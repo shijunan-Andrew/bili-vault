@@ -59,6 +59,7 @@ const selectedCount = document.getElementById("selectedCount");
 const selectVisibleButton = document.getElementById("selectVisible");
 const exitBatchButton = document.getElementById("exitBatch");
 const moveSelectedButton = document.getElementById("moveSelected");
+const downloadSelectedButton = document.getElementById("downloadSelected");
 const deleteSelectedButton = document.getElementById("deleteSelected");
 
 let rootHandle = null;
@@ -317,6 +318,7 @@ function updateBatchControls() {
   selectVisibleButton.textContent = allVisibleSelected ? "取消当前结果选择" : "全选当前结果";
   selectVisibleButton.disabled = visibleVideoIds.length === 0;
   moveSelectedButton.disabled = records.length === 0;
+  downloadSelectedButton.disabled = records.length === 0;
   deleteSelectedButton.disabled = records.length === 0;
 }
 
@@ -436,6 +438,18 @@ function compactDate(value) {
 function addField(rows, label, value) { if (value && value !== "未知") rows.push(`<dt>${label}</dt><dd>${escapeHtml(value)}</dd>`); }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
 
+function openDownloadInterface(videos) {
+  if (!videos.length) return;
+  const items = videos.map((video) => ({
+    title: video.title || "未知", bvid: video.bvid || "", aid: video.aid || "",
+    url: video.url || "", collection: video.collection || ""
+  }));
+  const target = new URL(chrome.runtime.getURL("download.html"));
+  target.searchParams.set("items", JSON.stringify(items));
+  const tab = window.open(target.href, "_blank");
+  if (!tab) showToast("浏览器拦截了下载页面，请允许本地收藏库打开新标签页。");
+}
+
 function openDetail(video) {
   detailPanel.classList.toggle("invalid-video", video.isInvalid);
   const rows = [];
@@ -451,7 +465,7 @@ function openDetail(video) {
   addField(rows, "av 号", video.aid);
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些操作只整理本地归档文件，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频资料</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -461,6 +475,7 @@ function openDetail(video) {
   if (link) link.href = video.url;
   const moveButton = detailContent.querySelector(".move-local");
   moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
+  detailContent.querySelector(".download-local").addEventListener("click", () => openDownloadInterface([video]));
   detailContent.querySelector(".delete-local").addEventListener("click", () => askToDeleteVideo(video));
   detailPanel.classList.add("open");
   detailPanel.setAttribute("aria-hidden", "false");
@@ -1011,6 +1026,7 @@ batchManageButton.addEventListener("click", () => setSelectionMode(!selectionMod
 selectVisibleButton.addEventListener("click", toggleVisibleSelection);
 exitBatchButton.addEventListener("click", () => setSelectionMode(false));
 moveSelectedButton.addEventListener("click", () => openCollectionActionDialog(selectedRecords(), "batch"));
+downloadSelectedButton.addEventListener("click", () => openDownloadInterface(selectedRecords()));
 deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRecords()));
 searchInput.addEventListener("input", renderVideos);
 sortSelect.addEventListener("change", renderVideos);

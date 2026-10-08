@@ -1149,7 +1149,135 @@ async function recordFavoriteError(data) {
   };
 }
 
+const DOWNLOAD_WBI_MIXIN_ORDER = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52];
+let downloadWbiKey = "";
+let downloadWbiExpiresAt = 0;
+
+function downloadMd5(text) {
+  const bytes = new TextEncoder().encode(String(text));
+  const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  new DataView(padded.buffer).setBigUint64(paddedLength - 8, BigInt(bytes.length) * 8n, true);
+  const shifts = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  const constants = Array.from({ length: 64 }, (_, index) => Math.floor(Math.abs(Math.sin(index + 1)) * 0x100000000) >>> 0);
+  const rotate = (value, amount) => (value << amount) | (value >>> (32 - amount));
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    const words = new Uint32Array(16);
+    const view = new DataView(padded.buffer, offset, 64);
+    for (let index = 0; index < 16; index += 1) words[index] = view.getUint32(index * 4, true);
+    let a = a0, b = b0, c = c0, d = d0;
+    for (let index = 0; index < 64; index += 1) {
+      let f, g, shift;
+      if (index < 16) { f = (b & c) | (~b & d); g = index; shift = shifts[index % 4]; }
+      else if (index < 32) { f = (d & b) | (~d & c); g = (5 * index + 1) % 16; shift = shifts[4 + (index % 4)]; }
+      else if (index < 48) { f = b ^ c ^ d; g = (3 * index + 5) % 16; shift = shifts[8 + (index % 4)]; }
+      else { f = c ^ (b | ~d); g = (7 * index) % 16; shift = shifts[12 + (index % 4)]; }
+      const next = d;
+      d = c;
+      c = b;
+      b = (b + rotate((a + f + constants[index] + words[g]) >>> 0, shift)) >>> 0;
+      a = next;
+    }
+    a0 = (a0 + a) >>> 0; b0 = (b0 + b) >>> 0; c0 = (c0 + c) >>> 0; d0 = (d0 + d) >>> 0;
+  }
+  return [a0, b0, c0, d0].map((word) => [0, 8, 16, 24].map((shift) => ((word >>> shift) & 255).toString(16).padStart(2, "0")).join("")).join("");
+}
+
+async function getDownloadWbiKey() {
+  if (downloadWbiKey && Date.now() < downloadWbiExpiresAt) return downloadWbiKey;
+  const response = await fetch("https://api.bilibili.com/x/web-interface/nav", { credentials: "include", cache: "no-store" });
+  const payload = await response.json();
+  const images = payload?.data?.wbi_img;
+  const img = images?.img_url?.split("/").pop()?.split(".")[0] || "";
+  const sub = images?.sub_url?.split("/").pop()?.split(".")[0] || "";
+  const raw = `${img}${sub}`;
+  if (payload?.code !== 0 || raw.length < 64) throw new Error("无法读取 B 站视频解析密钥，请刷新页面后重试。");
+  downloadWbiKey = DOWNLOAD_WBI_MIXIN_ORDER.map((index) => raw[index] || "").join("").slice(0, 32);
+  downloadWbiExpiresAt = Date.now() + 10 * 60 * 1000;
+  return downloadWbiKey;
+}
+
+async function biliDownloadApi(path, params, signed = false) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && value !== "") query.set(key, String(value).replace(/[!'()*]/g, ""));
+  }
+  if (signed) {
+    const mixinKey = await getDownloadWbiKey();
+    const wts = Math.floor(Date.now() / 1000);
+    query.set("wts", String(wts));
+    const signatureText = [...query.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&") + mixinKey;
+    query.set("w_rid", downloadMd5(signatureText));
+  }
+  const response = await fetch(`https://api.bilibili.com${path}?${query}`, { credentials: "include", cache: "no-store" });
+  if (!response.ok) throw new Error(`B 站接口请求失败：HTTP ${response.status}`);
+  const payload = await response.json();
+  if (payload?.code !== 0) throw new Error(payload?.message || `B 站接口错误 ${payload?.code ?? "未知"}`);
+  return payload.data;
+}
+
+async function getDownloadVideo(input) {
+  const identifier = parseManualVideoIdentifier(input);
+  let video;
+  try {
+    video = await biliDownloadApi("/x/web-interface/view", identifier);
+  } catch (error) {
+    try { video = await biliDownloadApi("/x/web-interface/view", identifier, true); }
+    catch (_) { throw error; }
+  }
+  if (!video?.cid || !video?.title) throw new Error("B 站没有返回可下载的视频信息。");
+  const pages = (Array.isArray(video.pages) && video.pages.length ? video.pages : [{ cid: video.cid, page: 1, part: video.title, duration: video.duration }])
+    .map((page) => ({ cid: Number(page.cid), page: Number(page.page) || 1, part: page.part || `第 ${page.page || 1} P`, duration: Number(page.duration) || 0 }))
+    .filter((page) => page.cid);
+  return {
+    bvid: video.bvid || identifier.bvid || "",
+    aid: String(video.aid || identifier.aid || ""),
+    cid: Number(video.cid),
+    title: video.title,
+    cover: normalizeUrl(video.pic),
+    description: video.desc || "",
+    owner: video.owner?.name || "未知",
+    duration: Number(video.duration) || 0,
+    pages
+  };
+}
+
+async function getDownloadPlayurl(message) {
+  const params = {
+    ...(message.bvid ? { bvid: message.bvid } : { avid: String(message.aid || "").replace(/^av/i, "") }),
+    cid: Number(message.cid), qn: Number(message.quality) || 0,
+    fnval: message.format === "mp4" ? 1 : 16 | 2048,
+    fnver: 0, fourk: 1, platform: "html5", high_quality: 1
+  };
+  return biliDownloadApi("/x/player/wbi/playurl", params, true);
+}
+
+async function getDownloadSubtitles(message) {
+  const params = { bvid: message.bvid, cid: Number(message.cid) };
+  try {
+    return (await biliDownloadApi("/x/player/v2", params)).subtitle?.subtitles || [];
+  } catch (_) {
+    return (await biliDownloadApi("/x/player/v2", params, true)).subtitle?.subtitles || [];
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "bca-download-parse") {
+    getDownloadVideo(message.identifier).then((video) => sendResponse({ ok: true, video })).catch((error) => sendResponse({ ok: false, message: error?.message || "视频解析失败。" }));
+    return true;
+  }
+  if (message?.type === "bca-download-playurl") {
+    getDownloadPlayurl(message).then((data) => sendResponse({ ok: true, data })).catch((error) => sendResponse({ ok: false, message: error?.message || "读取视频流失败。" }));
+    return true;
+  }
+  if (message?.type === "bca-download-subtitles") {
+    getDownloadSubtitles(message).then((subtitles) => sendResponse({ ok: true, subtitles })).catch((error) => sendResponse({ ok: false, message: error?.message || "读取字幕失败。" }));
+    return true;
+  }
   if (message?.type === "list-bili-favorite-folders") {
     listBiliFavoriteFolders(message.uid, sender?.tab?.id ?? null).then((folders) => sendResponse({ ok: true, folders }))
       .catch((error) => sendResponse({ ok: false, message: error?.message || "读取收藏夹失败。" }));

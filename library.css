@@ -64,6 +64,8 @@ button { cursor: pointer; }
 .button-primary:disabled { opacity: .6; cursor: wait; transform: none; }
 .button-large { min-height: 46px; padding: 0 22px; font-size: 13px; }
 .button-quiet { color: #65707c; border-color: #e5e8ed; background: #fff; }
+.button-download { color: #765d39; border-color: #eadbc5; background: #faf4e9; }
+.button-download:hover:not(:disabled) { border-color: #ddc7a5; background: #f6ecdc; }
 .button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 
 .welcome-state { display: flex; flex-direction: column; align-items: center; min-height: calc(100vh - 76px); padding: 10vh 24px 70px; text-align: center; }
@@ -226,6 +228,7 @@ body { background: #f5f3ef; }
 .video-card.invalid-video .card-cover::after { background: #2e32378c; }
 .invalid-badge { background: #c35d60; }
 .detail-management > .move-local { width: 100%; margin-bottom: 8px; box-shadow: none; }
+.detail-management > .download-local { width: 100%; margin: 0 0 17px; }
 .collection-action-dialog { width: min(520px, calc(100vw - 32px)); padding: 25px 24px 18px; }
 .collection-action-dialog h2 { margin-bottom: 7px; }
 .collection-action-dialog > .editor-hint { margin: 0 0 18px; color: #85847d; font-size: 11px; }
