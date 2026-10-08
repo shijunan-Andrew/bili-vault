@@ -25,18 +25,34 @@ const detailPanel = document.getElementById("detailPanel");
 const detailContent = document.getElementById("detailContent");
 const closeDetailButton = document.getElementById("closeDetail");
 const confirmBackdrop = document.getElementById("confirmBackdrop");
+const confirmTitle = document.getElementById("confirmTitle");
 const confirmMessage = document.getElementById("confirmMessage");
 const cancelDeleteButton = document.getElementById("cancelDelete");
 const confirmDeleteButton = document.getElementById("confirmDelete");
 const toast = document.getElementById("toast");
+const createCollectionButton = document.getElementById("createCollection");
+const addVideoButton = document.getElementById("addVideo");
+const collectionDialog = document.getElementById("collectionDialog");
+const collectionForm = document.getElementById("collectionForm");
+const collectionNameInput = document.getElementById("collectionName");
+const cancelCreateCollectionButton = document.getElementById("cancelCreateCollection");
+const submitCreateCollectionButton = document.getElementById("submitCreateCollection");
+const videoDialog = document.getElementById("videoDialog");
+const videoForm = document.getElementById("videoForm");
+const videoIdentifierInput = document.getElementById("videoIdentifier");
+const videoTargetCollection = document.getElementById("videoTargetCollection");
+const cancelAddVideoButton = document.getElementById("cancelAddVideo");
+const submitAddVideoButton = document.getElementById("submitAddVideo");
 
 let rootHandle = null;
 let collections = [];
 let selectedCollection = "*";
 let coverUrls = [];
 let toastTimer = 0;
-let pendingDeleteVideo = null;
+let pendingDeleteAction = null;
 let deleteInProgress = false;
+let collectionCreateInProgress = false;
+let videoAddInProgress = false;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -164,7 +180,7 @@ async function scanRoot(handle) {
       }
     }
     videos.sort((a, b) => b.timestamp - a.timestamp);
-    if (videos.length) scanned.push({ name: collectionEntry.name, videos });
+    scanned.push({ name: collectionEntry.name, videos });
   }
   scanned.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
   return { collections: scanned, issues };
@@ -186,6 +202,8 @@ function renderCollections() {
   collectionTotal.textContent = String(collections.length);
   const rows = [{ name: "全部收藏", key: "*", count: total, glyph: "▦" }, ...collections.map((item, index) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: ["▤", "▣", "▧", "▥"][index % 4] }))];
   collectionList.replaceChildren(...rows.map((row) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "collection-row";
     const button = document.createElement("button");
     button.className = `collection-button${selectedCollection === row.key ? " active" : ""}`;
     button.type = "button";
@@ -193,7 +211,21 @@ function renderCollections() {
     button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${row.glyph}</span><span class="collection-name"></span><span class="collection-count">${row.count}</span>`;
     button.querySelector(".collection-name").textContent = row.name;
     button.addEventListener("click", () => { selectedCollection = row.key; closeDetail(); renderCollections(); renderVideos(); });
-    return button;
+    wrapper.append(button);
+    if (row.key !== "*") {
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "collection-delete";
+      deleteButton.type = "button";
+      deleteButton.textContent = "×";
+      deleteButton.title = `删除收藏夹“${row.name}”`;
+      deleteButton.setAttribute("aria-label", `删除收藏夹 ${row.name}`);
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        askToDeleteCollection(collections.find((collection) => collection.name === row.name));
+      });
+      wrapper.append(deleteButton);
+    }
+    return wrapper;
   }));
 }
 
@@ -207,6 +239,8 @@ function renderVideos() {
   currentCollection.textContent = collectionName;
   pageTitle.textContent = collectionName;
   const videos = selectedVideos();
+  addVideoButton.disabled = selectedCollection === "*";
+  addVideoButton.title = selectedCollection === "*" ? "请先选择一个收藏夹" : `添加视频到“${selectedCollection}”`;
   const query = searchInput.value.trim().toLocaleLowerCase();
   const matching = videos.filter((video) => !query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query));
   const sort = sortSelect.value;
@@ -232,7 +266,9 @@ function renderVideos() {
   videoGrid.hidden = videos.length === 0;
   if (!videos.length) {
     videoGrid.hidden = false;
-    videoGrid.innerHTML = '<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">▤</div><h2>这个收藏夹里还没有归档视频</h2><p>在 B 站完成收藏后，插件会将视频资料保存到本地目录。</p></div>';
+    const emptyTitle = selectedCollection === "*" ? "本地收藏库里还没有视频" : "这个收藏夹里还没有视频";
+    const emptyCopy = selectedCollection === "*" ? "选择一个收藏夹，或新建收藏夹并添加视频。" : "点击右上角“添加视频”，输入 B 站网址、BV 号或 av 号。";
+    videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">▤</div><h2>${emptyTitle}</h2><p>${emptyCopy}</p></div>`;
   }
 }
 
@@ -298,8 +334,20 @@ function closeDetail() {
 }
 
 function askToDeleteVideo(video) {
-  pendingDeleteVideo = video;
+  pendingDeleteAction = { type: "video", video };
+  confirmTitle.textContent = "删除本地归档？";
   confirmMessage.textContent = `将删除本地目录“${video.collection}/${video.directory}”及其中的封面和视频信息。B 站账户里的收藏不会改变。`;
+  confirmDeleteButton.textContent = "删除本地文件";
+  confirmBackdrop.hidden = false;
+  confirmDeleteButton.focus();
+}
+
+function askToDeleteCollection(collection) {
+  if (!collection) return;
+  pendingDeleteAction = { type: "collection", collection };
+  confirmTitle.textContent = "删除整个本地收藏夹？";
+  confirmMessage.textContent = `将永久删除本地收藏夹“${collection.name}”及其全部文件（当前识别到 ${collection.videos.length} 个视频）。此操作只影响本地归档，不会更改 B 站账户中的收藏。`;
+  confirmDeleteButton.textContent = "删除收藏夹";
   confirmBackdrop.hidden = false;
   confirmDeleteButton.focus();
 }
@@ -307,7 +355,9 @@ function askToDeleteVideo(video) {
 function closeDeleteConfirmation() {
   if (deleteInProgress) return;
   confirmBackdrop.hidden = true;
-  pendingDeleteVideo = null;
+  pendingDeleteAction = null;
+  confirmTitle.textContent = "删除本地归档？";
+  confirmDeleteButton.textContent = "删除本地文件";
 }
 
 async function copyDirectoryContents(source, target) {
@@ -402,34 +452,36 @@ async function moveVideoToCollection(video, targetName, button) {
   }
 }
 
-async function deletePendingVideo() {
-  const video = pendingDeleteVideo;
-  if (!video) return;
+async function confirmPendingDelete() {
+  const action = pendingDeleteAction;
+  if (!action) return;
   deleteInProgress = true;
   cancelDeleteButton.disabled = true;
   confirmDeleteButton.disabled = true;
-  confirmDeleteButton.textContent = "正在删除…";
+  confirmDeleteButton.textContent = action.type === "collection" ? "正在删除收藏夹…" : "正在删除…";
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
-    const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
-    await collectionHandle.removeEntry(video.directory, { recursive: true });
-    if (video.cover) {
-      URL.revokeObjectURL(video.cover);
-      coverUrls = coverUrls.filter((url) => url !== video.cover);
+    if (action.type === "collection") {
+      await rootHandle.removeEntry(action.collection.name, { recursive: true });
+      if (selectedCollection === action.collection.name) selectedCollection = "*";
+    } else {
+      const video = action.video;
+      const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
+      await collectionHandle.removeEntry(video.directory, { recursive: true });
     }
     deleteInProgress = false;
     closeDeleteConfirmation();
     closeDetail();
-    await displayRoot(rootHandle);
-    showToast("已删除本地归档");
+    await displayRoot(rootHandle, selectedCollection);
+    showToast(action.type === "collection" ? `已删除本地收藏夹“${action.collection.name}”` : "已删除本地归档");
   } catch (error) {
     showToast(`删除失败：${error?.message || "本地文件操作失败。"}`);
   } finally {
     deleteInProgress = false;
     cancelDeleteButton.disabled = false;
     confirmDeleteButton.disabled = false;
-    confirmDeleteButton.textContent = "删除本地文件";
+    confirmDeleteButton.textContent = action.type === "collection" ? "删除收藏夹" : "删除本地文件";
   }
 }
 
@@ -440,13 +492,110 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 3000);
 }
 
-async function displayRoot(handle) {
+function validateCollectionName(rawName) {
+  const name = String(rawName || "").trim();
+  if (!name) throw new Error("请输入收藏夹名称。");
+  if (name.length > 120) throw new Error("收藏夹名称不能超过 120 个字符。");
+  if (/[<>:"/\\|?*\u0000-\u001f]/.test(name) || /[. ]$/.test(name)) {
+    throw new Error("名称包含本地文件夹不支持的字符，或以点号、空格结尾。");
+  }
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
+    throw new Error("这个名称是 Windows 保留名称，请换一个名称。");
+  }
+  if (name === "错误报告") throw new Error("“错误报告”是插件保留目录，请换一个名称。");
+  return name;
+}
+
+function openCreateCollectionDialog() {
+  if (!rootHandle || library.hidden) { showToast("请先打开本地收藏根目录。"); return; }
+  collectionNameInput.value = "";
+  collectionDialog.showModal();
+  collectionNameInput.focus();
+}
+
+function openAddVideoDialog() {
+  if (!rootHandle || selectedCollection === "*") { showToast("请先选择一个收藏夹。"); return; }
+  videoTargetCollection.textContent = selectedCollection;
+  videoIdentifierInput.value = "";
+  videoDialog.showModal();
+  videoIdentifierInput.focus();
+}
+
+collectionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (collectionCreateInProgress || !rootHandle) return;
+  let name;
+  try { name = validateCollectionName(collectionNameInput.value); }
+  catch (error) { showToast(error.message); collectionNameInput.focus(); return; }
+  collectionCreateInProgress = true;
+  submitCreateCollectionButton.disabled = true;
+  cancelCreateCollectionButton.disabled = true;
+  submitCreateCollectionButton.textContent = "正在创建…";
+  try {
+    const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
+    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    try {
+      await rootHandle.getDirectoryHandle(name);
+      throw new Error(`收藏夹“${name}”已存在。`);
+    } catch (error) {
+      if (error?.name !== "NotFoundError") throw error;
+    }
+    await rootHandle.getDirectoryHandle(name, { create: true });
+    collectionDialog.close();
+    collectionForm.reset();
+    await displayRoot(rootHandle, name);
+    showToast(`已新建收藏夹“${name}”`);
+  } catch (error) {
+    showToast(`创建失败：${error?.message || "本地文件夹操作失败。"}`);
+  } finally {
+    collectionCreateInProgress = false;
+    submitCreateCollectionButton.disabled = false;
+    cancelCreateCollectionButton.disabled = false;
+    submitCreateCollectionButton.textContent = "创建收藏夹";
+  }
+});
+
+videoForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (videoAddInProgress || !rootHandle || selectedCollection === "*") return;
+  const identifier = videoIdentifierInput.value.trim();
+  const collectionName = selectedCollection;
+  videoAddInProgress = true;
+  submitAddVideoButton.disabled = true;
+  cancelAddVideoButton.disabled = true;
+  submitAddVideoButton.textContent = "正在解析并保存…";
+  try {
+    const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
+    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const result = await chrome.runtime.sendMessage({
+      type: "add-manual-video",
+      data: { identifier, collection: collectionName }
+    });
+    if (!result?.ok) throw new Error(result?.message || "B 站视频解析或本地保存失败。");
+    videoDialog.close();
+    videoForm.reset();
+    await displayRoot(rootHandle, collectionName);
+    showToast(result.message || "视频已添加到本地收藏夹");
+  } catch (error) {
+    showToast(`添加失败：${error?.message || "无法解析或保存视频。"}`);
+  } finally {
+    videoAddInProgress = false;
+    submitAddVideoButton.disabled = false;
+    cancelAddVideoButton.disabled = false;
+    submitAddVideoButton.textContent = "解析并保存";
+  }
+});
+
+collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInProgress) event.preventDefault(); });
+videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
+
+async function displayRoot(handle, collectionToSelect = "*") {
   for (const url of coverUrls) URL.revokeObjectURL(url);
   coverUrls = [];
   rootHandle = handle;
   const result = await scanRoot(handle);
   collections = result.collections;
-  selectedCollection = "*";
+  selectedCollection = collectionToSelect === "*" || result.collections.some((collection) => collection.name === collectionToSelect) ? collectionToSelect : "*";
   rootLabel.textContent = handle.name;
   statusDot.classList.add("ready");
   scanNotice.hidden = result.issues.length === 0;
@@ -521,13 +670,17 @@ async function restoreLastRoot() {
 
 chooseRoot.addEventListener("click", chooseAndScan);
 welcomeChoose.addEventListener("click", () => rootHandle ? continueWithLastRoot() : chooseAndScan());
+createCollectionButton.addEventListener("click", openCreateCollectionDialog);
+addVideoButton.addEventListener("click", openAddVideoDialog);
 searchInput.addEventListener("input", renderVideos);
 sortSelect.addEventListener("change", renderVideos);
 clearSearch.addEventListener("click", () => { searchInput.value = ""; renderVideos(); searchInput.focus(); });
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
 cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
-confirmDeleteButton.addEventListener("click", deletePendingVideo);
+confirmDeleteButton.addEventListener("click", confirmPendingDelete);
+cancelCreateCollectionButton.addEventListener("click", () => collectionDialog.close());
+cancelAddVideoButton.addEventListener("click", () => videoDialog.close());
 confirmBackdrop.addEventListener("click", (event) => {
   if (event.target === confirmBackdrop && !deleteInProgress) closeDeleteConfirmation();
 });

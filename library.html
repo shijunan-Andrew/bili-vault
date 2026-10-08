@@ -17,7 +17,7 @@
       <div class="side-label">我的收藏夹 <span id="collectionTotal">—</span></div>
       <nav id="collectionList" class="collection-list" aria-label="收藏夹"></nav>
       <div class="sidebar-bottom">
-        <div class="privacy-note"><span class="lock-icon">▣</span><span>资料只在本地读取<br>不会上传到网络</span></div>
+        <div class="privacy-note"><span class="lock-icon">▣</span><span>归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
         <div class="side-version">B站收藏信息归档</div>
       </div>
     </aside>
@@ -27,6 +27,8 @@
         <div class="breadcrumb"><span>本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection">全部收藏</strong></div>
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel">尚未选择目录</span></div>
+          <button id="createCollection" class="button button-quiet" type="button">新建收藏夹</button>
+          <button id="addVideo" class="button button-primary" type="button" disabled>添加视频</button>
           <button id="chooseRoot" class="button button-primary"><span aria-hidden="true">＋</span> 选择收藏根目录</button>
         </div>
       </header>
@@ -64,6 +66,31 @@
     <button id="closeDetail" class="close-detail" aria-label="关闭详情">×</button>
     <div id="detailContent"></div>
   </aside>
+  <dialog id="collectionDialog" class="editor-dialog" aria-labelledby="collectionDialogTitle">
+    <form id="collectionForm">
+      <h2 id="collectionDialogTitle">新建收藏夹</h2>
+      <label for="collectionName">收藏夹名称</label>
+      <input id="collectionName" name="collectionName" type="text" maxlength="120" autocomplete="off" required placeholder="例如：收藏夹 A">
+      <p class="editor-hint">将在本地收藏根目录下创建同名文件夹。</p>
+      <div class="editor-actions">
+        <button id="cancelCreateCollection" class="button button-quiet" type="button">取消</button>
+        <button id="submitCreateCollection" class="button button-primary" type="submit">创建收藏夹</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="videoDialog" class="editor-dialog" aria-labelledby="videoDialogTitle">
+    <form id="videoForm">
+      <h2 id="videoDialogTitle">添加本地收藏视频</h2>
+      <p class="editor-target">保存到：<strong id="videoTargetCollection"></strong></p>
+      <label for="videoIdentifier">B 站视频网址、BV 号或 av 号</label>
+      <input id="videoIdentifier" name="videoIdentifier" type="text" autocomplete="off" required placeholder="https://www.bilibili.com/video/BV...">
+      <p class="editor-hint">会向 B 站查询视频资料；解析成功后保存封面和信息，并显示在当前收藏夹中。</p>
+      <div class="editor-actions">
+        <button id="cancelAddVideo" class="button button-quiet" type="button">取消</button>
+        <button id="submitAddVideo" class="button button-primary" type="submit">解析并保存</button>
+      </div>
+    </form>
+  </dialog>
   <div id="confirmBackdrop" class="confirm-backdrop" hidden>
     <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="confirm-icon" aria-hidden="true">!</div>

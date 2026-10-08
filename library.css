@@ -29,9 +29,12 @@ button { cursor: pointer; }
 .side-label { display: flex; justify-content: space-between; align-items: center; padding: 0 12px 11px; color: #a0a5af; font-size: 11px; font-weight: 700; letter-spacing: .5px; }
 .side-label span { color: #b4b9c2; font-weight: 500; }
 .collection-list { display: grid; gap: 5px; }
-.collection-button { display: flex; align-items: center; width: 100%; gap: 11px; min-height: 43px; padding: 0 12px; border: 0; border-radius: 10px; text-align: left; color: #6d7480; background: transparent; transition: .18s ease; }
+.collection-row { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.collection-button { display: flex; align-items: center; width: 100%; min-width: 0; flex: 1; gap: 11px; min-height: 43px; padding: 0 12px; border: 0; border-radius: 10px; text-align: left; color: #6d7480; background: transparent; transition: .18s ease; }
 .collection-button:hover { color: var(--ink); background: #f6f8fa; }
 .collection-button.active { color: #0089b7; background: #e9f8fc; font-weight: 650; }
+.collection-delete { width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 7px; color: #a7adb7; background: transparent; font-size: 17px; opacity: 0; transition: .15s ease; }
+.collection-row:hover .collection-delete, .collection-delete:focus-visible { color: #c84848; background: #fff0f0; opacity: 1; }
 .collection-glyph { display: grid; place-items: center; width: 22px; color: #abb2be; font-size: 15px; }
 .active .collection-glyph { color: var(--blue); }
 .collection-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
@@ -46,7 +49,7 @@ button { cursor: pointer; }
 .breadcrumb { display: flex; align-items: center; gap: 10px; color: #9ba1aa; font-size: 12px; }
 .breadcrumb strong { color: #49505b; font-weight: 600; }
 .crumb-slash { color: #d0d3d9; }
-.top-actions { display: flex; align-items: center; gap: 20px; }
+.top-actions { display: flex; align-items: center; gap: 10px; }
 .root-label { display: flex; align-items: center; gap: 8px; max-width: 210px; color: #8b919b; font-size: 11px; }
 .root-label span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: #c5c9d1; }
@@ -58,6 +61,7 @@ button { cursor: pointer; }
 .button-primary:disabled { opacity: .6; cursor: wait; transform: none; }
 .button-large { min-height: 46px; padding: 0 22px; font-size: 13px; }
 .button-quiet { color: #65707c; border-color: #e5e8ed; background: #fff; }
+.button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 
 .welcome-state { display: flex; flex-direction: column; align-items: center; min-height: calc(100vh - 76px); padding: 10vh 24px 70px; text-align: center; }
 .welcome-art { position: relative; display: grid; place-items: center; width: 188px; height: 164px; margin-bottom: 34px; }
@@ -137,6 +141,17 @@ kbd { flex: 0 0 auto; padding: 3px 5px; border: 1px solid #eceef2; border-radius
 .confirm-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
 .confirm-actions .button { width: auto; min-width: 98px; min-height: 37px; }
 .confirm-actions .button-quiet { border: 1px solid #e4e7eb; }
+.editor-dialog { width: min(440px, calc(100vw - 32px)); max-width: none; padding: 26px; border: 1px solid #eef0f3; border-radius: 16px; color: var(--ink); background: #fff; box-shadow: 0 22px 65px #10151f42; }
+.editor-dialog::backdrop { background: #171b23a8; backdrop-filter: blur(3px); }
+.editor-dialog h2 { margin: 0 0 20px; font-size: 17px; }
+.editor-dialog label { display: block; margin-bottom: 7px; color: #747c88; font-size: 11px; font-weight: 650; }
+.editor-dialog input { width: 100%; height: 40px; padding: 0 11px; border: 1px solid #e2e6eb; border-radius: 8px; outline: none; color: #3b424d; background: #fff; font-size: 12px; }
+.editor-dialog input:focus { border-color: #8dd7ed; box-shadow: 0 0 0 3px #00a1d612; }
+.editor-hint, .editor-target { margin: 9px 0 0; color: #979eaa; font-size: 10px; line-height: 1.7; }
+.editor-target { margin: -10px 0 18px; }
+.editor-target strong { color: #008bbd; font-weight: 650; }
+.editor-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 23px; }
+.editor-actions .button { min-width: 105px; }
 .detail-section-title { margin: 22px 0 12px; color: #7a828e; font-size: 10px; font-weight: 700; letter-spacing: .8px; }
 .detail-fields { display: grid; grid-template-columns: 100px 1fr; gap: 0; margin: 0; border-top: 1px solid #f0f1f3; }
 .detail-fields dt, .detail-fields dd { margin: 0; padding: 11px 0; border-bottom: 1px solid #f0f1f3; font-size: 11px; line-height: 1.6; }
@@ -155,10 +170,12 @@ kbd { flex: 0 0 auto; padding: 3px 5px; border: 1px solid #eceef2; border-radius
   .brand { margin: 0; }.brand-mark { width: 35px; height: 35px; border-radius: 11px; font-size: 20px; }
   .side-label, .sidebar-bottom { display: none; }
   .collection-list { display: flex; gap: 6px; overflow-x: auto; margin-top: 12px; padding-bottom: 2px; }
-  .collection-button { width: auto; min-height: 34px; flex: 0 0 auto; gap: 6px; padding: 0 10px; border: 1px solid #eceef2; border-radius: 8px; }
+  .collection-row { flex: 0 0 auto; }
+  .collection-button { width: auto; min-height: 34px; flex: 0 1 auto; gap: 6px; padding: 0 10px; border: 1px solid #eceef2; border-radius: 8px; }
+  .collection-delete { opacity: 1; }
   .collection-glyph { width: auto; }.collection-count { font-size: 9px; }
   .main-area { margin-left: 0; }.topbar { position: static; min-height: 59px; padding: 0 16px; }.root-label { display: none; }
-  .top-actions { gap: 0; }.topbar .button { min-height: 34px; padding: 0 11px; font-size: 10px; }
+  .top-actions { gap: 5px; }.topbar .button { min-height: 34px; padding: 0 9px; font-size: 9px; }
   .welcome-state { min-height: calc(100vh - 160px); padding-top: 9vh; }
   .library-view { padding: 27px 16px 40px; }.page-heading { display: block; margin-bottom: 20px; }.view-controls { margin-top: 18px; }.search-box { width: 100%; flex: 1; }.sort-select { gap: 4px; }.sort-select select { max-width: 104px; padding-right: 17px; }
   .video-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.card-body { padding: 9px 9px 10px; }.card-title { min-height: 36px; font-size: 10px; }.card-meta { margin-top: 7px; font-size: 8px; }.cover-badge { bottom: 6px; left: 6px; font-size: 8px; }

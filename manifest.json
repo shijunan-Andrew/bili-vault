@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "B站收藏信息归档",
-  "version": "1.1.4",
-  "description": "收藏 B 站视频后归档并管理本地收藏，支持控制自动归档。",
+  "version": "1.2.0",
+  "description": "收藏 B 站视频后归档，并可在本地收藏库中管理收藏夹和视频。",
   "minimum_chrome_version": "111",
   "permissions": ["storage"],
   "host_permissions": [
-    "https://*.hdslb.com/*"
+    "https://*.hdslb.com/*",
+    "https://api.bilibili.com/*"
   ],
   "background": {
     "service_worker": "background.js",

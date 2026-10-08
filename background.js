@@ -207,6 +207,110 @@ function buildInfo(data, folderName, savedAt) {
   ].join("\n");
 }
 
+function parseManualVideoIdentifier(input) {
+  let value = String(input || "").trim();
+  if (!value) throw new Error("请先输入 B 站视频网址、BV 号或 av 号。");
+  if (/^(?:[\w.-]+\.)?bilibili\.com\//i.test(value)) value = `https://${value}`;
+  if (/^https?:\/\//i.test(value)) {
+    let url;
+    try { url = new URL(value); }
+    catch (_) { throw new Error("视频网址格式无效。"); }
+    if (!/(^|\.)bilibili\.com$/i.test(url.hostname)) {
+      throw new Error("目前只支持 bilibili.com 的视频网址；也可以直接输入 BV 号或 av 号。");
+    }
+    const pathMatch = url.pathname.match(/\/video\/(BV[0-9A-Za-z]{10}|av\d+)/i);
+    value = pathMatch?.[1] || url.searchParams.get("bvid") || url.searchParams.get("aid") || "";
+  }
+  const bvidMatch = value.match(/BV[0-9A-Za-z]{10}/i);
+  if (bvidMatch) return { bvid: `BV${bvidMatch[0].slice(2)}` };
+  const aidMatch = value.match(/^(?:av)?(\d+)$/i);
+  if (aidMatch && Number(aidMatch[1]) > 0) return { aid: aidMatch[1] };
+  throw new Error("无法识别视频编号，请检查网址、BV 号或 av 号是否完整。");
+}
+
+async function fetchManualVideoMetadata(identifier) {
+  const query = new URLSearchParams(identifier);
+  const response = await fetch(`https://api.bilibili.com/x/web-interface/view?${query}`, {
+    credentials: "include",
+    cache: "no-store"
+  });
+  if (!response.ok) throw new Error(`读取 B 站视频信息失败：HTTP ${response.status}`);
+  const payload = await response.json();
+  if (payload.code !== 0 || !payload.data) {
+    throw new Error(`B 站未返回视频信息：${payload.message || `错误码 ${payload.code ?? "未知"}`}`);
+  }
+  const video = payload.data;
+  if (!video.title || !video.pic) throw new Error("B 站返回的视频资料不完整，缺少标题或封面。");
+  let tags = [];
+  try {
+    const tagResponse = await fetch(`https://api.bilibili.com/x/web-interface/view/detail/tag?aid=${encodeURIComponent(video.aid)}`, {
+      credentials: "include",
+      cache: "no-store"
+    });
+    if (tagResponse.ok) {
+      const tagPayload = await tagResponse.json();
+      if (tagPayload.code === 0 && Array.isArray(tagPayload.data)) {
+        tags = tagPayload.data.map((tag) => tag.tag_name).filter(Boolean);
+      }
+    }
+  } catch (_) {}
+  const bvid = video.bvid || identifier.bvid || "";
+  return {
+    title: video.title,
+    url: bvid ? `https://www.bilibili.com/video/${bvid}/` : `https://www.bilibili.com/video/av${video.aid}/`,
+    bvid,
+    aid: video.aid,
+    cover: normalizeUrl(video.pic),
+    description: video.desc || "未知",
+    upMid: video.owner?.mid,
+    upName: video.owner?.name,
+    category: video.tname,
+    duration: video.duration,
+    pubdate: video.pubdate,
+    tags
+  };
+}
+
+async function addManualVideo(data) {
+  const collectionName = String(data?.collection || "").trim();
+  let metadata = {};
+  try {
+    if (!collectionName || safeSegment(collectionName) !== collectionName) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
+    const root = await getRootHandle();
+    if (!root) throw new Error("尚未设置本地收藏根目录，请先选择收藏根目录。");
+    await ensureWritePermission(root);
+    const identifier = parseManualVideoIdentifier(data?.identifier);
+    metadata = await fetchManualVideoMetadata(identifier);
+    const cover = await loadCoverPng(metadata.cover);
+    const collection = await root.getDirectoryHandle(collectionName);
+    const favoriteAt = new Date();
+    const record = await uniqueTimeFolder(collection, timestampFolder(favoriteAt));
+    const savedAt = new Date();
+    try {
+      const info = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, savedAt);
+      await writeFile(record, "视频信息.txt", info);
+      await writeFile(record, "封面.png", cover);
+    } catch (error) {
+      await collection.removeEntry(record.name, { recursive: true }).catch(() => {});
+      throw error;
+    }
+    const path = `${root.name}/${collectionName}/${record.name}`;
+    const message = `已添加“${metadata.title}”`;
+    await chrome.storage.local.set({ lastResult: { message, path, createdAt: Date.now() }, lastError: null });
+    return { ok: true, message, path, collection: collectionName };
+  } catch (error) {
+    const saved = await logError(error, { metadata, folders: collectionName ? [{ name: collectionName }] : [] });
+    await chrome.storage.local.set({ lastResult: { message: `添加失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
+    return { ok: false, message: error?.message || "添加视频失败。", details: saved.reportPath };
+  }
+}
+
+function addManualVideoInOrder(data) {
+  const task = saveQueue.then(() => addManualVideo(data));
+  saveQueue = task.catch(() => undefined);
+  return task;
+}
+
 function reportText(error, context = {}) {
   const now = new Date();
   const metadata = context.metadata || {};
@@ -306,6 +410,10 @@ async function recordFavoriteError(data) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "save-favorite") {
     saveFavoriteInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error.message }));
+    return true;
+  }
+  if (message?.type === "add-manual-video") {
+    addManualVideoInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error.message || "添加视频失败。" }));
     return true;
   }
   if (message?.type === "record-favorite-error") {
