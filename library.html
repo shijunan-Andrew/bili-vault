@@ -60,11 +60,7 @@
               <button id="exitBatch" class="text-button" type="button">完成</button>
             </div>
             <div class="batch-actions">
-              <details id="batchTargetPicker" class="target-picker">
-                <summary id="batchTargetSummary">选择目标收藏夹…</summary>
-                <div id="batchTargetOptions" class="target-picker-options"></div>
-              </details>
-              <button id="moveSelected" class="button button-primary" type="button" disabled>移动</button>
+              <button id="moveSelected" class="button button-primary" type="button" disabled>移动或复制</button>
               <button id="deleteSelected" class="button button-danger" type="button" disabled>删除</button>
             </div>
           </section>
@@ -112,6 +108,20 @@
         <button id="submitAddVideo" class="button button-primary" type="submit">解析并保存</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="collectionActionDialog" class="editor-dialog collection-action-dialog" aria-labelledby="collectionActionTitle">
+    <h2 id="collectionActionTitle">移动或复制视频</h2>
+    <p id="collectionActionSummary" class="editor-hint"></p>
+    <div class="collection-action-list-tools"><span>收藏夹列表</span><div><button id="selectAllActionTargets" class="text-button" type="button">全选</button><button id="clearActionTargets" class="text-button" type="button">清空</button></div></div>
+    <div class="collection-action-list-wrap">
+      <div id="collectionActionList" class="collection-action-list"></div>
+    </div>
+    <p class="collection-action-hint">勾选视频当前所在的收藏夹会保留原件并复制；取消勾选则会移动。可同时选择多个收藏夹。</p>
+    <div class="editor-actions collection-action-footer">
+      <span id="collectionActionCount" class="collection-action-count">已选 0 个收藏夹</span>
+      <button id="cancelCollectionAction" class="button button-quiet" type="button">取消</button>
+      <button id="confirmCollectionAction" class="button button-primary" type="button" disabled>确认</button>
+    </div>
   </dialog>
   <div id="confirmBackdrop" class="confirm-backdrop" hidden>
     <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">

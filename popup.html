@@ -34,18 +34,30 @@
     </section>
 
     <section class="import-card">
-      <button id="openImport" class="primary" type="button">导入到本地</button>
-      <div id="importPanel" hidden>
-        <div class="import-heading">
-          <span class="section-label">选择要导入的收藏夹</span>
-          <button id="refreshImportFolders" class="text-button" type="button">刷新</button>
+      <div id="importPanelHeading" class="import-panel-heading">
+        <div>
+          <div class="section-label">导入到本地</div>
+          <p class="import-subtitle">把 B 站收藏夹整理到本地资料库</p>
         </div>
-        <div id="importFolderList" class="import-folder-list" aria-live="polite">请先打开 B 站个人空间的收藏夹页面。</div>
-        <div class="import-selection-actions">
-          <button id="selectAllImportFolders" class="text-button" type="button">全选</button>
-          <button id="clearImportFolders" class="text-button" type="button">清空</button>
+        <button id="refreshImportFolders" class="secondary refresh-button" type="button">刷新列表</button>
+      </div>
+      <div id="importPanel">
+        <div id="importSelectionView">
+          <div class="import-heading">
+            <span class="import-selection-label">选择要导入的收藏夹</span>
+            <span id="importSelectedCount" class="import-selected-count">已选 0 个</span>
+          </div>
+          <div id="importFolderList" class="import-folder-list" aria-live="polite">请先打开 B 站个人空间的收藏夹页面。</div>
+          <div class="import-selection-actions">
+            <button id="selectAllImportFolders" class="text-button" type="button">全选</button>
+            <button id="clearImportFolders" class="text-button" type="button">清空</button>
+          </div>
+          <button id="startImport" class="primary" type="button" disabled>开始导入</button>
         </div>
-        <button id="startImport" class="primary" type="button" disabled>开始导入</button>
+        <div id="importProgressView" class="import-progress-view" hidden>
+          <span class="progress-spinner" aria-hidden="true"></span>
+          <div><strong>正在导入收藏夹</strong><p id="importProgressText">正在准备…</p></div>
+        </div>
         <div id="importStatus" class="import-status" role="status"></div>
       </div>
     </section>
@@ -53,6 +65,10 @@
     <section class="status-card">
       <div class="section-label">最近状态</div>
       <div id="lastResult" class="muted">暂无保存记录</div>
+      <details id="resultDetails" class="result-details" hidden>
+        <summary id="resultDetailsSummary">查看保存位置</summary>
+        <div id="resultPath" class="result-path"></div>
+      </details>
       <div id="lastError" class="error-block" hidden>
         <div class="error-title">最近一次错误</div>
         <pre id="errorText"></pre>

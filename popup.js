@@ -14,14 +14,20 @@ const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
 const reportPath = document.getElementById("reportPath");
 const downloadButton = document.getElementById("downloadReport");
-const openImportButton = document.getElementById("openImport");
-const importPanel = document.getElementById("importPanel");
+const importSelectionView = document.getElementById("importSelectionView");
+const importProgressView = document.getElementById("importProgressView");
+const importProgressText = document.getElementById("importProgressText");
 const importFolderList = document.getElementById("importFolderList");
 const importStatus = document.getElementById("importStatus");
 const startImportButton = document.getElementById("startImport");
 const refreshImportFoldersButton = document.getElementById("refreshImportFolders");
 const selectAllImportFoldersButton = document.getElementById("selectAllImportFolders");
 const clearImportFoldersButton = document.getElementById("clearImportFolders");
+const importSelectedCount = document.getElementById("importSelectedCount");
+const importPanelHeading = document.getElementById("importPanelHeading");
+const resultDetails = document.getElementById("resultDetails");
+const resultDetailsSummary = document.getElementById("resultDetailsSummary");
+const resultPath = document.getElementById("resultPath");
 let errorReport = "";
 let rootHandle = null;
 let permissionNotice = "";
@@ -50,10 +56,10 @@ function sendTabMessage(tabId, message) {
   });
 }
 
-function renderImportFolders() {
+function renderImportFolders(emptyMessage = "没有找到可导入的收藏夹。") {
   importFolderList.replaceChildren();
   if (!importFolders.length) {
-    importFolderList.textContent = "没有找到可导入的收藏夹。";
+    importFolderList.textContent = emptyMessage;
     startImportButton.disabled = true;
     return;
   }
@@ -77,12 +83,15 @@ function renderImportFolders() {
 }
 
 function updateImportSelection() {
+  importPanelHeading.hidden = importBusy;
+  importSelectionView.hidden = importBusy;
+  importProgressView.hidden = !importBusy;
   importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = importBusy; });
   refreshImportFoldersButton.disabled = importBusy;
   selectAllImportFoldersButton.disabled = importBusy;
   clearImportFoldersButton.disabled = importBusy;
-  openImportButton.disabled = importBusy;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
+  importSelectedCount.textContent = `已选 ${selected} 个`;
   startImportButton.disabled = importBusy || selected === 0;
   startImportButton.textContent = selected ? `开始导入（${selected} 个收藏夹）` : "开始导入";
 }
@@ -91,7 +100,6 @@ async function loadImportFolders() {
   importStatus.classList.remove("error");
   importStatus.textContent = "正在读取 B 站收藏夹…";
   refreshImportFoldersButton.disabled = true;
-  openImportButton.disabled = true;
   try {
     const tab = await queryCurrentTab();
     const response = await sendTabMessage(tab.id, { type: "bca-list-import-folders" });
@@ -101,12 +109,12 @@ async function loadImportFolders() {
     importStatus.textContent = importFolders.length ? `已读取 ${importFolders.length} 个收藏夹。` : "当前账号没有可导入的收藏夹。";
   } catch (error) {
     importFolders = [];
-    renderImportFolders();
+    renderImportFolders(error?.message || "请在 B 站个人空间的收藏夹页面打开插件。");
     importStatus.textContent = error?.message || "读取收藏夹失败。";
     importStatus.classList.add("error");
   } finally {
     refreshImportFoldersButton.disabled = false;
-    openImportButton.disabled = false;
+    updateImportSelection();
   }
 }
 
@@ -120,9 +128,10 @@ async function startImport() {
     return;
   }
   importBusy = true;
+  importStatus.textContent = "";
   updateImportSelection();
   importStatus.classList.remove("error");
-  importStatus.textContent = "正在请求本地目录权限…";
+  importProgressText.textContent = "正在请求本地目录权限…";
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error("未获得本地保存文件夹的写入权限，请重新选择保存文件夹后重试。");
@@ -199,9 +208,16 @@ async function refreshStatus() {
   rootHandle = await loadRootHandle().catch(() => null);
   folderName.textContent = status.baseFolderName || "尚未选择文件夹";
   if (status.lastResult) {
-    lastResult.textContent = `${status.lastResult.message || "已完成"}\n${status.lastResult.path || ""}`;
+    const messageLines = String(status.lastResult.message || "已完成").split(/\r?\n/).filter(Boolean);
+    lastResult.textContent = messageLines.shift() || "已完成";
+    const paths = [...String(status.lastResult.path || "").split(/\r?\n/), ...messageLines].filter(Boolean);
+    resultPath.textContent = paths.join("\n");
+    resultDetailsSummary.textContent = paths.length > 1 ? `查看保存位置（${paths.length} 条）` : "查看保存位置";
+    resultDetails.hidden = paths.length === 0;
   } else {
     lastResult.textContent = "暂无保存记录";
+    resultDetails.hidden = true;
+    resultPath.textContent = "";
   }
   if (status.lastError?.report) {
     errorReport = status.lastError.report;
@@ -310,10 +326,6 @@ downloadButton.addEventListener("click", () => {
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 });
 
-openImportButton.addEventListener("click", () => {
-  importPanel.hidden = !importPanel.hidden;
-  if (!importPanel.hidden && !importFolders.length) loadImportFolders();
-});
 refreshImportFoldersButton.addEventListener("click", loadImportFolders);
 startImportButton.addEventListener("click", startImport);
 selectAllImportFoldersButton.addEventListener("click", () => {
@@ -327,8 +339,7 @@ clearImportFoldersButton.addEventListener("click", () => {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "bca-import-progress") return;
-  importStatus.classList.remove("error");
-  importStatus.textContent = message.text || "正在导入…";
+  importProgressText.textContent = message.text || "正在导入…";
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -336,6 +347,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   refreshStatus().catch(() => {});
 });
 refreshEnabledState().catch(() => renderEnabledState(true));
+loadImportFolders();
 refreshStatus().catch((error) => {
   lastResult.textContent = error?.message || "无法读取插件状态。";
 });

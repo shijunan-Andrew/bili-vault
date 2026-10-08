@@ -43,15 +43,21 @@ const videoIdentifierInput = document.getElementById("videoIdentifier");
 const videoTargetOptions = document.getElementById("videoTargetOptions");
 const cancelAddVideoButton = document.getElementById("cancelAddVideo");
 const submitAddVideoButton = document.getElementById("submitAddVideo");
+const collectionActionDialog = document.getElementById("collectionActionDialog");
+const collectionActionTitle = document.getElementById("collectionActionTitle");
+const collectionActionSummary = document.getElementById("collectionActionSummary");
+const collectionActionList = document.getElementById("collectionActionList");
+const collectionActionCount = document.getElementById("collectionActionCount");
+const cancelCollectionActionButton = document.getElementById("cancelCollectionAction");
+const confirmCollectionActionButton = document.getElementById("confirmCollectionAction");
+const selectAllActionTargetsButton = document.getElementById("selectAllActionTargets");
+const clearActionTargetsButton = document.getElementById("clearActionTargets");
 const invalidOnlyButton = document.getElementById("invalidOnly");
 const batchManageButton = document.getElementById("batchManage");
 const batchToolbar = document.getElementById("batchToolbar");
 const selectedCount = document.getElementById("selectedCount");
 const selectVisibleButton = document.getElementById("selectVisible");
 const exitBatchButton = document.getElementById("exitBatch");
-const batchTargetPicker = document.getElementById("batchTargetPicker");
-const batchTargetSummary = document.getElementById("batchTargetSummary");
-const batchTargetOptions = document.getElementById("batchTargetOptions");
 const moveSelectedButton = document.getElementById("moveSelected");
 const deleteSelectedButton = document.getElementById("deleteSelected");
 
@@ -68,6 +74,7 @@ let selectionMode = false;
 let showInvalidOnly = false;
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
+let pendingCollectionAction = null;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -297,13 +304,6 @@ function renderCollections() {
     }
     return wrapper;
   }));
-  renderBatchTargets();
-}
-
-function renderBatchTargets() {
-  const previouslySelected = selectedTargetNames(batchTargetOptions).filter((name) => collections.some((collection) => collection.name === name));
-  renderTargetChoices(batchTargetOptions, previouslySelected);
-  batchTargetSummary.textContent = previouslySelected.length ? `已选 ${previouslySelected.length} 个收藏夹` : "选择目标收藏夹…";
 }
 
 function selectedRecords() {
@@ -316,8 +316,7 @@ function updateBatchControls() {
   const allVisibleSelected = visibleVideoIds.length > 0 && visibleVideoIds.every((id) => selectedVideoIds.has(id));
   selectVisibleButton.textContent = allVisibleSelected ? "取消当前结果选择" : "全选当前结果";
   selectVisibleButton.disabled = visibleVideoIds.length === 0;
-  const targets = selectedTargetNames(batchTargetOptions);
-  moveSelectedButton.disabled = records.length === 0 || targets.length === 0;
+  moveSelectedButton.disabled = records.length === 0;
   deleteSelectedButton.disabled = records.length === 0;
 }
 
@@ -329,11 +328,6 @@ function setSelectionMode(enabled) {
   batchManageButton.classList.toggle("button-quiet", !selectionMode);
   batchManageButton.textContent = selectionMode ? "完成" : "批量管理";
   batchManageButton.setAttribute("aria-pressed", String(selectionMode));
-  if (!selectionMode) {
-    batchTargetPicker.open = false;
-    renderTargetChoices(batchTargetOptions, []);
-    batchTargetSummary.textContent = "选择目标收藏夹…";
-  }
   if (!selectionMode) selectedVideoIds.clear();
   renderVideos();
 }
@@ -457,7 +451,7 @@ function openDetail(video) {
   addField(rows, "av 号", video.aid);
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地收藏管理</h3><label class="move-label" for="moveTarget">移动到另一个收藏夹</label><div class="move-controls"><select id="moveTarget" class="move-target" aria-label="目标收藏夹"><option value="">选择目标收藏夹</option></select><button class="button button-primary move-local" type="button">移动</button></div><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些操作只整理本地归档文件，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些操作只整理本地归档文件，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -465,21 +459,8 @@ function openDetail(video) {
   detailContent.querySelector(".detail-description").textContent = video.description || "暂无简介";
   const link = detailContent.querySelector(".open-video");
   if (link) link.href = video.url;
-  const targetSelect = detailContent.querySelector("#moveTarget");
   const moveButton = detailContent.querySelector(".move-local");
-  const otherCollections = collections.filter((collection) => collection.name !== video.collection);
-  for (const collection of otherCollections) {
-    const option = document.createElement("option");
-    option.value = collection.name;
-    option.textContent = collection.name;
-    targetSelect.append(option);
-  }
-  if (!otherCollections.length) {
-    targetSelect.options[0].textContent = "暂无其他收藏夹";
-    targetSelect.disabled = true;
-    moveButton.disabled = true;
-  }
-  moveButton.addEventListener("click", () => moveVideoToCollection(video, targetSelect.value, moveButton));
+  moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
   detailContent.querySelector(".delete-local").addEventListener("click", () => askToDeleteVideo(video));
   detailPanel.classList.add("open");
   detailPanel.setAttribute("aria-hidden", "false");
@@ -651,81 +632,130 @@ async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null
   return { moved: !targets.includes(video.collection), copied: missingTargets.length, duplicateTargets };
 }
 
-async function moveVideoToCollection(video, targetName, button) {
-  if (!targetName || targetName === video.collection) { showToast("请选择另一个收藏夹。"); return; }
-  button.disabled = true;
-  button.textContent = "移动中…";
-  try {
-    const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
-    const result = await moveVideoRecordToTargets(video, [targetName]);
-    if (result.duplicate) {
-      showToast(`已存在相同视频，未移动到“${targetName}”。`);
-      return;
-    }
-    closeDetail();
-    await displayRoot(rootHandle, targetName);
-    showToast(`已移动到“${targetName}”`);
-  } catch (error) {
-    await displayRoot(rootHandle, selectedCollection).catch(() => {});
-    showToast(`移动失败：${error?.message || "本地文件操作失败。"}`);
-  } finally {
-    button.disabled = false;
-    button.textContent = "移动";
-  }
+function selectedActionTargetNames() {
+  return [...collectionActionList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
 }
 
-async function moveSelectedVideos() {
-  const records = selectedRecords();
-  const targetNames = selectedTargetNames(batchTargetOptions);
-  if (!records.length) { showToast("请先选择视频。"); return; }
-  if (!targetNames.length) { showToast("请选择一个或多个目标收藏夹。"); return; }
-  const duplicateSets = new Map(targetNames.map((name) => [
-    name,
-    new Set(allVideos().filter((video) => video.collection === name).flatMap((video) => Array.from(videoIdentifierKeys(video))))
-  ]));
-  moveSelectedButton.disabled = true;
-  moveSelectedButton.textContent = "移动中…";
+function updateCollectionActionSelection() {
+  const names = selectedActionTargetNames();
+  collectionActionCount.textContent = `已选 ${names.length} 个收藏夹`;
+  confirmCollectionActionButton.disabled = names.length === 0 || confirmCollectionActionButton.dataset.busy === "true";
+}
+
+function openCollectionActionDialog(videos, source) {
+  if (!rootHandle || !videos.length) return;
+  pendingCollectionAction = { videos, source };
+  collectionActionTitle.textContent = videos.length === 1 ? "移动或复制视频" : `移动或复制 ${videos.length} 个视频`;
+  collectionActionSummary.textContent = videos.length === 1
+    ? `“${videos[0].title}”当前位于“${videos[0].collection}”。`
+    : `为所选的 ${videos.length} 个视频选择目标收藏夹。每个视频都会按其原收藏夹分别判断移动或复制。`;
+  collectionActionList.replaceChildren();
+  const sourceCollections = new Set(videos.map((video) => video.collection));
+  if (!collections.length) {
+    const empty = document.createElement("p");
+    empty.className = "collection-action-empty";
+    empty.textContent = "本地收藏库中还没有收藏夹。";
+    collectionActionList.append(empty);
+  }
+  for (const collection of collections) {
+    const row = document.createElement("label");
+    row.className = "collection-action-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = collection.name;
+    checkbox.addEventListener("change", updateCollectionActionSelection);
+    const icon = document.createElement("span");
+    icon.className = "collection-action-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "▰";
+    const name = document.createElement("span");
+    name.className = "collection-action-name";
+    name.textContent = collection.name;
+    if (sourceCollections.has(collection.name)) {
+      const sourceBadge = document.createElement("small");
+      sourceBadge.className = "collection-source-badge";
+      sourceBadge.textContent = "原收藏夹";
+      name.append(sourceBadge);
+    }
+    const count = document.createElement("small");
+    count.className = "collection-action-video-count";
+    count.textContent = `${collection.videos.length} 个视频`;
+    row.append(checkbox, icon, name, count);
+    collectionActionList.append(row);
+  }
+  confirmCollectionActionButton.dataset.busy = "false";
+  confirmCollectionActionButton.textContent = "确认";
+  cancelCollectionActionButton.disabled = false;
+  updateCollectionActionSelection();
+  collectionActionDialog.showModal();
+}
+
+async function confirmCollectionAction() {
+  const action = pendingCollectionAction;
+  if (!action || confirmCollectionActionButton.dataset.busy === "true") return;
+  const targetNames = selectedActionTargetNames();
+  if (!targetNames.length) { showToast("请选择一个或多个收藏夹。"); return; }
+  confirmCollectionActionButton.dataset.busy = "true";
+  confirmCollectionActionButton.disabled = true;
+  confirmCollectionActionButton.textContent = "正在整理…";
+  cancelCollectionActionButton.disabled = true;
+  selectAllActionTargetsButton.disabled = true;
+  clearActionTargetsButton.disabled = true;
+  collectionActionList.querySelectorAll("input").forEach((input) => { input.disabled = true; });
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const duplicateSets = new Map(targetNames.map((name) => [
+      name,
+      new Set(allVideos().filter((video) => video.collection === name).flatMap((video) => Array.from(videoIdentifierKeys(video))))
+    ]));
     let moved = 0;
+    let copied = 0;
     let duplicates = 0;
     let alreadyThere = 0;
     const failures = [];
-    for (const video of records) {
+    const remainingIds = new Set();
+    for (const video of action.videos) {
       try {
         const result = await moveVideoRecordToTargets(video, targetNames, duplicateSets);
-        if (result.duplicate) duplicates += result.duplicateTargets?.length || 1;
-        else if (result.alreadyInTargets) alreadyThere += 1;
-        else if (result.moved || result.copied) {
-          duplicates += result.duplicateTargets?.length || 0;
-          moved += 1;
-          selectedVideoIds.delete(video.id);
-        }
+        duplicates += result.duplicateTargets?.length || 0;
+        if (result.duplicate) remainingIds.add(video.id);
+        else if (result.alreadyInTargets) { alreadyThere += 1; remainingIds.add(video.id); }
+        else if (result.moved) moved += 1;
+        else if (result.copied) copied += 1;
+        else remainingIds.add(video.id);
       } catch (error) {
-        failures.push({ id: video.id, message: `${video.title}：${error?.message || "移动失败"}` });
+        failures.push(`${video.title}：${error?.message || "本地文件操作失败"}`);
+        remainingIds.add(video.id);
       }
     }
-    if (moved || duplicates || failures.length) {
-      selectedVideoIds = new Set([...records.filter((video) => video.collection && selectedVideoIds.has(video.id)).map((video) => video.id), ...failures.map((failure) => failure.id)]);
-      if (!failures.length && !duplicates && targetNames.length === 1 && selectedCollection !== "*" && selectedCollection !== records[0]?.collection && collections.some((entry) => entry.name === targetNames[0])) selectedCollection = targetNames[0];
+    pendingCollectionAction = null;
+    collectionActionDialog.close();
+    if (moved || copied) {
+      if (action.source === "detail") closeDetail();
+      else if (moved && targetNames.length === 1) selectedCollection = targetNames[0];
+      selectedVideoIds = remainingIds;
       await displayRoot(rootHandle, selectedCollection);
-      if (!failures.length && !duplicates) setSelectionMode(false);
-      const messages = [];
-      if (moved) messages.push(`已处理 ${moved} 个视频`);
-      if (duplicates) messages.push(`已存在相同视频 ${duplicates} 个目标，已跳过`);
-      if (alreadyThere) messages.push(`${alreadyThere} 个视频已在目标收藏夹中`);
-      if (failures.length) messages.push(`${failures.length} 个失败并保留选中：${failures[0].message}`);
-      showToast(messages.join("；") || "没有可移动的视频。");
-    } else {
-      showToast("所选视频已经都在目标收藏夹中。");
+      if (action.source === "batch" && remainingIds.size === 0) setSelectionMode(false);
+      else if (action.source === "batch") updateBatchControls();
     }
+    const messages = [];
+    if (moved) messages.push(`已移动 ${moved} 个视频`);
+    if (copied) messages.push(`已复制 ${copied} 个视频`);
+    if (duplicates) messages.push(`重复项 ${duplicates} 个，已跳过`);
+    if (alreadyThere) messages.push(`${alreadyThere} 个视频已在所选收藏夹中`);
+    if (failures.length) messages.push(`${failures.length} 个失败，仍保留选中：${failures[0]}`);
+    showToast(messages.join("；") || "没有需要整理的视频。原视频已保留。");
   } catch (error) {
-    showToast(`批量移动失败：${error?.message || "本地文件操作失败。"}`);
+    showToast(`整理失败：${error?.message || "本地文件操作失败。"}`);
   } finally {
-    moveSelectedButton.textContent = "移动";
-    updateBatchControls();
+    confirmCollectionActionButton.dataset.busy = "false";
+    confirmCollectionActionButton.textContent = "确认";
+    cancelCollectionActionButton.disabled = false;
+    selectAllActionTargetsButton.disabled = false;
+    clearActionTargetsButton.disabled = false;
+    collectionActionList.querySelectorAll("input").forEach((input) => { input.disabled = false; });
+    updateCollectionActionSelection();
   }
 }
 
@@ -980,12 +1010,7 @@ addVideoButton.addEventListener("click", openAddVideoDialog);
 batchManageButton.addEventListener("click", () => setSelectionMode(!selectionMode));
 selectVisibleButton.addEventListener("click", toggleVisibleSelection);
 exitBatchButton.addEventListener("click", () => setSelectionMode(false));
-batchTargetOptions.addEventListener("change", () => {
-  const selected = selectedTargetNames(batchTargetOptions);
-  batchTargetSummary.textContent = selected.length ? `已选 ${selected.length} 个收藏夹` : "选择目标收藏夹…";
-  updateBatchControls();
-});
-moveSelectedButton.addEventListener("click", moveSelectedVideos);
+moveSelectedButton.addEventListener("click", () => openCollectionActionDialog(selectedRecords(), "batch"));
 deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRecords()));
 searchInput.addEventListener("input", renderVideos);
 sortSelect.addEventListener("change", renderVideos);
@@ -997,6 +1022,28 @@ cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
 confirmDeleteButton.addEventListener("click", confirmPendingDelete);
 cancelCreateCollectionButton.addEventListener("click", () => collectionDialog.close());
 cancelAddVideoButton.addEventListener("click", () => videoDialog.close());
+cancelCollectionActionButton.addEventListener("click", () => {
+  if (confirmCollectionActionButton.dataset.busy !== "true") {
+    pendingCollectionAction = null;
+    collectionActionDialog.close();
+  }
+});
+collectionActionDialog.addEventListener("cancel", (event) => {
+  if (confirmCollectionActionButton.dataset.busy === "true") {
+    event.preventDefault();
+    return;
+  }
+  pendingCollectionAction = null;
+});
+confirmCollectionActionButton.addEventListener("click", confirmCollectionAction);
+selectAllActionTargetsButton.addEventListener("click", () => {
+  collectionActionList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = true; });
+  updateCollectionActionSelection();
+});
+clearActionTargetsButton.addEventListener("click", () => {
+  collectionActionList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+  updateCollectionActionSelection();
+});
 confirmBackdrop.addEventListener("click", (event) => {
   if (event.target === confirmBackdrop && !deleteInProgress) closeDeleteConfirmation();
 });
