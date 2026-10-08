@@ -70,7 +70,10 @@
         <div class="progress-track"><div id="overallProgress" class="progress-fill"></div></div>
         <div class="progress-meta"><span id="progressCurrent">准备就绪</span><span id="progressFiles">已保存 0 个文件</span></div>
         <div id="downloadLog" class="download-log" role="status" aria-live="polite"><div class="log-placeholder">解析完成后，下载过程和结果会显示在这里。</div></div>
-        <button id="cancelDownload" class="button button-quiet cancel-download" type="button" hidden>取消下载</button>
+        <div class="download-actions" hidden>
+          <button id="pauseDownload" class="button button-quiet pause-download" type="button">暂停下载</button>
+          <button id="cancelDownload" class="button button-quiet cancel-download" type="button">取消下载</button>
+        </div>
       </section>
     </div>
     <p class="page-footnote">仅保存当前账号有权播放的内容。部分清晰度、字幕或失效视频可能无法从 B 站接口获取。</p>

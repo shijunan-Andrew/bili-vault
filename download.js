@@ -27,6 +27,8 @@ const audioOption = $("audioOption");
 const audioQualitySetting = $("audioQualitySetting");
 const formatNote = $("formatNote");
 const startDownload = $("startDownload");
+const downloadActions = document.querySelector(".download-actions");
+const pauseDownload = $("pauseDownload");
 const cancelDownload = $("cancelDownload");
 const progressSummary = $("progressSummary");
 const progressBadge = $("progressBadge");
@@ -40,6 +42,8 @@ let downloadFolderMode = "default";
 let archiveRootHandle = null;
 let queue = [];
 let running = false;
+let paused = false;
+let pauseWaiter = null;
 let cancelController = null;
 let savedFileCount = 0;
 let failedCount = 0;
@@ -125,7 +129,43 @@ function setQueueBusy(busy) {
   parseVideoButton.disabled = busy;
   videoInput.disabled = busy;
   queueList.querySelectorAll("button,select").forEach((element) => { element.disabled = busy; });
+  chooseDownloadFolder.disabled = busy;
+  useDefaultDownloadFolder.disabled = busy;
+  document.querySelectorAll(".settings-panel select, .settings-panel input").forEach((element) => { element.disabled = busy; });
+  if (!busy) setFormatUi();
   updateStartButton();
+}
+
+function releasePauseWaiter() {
+  if (!pauseWaiter) return;
+  const resume = pauseWaiter;
+  pauseWaiter = null;
+  resume();
+}
+
+async function waitWhilePaused() {
+  while (paused && !cancelController?.signal.aborted) {
+    await new Promise((resolve) => { pauseWaiter = resolve; });
+  }
+  if (cancelController?.signal.aborted) throw new DOMException("用户取消下载", "AbortError");
+}
+
+function setPaused(value) {
+  paused = value;
+  pauseDownload.textContent = paused ? "继续下载" : "暂停下载";
+  setBadge(paused ? "已暂停" : "下载中", paused ? "paused" : "active");
+  progressSummary.textContent = paused ? "下载已暂停，可继续或取消" : "下载继续进行中";
+  if (!paused) releasePauseWaiter();
+}
+
+function cancelCurrentDownload() {
+  if (!running || !cancelController) return;
+  paused = false;
+  releasePauseWaiter();
+  cancelController.abort();
+  progressCurrent.textContent = "正在取消并清理本次下载文件…";
+  cancelDownload.disabled = true;
+  pauseDownload.disabled = true;
 }
 
 function pageLabel(page) {
@@ -377,9 +417,10 @@ async function writeResponseToFile(directory, fileName, response, onProgress) {
   let received = 0;
   try {
     while (true) {
-      if (cancelController?.signal.aborted) throw new DOMException("用户取消下载", "AbortError");
+      await waitWhilePaused();
       const { done, value } = await reader.read();
       if (done) break;
+      await waitWhilePaused();
       await writable.write(value);
       received += value.byteLength;
       onProgress?.(received, total);
@@ -536,9 +577,8 @@ function taskCountForCurrentSettings(pageCount) {
 }
 
 async function runAsset(label, operation) {
-  if (cancelController.signal.aborted) throw new DOMException("用户取消下载", "AbortError");
   progressCurrent.textContent = label;
-  try { await operation(); }
+  try { await waitWhilePaused(); await operation(); }
   catch (error) {
     if (error?.name === "AbortError") throw error;
     failedCount += 1;
@@ -624,6 +664,7 @@ async function start() {
   }
 
   running = true;
+  paused = false;
   cancelController = new AbortController();
   savedFileCount = 0;
   failedCount = 0;
@@ -634,7 +675,10 @@ async function start() {
   progressSummary.textContent = `准备下载 ${validItems.length} 个视频，共 ${pagesToDownload.length} 个分 P`;
   progressCurrent.textContent = "正在创建下载目录";
   startDownload.disabled = true;
-  cancelDownload.hidden = false;
+  downloadActions.hidden = false;
+  cancelDownload.disabled = false;
+  pauseDownload.disabled = false;
+  pauseDownload.textContent = "暂停下载";
   setQueueBusy(true);
   addLog(`开始下载：${validItems.length} 个视频 / ${pagesToDownload.length} 个分 P`, "info");
   try {
@@ -642,6 +686,8 @@ async function start() {
     const failedFolders = new Set();
     const total = pagesToDownload.length;
     for (let index = 0; index < total; index += 1) {
+      try { await waitWhilePaused(); }
+      catch (error) { if (error?.name === "AbortError") break; throw error; }
       if (cancelController.signal.aborted) break;
       const { item, page } = pagesToDownload[index];
       const video = item.video;
@@ -672,9 +718,28 @@ async function start() {
     }
     const cancelled = cancelController.signal.aborted;
     if (cancelled) {
+      const createdDirectories = [...folderCache.values()];
+      let removedDirectories = 0;
+      for (const directory of createdDirectories) {
+        try {
+          await downloadFolder.removeEntry(directory.name, { recursive: true });
+          removedDirectories += 1;
+          addLog(`已清理本次下载目录：${directory.name}`, "success");
+        } catch (error) {
+          addLog(`未能清理“${directory.name}”：${error.message}`, "error");
+        }
+      }
+      if (removedDirectories === createdDirectories.length) {
+        savedFileCount = 0;
+        updateProgress();
+      }
       setBadge("已取消", "error");
-      progressSummary.textContent = `已取消 · 已保存 ${savedFileCount} 个文件`;
-      addLog(`下载已取消，已保存 ${savedFileCount} 个文件。`, "error");
+      progressSummary.textContent = createdDirectories.length === 0
+        ? "已取消 · 尚未创建本地下载目录"
+        : removedDirectories === createdDirectories.length
+          ? `已取消 · 本次下载文件已清理（${removedDirectories} 个目录）`
+          : `已取消 · ${removedDirectories}/${createdDirectories.length} 个本次下载目录已清理`;
+      addLog(`下载已取消，已清理 ${removedDirectories}/${createdDirectories.length} 个本次创建的目录。`, removedDirectories === createdDirectories.length ? "success" : "error");
     } else if (failedCount) {
       setBadge("部分完成", "error");
       progressSummary.textContent = `完成 · ${savedFileCount} 个文件成功，${failedCount} 项失败`;
@@ -686,13 +751,16 @@ async function start() {
     }
     if (!cancelled) { completedTasks = plannedTasks; updateProgress(); }
   } finally {
-    if (savedFileCount > 0) {
+    if (savedFileCount > 0 || cancelController?.signal.aborted) {
       try { await chrome.storage.local.set({ downloadRevision: crypto.randomUUID() }); }
       catch (error) { addLog(`已保存文件，但收藏库状态同步失败：${error.message}`, "error"); }
     }
     running = false;
+    paused = false;
     cancelController = null;
-    cancelDownload.hidden = true;
+    downloadActions.hidden = true;
+    cancelDownload.disabled = false;
+    pauseDownload.disabled = false;
     setQueueBusy(false);
   }
 }
@@ -721,7 +789,8 @@ useDefaultDownloadFolder.addEventListener("click", useDefaultFolder);
 formatSelect.addEventListener("change", () => { setFormatUi(); refreshQualityOptions(); });
 qualitySelect.addEventListener("change", () => { queue.forEach((item) => { item.playurlCache = null; }); });
 startDownload.addEventListener("click", start);
-cancelDownload.addEventListener("click", () => cancelController?.abort());
+pauseDownload.addEventListener("click", () => { if (running) setPaused(!paused); });
+cancelDownload.addEventListener("click", cancelCurrentDownload);
 
 async function initialize() {
   setFormatUi();

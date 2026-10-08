@@ -174,7 +174,7 @@ function downloadDirectoryIdentifiers(name) {
   const identifiers = new Set();
   const bvid = String(name || "").match(/(?:^| - )(BV[0-9A-Za-z]{10})(?: \(\d+\))?$/);
   const aid = String(name || "").match(/(?:^| - )av(\d+)(?: \(\d+\))?$/i);
-  if (bvid) identifiers.add(`bvid:${bvid[0]}`);
+  if (bvid) identifiers.add(`bvid:${bvid[1]}`);
   if (aid) identifiers.add(`aid:${aid[1]}`);
   return identifiers;
 }
