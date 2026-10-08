@@ -411,6 +411,7 @@ function importClean(value) { return String(value ?? "").replace(/\s+/g, " ").tr
 function importIsInvalidTitle(value) { return IMPORT_INVALID_TITLES.has(importClean(value)); }
 function importUsefulTitle(value) { const text = importClean(value); return !!text && !importIsInvalidTitle(text) && text !== "该合集已失效"; }
 function importBvidFromUrl(value) { return importClean(value).match(/\b(BV[0-9A-Za-z]{10})\b/)?.[1] || ""; }
+function importAidKey(value) { return importClean(value).replace(/^av/i, ""); }
 
 function importBvToAid(bvid) {
   const text = importClean(bvid);
@@ -463,7 +464,19 @@ function importLinkParam(value, names) {
   return "";
 }
 
-async function biliImportApiGet(path, params = {}, timeoutMs = 15000) {
+function biliImportPageApiGet(tabId, url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, { type: "bca-page-api-get", url, timeoutMs }, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) return reject(new Error(error.message || "无法从 B 站收藏夹页面请求接口。"));
+      if (!response) return reject(new Error("B 站收藏夹页面没有响应接口请求。"));
+      if (!response.ok) return reject(new Error(response.message || "B 站页面接口请求失败。"));
+      resolve({ status: response.status, payload: response.payload });
+    });
+  });
+}
+
+async function biliImportApiGet(path, params = {}, timeoutMs = 15000, tabId = null) {
   const url = new URL(path, "https://api.bilibili.com");
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
@@ -471,11 +484,24 @@ async function biliImportApiGet(path, params = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url.toString(), { credentials: "include", cache: "no-store", signal: controller.signal });
+    let status;
     let payload;
-    try { payload = await response.json(); }
-    catch (_) { throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`); }
-    if (!response.ok) throw new Error(`B站接口请求失败：HTTP ${response.status}`);
+    if (Number.isInteger(tabId)) {
+      try {
+        ({ status, payload } = await biliImportPageApiGet(tabId, url.toString(), timeoutMs));
+      } catch (_) {
+        const response = await fetch(url.toString(), { credentials: "include", cache: "no-store", signal: controller.signal });
+        status = response.status;
+        try { payload = await response.json(); }
+        catch (_) { throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`); }
+      }
+    } else {
+      const response = await fetch(url.toString(), { credentials: "include", cache: "no-store", signal: controller.signal });
+      status = response.status;
+      try { payload = await response.json(); }
+      catch (_) { throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`); }
+    }
+    if (status < 200 || status >= 300) throw new Error(`B站接口请求失败：HTTP ${status}`);
     if (payload.code !== 0) throw new Error(payload.message || `B站接口返回错误码 ${payload.code ?? "未知"}`);
     return payload.data || {};
   } catch (error) {
@@ -486,14 +512,14 @@ async function biliImportApiGet(path, params = {}, timeoutMs = 15000) {
 
 function importDelay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-async function listBiliFavoriteFolders(uid) {
+async function listBiliFavoriteFolders(uid, tabId = null) {
   const ownerId = importClean(uid);
   if (!/^\d+$/.test(ownerId)) throw new Error("无法从当前收藏夹页面读取用户 UID，请刷新 B 站收藏夹页后重试。");
   const folders = [];
   let page = 1;
   try {
     while (page <= 50) {
-      const data = await biliImportApiGet("/x/v3/fav/folder/created/list", { up_mid: ownerId, ps: 30, pn: page });
+      const data = await biliImportApiGet("/x/v3/fav/folder/created/list", { up_mid: ownerId, ps: 30, pn: page }, 15000, tabId);
       const list = Array.isArray(data.list) ? data.list : [];
       folders.push(...list.map((item) => ({
         id: String(item.id || item.media_id || item.fid || ""),
@@ -505,7 +531,7 @@ async function listBiliFavoriteFolders(uid) {
     }
   } catch (error) {
     if (folders.length) return folders;
-    const data = await biliImportApiGet("/x/v3/fav/folder/created/list-all", { up_mid: ownerId });
+    const data = await biliImportApiGet("/x/v3/fav/folder/created/list-all", { up_mid: ownerId }, 15000, tabId);
     const list = Array.isArray(data.list) ? data.list : [];
     folders.push(...list.map((item) => ({
       id: String(item.id || item.media_id || item.fid || ""),
@@ -520,10 +546,14 @@ async function listBiliFavoriteFolders(uid) {
 function normalizeImportMedia(media, folder) {
   const upper = media.upper || {};
   const link = media.link || media.uri || "";
-  const rawAid = importClean(media.aid || media.oid || importLinkParam(link, ["oid", "sourceid"]));
+  const linkOid = importClean(importLinkParam(link, ["oid"]));
+  const linkSourceId = importClean(importLinkParam(link, ["sourceid"]));
+  const explicitAid = importClean(media.aid || "");
+  const explicitOid = importClean(media.oid || "");
   const mediaId = importClean(media.id || "");
-  const bvid = importClean(media.bvid || media.bv_id || importBvidFromUrl(link)) || importAidToBv(rawAid || mediaId);
-  const aid = rawAid || mediaId || importBvToAid(bvid);
+  const bvid = importClean(media.bvid || media.bv_id || importBvidFromUrl(link)) || importAidToBv(explicitAid || explicitOid || linkOid || linkSourceId || mediaId);
+  const aidKeys = [...new Set([explicitAid, explicitOid, linkOid, linkSourceId, mediaId].map(importAidKey).filter(Boolean))];
+  const aid = explicitAid || explicitOid || linkOid || linkSourceId || mediaId || importBvToAid(bvid);
   const title = importClean(media.title || "");
   return {
     title: title || "已失效视频",
@@ -542,7 +572,7 @@ function normalizeImportMedia(media, folder) {
     favoriteAt: Number(media.fav_time || media.ctime || media.mtime || 0) || 0,
     isInvalid: media.is_invalid === true || importIsInvalidTitle(title),
     attr: Number(media.attr || 0),
-    aidKeys: [...new Set([rawAid, mediaId, importLinkParam(link, ["oid", "sourceid"])].filter(Boolean))],
+    aidKeys,
     cid: importClean(media.cid || media.first_cid || media.ugc?.first_cid || ""),
     folder
   };
@@ -551,8 +581,8 @@ function normalizeImportMedia(media, folder) {
 function importMediaKeys(item) {
   return new Set([
     item?.bvid ? `bvid:${item.bvid}` : "",
-    ...(item?.aidKeys || []).map((aid) => `aid:${aid}`),
-    item?.aid ? `aid:${item.aid}` : "",
+    ...(item?.aidKeys || []).map((aid) => `aid:${importAidKey(aid)}`),
+    item?.aid ? `aid:${importAidKey(item.aid)}` : "",
     item?.cid ? `cid:${item.cid}` : ""
   ].filter(Boolean));
 }
@@ -560,12 +590,19 @@ function importMediaKeys(item) {
 function importMobileRecord(record) {
   const upper = record?.upper || {};
   const link = record?.link || record?.uri || "";
-  const oid = importClean(record?.oid || record?.id || importLinkParam(link, ["oid", "sourceid"]));
+  const oid = importClean(record?.oid || "");
+  const recordId = importClean(record?.id || "");
+  const linkOid = importClean(importLinkParam(link, ["oid"]));
+  const linkSourceId = importClean(importLinkParam(link, ["sourceid"]));
+  const aid = importClean(record?.aid || oid || recordId || linkOid || linkSourceId);
   const bvid = importClean(record?.bvid || record?.bv_id || importBvidFromUrl(link));
+  const bvidFromOid = importAidToBv(importAidKey(oid || aid));
   return {
     oid,
     bvid,
-    aid: oid,
+    bvidFromOid,
+    aid,
+    aidKeys: [...new Set([importClean(record?.aid || ""), oid, recordId, linkOid, linkSourceId].map(importAidKey).filter(Boolean))],
     cid: importClean(record?.cid || record?.first_cid || record?.ugc?.first_cid || ""),
     title: importClean(record?.title || ""),
     cover: normalizeUrl(record?.cover || ""),
@@ -577,6 +614,29 @@ function importMobileRecord(record) {
     invalid: record?.is_invalid === true,
     stats: record?.cnt_info || {}
   };
+}
+
+function importMobileKeys(record) {
+  return new Set([
+    ...(record?.bvid ? [`bvid:${record.bvid}`] : []),
+    ...(record?.bvidFromOid ? [`bvid:${record.bvidFromOid}`] : []),
+    ...(record?.aidKeys || []).map((aid) => `aid:${importAidKey(aid)}`),
+    ...(record?.aid ? [`aid:${importAidKey(record.aid)}`] : []),
+    ...(record?.cid ? [`cid:${record.cid}`] : [])
+  ]);
+}
+
+function importMobileScore(record) {
+  return (importUsefulTitle(record?.title) ? 8 : 0) + (record?.cover ? 6 : 0) + (record?.author ? 3 : 0) +
+    (record?.duration ? 2 : 0) + (record?.tags?.length ? 1 : 0);
+}
+
+function importMobileUnionKey(record) {
+  return record?.oid || record?.aid || record?.cid || record?.bvid || record?.bvidFromOid || "";
+}
+
+function importMobileHasDisplayData(record) {
+  return importUsefulTitle(record?.title) || !!record?.cover || !!record?.author || !!record?.duration || !!record?.tags?.length;
 }
 
 function mergeRecoveredValue(item, candidate, source) {
@@ -601,10 +661,10 @@ function mergeRecoveredValue(item, candidate, source) {
   }
 }
 
-async function fetchImportFavoritePage(folder, page) {
+async function fetchImportFavoritePage(folder, page, tabId = null) {
   const data = await biliImportApiGet("/x/v3/fav/resource/list", {
     media_id: folder.id, pn: page, ps: 40, keyword: "", order: "mtime", type: 0, tid: 0, platform: "web"
-  });
+  }, 15000, tabId);
   const medias = Array.isArray(data.medias) ? data.medias : [];
   return {
     items: medias.map((media) => normalizeImportMedia(media, folder)),
@@ -613,45 +673,66 @@ async function fetchImportFavoritePage(folder, page) {
   };
 }
 
-async function fetchMobileRecovery(folder, targets) {
-  const records = [];
-  const unmatched = new Set(targets.filter((item) => importMediaKeys(item).size));
-  if (!unmatched.size) return records;
-  for (let page = 1; page <= 100 && unmatched.size; page += 1) {
-    let payload = null;
-    let lastError = null;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        payload = await biliImportApiGet("/x/v3/fav/folder/resources", {
-          media_id: folder.id, pn: page, platform: "ios", mobi_app: "iphone", build: 89501100
-        }, 9000);
-        break;
-      } catch (error) {
-        lastError = error;
-        if (attempt < 3) await importDelay(500 * attempt);
-      }
+async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId = null) {
+  const recordsByKey = new Map();
+  const keyedTargets = targets.filter((item) => importMediaKeys(item).size);
+  if (!keyedTargets.length) return [];
+
+  function missingTargets() {
+    const recordKeys = new Set();
+    const records = [...recordsByKey.values()];
+    for (const record of records) {
+      if (!importMobileHasDisplayData(record)) continue;
+      importMobileKeys(record).forEach((key) => recordKeys.add(key));
     }
-    if (!payload) throw lastError || new Error("APP收藏夹恢复接口请求失败。");
-    const list = Array.isArray(payload.list) ? payload.list : [];
-    const mapped = list.map(importMobileRecord);
-    records.push(...mapped);
-    for (const record of mapped) {
-      const recordKeys = new Set([
-        ...(record.bvid ? [`bvid:${record.bvid}`] : []),
-        ...(record.aid ? [`aid:${record.aid}`] : []),
-        ...(record.cid ? [`cid:${record.cid}`] : [])
-      ]);
-      for (const target of [...unmatched]) {
-        if ([...importMediaKeys(target)].some((key) => recordKeys.has(key))) unmatched.delete(target);
-      }
-    }
-    if (!payload.has_more || !list.length) break;
-    await importDelay(350);
+    return keyedTargets.filter((target) => ![...importMediaKeys(target)].some((key) => recordKeys.has(key)));
   }
-  return records;
+
+  const maxPasses = 4;
+  for (let pass = 1; pass <= maxPasses; pass += 1) {
+    let page = 1;
+    let passFailed = false;
+    for (; page <= 100; page += 1) {
+      let payload = null;
+      let lastError = null;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          payload = await biliImportApiGet("/x/v3/fav/folder/resources", {
+            media_id: folder.id, pn: page, platform: "ios", mobi_app: "iphone", build: 89501100
+          }, 9000, tabId);
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3) await importDelay(500 * attempt);
+        }
+      }
+      if (!payload) {
+        passFailed = true;
+        recoveryErrors.push(`APP收藏夹接口：第 ${page} 页第 ${pass} 轮扫描失败（${lastError?.message || "请求失败"}）；已保留此前成功读取的恢复记录。`);
+        break;
+      }
+
+      const list = Array.isArray(payload.list) ? payload.list : [];
+      for (const rawRecord of list) {
+        const record = importMobileRecord(rawRecord);
+        const key = importMobileUnionKey(record);
+        if (!key) continue;
+        const previous = recordsByKey.get(key);
+        if (!previous || importMobileScore(record) >= importMobileScore(previous)) recordsByKey.set(key, record);
+      }
+      if (!payload.has_more || !list.length) break;
+      await importDelay(650);
+    }
+
+    const missing = missingTargets();
+    if (!missing.length) break;
+    if (passFailed) recoveryErrors.push(`APP收藏夹接口：第 ${pass} 轮扫描在第 ${page} 页中断，剩余 ${missing.length} 个失效视频将继续重试。`);
+    if (pass < maxPasses) await importDelay(1200);
+  }
+  return [...recordsByKey.values()];
 }
 
-async function fetchImportHistory(wantedBvids, recoveryErrors = []) {
+async function fetchImportHistory(wantedBvids, recoveryErrors = [], tabId = null) {
   const wanted = new Set(wantedBvids.filter(Boolean));
   const found = new Map();
   let cursor = { max: 0, view_at: 0, business: "" };
@@ -660,7 +741,7 @@ async function fetchImportHistory(wantedBvids, recoveryErrors = []) {
     try {
       data = await biliImportApiGet("/x/web-interface/history/cursor", {
         ps: 30, type: "archive", max: cursor.max || 0, view_at: cursor.view_at || 0, business: cursor.business || ""
-      });
+      }, 15000, tabId);
     } catch (error) { recoveryErrors.push(`观看历史接口：${error.message}`); break; }
     const list = Array.isArray(data.list) ? data.list : [];
     for (const record of list) {
@@ -677,18 +758,14 @@ async function fetchImportHistory(wantedBvids, recoveryErrors = []) {
   return found;
 }
 
-async function enrichImportedInvalidVideos(items, folder) {
+async function enrichImportedInvalidVideos(items, folder, tabId = null) {
   const invalid = items.filter((item) => item.isInvalid);
   if (!invalid.length) return;
   const recoveryErrors = [];
   try {
-    const mobileRecords = await fetchMobileRecovery(folder, invalid);
+    const mobileRecords = await fetchMobileRecovery(folder, invalid, recoveryErrors, tabId);
     for (const record of mobileRecords) {
-      const recordKeys = new Set([
-        ...(record.bvid ? [`bvid:${record.bvid}`] : []),
-        ...(record.aid ? [`aid:${record.aid}`] : []),
-        ...(record.cid ? [`cid:${record.cid}`] : [])
-      ]);
+      const recordKeys = importMobileKeys(record);
       const item = invalid.find((target) => [...importMediaKeys(target)].some((key) => recordKeys.has(key)));
       if (item) mergeRecoveredValue(item, record, "APP收藏夹接口");
     }
@@ -696,13 +773,13 @@ async function enrichImportedInvalidVideos(items, folder) {
 
   let toView = new Map();
   try {
-    const data = await biliImportApiGet("/x/v2/history/toview/web", {});
+    const data = await biliImportApiGet("/x/v2/history/toview/web", {}, 15000, tabId);
     for (const record of Array.isArray(data.list) ? data.list : []) {
       if (record?.bvid) toView.set(record.bvid, record);
     }
   } catch (error) { recoveryErrors.push(`稍后再看接口：${error.message}`); }
 
-  const history = await fetchImportHistory(invalid.map((item) => item.bvid), recoveryErrors);
+  const history = await fetchImportHistory(invalid.map((item) => item.bvid), recoveryErrors, tabId);
   for (const item of invalid) {
     const toViewRecord = toView.get(item.bvid);
     if (toViewRecord) mergeRecoveredValue(item, {
@@ -720,7 +797,7 @@ async function enrichImportedInvalidVideos(items, folder) {
   await importRunLimited(invalid, 3, async (item) => {
     if (!item.bvid) return;
     try {
-      const data = await biliImportApiGet("/x/web-interface/view", { bvid: item.bvid }, 10000);
+      const data = await biliImportApiGet("/x/web-interface/view", { bvid: item.bvid }, 10000, tabId);
       if (data?.title) mergeRecoveredValue(item, {
         title: data.title, cover: data.pic, author: data.owner?.name, authorMid: data.owner?.mid,
         category: data.tname, duration: data.duration, pubdate: data.pubdate, description: data.desc
@@ -728,7 +805,7 @@ async function enrichImportedInvalidVideos(items, folder) {
     } catch (error) { recoveryErrors.push(`${item.title || item.bvid}：视频资料接口：${error.message}`); }
     try {
       if (!item.tags.length) {
-        const tagData = await biliImportApiGet("/x/tag/archive/tags", { bvid: item.bvid }, 9000);
+        const tagData = await biliImportApiGet("/x/tag/archive/tags", { bvid: item.bvid }, 9000, tabId);
         if (Array.isArray(tagData)) item.tags = tagData.map((tag) => importClean(tag.tag_name)).filter(Boolean);
         if (item.tags.length) item.recoverySources.add("视频标签接口");
       }
@@ -892,14 +969,14 @@ function sendImportProgress(text) {
   chrome.runtime.sendMessage({ type: "bca-import-progress", text }, () => { void chrome.runtime.lastError; });
 }
 
-async function importBiliFavorites(data) {
+async function importBiliFavorites(data, tabId = null) {
   const selectedIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
   const reportLines = ["B站收藏夹本地导入报告", `开始时间：${formatChineseDateTime(new Date(), true)}`];
   const root = await getRootHandle();
   if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
   await ensureWritePermission(root);
   if (!selectedIds.size) throw new Error("请至少勾选一个 B 站收藏夹。");
-  const allFolders = await listBiliFavoriteFolders(data?.uid);
+  const allFolders = await listBiliFavoriteFolders(data?.uid, tabId);
   const folders = allFolders.filter((folder) => selectedIds.has(String(folder.id)));
   if (!folders.length) throw new Error("所选收藏夹已不存在或没有读取权限，请刷新列表后重试。");
 
@@ -910,7 +987,7 @@ async function importBiliFavorites(data) {
     const folderLog = [];
     sendImportProgress(`正在读取 ${folder.title}（${folderIndex + 1}/${folders.length}）…`);
     let first;
-    try { first = await fetchImportFavoritePage(folder, 1); }
+    try { first = await fetchImportFavoritePage(folder, 1, tabId); }
     catch (error) {
       failed += 1;
       hasIssues = true;
@@ -921,7 +998,7 @@ async function importBiliFavorites(data) {
     const pageLimit = first.total ? Math.ceil(first.total / 40) : (first.hasMore || first.items.length === 40 ? 1000 : 1);
     for (let page = 2; page <= Math.min(pageLimit, 1000); page += 1) {
       try {
-        const result = await fetchImportFavoritePage(folder, page);
+        const result = await fetchImportFavoritePage(folder, page, tabId);
         allItems.push(...result.items);
         if (!result.items.length || (!first.total && !result.hasMore)) break;
       } catch (error) {
@@ -937,7 +1014,7 @@ async function importBiliFavorites(data) {
       item.recoverySources = new Set();
       if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
     });
-    try { await enrichImportedInvalidVideos(allItems, folder); }
+    try { await enrichImportedInvalidVideos(allItems, folder, tabId); }
     catch (error) { folderLog.push(`失效视频恢复流程异常：${error.message}`); }
     for (const item of allItems) {
       for (const message of item.recoveryErrors || []) {
@@ -994,8 +1071,8 @@ async function importBiliFavorites(data) {
   return { ok: true, message, imported, skipped, failed, total, reportPath };
 }
 
-function importBiliFavoritesInOrder(data) {
-  const task = saveQueue.then(() => importBiliFavorites(data));
+function importBiliFavoritesInOrder(data, tabId = null) {
+  const task = saveQueue.then(() => importBiliFavorites(data, tabId));
   saveQueue = task.catch(() => undefined);
   return task;
 }
@@ -1011,14 +1088,14 @@ async function recordFavoriteError(data) {
   };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "list-bili-favorite-folders") {
-    listBiliFavoriteFolders(message.uid).then((folders) => sendResponse({ ok: true, folders }))
+    listBiliFavoriteFolders(message.uid, sender?.tab?.id ?? null).then((folders) => sendResponse({ ok: true, folders }))
       .catch((error) => sendResponse({ ok: false, message: error?.message || "读取收藏夹失败。" }));
     return true;
   }
   if (message?.type === "import-bili-favorites") {
-    importBiliFavoritesInOrder(message.data || message).then(sendResponse).catch(async (error) => {
+    importBiliFavoritesInOrder(message.data || message, sender?.tab?.id ?? null).then(sendResponse).catch(async (error) => {
       const folders = Array.isArray(message.folderIds) ? message.folderIds.map((id) => ({ id, name: id })) : [];
       const saved = await logError(error, { folders });
       await chrome.storage.local.set({ lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
