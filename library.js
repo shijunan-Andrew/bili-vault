@@ -40,15 +40,18 @@ const submitCreateCollectionButton = document.getElementById("submitCreateCollec
 const videoDialog = document.getElementById("videoDialog");
 const videoForm = document.getElementById("videoForm");
 const videoIdentifierInput = document.getElementById("videoIdentifier");
-const videoTargetCollection = document.getElementById("videoTargetCollection");
+const videoTargetOptions = document.getElementById("videoTargetOptions");
 const cancelAddVideoButton = document.getElementById("cancelAddVideo");
 const submitAddVideoButton = document.getElementById("submitAddVideo");
+const invalidOnlyButton = document.getElementById("invalidOnly");
 const batchManageButton = document.getElementById("batchManage");
 const batchToolbar = document.getElementById("batchToolbar");
 const selectedCount = document.getElementById("selectedCount");
 const selectVisibleButton = document.getElementById("selectVisible");
 const exitBatchButton = document.getElementById("exitBatch");
-const batchTarget = document.getElementById("batchTarget");
+const batchTargetPicker = document.getElementById("batchTargetPicker");
+const batchTargetSummary = document.getElementById("batchTargetSummary");
+const batchTargetOptions = document.getElementById("batchTargetOptions");
 const moveSelectedButton = document.getElementById("moveSelected");
 const deleteSelectedButton = document.getElementById("deleteSelected");
 
@@ -62,6 +65,7 @@ let deleteInProgress = false;
 let collectionCreateInProgress = false;
 let videoAddInProgress = false;
 let selectionMode = false;
+let showInvalidOnly = false;
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
 
@@ -172,6 +176,7 @@ async function scanRoot(handle) {
           url: /^https?:\/\//i.test(url) ? url : "",
           bvid: field(info, "BV号"),
           aid: field(info, "av号"),
+          isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
           upName: field(info, "UP主昵称"),
           upMid: field(info, "UP主UID"),
           upHome: field(info, "UP主主页"),
@@ -207,6 +212,54 @@ function parseDate(value, fallback) {
 
 function allVideos() { return collections.flatMap((collection) => collection.videos); }
 function selectedVideos() { return selectedCollection === "*" ? allVideos() : collections.find((item) => item.name === selectedCollection)?.videos || []; }
+
+const LIBRARY_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
+function libraryBvidToAid(bvid) {
+  const text = String(bvid || "").trim();
+  if (!/^BV[0-9A-Za-z]{10}$/.test(text)) return "";
+  const chars = text.split("");
+  [chars[3], chars[9]] = [chars[9], chars[3]];
+  [chars[4], chars[7]] = [chars[7], chars[4]];
+  let value = 0n;
+  for (const char of chars.slice(3, 11)) {
+    const digit = LIBRARY_BV_TABLE.indexOf(char);
+    if (digit < 0) return "";
+    value = value * 58n + BigInt(digit);
+  }
+  return String((value & 2251799813685247n) ^ 23442827791579n);
+}
+
+function videoIdentifierKeys(video) {
+  const bvid = String(video?.bvid || "").trim();
+  const aid = String(video?.aid || "").trim().replace(/^av/i, "") || libraryBvidToAid(bvid);
+  return new Set([bvid && bvid !== "未知" ? `bvid:${bvid}` : "", aid && aid !== "未知" ? `aid:${aid}` : ""].filter(Boolean));
+}
+
+function identifiersOverlap(left, right) {
+  for (const key of right) if (left.has(key)) return true;
+  return false;
+}
+
+function selectedTargetNames(container) {
+  return [...container.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+}
+
+function renderTargetChoices(container, chosenNames = []) {
+  const chosen = new Set(chosenNames);
+  const labels = collections.map((collection) => {
+    const label = document.createElement("label");
+    label.className = "target-checkbox-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = collection.name;
+    checkbox.checked = chosen.has(collection.name);
+    const name = document.createElement("span");
+    name.textContent = collection.name;
+    label.append(checkbox, name);
+    return label;
+  });
+  container.replaceChildren(...labels);
+}
 
 function renderCollections() {
   const total = allVideos().length;
@@ -248,11 +301,9 @@ function renderCollections() {
 }
 
 function renderBatchTargets() {
-  const previousValue = batchTarget.value;
-  const options = [new Option("移动到收藏夹…", "")];
-  for (const collection of collections) options.push(new Option(collection.name, collection.name));
-  batchTarget.replaceChildren(...options);
-  if (collections.some((collection) => collection.name === previousValue)) batchTarget.value = previousValue;
+  const previouslySelected = selectedTargetNames(batchTargetOptions).filter((name) => collections.some((collection) => collection.name === name));
+  renderTargetChoices(batchTargetOptions, previouslySelected);
+  batchTargetSummary.textContent = previouslySelected.length ? `已选 ${previouslySelected.length} 个收藏夹` : "选择目标收藏夹…";
 }
 
 function selectedRecords() {
@@ -265,8 +316,8 @@ function updateBatchControls() {
   const allVisibleSelected = visibleVideoIds.length > 0 && visibleVideoIds.every((id) => selectedVideoIds.has(id));
   selectVisibleButton.textContent = allVisibleSelected ? "取消当前结果选择" : "全选当前结果";
   selectVisibleButton.disabled = visibleVideoIds.length === 0;
-  const targetName = batchTarget.value;
-  moveSelectedButton.disabled = records.length === 0 || !targetName || records.every((video) => video.collection === targetName);
+  const targets = selectedTargetNames(batchTargetOptions);
+  moveSelectedButton.disabled = records.length === 0 || targets.length === 0;
   deleteSelectedButton.disabled = records.length === 0;
 }
 
@@ -278,6 +329,11 @@ function setSelectionMode(enabled) {
   batchManageButton.classList.toggle("button-quiet", !selectionMode);
   batchManageButton.textContent = selectionMode ? "完成" : "批量管理";
   batchManageButton.setAttribute("aria-pressed", String(selectionMode));
+  if (!selectionMode) {
+    batchTargetPicker.open = false;
+    renderTargetChoices(batchTargetOptions, []);
+    batchTargetSummary.textContent = "选择目标收藏夹…";
+  }
   if (!selectionMode) selectedVideoIds.clear();
   renderVideos();
 }
@@ -322,22 +378,27 @@ function renderVideos() {
   batchManageButton.disabled = videos.length === 0;
   addVideoButton.disabled = selectedCollection === "*";
   addVideoButton.title = selectedCollection === "*" ? "请先选择一个收藏夹" : `添加视频到“${selectedCollection}”`;
+  invalidOnlyButton.setAttribute("aria-pressed", String(showInvalidOnly));
+  invalidOnlyButton.textContent = showInvalidOnly ? "显示全部视频" : "只显示已失效";
   const query = searchInput.value.trim().toLocaleLowerCase();
-  const matching = videos.filter((video) => !query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query));
+  const matching = videos.filter((video) => (!showInvalidOnly || video.isInvalid) && (!query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query)));
   visibleVideoIds = matching.map((video) => video.id);
   const sort = sortSelect.value;
   matching.sort((a, b) => sort === "title" ? a.title.localeCompare(b.title, "zh-CN") : sort === "oldest" ? a.timestamp - b.timestamp : b.timestamp - a.timestamp);
-  const countLabel = query ? `${matching.length} / ${videos.length} 个视频` : `${videos.length} 个视频`;
+  const countLabel = showInvalidOnly
+    ? `${matching.length} / ${videos.filter((video) => video.isInvalid).length} 个失效视频`
+    : query ? `${matching.length} / ${videos.length} 个视频` : `${videos.length} 个视频`;
   resultSummary.textContent = selectedCollection === "*" ? `${countLabel}，来自 ${collections.length} 个收藏夹` : countLabel;
   videoGrid.replaceChildren(...matching.map((video) => {
     const card = document.createElement("article");
     card.className = "video-card";
+    card.classList.toggle("invalid-video", video.isInvalid);
     card.dataset.videoId = video.id;
     card.classList.toggle("selected", selectedVideoIds.has(video.id));
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", selectionMode ? `选择视频：${video.title}` : `查看视频：${video.title}`);
-    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="选择视频"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date"></span></div></div>`;
+    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">已失效</span><span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="选择视频"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date"></span></div></div>`;
     const checkbox = card.querySelector(".card-select");
     checkbox.checked = selectedVideoIds.has(video.id);
     checkbox.addEventListener("click", (event) => event.stopPropagation());
@@ -356,6 +417,13 @@ function renderVideos() {
     return card;
   }));
   emptySearch.hidden = matching.length > 0 || videos.length === 0;
+  if (!matching.length && videos.length) {
+    emptySearch.querySelector("h2").textContent = showInvalidOnly ? "没有已失效视频" : "没有找到相关视频";
+    emptySearch.querySelector("p").textContent = showInvalidOnly ? "当前收藏范围内没有检测到失效视频。" : "试试其他标题、UP 主名称或 BV 号。";
+    clearSearch.hidden = showInvalidOnly && !query;
+  } else {
+    clearSearch.hidden = false;
+  }
   videoGrid.hidden = videos.length === 0;
   if (!videos.length) {
     videoGrid.hidden = false;
@@ -375,6 +443,7 @@ function addField(rows, label, value) { if (value && value !== "未知") rows.pu
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
 
 function openDetail(video) {
+  detailPanel.classList.toggle("invalid-video", video.isInvalid);
   const rows = [];
   addField(rows, "收藏时间", video.favoriteAt);
   addField(rows, "信息保存于", video.savedAt);
@@ -389,7 +458,8 @@ function openDetail(video) {
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
   detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地收藏管理</h3><label class="move-label" for="moveTarget">移动到另一个收藏夹</label><div class="move-controls"><select id="moveTarget" class="move-target" aria-label="目标收藏夹"><option value="">选择目标收藏夹</option></select><button class="button button-primary move-local" type="button">移动</button></div><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些操作只整理本地归档文件，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
-  detailContent.querySelector(".detail-collection").textContent = video.collection;
+  detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
+  detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
   detailContent.querySelector(".detail-bvid").textContent = video.bvid ? `BV号 ${video.bvid}` : "本地归档";
   detailContent.querySelector(".detail-description").textContent = video.description || "暂无简介";
@@ -422,6 +492,7 @@ function closeDetail() {
   if (deleteInProgress) return;
   closeDeleteConfirmation();
   detailPanel.classList.remove("open");
+  detailPanel.classList.remove("invalid-video");
   detailPanel.setAttribute("aria-hidden", "true");
   detailBackdrop.hidden = true;
   document.body.style.overflow = "";
@@ -520,8 +591,7 @@ async function uniqueRecordFolderName(parent, originalName) {
   }
 }
 
-async function moveVideoRecord(video, targetName) {
-  if (targetName === video.collection) return false;
+async function copyVideoRecord(video, targetName) {
   const sourceCollection = await rootHandle.getDirectoryHandle(video.collection);
   const targetCollection = await rootHandle.getDirectoryHandle(targetName);
   const targetRecordName = await uniqueRecordFolderName(targetCollection, video.directory);
@@ -533,12 +603,52 @@ async function moveVideoRecord(video, targetName) {
     await targetCollection.removeEntry(targetRecordName, { recursive: true }).catch(() => {});
     throw error;
   }
+  return { targetCollection, targetRecordName };
+}
+
+async function removeMovedSource(video) {
+  const sourceCollection = await rootHandle.getDirectoryHandle(video.collection);
+  await sourceCollection.removeEntry(video.directory, { recursive: true });
+}
+
+function collectionAlreadyHasVideo(targetName, video) {
+  const target = collections.find((collection) => collection.name === targetName);
+  if (!target) return false;
+  const wanted = videoIdentifierKeys(video);
+  return target.videos.some((existing) => existing.id !== video.id && identifiersOverlap(videoIdentifierKeys(existing), wanted));
+}
+
+async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null) {
+  const targets = [...new Set(targetNames)].filter((name) => collections.some((collection) => collection.name === name));
+  const copyTargets = targets.filter((name) => name !== video.collection);
+  if (!copyTargets.length) return { moved: false, alreadyInTargets: true };
+  const wantedKeys = videoIdentifierKeys(video);
+  const duplicateTargets = copyTargets.filter((name) => {
+    const known = duplicateSets?.get(name);
+    return known ? identifiersOverlap(known, wantedKeys) : collectionAlreadyHasVideo(name, video);
+  });
+  const missingTargets = copyTargets.filter((name) => !duplicateTargets.includes(name));
+  if (!missingTargets.length) return { moved: false, duplicate: true, duplicateTargets };
+
+  const created = [];
   try {
-    await sourceCollection.removeEntry(video.directory, { recursive: true });
+    for (const targetName of missingTargets) {
+      const result = await copyVideoRecord(video, targetName);
+      created.push({ name: targetName, ...result });
+      if (duplicateSets?.has(targetName)) wantedKeys.forEach((key) => duplicateSets.get(targetName).add(key));
+    }
+    if (!targets.includes(video.collection)) await removeMovedSource(video);
   } catch (error) {
-    throw new Error(`已复制到“${targetName}”，但原目录未能删除；可能存在重复记录。${error?.message || ""}`);
+    for (const entry of created.reverse()) {
+      await entry.targetCollection.removeEntry(entry.targetRecordName, { recursive: true }).catch(() => {});
+      if (duplicateSets?.has(entry.name)) {
+        const set = duplicateSets.get(entry.name);
+        wantedKeys.forEach((key) => set.delete(key));
+      }
+    }
+    throw error;
   }
-  return true;
+  return { moved: !targets.includes(video.collection), copied: missingTargets.length, duplicateTargets };
 }
 
 async function moveVideoToCollection(video, targetName, button) {
@@ -548,7 +658,11 @@ async function moveVideoToCollection(video, targetName, button) {
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
-    await moveVideoRecord(video, targetName);
+    const result = await moveVideoRecordToTargets(video, [targetName]);
+    if (result.duplicate) {
+      showToast(`已存在相同视频，未移动到“${targetName}”。`);
+      return;
+    }
     closeDetail();
     await displayRoot(rootHandle, targetName);
     showToast(`已移动到“${targetName}”`);
@@ -563,38 +677,49 @@ async function moveVideoToCollection(video, targetName, button) {
 
 async function moveSelectedVideos() {
   const records = selectedRecords();
-  const targetName = batchTarget.value;
+  const targetNames = selectedTargetNames(batchTargetOptions);
   if (!records.length) { showToast("请先选择视频。"); return; }
-  if (!targetName) { showToast("请选择目标收藏夹。"); return; }
-  if (records.every((video) => video.collection === targetName)) { showToast("所选视频已经都在这个收藏夹中。"); return; }
+  if (!targetNames.length) { showToast("请选择一个或多个目标收藏夹。"); return; }
+  const duplicateSets = new Map(targetNames.map((name) => [
+    name,
+    new Set(allVideos().filter((video) => video.collection === name).flatMap((video) => Array.from(videoIdentifierKeys(video))))
+  ]));
   moveSelectedButton.disabled = true;
   moveSelectedButton.textContent = "移动中…";
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
     let moved = 0;
+    let duplicates = 0;
+    let alreadyThere = 0;
     const failures = [];
     for (const video of records) {
-      if (video.collection === targetName) continue;
       try {
-        await moveVideoRecord(video, targetName);
-        moved += 1;
-        selectedVideoIds.delete(video.id);
+        const result = await moveVideoRecordToTargets(video, targetNames, duplicateSets);
+        if (result.duplicate) duplicates += result.duplicateTargets?.length || 1;
+        else if (result.alreadyInTargets) alreadyThere += 1;
+        else if (result.moved || result.copied) {
+          duplicates += result.duplicateTargets?.length || 0;
+          moved += 1;
+          selectedVideoIds.delete(video.id);
+        }
       } catch (error) {
         failures.push({ id: video.id, message: `${video.title}：${error?.message || "移动失败"}` });
       }
     }
-    if (moved || failures.length) {
-      selectedVideoIds.clear();
-      for (const failure of failures) selectedVideoIds.add(failure.id);
-      if (!failures.length && selectedCollection !== "*" && selectedCollection !== targetName) selectedCollection = targetName;
+    if (moved || duplicates || failures.length) {
+      selectedVideoIds = new Set([...records.filter((video) => video.collection && selectedVideoIds.has(video.id)).map((video) => video.id), ...failures.map((failure) => failure.id)]);
+      if (!failures.length && !duplicates && targetNames.length === 1 && selectedCollection !== "*" && selectedCollection !== records[0]?.collection && collections.some((entry) => entry.name === targetNames[0])) selectedCollection = targetNames[0];
       await displayRoot(rootHandle, selectedCollection);
-      if (!failures.length) setSelectionMode(false);
-      showToast(failures.length
-        ? `已移动 ${moved} 个，${failures.length} 个失败并保留选中。${failures[0].message}`
-        : `已移动 ${moved} 个视频到“${targetName}”`);
+      if (!failures.length && !duplicates) setSelectionMode(false);
+      const messages = [];
+      if (moved) messages.push(`已处理 ${moved} 个视频`);
+      if (duplicates) messages.push(`已存在相同视频 ${duplicates} 个目标，已跳过`);
+      if (alreadyThere) messages.push(`${alreadyThere} 个视频已在目标收藏夹中`);
+      if (failures.length) messages.push(`${failures.length} 个失败并保留选中：${failures[0].message}`);
+      showToast(messages.join("；") || "没有可移动的视频。");
     } else {
-      showToast("所选视频已经都在这个收藏夹中。");
+      showToast("所选视频已经都在目标收藏夹中。");
     }
   } catch (error) {
     showToast(`批量移动失败：${error?.message || "本地文件操作失败。"}`);
@@ -691,7 +816,7 @@ function openCreateCollectionDialog() {
 
 function openAddVideoDialog() {
   if (!rootHandle || selectedCollection === "*") { showToast("请先选择一个收藏夹。"); return; }
-  videoTargetCollection.textContent = selectedCollection;
+  renderTargetChoices(videoTargetOptions, [selectedCollection]);
   videoIdentifierInput.value = "";
   videoDialog.showModal();
   videoIdentifierInput.focus();
@@ -735,7 +860,8 @@ videoForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (videoAddInProgress || !rootHandle || selectedCollection === "*") return;
   const identifier = videoIdentifierInput.value.trim();
-  const collectionName = selectedCollection;
+  const collectionNames = selectedTargetNames(videoTargetOptions);
+  if (!collectionNames.length) { showToast("请选择一个或多个目标收藏夹。"); return; }
   videoAddInProgress = true;
   submitAddVideoButton.disabled = true;
   cancelAddVideoButton.disabled = true;
@@ -745,12 +871,13 @@ videoForm.addEventListener("submit", async (event) => {
     if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
     const result = await chrome.runtime.sendMessage({
       type: "add-manual-video",
-      data: { identifier, collection: collectionName }
+      data: { identifier, collections: collectionNames }
     });
     if (!result?.ok) throw new Error(result?.message || "B 站视频解析或本地保存失败。");
     videoDialog.close();
     videoForm.reset();
-    await displayRoot(rootHandle, collectionName);
+    const collectionToSelect = collectionNames.includes(selectedCollection) ? selectedCollection : collectionNames[0];
+    await displayRoot(rootHandle, collectionToSelect);
     showToast(result.message || "视频已添加到本地收藏夹");
   } catch (error) {
     showToast(`添加失败：${error?.message || "无法解析或保存视频。"}`);
@@ -853,11 +980,16 @@ addVideoButton.addEventListener("click", openAddVideoDialog);
 batchManageButton.addEventListener("click", () => setSelectionMode(!selectionMode));
 selectVisibleButton.addEventListener("click", toggleVisibleSelection);
 exitBatchButton.addEventListener("click", () => setSelectionMode(false));
-batchTarget.addEventListener("change", updateBatchControls);
+batchTargetOptions.addEventListener("change", () => {
+  const selected = selectedTargetNames(batchTargetOptions);
+  batchTargetSummary.textContent = selected.length ? `已选 ${selected.length} 个收藏夹` : "选择目标收藏夹…";
+  updateBatchControls();
+});
 moveSelectedButton.addEventListener("click", moveSelectedVideos);
 deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRecords()));
 searchInput.addEventListener("input", renderVideos);
 sortSelect.addEventListener("change", renderVideos);
+invalidOnlyButton.addEventListener("click", () => { showInvalidOnly = !showInvalidOnly; renderVideos(); });
 clearSearch.addEventListener("click", () => { searchInput.value = ""; renderVideos(); searchInput.focus(); });
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);

@@ -280,37 +280,81 @@ async function fetchManualVideoMetadata(identifier) {
 }
 
 async function addManualVideo(data) {
-  const collectionName = String(data?.collection || "").trim();
+  const collectionNames = [...new Set((Array.isArray(data?.collections) ? data.collections : [data?.collection])
+    .map((value) => String(value || "").trim()).filter(Boolean))];
   let metadata = {};
   try {
-    if (!collectionName || safeSegment(collectionName) !== collectionName) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
+    if (!collectionNames.length) throw new Error("请至少选择一个目标收藏夹。");
+    if (collectionNames.some((name) => safeSegment(name) !== name || name === "错误报告")) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
     const root = await getRootHandle();
     if (!root) throw new Error("尚未设置本地收藏根目录，请先选择收藏根目录。");
     await ensureWritePermission(root);
     const identifier = parseManualVideoIdentifier(data?.identifier);
     metadata = await fetchManualVideoMetadata(identifier);
-    const cover = await loadCoverPng(metadata.cover);
-    const collection = await root.getDirectoryHandle(collectionName);
-    const favoriteAt = new Date();
-    const record = await uniqueTimeFolder(collection, timestampFolder(favoriteAt));
-    const savedAt = new Date();
-    try {
-      const info = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, savedAt);
-      await writeFile(record, "视频信息.txt", info);
-      await writeFile(record, "封面.png", cover);
-    } catch (error) {
-      await collection.removeEntry(record.name, { recursive: true }).catch(() => {});
-      throw error;
+    const keys = new Set(importIdentifierKeys(metadata));
+    if (!keys.size) throw new Error("B 站解析结果缺少 BV/av 号，无法安全检查重复视频。");
+    const pending = [];
+    const duplicates = [];
+    const failures = [];
+    for (const name of collectionNames) {
+      try {
+        const collection = await root.getDirectoryHandle(name);
+        const existing = await readExistingImportIdentifiers(collection);
+        if (identifiersIntersect(existing, keys)) duplicates.push(name);
+        else pending.push({ name, collection });
+      } catch (error) {
+        failures.push({ name, message: error?.message || "无法读取目标收藏夹。" });
+      }
     }
-    const path = `${root.name}/${collectionName}/${record.name}`;
-    const message = `已添加“${metadata.title}”`;
-    await chrome.storage.local.set({ lastResult: { message, path, createdAt: Date.now() }, lastError: null });
-    return { ok: true, message, path, collection: collectionName };
+    const savedCollections = [];
+    const savedPaths = [];
+    if (pending.length) {
+      const cover = await loadCoverPng(metadata.cover);
+      const favoriteAt = new Date();
+      for (const target of pending) {
+        const record = await uniqueTimeFolder(target.collection, timestampFolder(favoriteAt));
+        try {
+          const info = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, new Date());
+          await writeFile(record, "视频信息.txt", info);
+          await writeFile(record, "封面.png", cover);
+          savedCollections.push(target.name);
+          savedPaths.push(`${root.name}/${target.name}/${record.name}`);
+        } catch (error) {
+          await target.collection.removeEntry(record.name, { recursive: true }).catch(() => {});
+          failures.push({ name: target.name, message: error?.message || "保存视频信息失败。" });
+        }
+      }
+    }
+
+    let reportPath = "";
+    if (failures.length) {
+      const message = failures.map((item) => `${item.name}：${item.message}`).join("；");
+      const saved = await logError(new Error(`部分目标收藏夹保存失败：${message}`), {
+        metadata, folders: failures.map((item) => ({ name: item.name }))
+      });
+      reportPath = saved.reportPath || "";
+    }
+    const messageParts = [];
+    if (savedCollections.length) messageParts.push(`已添加到 ${savedCollections.length} 个收藏夹`);
+    if (duplicates.length) messageParts.push(`已存在相同视频，跳过 ${duplicates.length} 个收藏夹`);
+    if (failures.length) messageParts.push(`${failures.length} 个收藏夹保存失败`);
+    const message = messageParts.join("；") || "已存在相同视频，未重复添加。";
+    await chrome.storage.local.set({
+      lastResult: { message: `“${metadata.title}”：${message}`, path: savedPaths.slice(0, 10).join("\n"), createdAt: Date.now() },
+      ...(failures.length ? { lastError: { reportPath, createdAt: Date.now(), report: message } } : { lastError: null })
+    });
+    const ok = !failures.length || savedCollections.length > 0 || duplicates.length > 0;
+    return { ok, message, paths: savedPaths, added: savedCollections, skipped: duplicates, failed: failures, reportPath };
   } catch (error) {
-    const saved = await logError(error, { metadata, folders: collectionName ? [{ name: collectionName }] : [] });
+    const saved = await logError(error, { metadata, folders: collectionNames.map((name) => ({ name })) });
     await chrome.storage.local.set({ lastResult: { message: `添加失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
     return { ok: false, message: error?.message || "添加视频失败。", details: saved.reportPath };
   }
+}
+
+function identifiersIntersect(left, right) {
+  for (const key of right) if (left.has(key)) return true;
+  return false;
 }
 
 function addManualVideoInOrder(data) {
@@ -898,8 +942,16 @@ async function readExistingImportIdentifiers(collection) {
       const text = await (await file.getFile()).text();
       const bvid = text.match(/^BV号：(.+)$/m)?.[1]?.trim();
       const aid = text.match(/^av号：(.+)$/m)?.[1]?.trim().replace(/^av/i, "");
-      if (bvid && bvid !== "未知") identifiers.add(`bvid:${bvid}`);
-      if (aid && aid !== "未知") identifiers.add(`aid:${aid}`);
+      if (bvid && bvid !== "未知") {
+        identifiers.add(`bvid:${bvid}`);
+        const derivedAid = importBvToAid(bvid);
+        if (derivedAid) identifiers.add(`aid:${derivedAid}`);
+      }
+      if (aid && aid !== "未知") {
+        identifiers.add(`aid:${aid}`);
+        const derivedBvid = importAidToBv(aid);
+        if (derivedBvid) identifiers.add(`bvid:${derivedBvid}`);
+      }
     } catch (_) {}
   }
   return identifiers;
@@ -934,8 +986,13 @@ function importMetadata(item, cover) {
 }
 
 function importIdentifierKeys(item) {
-  const normalizedAid = String(item.aid || "").replace(/^av/i, "");
-  return [`bvid:${item.bvid}`, `aid:${normalizedAid}`].filter((key) => !key.endsWith(":"));
+  const normalizedBvid = String(item.bvid || "").trim();
+  const normalizedAid = String(item.aid || "").trim().replace(/^av/i, "");
+  const aid = normalizedAid || (item.bvid ? importBvToAid(item.bvid) : "");
+  return [
+    normalizedBvid && normalizedBvid !== "未知" ? `bvid:${normalizedBvid}` : "",
+    aid && aid !== "未知" ? `aid:${aid}` : ""
+  ].filter(Boolean);
 }
 
 async function saveImportedItem(root, folder, item) {
@@ -1014,13 +1071,6 @@ async function importBiliFavorites(data, tabId = null) {
       item.recoverySources = new Set();
       if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
     });
-    try { await enrichImportedInvalidVideos(allItems, folder, tabId); }
-    catch (error) { folderLog.push(`失效视频恢复流程异常：${error.message}`); }
-    for (const item of allItems) {
-      for (const message of item.recoveryErrors || []) {
-        if (!folderLog.includes(message)) folderLog.push(message);
-      }
-    }
 
     const collection = await root.getDirectoryHandle(safeSegment(folder.title), { create: true });
     const duplicateSet = await readExistingImportIdentifiers(collection);
@@ -1031,6 +1081,15 @@ async function importBiliFavorites(data, tabId = null) {
       keys.forEach((key) => duplicateSet.add(key));
       pendingItems.push(item);
     }
+
+    try { await enrichImportedInvalidVideos(pendingItems, folder, tabId); }
+    catch (error) { folderLog.push(`失效视频恢复流程异常：${error.message}`); }
+    for (const item of pendingItems) {
+      for (const message of item.recoveryErrors || []) {
+        if (!folderLog.includes(message)) folderLog.push(message);
+      }
+    }
+
     for (let offset = 0; offset < pendingItems.length; offset += 12) {
       const batch = pendingItems.slice(offset, offset + 12);
       sendImportProgress(`正在准备 ${folder.title} 的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`);
@@ -1065,7 +1124,9 @@ async function importBiliFavorites(data, tabId = null) {
     reportPath = await persistErrorReport(reportLines.join("\n"));
     await chrome.storage.local.set({ lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: Date.now() } });
   }
-  const message = `导入完成：新导入 ${imported} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`;
+  const message = skipped
+    ? `导入完成：已存在相同视频 ${skipped} 个，已跳过；只导入未存在的视频。新导入 ${imported} 个，失败 ${failed} 个。`
+    : `导入完成：新导入 ${imported} 个，失败 ${failed} 个。`;
   const pathText = savedPaths.slice(0, 10).join("\n");
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
   return { ok: true, message, imported, skipped, failed, total, reportPath };

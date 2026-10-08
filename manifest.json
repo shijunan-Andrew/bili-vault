@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "B站收藏信息归档",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "收藏 B 站视频后归档，并可将 B 站收藏夹批量导入本地收藏库。",
   "minimum_chrome_version": "111",
   "permissions": ["storage"],
