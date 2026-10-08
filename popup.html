@@ -12,7 +12,7 @@
       <div id="brandIcon" class="brand-icon">B</div>
       <div>
         <h1>B站收藏信息归档</h1>
-        <p class="subtitle">收藏成功后自动保存视频资料</p>
+        <p class="subtitle">自动归档视频，也可批量导入收藏夹</p>
       </div>
     </div>
 
@@ -33,6 +33,23 @@
       <p class="hint">选择一次后，插件会在其中按收藏夹名称和收藏时间创建目录。</p>
     </section>
 
+    <section class="import-card">
+      <button id="openImport" class="primary" type="button">导入到本地</button>
+      <div id="importPanel" hidden>
+        <div class="import-heading">
+          <span class="section-label">选择要导入的收藏夹</span>
+          <button id="refreshImportFolders" class="text-button" type="button">刷新</button>
+        </div>
+        <div id="importFolderList" class="import-folder-list" aria-live="polite">请先打开 B 站个人空间的收藏夹页面。</div>
+        <div class="import-selection-actions">
+          <button id="selectAllImportFolders" class="text-button" type="button">全选</button>
+          <button id="clearImportFolders" class="text-button" type="button">清空</button>
+        </div>
+        <button id="startImport" class="primary" type="button" disabled>开始导入</button>
+        <div id="importStatus" class="import-status" role="status"></div>
+      </div>
+    </section>
+
     <section class="status-card">
       <div class="section-label">最近状态</div>
       <div id="lastResult" class="muted">暂无保存记录</div>
@@ -46,7 +63,7 @@
 
     <a class="library-link" href="library.html" target="_blank" rel="noopener">打开本地收藏库 <span aria-hidden="true">↗</span></a>
 
-    <footer>请在 B 站视频页完成收藏操作。</footer>
+  <footer>收藏夹导入请在 B 站个人空间的收藏夹页面打开插件。</footer>
   </main>
   <script src="popup.js"></script>
 </body>

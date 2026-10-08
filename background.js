@@ -171,7 +171,10 @@ async function loadCoverPng(url) {
 function buildInfo(data, folderName, savedAt) {
   const metadata = data.metadata || {};
   const favoriteAt = new Date(Number(data.favoriteAt) || Date.now());
-  const tags = Array.isArray(metadata.tags) && metadata.tags.length ? metadata.tags.join("、") : "无";
+  const favoriteAtText = metadata.imported && metadata.favoriteTimeUnknown
+    ? "未知"
+    : formatChineseDateTime(favoriteAt, true);
+  const tags = Array.isArray(metadata.tags) && metadata.tags.length ? metadata.tags.join("、") : (metadata.imported ? "未知" : "无");
   const title = metadata.title || "未知";
   const videoUrl = metadata.url || "未知";
   const bvid = metadata.bvid || (videoUrl.match(/\bBV[\w]+/i)?.[0] || "未知");
@@ -180,9 +183,9 @@ function buildInfo(data, folderName, savedAt) {
   const upName = metadata.upName || "未知";
   const upHome = metadata.upMid ? `https://space.bilibili.com/${metadata.upMid}` : "未知";
   const description = String(metadata.description || "未知").replace(/\r\n/g, "\n");
-  return [
+  const lines = [
     "【基本信息】",
-    `视频收藏时间：${formatChineseDateTime(favoriteAt, true)}`,
+    `视频收藏时间：${favoriteAtText}`,
     `信息保存于：${formatDateTime(savedAt)}`,
     `保存文件夹：${folderName}`,
     `视频标题：${title}`,
@@ -190,7 +193,7 @@ function buildInfo(data, folderName, savedAt) {
     `BV号：${bvid}`,
     `av号：${aid}`,
     `分区：${metadata.category || "未知"}`,
-    `视频时长：${formatDuration(metadata.duration)}`,
+    `视频时长：${metadata.imported && !(Number(metadata.duration) > 0) ? "未知" : formatDuration(metadata.duration)}`,
     `视频发布时间：${formatPublishDate(metadata.pubdate)}`,
     "",
     "【UP主】",
@@ -204,7 +207,12 @@ function buildInfo(data, folderName, savedAt) {
     "【视频简介】",
     description,
     ""
-  ].join("\n");
+  ];
+  if (metadata.imported) {
+    lines.splice(6, 0, `视频状态：${metadata.invalid ? "已失效视频（已尝试恢复）" : "正常"}`);
+    lines.splice(7, 0, `恢复情况：${metadata.recoverySummary || "未知"}`);
+  }
+  return lines.join("\n");
 }
 
 function parseManualVideoIdentifier(input) {
@@ -396,6 +404,602 @@ function saveFavoriteInOrder(data) {
   return task;
 }
 
+const IMPORT_INVALID_TITLES = new Set(["已失效视频", "该视频已失效"]);
+const IMPORT_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
+
+function importClean(value) { return String(value ?? "").replace(/\s+/g, " ").trim(); }
+function importIsInvalidTitle(value) { return IMPORT_INVALID_TITLES.has(importClean(value)); }
+function importUsefulTitle(value) { const text = importClean(value); return !!text && !importIsInvalidTitle(text) && text !== "该合集已失效"; }
+function importBvidFromUrl(value) { return importClean(value).match(/\b(BV[0-9A-Za-z]{10})\b/)?.[1] || ""; }
+
+function importBvToAid(bvid) {
+  const text = importClean(bvid);
+  if (!/^BV[0-9A-Za-z]{10}$/.test(text)) return "";
+  const chars = text.split("");
+  [chars[3], chars[9]] = [chars[9], chars[3]];
+  [chars[4], chars[7]] = [chars[7], chars[4]];
+  const xor = 23442827791579n;
+  const mask = 2251799813685247n;
+  let value = 0n;
+  for (const char of chars.slice(3, 11)) {
+    const digit = IMPORT_BV_TABLE.indexOf(char);
+    if (digit < 0) return "";
+    value = value * 58n + BigInt(digit);
+  }
+  return String((value & mask) ^ xor);
+}
+
+function importAidToBv(aid) {
+  const text = importClean(aid);
+  if (!/^\d+$/.test(text) || BigInt(text) <= 0n) return "";
+  let value = BigInt(text) ^ 23442827791579n;
+  const chars = "BV1000000000".split("");
+  for (let index = 10; index >= 3; index -= 1) {
+    chars[index] = IMPORT_BV_TABLE[Number(value % 58n)];
+    value /= 58n;
+  }
+  [chars[3], chars[9]] = [chars[9], chars[3]];
+  [chars[4], chars[7]] = [chars[7], chars[4]];
+  return chars.join("");
+}
+
+function importLinkParam(value, names) {
+  const text = importClean(value);
+  if (!text) return "";
+  try {
+    const parsed = new URL(text.replace(/^bilibili:\/\//, "https://bilibili.local/"));
+    for (const name of names) {
+      const found = importClean(parsed.searchParams.get(name));
+      if (found) return found;
+    }
+  } catch (_) {}
+  for (const name of names) {
+    const found = text.match(new RegExp(`[?&]${name}=([^&]+)`))?.[1];
+    if (found) {
+      try { return decodeURIComponent(found); }
+      catch (_) { return found; }
+    }
+  }
+  return "";
+}
+
+async function biliImportApiGet(path, params = {}, timeoutMs = 15000) {
+  const url = new URL(path, "https://api.bilibili.com");
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url.toString(), { credentials: "include", cache: "no-store", signal: controller.signal });
+    let payload;
+    try { payload = await response.json(); }
+    catch (_) { throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`); }
+    if (!response.ok) throw new Error(`B站接口请求失败：HTTP ${response.status}`);
+    if (payload.code !== 0) throw new Error(payload.message || `B站接口返回错误码 ${payload.code ?? "未知"}`);
+    return payload.data || {};
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("B站接口请求超时。");
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+
+function importDelay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+async function listBiliFavoriteFolders(uid) {
+  const ownerId = importClean(uid);
+  if (!/^\d+$/.test(ownerId)) throw new Error("无法从当前收藏夹页面读取用户 UID，请刷新 B 站收藏夹页后重试。");
+  const folders = [];
+  let page = 1;
+  try {
+    while (page <= 50) {
+      const data = await biliImportApiGet("/x/v3/fav/folder/created/list", { up_mid: ownerId, ps: 30, pn: page });
+      const list = Array.isArray(data.list) ? data.list : [];
+      folders.push(...list.map((item) => ({
+        id: String(item.id || item.media_id || item.fid || ""),
+        title: importClean(item.title || item.name || ""),
+        count: String(item.media_count ?? item.count ?? "")
+      })).filter((item) => item.id && item.title));
+      if (data.has_more === false || list.length < 30) break;
+      page += 1;
+    }
+  } catch (error) {
+    if (folders.length) return folders;
+    const data = await biliImportApiGet("/x/v3/fav/folder/created/list-all", { up_mid: ownerId });
+    const list = Array.isArray(data.list) ? data.list : [];
+    folders.push(...list.map((item) => ({
+      id: String(item.id || item.media_id || item.fid || ""),
+      title: importClean(item.title || item.name || ""),
+      count: String(item.media_count ?? item.count ?? "")
+    })).filter((item) => item.id && item.title));
+    if (!folders.length) throw error;
+  }
+  return folders;
+}
+
+function normalizeImportMedia(media, folder) {
+  const upper = media.upper || {};
+  const link = media.link || media.uri || "";
+  const rawAid = importClean(media.aid || media.oid || importLinkParam(link, ["oid", "sourceid"]));
+  const mediaId = importClean(media.id || "");
+  const bvid = importClean(media.bvid || media.bv_id || importBvidFromUrl(link)) || importAidToBv(rawAid || mediaId);
+  const aid = rawAid || mediaId || importBvToAid(bvid);
+  const title = importClean(media.title || "");
+  return {
+    title: title || "已失效视频",
+    originalTitle: title,
+    bvid,
+    aid,
+    link,
+    cover: normalizeUrl(media.cover || media.pic || ""),
+    description: String(media.intro || media.desc || "").replace(/\r\n?/g, "\n").trim(),
+    author: importClean(upper.name || media.upper_name || ""),
+    authorMid: String(upper.mid || ""),
+    category: importClean(media.tname || media.type_name || ""),
+    duration: Number(media.duration || 0) || 0,
+    pubdate: Number(media.pubtime || media.pubdate || 0) || 0,
+    tags: [],
+    favoriteAt: Number(media.fav_time || media.ctime || media.mtime || 0) || 0,
+    isInvalid: media.is_invalid === true || importIsInvalidTitle(title),
+    attr: Number(media.attr || 0),
+    aidKeys: [...new Set([rawAid, mediaId, importLinkParam(link, ["oid", "sourceid"])].filter(Boolean))],
+    cid: importClean(media.cid || media.first_cid || media.ugc?.first_cid || ""),
+    folder
+  };
+}
+
+function importMediaKeys(item) {
+  return new Set([
+    item?.bvid ? `bvid:${item.bvid}` : "",
+    ...(item?.aidKeys || []).map((aid) => `aid:${aid}`),
+    item?.aid ? `aid:${item.aid}` : "",
+    item?.cid ? `cid:${item.cid}` : ""
+  ].filter(Boolean));
+}
+
+function importMobileRecord(record) {
+  const upper = record?.upper || {};
+  const link = record?.link || record?.uri || "";
+  const oid = importClean(record?.oid || record?.id || importLinkParam(link, ["oid", "sourceid"]));
+  const bvid = importClean(record?.bvid || record?.bv_id || importBvidFromUrl(link));
+  return {
+    oid,
+    bvid,
+    aid: oid,
+    cid: importClean(record?.cid || record?.first_cid || record?.ugc?.first_cid || ""),
+    title: importClean(record?.title || ""),
+    cover: normalizeUrl(record?.cover || ""),
+    author: importClean(upper.name || ""),
+    authorMid: String(upper.mid || ""),
+    duration: Number(record?.duration || 0) || 0,
+    tags: [...(Array.isArray(record?.tags) ? record.tags : []), ...(Array.isArray(record?.new_tags) ? record.new_tags : []), ...(Array.isArray(record?.tag) ? record.tag : [])]
+      .map((tag) => importClean(typeof tag === "string" ? tag : tag?.tag_name || tag?.name || tag?.title)).filter(Boolean),
+    invalid: record?.is_invalid === true,
+    stats: record?.cnt_info || {}
+  };
+}
+
+function mergeRecoveredValue(item, candidate, source) {
+  let changed = false;
+  let tagsAdded = false;
+  if (importUsefulTitle(candidate.title) && (!importUsefulTitle(item.title) || item.title === "未知")) { item.title = candidate.title; changed = true; }
+  if (candidate.cover) {
+    const coverCandidate = { url: candidate.cover, source };
+    if (source === "收藏夹接口") item.coverCandidates.push(coverCandidate);
+    else item.coverCandidates.unshift(coverCandidate);
+    if (!item.cover || source !== "收藏夹接口") item.cover = candidate.cover;
+  }
+  if (candidate.author && !item.author) item.author = candidate.author;
+  if (candidate.authorMid && !item.authorMid) item.authorMid = String(candidate.authorMid);
+  if (candidate.duration && !item.duration) item.duration = Number(candidate.duration) || 0;
+  if (candidate.category && !item.category) item.category = candidate.category;
+  if (candidate.pubdate && !item.pubdate) item.pubdate = Number(candidate.pubdate) || 0;
+  if (candidate.description && !item.description) item.description = candidate.description;
+  if (Array.isArray(candidate.tags) && candidate.tags.length && !item.tags.length) { item.tags = candidate.tags; tagsAdded = true; }
+  if (changed || candidate.cover || candidate.author || candidate.authorMid || candidate.duration || candidate.category || candidate.pubdate || candidate.description || tagsAdded) {
+    item.recoverySources.add(source);
+  }
+}
+
+async function fetchImportFavoritePage(folder, page) {
+  const data = await biliImportApiGet("/x/v3/fav/resource/list", {
+    media_id: folder.id, pn: page, ps: 40, keyword: "", order: "mtime", type: 0, tid: 0, platform: "web"
+  });
+  const medias = Array.isArray(data.medias) ? data.medias : [];
+  return {
+    items: medias.map((media) => normalizeImportMedia(media, folder)),
+    total: Number(data.info?.media_count || data.media_count || data.total || 0),
+    hasMore: data.has_more === undefined ? (page * 40 < Number(data.info?.media_count || data.media_count || data.total || 0)) : !!data.has_more
+  };
+}
+
+async function fetchMobileRecovery(folder, targets) {
+  const records = [];
+  const unmatched = new Set(targets.filter((item) => importMediaKeys(item).size));
+  if (!unmatched.size) return records;
+  for (let page = 1; page <= 100 && unmatched.size; page += 1) {
+    let payload = null;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        payload = await biliImportApiGet("/x/v3/fav/folder/resources", {
+          media_id: folder.id, pn: page, platform: "ios", mobi_app: "iphone", build: 89501100
+        }, 9000);
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await importDelay(500 * attempt);
+      }
+    }
+    if (!payload) throw lastError || new Error("APP收藏夹恢复接口请求失败。");
+    const list = Array.isArray(payload.list) ? payload.list : [];
+    const mapped = list.map(importMobileRecord);
+    records.push(...mapped);
+    for (const record of mapped) {
+      const recordKeys = new Set([
+        ...(record.bvid ? [`bvid:${record.bvid}`] : []),
+        ...(record.aid ? [`aid:${record.aid}`] : []),
+        ...(record.cid ? [`cid:${record.cid}`] : [])
+      ]);
+      for (const target of [...unmatched]) {
+        if ([...importMediaKeys(target)].some((key) => recordKeys.has(key))) unmatched.delete(target);
+      }
+    }
+    if (!payload.has_more || !list.length) break;
+    await importDelay(350);
+  }
+  return records;
+}
+
+async function fetchImportHistory(wantedBvids, recoveryErrors = []) {
+  const wanted = new Set(wantedBvids.filter(Boolean));
+  const found = new Map();
+  let cursor = { max: 0, view_at: 0, business: "" };
+  for (let page = 0; page < 80 && wanted.size; page += 1) {
+    let data;
+    try {
+      data = await biliImportApiGet("/x/web-interface/history/cursor", {
+        ps: 30, type: "archive", max: cursor.max || 0, view_at: cursor.view_at || 0, business: cursor.business || ""
+      });
+    } catch (error) { recoveryErrors.push(`观看历史接口：${error.message}`); break; }
+    const list = Array.isArray(data.list) ? data.list : [];
+    for (const record of list) {
+      const bvid = importClean(record?.history?.bvid || record?.bvid || "");
+      if (!bvid || !wanted.has(bvid)) continue;
+      found.set(bvid, record);
+      wanted.delete(bvid);
+    }
+    const next = data.cursor || {};
+    if (!list.length || (next.max === cursor.max && next.view_at === cursor.view_at && next.business === cursor.business)) break;
+    cursor = next;
+    if (list.length < 30) break;
+  }
+  return found;
+}
+
+async function enrichImportedInvalidVideos(items, folder) {
+  const invalid = items.filter((item) => item.isInvalid);
+  if (!invalid.length) return;
+  const recoveryErrors = [];
+  try {
+    const mobileRecords = await fetchMobileRecovery(folder, invalid);
+    for (const record of mobileRecords) {
+      const recordKeys = new Set([
+        ...(record.bvid ? [`bvid:${record.bvid}`] : []),
+        ...(record.aid ? [`aid:${record.aid}`] : []),
+        ...(record.cid ? [`cid:${record.cid}`] : [])
+      ]);
+      const item = invalid.find((target) => [...importMediaKeys(target)].some((key) => recordKeys.has(key)));
+      if (item) mergeRecoveredValue(item, record, "APP收藏夹接口");
+    }
+  } catch (error) { recoveryErrors.push(`APP收藏夹接口：${error.message}`); }
+
+  let toView = new Map();
+  try {
+    const data = await biliImportApiGet("/x/v2/history/toview/web", {});
+    for (const record of Array.isArray(data.list) ? data.list : []) {
+      if (record?.bvid) toView.set(record.bvid, record);
+    }
+  } catch (error) { recoveryErrors.push(`稍后再看接口：${error.message}`); }
+
+  const history = await fetchImportHistory(invalid.map((item) => item.bvid), recoveryErrors);
+  for (const item of invalid) {
+    const toViewRecord = toView.get(item.bvid);
+    if (toViewRecord) mergeRecoveredValue(item, {
+      title: toViewRecord.title, cover: toViewRecord.pic, author: toViewRecord.owner?.name,
+      authorMid: toViewRecord.owner?.mid, duration: toViewRecord.duration, pubdate: toViewRecord.pubdate
+    }, "稍后再看");
+    const historyRecord = history.get(item.bvid);
+    if (historyRecord) mergeRecoveredValue(item, {
+      title: historyRecord.title, cover: historyRecord.cover, author: historyRecord.author_name,
+      authorMid: historyRecord.author_mid, duration: historyRecord.duration,
+      tags: historyRecord.tag_name ? [historyRecord.tag_name] : []
+    }, "观看历史");
+  }
+
+  await importRunLimited(invalid, 3, async (item) => {
+    if (!item.bvid) return;
+    try {
+      const data = await biliImportApiGet("/x/web-interface/view", { bvid: item.bvid }, 10000);
+      if (data?.title) mergeRecoveredValue(item, {
+        title: data.title, cover: data.pic, author: data.owner?.name, authorMid: data.owner?.mid,
+        category: data.tname, duration: data.duration, pubdate: data.pubdate, description: data.desc
+      }, "视频资料接口");
+    } catch (error) { recoveryErrors.push(`${item.title || item.bvid}：视频资料接口：${error.message}`); }
+    try {
+      if (!item.tags.length) {
+        const tagData = await biliImportApiGet("/x/tag/archive/tags", { bvid: item.bvid }, 9000);
+        if (Array.isArray(tagData)) item.tags = tagData.map((tag) => importClean(tag.tag_name)).filter(Boolean);
+        if (item.tags.length) item.recoverySources.add("视频标签接口");
+      }
+    } catch (error) { recoveryErrors.push(`${item.title || item.bvid}：标签接口：${error.message}`); }
+  });
+  for (const item of invalid) {
+    if (!item.cover && item.coverCandidates.length) item.cover = item.coverCandidates[0].url;
+    item.recoveryErrors = recoveryErrors;
+  }
+}
+
+async function importRunLimited(items, limit, worker) {
+  let index = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const current = items[index++];
+      try { await worker(current); } catch (_) {}
+    }
+  });
+  await Promise.all(runners);
+}
+
+function importedUnknownCover() {
+  const canvas = new OffscreenCanvas(640, 360);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#e8edf2";
+  context.fillRect(0, 0, 640, 360);
+  context.fillStyle = "#00a1d6";
+  context.beginPath();
+  context.roundRect(250, 92, 140, 140, 26);
+  context.fill();
+  context.fillStyle = "#fff";
+  context.font = "bold 104px sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText("B", 320, 165);
+  context.fillStyle = "#69727c";
+  context.font = "24px sans-serif";
+  context.fillText("封面暂不可恢复", 320, 280);
+  return canvas.convertToBlob({ type: "image/png" });
+}
+
+async function loadImportCover(candidates, invalid) {
+  const unique = [];
+  for (const candidate of candidates) {
+    const url = normalizeUrl(candidate?.url || candidate);
+    if (!url || unique.some((entry) => entry.url === url)) continue;
+    unique.push({ url, source: candidate?.source || "收藏夹接口" });
+  }
+  const sourcePriority = { "APP收藏夹接口": 0, "观看历史": 1, "稍后再看": 2, "视频资料接口": 3, "收藏夹接口": 4 };
+  unique.sort((left, right) => (sourcePriority[left.source] ?? 5) - (sourcePriority[right.source] ?? 5));
+  for (const candidate of unique) {
+    try {
+      if (invalid && /(?:blank|placeholder|default|sprite|no_cover|nocover)/i.test(candidate.url)) continue;
+      const blob = await loadCoverPng(candidate.url);
+      if (invalid) {
+        const bitmap = await createImageBitmap(blob);
+        try {
+          const canvas = new OffscreenCanvas(32, 18);
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          context.drawImage(bitmap, 0, 0, 32, 18);
+          const pixels = context.getImageData(0, 0, 32, 18).data;
+          let sum = 0; let square = 0; let saturation = 0;
+          for (let index = 0; index < pixels.length; index += 4) {
+            const red = pixels[index], green = pixels[index + 1], blue = pixels[index + 2];
+            const lum = 0.299 * red + 0.587 * green + 0.114 * blue;
+            sum += lum; square += lum * lum;
+            const maximum = Math.max(red, green, blue), minimum = Math.min(red, green, blue);
+            saturation += maximum ? (maximum - minimum) / maximum : 0;
+          }
+          const count = pixels.length / 4;
+          const mean = sum / count;
+          const deviation = Math.sqrt(Math.max(0, square / count - mean * mean));
+          const meanSaturation = saturation / count;
+          if (mean > 180 && deviation < 8 && meanSaturation < 0.08) continue;
+        } finally { bitmap.close(); }
+      }
+      return { blob, source: candidate.source };
+    } catch (_) {}
+  }
+  return { blob: await importedUnknownCover(), source: "未知" };
+}
+
+async function readExistingImportIdentifiers(collection) {
+  const identifiers = new Set();
+  for await (const entry of collection.values()) {
+    if (entry.kind !== "directory") continue;
+    try {
+      const file = await entry.getFileHandle("视频信息.txt");
+      const text = await (await file.getFile()).text();
+      const bvid = text.match(/^BV号：(.+)$/m)?.[1]?.trim();
+      const aid = text.match(/^av号：(.+)$/m)?.[1]?.trim().replace(/^av/i, "");
+      if (bvid && bvid !== "未知") identifiers.add(`bvid:${bvid}`);
+      if (aid && aid !== "未知") identifiers.add(`aid:${aid}`);
+    } catch (_) {}
+  }
+  return identifiers;
+}
+
+function importMetadata(item, cover) {
+  const bvid = item.bvid || "";
+  const aid = item.aid || (bvid ? importBvToAid(bvid) : "");
+  const title = importUsefulTitle(item.title) ? item.title : "未知";
+  const sources = [...item.recoverySources];
+  const recoveredFields = [item.title, item.cover, item.author, item.duration, item.category, item.pubdate, item.description]
+    .filter((value) => value && value !== "已失效视频").length;
+  return {
+    title,
+    url: bvid ? `https://www.bilibili.com/video/${bvid}/` : aid ? `https://www.bilibili.com/video/av${aid}/` : "未知",
+    bvid: bvid || "未知",
+    aid: aid || "",
+    cover: cover?.source === "未知" ? "" : item.cover,
+    description: item.description || "未知",
+    upName: item.author || "未知",
+    upMid: item.authorMid || "",
+    category: item.category || "未知",
+    duration: Number(item.duration) || 0,
+    pubdate: Number(item.pubdate) || 0,
+    tags: item.tags.length ? item.tags : ["未知"],
+    imported: true,
+    invalid: item.isInvalid,
+    recoverySummary: item.isInvalid
+      ? (sources.length ? `已从${sources.join("、")}找回部分资料（${recoveredFields} 项）` : "未能找回资料，缺失项以“未知”标记")
+      : "收藏夹资料"
+  };
+}
+
+function importIdentifierKeys(item) {
+  const normalizedAid = String(item.aid || "").replace(/^av/i, "");
+  return [`bvid:${item.bvid}`, `aid:${normalizedAid}`].filter((key) => !key.endsWith(":"));
+}
+
+async function saveImportedItem(root, folder, item) {
+  const collectionName = safeSegment(folder.title);
+  const collection = await root.getDirectoryHandle(collectionName, { create: true });
+
+  item.coverCandidates = [
+    ...item.coverCandidates,
+    ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
+  ];
+  if (item.coverPreparationError) throw item.coverPreparationError;
+  const cover = item.preparedCover || await loadImportCover(item.coverCandidates, item.isInvalid);
+  const metadata = importMetadata(item, cover);
+  const favoriteTimestamp = Number(item.favoriteAt) || 0;
+  const parsedFavoriteAt = favoriteTimestamp ? new Date(favoriteTimestamp > 1e12 ? favoriteTimestamp : favoriteTimestamp * 1000) : null;
+  const favoriteTimeUnknown = !parsedFavoriteAt || Number.isNaN(parsedFavoriteAt.getTime());
+  const favoriteAt = favoriteTimeUnknown ? new Date() : parsedFavoriteAt;
+  metadata.favoriteTimeUnknown = favoriteTimeUnknown;
+  const record = await uniqueTimeFolder(collection, timestampFolder(favoriteAt));
+  try {
+    await writeFile(record, "视频信息.txt", buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, new Date()));
+    await writeFile(record, "封面.png", cover.blob);
+  } catch (error) {
+    await collection.removeEntry(record.name, { recursive: true }).catch(() => {});
+    throw error;
+  }
+  return { path: `${root.name}/${collectionName}/${record.name}` };
+}
+
+function sendImportProgress(text) {
+  chrome.runtime.sendMessage({ type: "bca-import-progress", text }, () => { void chrome.runtime.lastError; });
+}
+
+async function importBiliFavorites(data) {
+  const selectedIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
+  const reportLines = ["B站收藏夹本地导入报告", `开始时间：${formatChineseDateTime(new Date(), true)}`];
+  const root = await getRootHandle();
+  if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
+  await ensureWritePermission(root);
+  if (!selectedIds.size) throw new Error("请至少勾选一个 B 站收藏夹。");
+  const allFolders = await listBiliFavoriteFolders(data?.uid);
+  const folders = allFolders.filter((folder) => selectedIds.has(String(folder.id)));
+  if (!folders.length) throw new Error("所选收藏夹已不存在或没有读取权限，请刷新列表后重试。");
+
+  let imported = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
+  const savedPaths = [];
+  for (let folderIndex = 0; folderIndex < folders.length; folderIndex += 1) {
+    const folder = folders[folderIndex];
+    const folderLog = [];
+    sendImportProgress(`正在读取 ${folder.title}（${folderIndex + 1}/${folders.length}）…`);
+    let first;
+    try { first = await fetchImportFavoritePage(folder, 1); }
+    catch (error) {
+      failed += 1;
+      hasIssues = true;
+      reportLines.push("", `收藏夹：${folder.title}`, `读取第 1 页失败：${error.message}`);
+      continue;
+    }
+    const allItems = [...first.items];
+    const pageLimit = first.total ? Math.ceil(first.total / 40) : (first.hasMore || first.items.length === 40 ? 1000 : 1);
+    for (let page = 2; page <= Math.min(pageLimit, 1000); page += 1) {
+      try {
+        const result = await fetchImportFavoritePage(folder, page);
+        allItems.push(...result.items);
+        if (!result.items.length || (!first.total && !result.hasMore)) break;
+      } catch (error) {
+        failed += 1;
+        folderLog.push(`读取第 ${page} 页失败：${error.message}`);
+        break;
+      }
+      if (page % 4 === 0) await importDelay(150);
+    }
+    total += allItems.length;
+    allItems.forEach((item) => {
+      item.coverCandidates = item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [];
+      item.recoverySources = new Set();
+      if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
+    });
+    try { await enrichImportedInvalidVideos(allItems, folder); }
+    catch (error) { folderLog.push(`失效视频恢复流程异常：${error.message}`); }
+    for (const item of allItems) {
+      for (const message of item.recoveryErrors || []) {
+        if (!folderLog.includes(message)) folderLog.push(message);
+      }
+    }
+
+    const collection = await root.getDirectoryHandle(safeSegment(folder.title), { create: true });
+    const duplicateSet = await readExistingImportIdentifiers(collection);
+    const pendingItems = [];
+    for (const item of allItems) {
+      const keys = importIdentifierKeys(item);
+      if (keys.some((key) => duplicateSet.has(key))) { skipped += 1; continue; }
+      keys.forEach((key) => duplicateSet.add(key));
+      pendingItems.push(item);
+    }
+    for (let offset = 0; offset < pendingItems.length; offset += 12) {
+      const batch = pendingItems.slice(offset, offset + 12);
+      sendImportProgress(`正在准备 ${folder.title} 的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`);
+      await importRunLimited(batch, 4, async (item) => {
+        item.coverCandidates = [
+          ...item.coverCandidates,
+          ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
+        ];
+        try { item.preparedCover = await loadImportCover(item.coverCandidates, item.isInvalid); }
+        catch (error) { item.coverPreparationError = error; }
+      });
+      for (let index = 0; index < batch.length; index += 1) {
+        const item = batch[index];
+        sendImportProgress(`正在导入 ${folder.title}：${offset + index + 1}/${pendingItems.length}（已保存 ${imported} 个）`);
+        try {
+          const result = await saveImportedItem(root, folder, item);
+          imported += 1;
+          savedPaths.push(result.path);
+        } catch (error) {
+          failed += 1;
+          folderLog.push(`${item.title || "未知"} (${item.bvid || item.aid || "无编号"})：${error.message}`);
+        }
+      }
+    }
+    if (folderLog.length) reportLines.push("", `收藏夹：${folder.title}`, ...folderLog.slice(0, 500));
+    if (folderLog.length) hasIssues = true;
+  }
+
+  reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`, `读取视频：${total}`, `新导入：${imported}`, `已存在跳过：${skipped}`, `失败：${failed}`);
+  let reportPath = "";
+  if (failed || hasIssues || reportLines.some((line) => line.includes("失败：") || line.includes("失败"))) {
+    reportPath = await persistErrorReport(reportLines.join("\n"));
+    await chrome.storage.local.set({ lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: Date.now() } });
+  }
+  const message = `导入完成：新导入 ${imported} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`;
+  const pathText = savedPaths.slice(0, 10).join("\n");
+  await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
+  return { ok: true, message, imported, skipped, failed, total, reportPath };
+}
+
+function importBiliFavoritesInOrder(data) {
+  const task = saveQueue.then(() => importBiliFavorites(data));
+  saveQueue = task.catch(() => undefined);
+  return task;
+}
+
 async function recordFavoriteError(data) {
   const error = new Error(data?.message || "B站收藏操作失败。");
   const saved = await logError(error, { metadata: data?.metadata || {} });
@@ -408,6 +1012,20 @@ async function recordFavoriteError(data) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "list-bili-favorite-folders") {
+    listBiliFavoriteFolders(message.uid).then((folders) => sendResponse({ ok: true, folders }))
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "读取收藏夹失败。" }));
+    return true;
+  }
+  if (message?.type === "import-bili-favorites") {
+    importBiliFavoritesInOrder(message.data || message).then(sendResponse).catch(async (error) => {
+      const folders = Array.isArray(message.folderIds) ? message.folderIds.map((id) => ({ id, name: id })) : [];
+      const saved = await logError(error, { folders });
+      await chrome.storage.local.set({ lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
+      sendResponse({ ok: false, message: error?.message || "导入失败。", reportPath: saved.reportPath });
+    });
+    return true;
+  }
   if (message?.type === "save-favorite") {
     saveFavoriteInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error.message }));
     return true;

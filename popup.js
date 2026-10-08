@@ -14,10 +14,132 @@ const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
 const reportPath = document.getElementById("reportPath");
 const downloadButton = document.getElementById("downloadReport");
+const openImportButton = document.getElementById("openImport");
+const importPanel = document.getElementById("importPanel");
+const importFolderList = document.getElementById("importFolderList");
+const importStatus = document.getElementById("importStatus");
+const startImportButton = document.getElementById("startImport");
+const refreshImportFoldersButton = document.getElementById("refreshImportFolders");
+const selectAllImportFoldersButton = document.getElementById("selectAllImportFolders");
+const clearImportFoldersButton = document.getElementById("clearImportFolders");
 let errorReport = "";
 let rootHandle = null;
 let permissionNotice = "";
 let extensionEnabled = true;
+let importFolders = [];
+let importBusy = false;
+
+function queryCurrentTab() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) return reject(new Error(runtimeError.message));
+      if (!tabs?.[0]?.id) return reject(new Error("无法读取当前标签页。"));
+      resolve(tabs[0]);
+    });
+  });
+}
+
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) return reject(new Error("请先打开并刷新 B 站个人空间的收藏夹页面，再试一次。"));
+      resolve(response || { ok: false, message: "页面没有返回结果。" });
+    });
+  });
+}
+
+function renderImportFolders() {
+  importFolderList.replaceChildren();
+  if (!importFolders.length) {
+    importFolderList.textContent = "没有找到可导入的收藏夹。";
+    startImportButton.disabled = true;
+    return;
+  }
+  for (const folder of importFolders) {
+    const label = document.createElement("label");
+    label.className = "import-folder-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = String(folder.id);
+    checkbox.checked = false;
+    checkbox.addEventListener("change", updateImportSelection);
+    const name = document.createElement("span");
+    name.textContent = folder.title || "未命名收藏夹";
+    const count = document.createElement("small");
+    count.className = "import-folder-count";
+    count.textContent = folder.count ? `${folder.count} 个` : "";
+    label.append(checkbox, name, count);
+    importFolderList.append(label);
+  }
+  updateImportSelection();
+}
+
+function updateImportSelection() {
+  importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = importBusy; });
+  refreshImportFoldersButton.disabled = importBusy;
+  selectAllImportFoldersButton.disabled = importBusy;
+  clearImportFoldersButton.disabled = importBusy;
+  openImportButton.disabled = importBusy;
+  const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
+  startImportButton.disabled = importBusy || selected === 0;
+  startImportButton.textContent = selected ? `开始导入（${selected} 个收藏夹）` : "开始导入";
+}
+
+async function loadImportFolders() {
+  importStatus.classList.remove("error");
+  importStatus.textContent = "正在读取 B 站收藏夹…";
+  refreshImportFoldersButton.disabled = true;
+  openImportButton.disabled = true;
+  try {
+    const tab = await queryCurrentTab();
+    const response = await sendTabMessage(tab.id, { type: "bca-list-import-folders" });
+    if (!response?.ok) throw new Error(response?.message || "读取收藏夹失败。");
+    importFolders = Array.isArray(response.folders) ? response.folders : [];
+    renderImportFolders();
+    importStatus.textContent = importFolders.length ? `已读取 ${importFolders.length} 个收藏夹。` : "当前账号没有可导入的收藏夹。";
+  } catch (error) {
+    importFolders = [];
+    renderImportFolders();
+    importStatus.textContent = error?.message || "读取收藏夹失败。";
+    importStatus.classList.add("error");
+  } finally {
+    refreshImportFoldersButton.disabled = false;
+    openImportButton.disabled = false;
+  }
+}
+
+async function startImport() {
+  if (importBusy) return;
+  const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+  if (!folderIds.length) return;
+  if (!rootHandle) {
+    importStatus.textContent = "请先选择本地保存文件夹。";
+    importStatus.classList.add("error");
+    return;
+  }
+  importBusy = true;
+  updateImportSelection();
+  importStatus.classList.remove("error");
+  importStatus.textContent = "正在请求本地目录权限…";
+  try {
+    const permission = await rootHandle.requestPermission({ mode: "readwrite" });
+    if (permission !== "granted") throw new Error("未获得本地保存文件夹的写入权限，请重新选择保存文件夹后重试。");
+    const tab = await queryCurrentTab();
+    const response = await sendTabMessage(tab.id, { type: "bca-import-selected-folders", folderIds });
+    if (!response?.ok) throw new Error(response?.message || "导入失败。");
+    importStatus.classList.remove("error");
+    importStatus.textContent = response.message || `导入完成：${response.imported || 0} 个，跳过 ${response.skipped || 0} 个。`;
+    if (response.reportPath) importStatus.textContent += ` 错误报告：${response.reportPath}`;
+  } catch (error) {
+    importStatus.textContent = error?.message || "导入失败。";
+    importStatus.classList.add("error");
+  } finally {
+    importBusy = false;
+    updateImportSelection();
+  }
+}
 
 function renderEnabledState(enabled) {
   extensionEnabled = enabled;
@@ -186,6 +308,27 @@ downloadButton.addEventListener("click", () => {
   anchor.download = `B站收藏归档错误报告_${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
   anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+});
+
+openImportButton.addEventListener("click", () => {
+  importPanel.hidden = !importPanel.hidden;
+  if (!importPanel.hidden && !importFolders.length) loadImportFolders();
+});
+refreshImportFoldersButton.addEventListener("click", loadImportFolders);
+startImportButton.addEventListener("click", startImport);
+selectAllImportFoldersButton.addEventListener("click", () => {
+  importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = true; });
+  updateImportSelection();
+});
+clearImportFoldersButton.addEventListener("click", () => {
+  importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+  updateImportSelection();
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "bca-import-progress") return;
+  importStatus.classList.remove("error");
+  importStatus.textContent = message.text || "正在导入…";
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
