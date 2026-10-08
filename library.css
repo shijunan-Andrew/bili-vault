@@ -116,6 +116,27 @@ kbd { flex: 0 0 auto; padding: 3px 5px; border: 1px solid #eceef2; border-radius
 .detail-title { margin: 0; color: #292f39; font-size: 19px; line-height: 1.55; letter-spacing: -.4px; }
 .detail-bvid { margin: 9px 0 18px; color: #a0a6af; font-size: 10px; }
 .open-video { width: 100%; margin: 0 0 23px; text-decoration: none; }
+.detail-management { margin: 22px 0 25px; padding: 14px; border: 1px solid #e8edf1; border-radius: 11px; background: #fafcfd; }
+.detail-management h3 { margin: 0 0 12px; color: #59616d; font-size: 11px; font-weight: 700; }
+.move-label { display: block; margin: 0 0 6px; color: #9299a3; font-size: 10px; }
+.move-controls { display: flex; gap: 8px; }
+.move-target { min-width: 0; flex: 1; height: 36px; padding: 0 9px; border: 1px solid #e4e8ed; border-radius: 8px; outline: none; color: #59616c; background: #fff; font-size: 10px; }
+.move-target:focus { border-color: #8dd7ed; }
+.move-local { min-height: 36px; padding: 0 13px; }
+.move-local:disabled { opacity: .5; cursor: not-allowed; }
+.button-danger { color: #fff; background: #d95050; }
+.button-danger:hover { background: #c53e3e; }
+.delete-local { width: 100%; min-height: 35px; margin-top: 9px; border-radius: 8px; font-size: 11px; }
+.management-note { margin: 9px 0 0; color: #a0a6af; font-size: 9px; line-height: 1.6; }
+.confirm-backdrop { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 18px; background: #171b23a8; backdrop-filter: blur(3px); }
+.confirm-backdrop[hidden] { display: none; }
+.confirm-dialog { width: min(390px, 100%); padding: 25px; border: 1px solid #eef0f3; border-radius: 16px; background: #fff; box-shadow: 0 22px 65px #10151f42; }
+.confirm-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: #c84848; background: #fff0f0; font-size: 20px; font-weight: 700; }
+.confirm-dialog h2 { margin: 15px 0 7px; color: #313741; font-size: 16px; }
+.confirm-dialog p { margin: 0; color: #7f8792; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
+.confirm-actions .button { width: auto; min-width: 98px; min-height: 37px; }
+.confirm-actions .button-quiet { border: 1px solid #e4e7eb; }
 .detail-section-title { margin: 22px 0 12px; color: #7a828e; font-size: 10px; font-weight: 700; letter-spacing: .8px; }
 .detail-fields { display: grid; grid-template-columns: 100px 1fr; gap: 0; margin: 0; border-top: 1px solid #f0f1f3; }
 .detail-fields dt, .detail-fields dd { margin: 0; padding: 11px 0; border-bottom: 1px solid #f0f1f3; font-size: 11px; line-height: 1.6; }

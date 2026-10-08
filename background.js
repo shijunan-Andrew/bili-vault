@@ -2,6 +2,47 @@ const DB_NAME = "bili-fav-archiver";
 const DB_STORE = "settings";
 let saveQueue = Promise.resolve();
 
+async function updateActionIcon(enabled) {
+  const imageData = {};
+  for (const size of [16, 32, 48, 128]) {
+    const canvas = new OffscreenCanvas(size, size);
+    const context = canvas.getContext("2d");
+    const radius = size * 0.22;
+    context.beginPath();
+    context.moveTo(radius, 1);
+    context.arcTo(size - 1, 1, size - 1, radius, radius);
+    context.arcTo(size - 1, size - 1, size - radius, size - 1, radius);
+    context.arcTo(1, size - 1, 1, size - radius, radius);
+    context.arcTo(1, 1, radius, 1, radius);
+    context.closePath();
+    context.fillStyle = enabled ? "#00a1d6" : "#9ba2ac";
+    context.fill();
+    context.fillStyle = "#ffffff";
+    context.font = `bold ${Math.round(size * 0.62)}px Arial, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("B", size / 2, size / 2 + size * 0.03);
+    imageData[size] = context.getImageData(0, 0, size, size);
+  }
+  await chrome.action.setIcon({ imageData });
+}
+
+async function initializeActionIcon() {
+  const settings = await chrome.storage.local.get("enabled");
+  const enabled = settings.enabled !== false;
+  if (settings.enabled === undefined) await chrome.storage.local.set({ enabled: true });
+  await updateActionIcon(enabled);
+}
+
+chrome.runtime.onInstalled.addListener(() => initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error)));
+chrome.runtime.onStartup.addListener(() => initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error)));
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.enabled) {
+    updateActionIcon(changes.enabled.newValue !== false).catch((error) => console.warn("更新扩展图标失败", error));
+  }
+});
+initializeActionIcon().catch((error) => console.warn("初始化扩展图标失败", error));
+
 function openDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
@@ -204,6 +245,8 @@ async function logError(error, context = {}) {
 async function saveFavorite(data) {
   const metadata = data?.metadata || {};
   const folders = Array.isArray(data?.folders) ? data.folders : [];
+  const settings = await chrome.storage.local.get("enabled");
+  if (settings.enabled === false) return { ok: false, message: "自动归档已关闭，本次收藏未保存到本地。" };
   try {
     if (!folders.length || folders.some((folder) => !folder?.name)) {
       throw new Error("无法从 B 站读取本次收藏夹的实际名称。请保持收藏夹列表已加载后重试。 ");

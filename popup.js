@@ -3,6 +3,10 @@ const DB_STORE = "settings";
 
 const folderName = document.getElementById("folderName");
 const chooseButton = document.getElementById("chooseFolder");
+const toggleButton = document.getElementById("toggleEnabled");
+const enabledLabel = document.getElementById("enabledLabel");
+const enabledHint = document.getElementById("enabledHint");
+const brandIcon = document.getElementById("brandIcon");
 const reauthorizeButton = document.getElementById("reauthorizeFolder");
 const permissionHint = document.getElementById("permissionHint");
 const lastResult = document.getElementById("lastResult");
@@ -13,6 +17,24 @@ const downloadButton = document.getElementById("downloadReport");
 let errorReport = "";
 let rootHandle = null;
 let permissionNotice = "";
+let extensionEnabled = true;
+
+function renderEnabledState(enabled) {
+  extensionEnabled = enabled;
+  brandIcon.classList.toggle("disabled", !enabled);
+  toggleButton.classList.toggle("off", !enabled);
+  toggleButton.setAttribute("aria-pressed", String(enabled));
+  toggleButton.setAttribute("aria-label", enabled ? "关闭自动归档" : "开启自动归档");
+  enabledLabel.textContent = enabled ? "自动归档已开启" : "自动归档已关闭";
+  enabledHint.textContent = enabled
+    ? "收藏成功后自动保存视频资料"
+    : "新收藏不会自动归档，本地收藏库仍可使用";
+}
+
+async function refreshEnabledState() {
+  const { enabled } = await chrome.storage.local.get("enabled");
+  renderEnabledState(enabled !== false);
+}
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -141,6 +163,20 @@ reauthorizeButton.addEventListener("click", async () => {
   }
 });
 
+toggleButton.addEventListener("click", async () => {
+  toggleButton.disabled = true;
+  const nextEnabled = !extensionEnabled;
+  renderEnabledState(nextEnabled);
+  try {
+    await chrome.storage.local.set({ enabled: nextEnabled });
+  } catch (error) {
+    renderEnabledState(!nextEnabled);
+    lastResult.textContent = error?.message || "无法更新插件状态。";
+  } finally {
+    toggleButton.disabled = false;
+  }
+});
+
 downloadButton.addEventListener("click", () => {
   if (!errorReport) return;
   const blob = new Blob([errorReport], { type: "text/plain;charset=utf-8" });
@@ -152,7 +188,11 @@ downloadButton.addEventListener("click", () => {
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 });
 
-chrome.storage.onChanged.addListener(() => refreshStatus().catch(() => {}));
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.enabled) renderEnabledState(changes.enabled.newValue !== false);
+  refreshStatus().catch(() => {});
+});
+refreshEnabledState().catch(() => renderEnabledState(true));
 refreshStatus().catch((error) => {
   lastResult.textContent = error?.message || "无法读取插件状态。";
 });

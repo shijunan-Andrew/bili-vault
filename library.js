@@ -24,6 +24,10 @@ const detailBackdrop = document.getElementById("detailBackdrop");
 const detailPanel = document.getElementById("detailPanel");
 const detailContent = document.getElementById("detailContent");
 const closeDetailButton = document.getElementById("closeDetail");
+const confirmBackdrop = document.getElementById("confirmBackdrop");
+const confirmMessage = document.getElementById("confirmMessage");
+const cancelDeleteButton = document.getElementById("cancelDelete");
+const confirmDeleteButton = document.getElementById("confirmDelete");
 const toast = document.getElementById("toast");
 
 let rootHandle = null;
@@ -31,6 +35,8 @@ let collections = [];
 let selectedCollection = "*";
 let coverUrls = [];
 let toastTimer = 0;
+let pendingDeleteVideo = null;
+let deleteInProgress = false;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -252,13 +258,29 @@ function openDetail(video) {
   addField(rows, "av 号", video.aid);
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地收藏管理</h3><label class="move-label" for="moveTarget">移动到另一个收藏夹</label><div class="move-controls"><select id="moveTarget" class="move-target" aria-label="目标收藏夹"><option value="">选择目标收藏夹</option></select><button class="button button-primary move-local" type="button">移动</button></div><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些操作只整理本地归档文件，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
   detailContent.querySelector(".detail-collection").textContent = video.collection;
   detailContent.querySelector(".detail-title").textContent = video.title;
   detailContent.querySelector(".detail-bvid").textContent = video.bvid ? `BV号 ${video.bvid}` : "本地归档";
   detailContent.querySelector(".detail-description").textContent = video.description || "暂无简介";
   const link = detailContent.querySelector(".open-video");
   if (link) link.href = video.url;
+  const targetSelect = detailContent.querySelector("#moveTarget");
+  const moveButton = detailContent.querySelector(".move-local");
+  const otherCollections = collections.filter((collection) => collection.name !== video.collection);
+  for (const collection of otherCollections) {
+    const option = document.createElement("option");
+    option.value = collection.name;
+    option.textContent = collection.name;
+    targetSelect.append(option);
+  }
+  if (!otherCollections.length) {
+    targetSelect.options[0].textContent = "暂无其他收藏夹";
+    targetSelect.disabled = true;
+    moveButton.disabled = true;
+  }
+  moveButton.addEventListener("click", () => moveVideoToCollection(video, targetSelect.value, moveButton));
+  detailContent.querySelector(".delete-local").addEventListener("click", () => askToDeleteVideo(video));
   detailPanel.classList.add("open");
   detailPanel.setAttribute("aria-hidden", "false");
   detailBackdrop.hidden = false;
@@ -267,10 +289,148 @@ function openDetail(video) {
 }
 
 function closeDetail() {
+  if (deleteInProgress) return;
+  closeDeleteConfirmation();
   detailPanel.classList.remove("open");
   detailPanel.setAttribute("aria-hidden", "true");
   detailBackdrop.hidden = true;
   document.body.style.overflow = "";
+}
+
+function askToDeleteVideo(video) {
+  pendingDeleteVideo = video;
+  confirmMessage.textContent = `将删除本地目录“${video.collection}/${video.directory}”及其中的封面和视频信息。B 站账户里的收藏不会改变。`;
+  confirmBackdrop.hidden = false;
+  confirmDeleteButton.focus();
+}
+
+function closeDeleteConfirmation() {
+  if (deleteInProgress) return;
+  confirmBackdrop.hidden = true;
+  pendingDeleteVideo = null;
+}
+
+async function copyDirectoryContents(source, target) {
+  for await (const [name, entry] of source.entries()) {
+    if (entry.kind === "directory") {
+      const childTarget = await target.getDirectoryHandle(name, { create: true });
+      await copyDirectoryContents(entry, childTarget);
+      continue;
+    }
+    const sourceFile = await entry.getFile();
+    const targetFile = await target.getFileHandle(name, { create: true });
+    const writable = await targetFile.createWritable();
+    try {
+      await writable.write(sourceFile);
+      await writable.close();
+    } catch (error) {
+      try { await writable.abort(); } catch (_) {}
+      throw error;
+    }
+  }
+}
+
+async function updateSavedFolderName(directory, folderName) {
+  const infoHandle = await directory.getFileHandle("视频信息.txt");
+  const file = await infoHandle.getFile();
+  const text = await file.text();
+  const updated = text.replace(/^保存文件夹[：:].*$/m, `保存文件夹：${folderName}`);
+  if (updated === text) return;
+  const writable = await infoHandle.createWritable();
+  try {
+    await writable.write(updated);
+    await writable.close();
+  } catch (error) {
+    try { await writable.abort(); } catch (_) {}
+    throw error;
+  }
+}
+
+async function uniqueRecordFolderName(parent, originalName) {
+  const match = originalName.match(/^(.*?)(?:_(\d+))?$/);
+  const stem = match?.[1] || originalName;
+  let suffix = match?.[2] ? Number(match[2]) + 1 : 2;
+  let candidate = originalName;
+  while (true) {
+    try {
+      await parent.getDirectoryHandle(candidate);
+      candidate = `${stem}_${suffix++}`;
+    } catch (error) {
+      if (error?.name === "NotFoundError") return candidate;
+      if (error?.name === "TypeMismatchError") {
+        candidate = `${stem}_${suffix++}`;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+async function moveVideoToCollection(video, targetName, button) {
+  if (!targetName || targetName === video.collection) { showToast("请选择另一个收藏夹。"); return; }
+  button.disabled = true;
+  button.textContent = "移动中…";
+  try {
+    const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
+    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const sourceCollection = await rootHandle.getDirectoryHandle(video.collection);
+    const targetCollection = await rootHandle.getDirectoryHandle(targetName, { create: true });
+    const targetRecordName = await uniqueRecordFolderName(targetCollection, video.directory);
+    const targetRecord = await targetCollection.getDirectoryHandle(targetRecordName, { create: true });
+    try {
+      await copyDirectoryContents(await sourceCollection.getDirectoryHandle(video.directory), targetRecord);
+      if (targetRecordName !== video.directory) await updateSavedFolderName(targetRecord, targetRecordName);
+    } catch (error) {
+      await targetCollection.removeEntry(targetRecordName, { recursive: true }).catch(() => {});
+      throw error;
+    }
+    try {
+      await sourceCollection.removeEntry(video.directory, { recursive: true });
+    } catch (error) {
+      closeDetail();
+      await displayRoot(rootHandle);
+      throw new Error(`目标收藏夹中已写入副本，但原目录未能删除，页面已重新读取。${error?.message || ""}`);
+    }
+    closeDetail();
+    await displayRoot(rootHandle);
+    showToast(`已移动到“${targetName}”`);
+  } catch (error) {
+    showToast(`移动失败：${error?.message || "本地文件操作失败。"}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "移动";
+  }
+}
+
+async function deletePendingVideo() {
+  const video = pendingDeleteVideo;
+  if (!video) return;
+  deleteInProgress = true;
+  cancelDeleteButton.disabled = true;
+  confirmDeleteButton.disabled = true;
+  confirmDeleteButton.textContent = "正在删除…";
+  try {
+    const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
+    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
+    await collectionHandle.removeEntry(video.directory, { recursive: true });
+    if (video.cover) {
+      URL.revokeObjectURL(video.cover);
+      coverUrls = coverUrls.filter((url) => url !== video.cover);
+    }
+    deleteInProgress = false;
+    closeDeleteConfirmation();
+    closeDetail();
+    await displayRoot(rootHandle);
+    showToast("已删除本地归档");
+  } catch (error) {
+    showToast(`删除失败：${error?.message || "本地文件操作失败。"}`);
+  } finally {
+    deleteInProgress = false;
+    cancelDeleteButton.disabled = false;
+    confirmDeleteButton.disabled = false;
+    confirmDeleteButton.textContent = "删除本地文件";
+  }
 }
 
 function showToast(message) {
@@ -366,8 +526,19 @@ sortSelect.addEventListener("change", renderVideos);
 clearSearch.addEventListener("click", () => { searchInput.value = ""; renderVideos(); searchInput.focus(); });
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
+cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
+confirmDeleteButton.addEventListener("click", deletePendingVideo);
+confirmBackdrop.addEventListener("click", (event) => {
+  if (event.target === confirmBackdrop && !deleteInProgress) closeDeleteConfirmation();
+});
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeDetail();
+  if (event.key === "Escape") {
+    if (!confirmBackdrop.hidden) {
+      if (!deleteInProgress) closeDeleteConfirmation();
+      return;
+    }
+    closeDetail();
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !library.hidden) { event.preventDefault(); searchInput.focus(); }
 });
 window.addEventListener("beforeunload", () => coverUrls.forEach(URL.revokeObjectURL));

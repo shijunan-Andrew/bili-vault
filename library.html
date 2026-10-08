@@ -64,6 +64,17 @@
     <button id="closeDetail" class="close-detail" aria-label="关闭详情">×</button>
     <div id="detailContent"></div>
   </aside>
+  <div id="confirmBackdrop" class="confirm-backdrop" hidden>
+    <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+      <div class="confirm-icon" aria-hidden="true">!</div>
+      <h2 id="confirmTitle">删除本地归档？</h2>
+      <p id="confirmMessage"></p>
+      <div class="confirm-actions">
+        <button id="cancelDelete" class="button button-quiet" type="button">取消</button>
+        <button id="confirmDelete" class="button button-danger" type="button">删除本地文件</button>
+      </div>
+    </section>
+  </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="library.js"></script>
 </body>

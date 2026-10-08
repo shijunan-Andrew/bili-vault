@@ -9,12 +9,20 @@
 <body>
   <main>
     <div class="brand-row">
-      <div class="brand-icon">B</div>
+      <div id="brandIcon" class="brand-icon">B</div>
       <div>
         <h1>B站收藏信息归档</h1>
         <p class="subtitle">收藏成功后自动保存视频资料</p>
       </div>
     </div>
+
+    <section class="feature-card">
+      <div>
+        <div id="enabledLabel" class="feature-title">自动归档已开启</div>
+        <p id="enabledHint" class="feature-hint">收藏成功后自动保存视频资料</p>
+      </div>
+      <button id="toggleEnabled" class="toggle-switch" type="button" aria-label="关闭自动归档" aria-pressed="true"><span></span></button>
+    </section>
 
     <section class="folder-card">
       <div class="section-label">本地保存位置</div>

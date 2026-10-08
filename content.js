@@ -1,6 +1,20 @@
 (() => {
   const seen = new Set();
+  const pendingStops = new Set();
   let lastConfirmAt = 0;
+  let archiveEnabled = false;
+  let enabledStateUpdated = false;
+
+  chrome.storage.local.get("enabled").then(({ enabled }) => {
+    if (!enabledStateUpdated) archiveEnabled = enabled !== false;
+  }).catch(() => {});
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes.enabled) return;
+    enabledStateUpdated = true;
+    archiveEnabled = changes.enabled.newValue !== false;
+    if (!archiveEnabled) for (const stop of [...pendingStops]) stop();
+  });
 
   function visible(element) {
     if (!element?.isConnected) return false;
@@ -165,14 +179,22 @@
 
   function waitForSuccessfulClose(dialog, data) {
     let finished = false;
-    const observer = new MutationObserver(() => {
+    let timeout;
+    let observer;
+    const stop = () => {
+      if (finished) return;
+      finished = true;
+      observer?.disconnect();
+      clearTimeout(timeout);
+      pendingStops.delete(stop);
+    };
+    observer = new MutationObserver(() => {
       if (finished) return;
       const style = dialog.isConnected ? getComputedStyle(dialog) : null;
       const closed = !dialog.isConnected || !style || style.display === "none" || style.visibility === "hidden" || Number(style.opacity || 1) <= 0.05;
       if (!closed) return;
-      finished = true;
-      observer.disconnect();
-      clearTimeout(timeout);
+      stop();
+      if (!archiveEnabled) return;
       data.favoriteAt = Date.now();
       const signature = `${data.metadata.bvid}|${data.folders.map((folder) => folder.name).sort().join(",")}`;
       if (seen.has(signature)) return;
@@ -181,13 +203,12 @@
       sendFavorite(data);
     });
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "aria-hidden"] });
-    const timeout = window.setTimeout(() => {
-      finished = true;
-      observer.disconnect();
-    }, 10000);
+    pendingStops.add(stop);
+    timeout = window.setTimeout(stop, 10000);
   }
 
   document.addEventListener("click", (event) => {
+    if (!archiveEnabled) return;
     const dialog = findFavoriteDialog(event);
     if (!dialog || !clickedConfirm(event, dialog)) return;
     if (Date.now() - lastConfirmAt < 700) return;
