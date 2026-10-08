@@ -39,9 +39,10 @@
         <div class="panel-heading compact-heading"><div><h2>下载设置</h2><p>这些选项应用于当前队列。</p></div></div>
         <div class="folder-picker-row">
           <div class="folder-symbol" aria-hidden="true">▰</div>
-          <div class="folder-copy"><span class="setting-label">保存到</span><strong id="downloadFolderName">请选择下载目录</strong></div>
+          <div class="folder-copy"><span class="setting-label">保存到</span><strong id="downloadFolderName">本地收藏根目录 / 视频下载（默认）</strong><small id="downloadFolderHelp">默认位置会在本地收藏根目录下自动创建“视频下载”文件夹。</small></div>
           <button id="chooseDownloadFolder" class="button button-secondary" type="button">选择目录</button>
         </div>
+        <button id="useDefaultDownloadFolder" class="text-button" type="button">使用默认下载位置</button>
         <div id="folderPermissionHint" class="inline-hint" hidden>请重新授权此目录，或选择其他目录。</div>
 
         <div class="settings-grid">

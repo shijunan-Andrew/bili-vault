@@ -135,6 +135,8 @@ kbd { flex: 0 0 auto; padding: 3px 5px; border: 1px solid #eceef2; border-radius
 .cover-badge { position: absolute; bottom: 9px; left: 9px; z-index: 1; max-width: calc(100% - 18px); overflow: hidden; padding: 4px 7px; border-radius: 5px; color: #fff; background: #191c24aa; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; backdrop-filter: blur(5px); }
 .invalid-badge { position: absolute; top: 9px; left: 9px; z-index: 2; display: none; padding: 4px 7px; border: 1px solid #ffffff70; border-radius: 5px; color: #fff; background: #c94343e8; font-size: 9px; font-weight: 700; }
 .video-card.invalid-video .invalid-badge { display: block; }
+.downloaded-badge { position: absolute; top: 9px; right: 9px; z-index: 2; padding: 4px 7px; border: 1px solid #ffffff7a; border-radius: 5px; color: #fff; background: #368c68e8; box-shadow: 0 2px 8px #192b2530; font-size: 9px; font-weight: 700; }
+.library-view.batch-mode .downloaded-badge { right: 38px; }
 .card-body { padding: 12px 13px 13px; }
 .card-title { display: -webkit-box; min-height: 38px; overflow: hidden; color: #353b45; font-size: 12px; font-weight: 650; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .video-card.invalid-video .card-title { color: #c94343; }
@@ -229,6 +231,7 @@ body { background: #f5f3ef; }
 .invalid-badge { background: #c35d60; }
 .detail-management > .move-local { width: 100%; margin-bottom: 8px; box-shadow: none; }
 .detail-management > .download-local { width: 100%; margin: 0 0 17px; }
+.detail-management > .open-download-directory { width: 100%; margin: -8px 0 17px; border-color: #d4e8dc; color: #347757; background: #f0f8f3; }
 .collection-action-dialog { width: min(520px, calc(100vw - 32px)); padding: 25px 24px 18px; }
 .collection-action-dialog h2 { margin-bottom: 7px; }
 .collection-action-dialog > .editor-hint { margin: 0 0 18px; color: #85847d; font-size: 11px; }

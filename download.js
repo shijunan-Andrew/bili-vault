@@ -9,7 +9,9 @@ const addVideoForm = $("addVideoForm");
 const videoInput = $("videoInput");
 const parseVideoButton = $("parseVideoButton");
 const chooseDownloadFolder = $("chooseDownloadFolder");
+const useDefaultDownloadFolder = $("useDefaultDownloadFolder");
 const downloadFolderName = $("downloadFolderName");
+const downloadFolderHelp = $("downloadFolderHelp");
 const folderPermissionHint = $("folderPermissionHint");
 const qualitySelect = $("qualitySelect");
 const formatSelect = $("formatSelect");
@@ -34,6 +36,8 @@ const progressFiles = $("progressFiles");
 const downloadLog = $("downloadLog");
 
 let downloadFolder = null;
+let downloadFolderMode = "default";
+let archiveRootHandle = null;
 let queue = [];
 let running = false;
 let cancelController = null;
@@ -53,13 +57,13 @@ function openDb() {
   });
 }
 
-async function folderSetting(action, value) {
+async function folderSetting(action, value, key = "downloadFolder") {
   const db = await openDb();
   try {
     return await new Promise((resolve, reject) => {
       const transaction = db.transaction(DB_STORE, action === "get" ? "readonly" : "readwrite");
       const store = transaction.objectStore(DB_STORE);
-      const request = action === "get" ? store.get("downloadFolder") : store.put(value, "downloadFolder");
+      const request = action === "get" ? store.get(key) : action === "delete" ? store.delete(key) : store.put(value, key);
       request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(request.error || new Error("保存下载目录失败。"));
     });
@@ -113,7 +117,8 @@ function updateProgress() {
 }
 
 function updateStartButton() {
-  startDownload.disabled = running || !downloadFolder || !queue.some((item) => item.video);
+  const hasDestination = downloadFolderMode === "custom" ? Boolean(downloadFolder) : Boolean(archiveRootHandle);
+  startDownload.disabled = running || !hasDestination || !queue.some((item) => item.video);
 }
 
 function setQueueBusy(busy) {
@@ -262,7 +267,10 @@ async function chooseFolder() {
     if (permission !== "granted") throw new Error("没有获得此目录的写入授权。");
     downloadFolder = handle;
     await folderSetting("put", handle);
+    downloadFolderMode = "custom";
+    await folderSetting("put", downloadFolderMode, "downloadFolderMode");
     downloadFolderName.textContent = handle.name;
+    downloadFolderHelp.textContent = "当前使用自选目录；下载完成后，本地收藏库会同步显示下载状态。";
     folderPermissionHint.hidden = true;
     addLog(`下载目录已选择：${handle.name}`, "success");
     updateStartButton();
@@ -271,14 +279,47 @@ async function chooseFolder() {
   }
 }
 
+async function useDefaultFolder() {
+  try {
+    downloadFolderMode = "default";
+    downloadFolder = null;
+    await folderSetting("put", "default", "downloadFolderMode");
+    archiveRootHandle = await folderSetting("get", null, "rootHandle");
+    downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 视频下载（默认）` : "本地收藏根目录 / 视频下载（默认）";
+    downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“视频下载”文件夹。";
+    folderPermissionHint.hidden = Boolean(archiveRootHandle);
+    if (!archiveRootHandle) folderPermissionHint.textContent = "请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。";
+    addLog("已切换到本地收藏根目录下的默认下载位置。", "success");
+    updateStartButton();
+  } catch (error) {
+    folderPermissionHint.hidden = false;
+    folderPermissionHint.textContent = `切换默认目录失败：${error.message}`;
+  }
+}
+
 async function restoreFolder() {
   try {
-    downloadFolder = await folderSetting("get");
-    if (!downloadFolder) return;
-    downloadFolderName.textContent = downloadFolder.name || "上次选择的目录";
-    const permission = await downloadFolder.queryPermission({ mode: "readwrite" });
-    folderPermissionHint.hidden = permission === "granted";
-    if (permission !== "granted") folderPermissionHint.textContent = "上次目录需要重新授权；点击“选择目录”并重新选中它。";
+    archiveRootHandle = await folderSetting("get", null, "rootHandle");
+    const storedMode = await folderSetting("get", null, "downloadFolderMode");
+    const storedFolder = await folderSetting("get");
+    // 3.1 的版本只保存了 downloadFolder；将已有选择视为用户主动设置的自定义位置。
+    downloadFolderMode = storedMode || (storedFolder ? "custom" : "default");
+    if (downloadFolderMode === "custom") {
+      downloadFolder = storedFolder;
+      if (!downloadFolder) throw new Error("上次选择的下载目录已丢失，请重新选择目录或恢复默认位置。");
+      downloadFolderName.textContent = downloadFolder.name || "上次选择的目录";
+      downloadFolderHelp.textContent = "当前使用自选目录；下载完成后，本地收藏库会同步显示下载状态。";
+      const permission = await downloadFolder.queryPermission({ mode: "readwrite" });
+      folderPermissionHint.hidden = permission === "granted";
+      if (permission !== "granted") folderPermissionHint.textContent = "上次目录需要重新授权；点击“选择目录”并重新选中它。";
+    } else {
+      downloadFolderMode = "default";
+      downloadFolder = null;
+      downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 视频下载（默认）` : "本地收藏根目录 / 视频下载（默认）";
+      downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“视频下载”文件夹。";
+      folderPermissionHint.hidden = Boolean(archiveRootHandle);
+      if (!archiveRootHandle) folderPermissionHint.textContent = "请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。";
+    }
     updateStartButton();
   } catch (error) {
     folderPermissionHint.hidden = false;
@@ -298,6 +339,28 @@ async function getWritableDirectory(parent, name) {
     }
   }
   throw new Error("无法创建唯一的视频目录。 ");
+}
+
+function videoDirectoryLabel(video, index) {
+  const rawBvid = String(video.bvid || "").trim();
+  const rawAid = String(video.aid || "").trim().replace(/^av/i, "");
+  const suffix = /^BV[0-9A-Za-z]{10}$/.test(rawBvid) ? rawBvid : /^\d+$/.test(rawAid) ? `av${rawAid}` : `视频${index + 1}`;
+  const tail = ` - ${suffix}`;
+  const title = safeName(video.title, "未知").slice(0, Math.max(1, 100 - tail.length));
+  return `${title}${tail}`;
+}
+
+async function resolveDownloadFolder() {
+  if (downloadFolderMode === "custom") {
+    if (!downloadFolder) throw new Error("请先选择下载目录。");
+    return downloadFolder;
+  }
+  if (!archiveRootHandle) archiveRootHandle = await folderSetting("get", null, "rootHandle");
+  if (!archiveRootHandle) throw new Error("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。");
+  const permission = await archiveRootHandle.requestPermission({ mode: "readwrite" });
+  if (permission !== "granted") throw new Error("未获得本地收藏根目录的写入权限，请在插件弹窗中重新授权。");
+  // 使用固定目录名；已有目录时复用，不生成“视频下载 (2)”等副本。
+  return archiveRootHandle.getDirectoryHandle("视频下载", { create: true });
 }
 
 function fetchOptions(signal) {
@@ -545,10 +608,14 @@ async function start() {
   if (running) return;
   const validItems = queue.filter((item) => item.video);
   if (!validItems.length) return;
-  if (!downloadFolder) { addLog("请先选择保存目录。", "error"); return; }
   try {
+    downloadFolder = await resolveDownloadFolder();
     const permission = await downloadFolder.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("没有获得保存目录的写入权限，请重新选择目录。 ");
+    if (permission !== "granted") throw new Error("没有获得保存目录的写入权限，请重新授权或重新选择目录。");
+    downloadFolderName.textContent = downloadFolderMode === "default"
+      ? `${archiveRootHandle.name} / 视频下载（默认）`
+      : downloadFolder.name;
+    folderPermissionHint.hidden = true;
   } catch (error) { folderPermissionHint.hidden = false; addLog(error.message, "error"); return; }
   const pagesToDownload = validItems.flatMap((item) => selectedPages(item).map((page) => ({ item, page })));
   if (!pagesToDownload.length) { addLog("队列中没有可下载的分 P。", "error"); return; }
@@ -581,9 +648,8 @@ async function start() {
       if (failedFolders.has(item.id)) continue;
       let directory = folderCache.get(item.id);
       if (!directory) {
-        const suffix = video.bvid || (video.aid ? `av${video.aid}` : `视频${index + 1}`);
         try {
-          directory = await getWritableDirectory(downloadFolder, `${video.title} - ${suffix}`);
+          directory = await getWritableDirectory(downloadFolder, videoDirectoryLabel(video, index));
           folderCache.set(item.id, directory);
           addLog(`保存位置：${downloadFolder.name}/${directory.name}`, "info");
         } catch (error) {
@@ -620,6 +686,10 @@ async function start() {
     }
     if (!cancelled) { completedTasks = plannedTasks; updateProgress(); }
   } finally {
+    if (savedFileCount > 0) {
+      try { await chrome.storage.local.set({ downloadRevision: crypto.randomUUID() }); }
+      catch (error) { addLog(`已保存文件，但收藏库状态同步失败：${error.message}`, "error"); }
+    }
     running = false;
     cancelController = null;
     cancelDownload.hidden = true;
@@ -647,6 +717,7 @@ addVideoForm.addEventListener("submit", async (event) => {
 });
 
 chooseDownloadFolder.addEventListener("click", chooseFolder);
+useDefaultDownloadFolder.addEventListener("click", useDefaultFolder);
 formatSelect.addEventListener("change", () => { setFormatUi(); refreshQualityOptions(); });
 qualitySelect.addEventListener("change", () => { queue.forEach((item) => { item.playurlCache = null; }); });
 startDownload.addEventListener("click", start);

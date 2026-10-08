@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#00a1d6">
+  <title>本地视频目录 · B站收藏信息归档</title>
+  <link rel="stylesheet" href="download-folder.css">
+</head>
+<body>
+  <header class="folder-topbar">
+    <a href="library.html">← 返回本地收藏库</a>
+    <span>B站收藏信息归档 · 本地文件</span>
+  </header>
+  <main class="folder-main">
+    <section class="folder-heading">
+      <p class="eyebrow">LOCAL DOWNLOADS</p>
+      <h1 id="videoTitle">本地视频目录</h1>
+      <p id="folderPath">正在读取目录…</p>
+      <p class="folder-subtitle">此页面会列出本地视频文件，点击文件名可在新标签页中打开。</p>
+      <div class="folder-actions">
+        <span id="folderSummary" class="folder-summary">正在检查文件</span>
+        <button id="grantAccess" class="button" type="button" hidden>授权读取目录</button>
+      </div>
+    </section>
+    <div id="folderMessage" class="folder-message" role="status" hidden></div>
+    <section id="fileList" class="file-list" aria-label="下载文件"></section>
+    <p class="folder-note">如果在文件资源管理器中删除了这里的全部文件，本地收藏库会自动撤销“已下载”标记。</p>
+  </main>
+  <script src="download-folder.js"></script>
+</body>
+</html>

@@ -69,6 +69,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .folder-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
 .setting-label { color: #9a9da2; font-size: 9px; }
 .folder-copy strong { overflow: hidden; color: #59616b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.folder-copy small { color: #969ca5; font-size: 9px; line-height: 1.5; }
+.text-button { display: block; margin: 7px 0 0 auto; padding: 4px 2px; border: 0; color: #1683a3; background: transparent; font-size: 9px; }
+.text-button:hover { color: #006d90; text-decoration: underline; }
 .inline-hint { margin: 8px 0 0; color: var(--red); font-size: 10px; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
 .select-setting { display: grid; gap: 6px; color: #7d848d; font-size: 10px; }

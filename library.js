@@ -79,6 +79,7 @@ let visibleVideoIds = [];
 let pendingCollectionAction = null;
 let collectionOrder = [];
 let draggedCollectionName = "";
+let downloadStatusCheckRunning = false;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -108,6 +109,17 @@ async function loadSavedHandle() {
       const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get("rootHandle");
       request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(request.error || new Error("无法读取上次选择的目录。"));
+    });
+  } finally { db.close(); }
+}
+
+async function readSavedSetting(key) {
+  const db = await openDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(key);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("无法读取本地目录设置。"));
     });
   } finally { db.close(); }
 }
@@ -158,12 +170,71 @@ async function readCover(fileHandle) {
 
 function field(info, key) { return info.fields[key] || ""; }
 
+function downloadDirectoryIdentifiers(name) {
+  const identifiers = new Set();
+  const bvid = String(name || "").match(/(?:^| - )(BV[0-9A-Za-z]{10})(?: \(\d+\))?$/);
+  const aid = String(name || "").match(/(?:^| - )av(\d+)(?: \(\d+\))?$/i);
+  if (bvid) identifiers.add(`bvid:${bvid[0]}`);
+  if (aid) identifiers.add(`aid:${aid[1]}`);
+  return identifiers;
+}
+
+async function directoryContainsFiles(directory) {
+  for await (const entry of directory.values()) {
+    if (entry.kind === "file") return true;
+    if (entry.kind === "directory" && await directoryContainsFiles(entry)) return true;
+  }
+  return false;
+}
+
+async function getDownloadParentHandle(archiveRoot) {
+  const mode = await readSavedSetting("downloadFolderMode");
+  const savedCustom = await readSavedSetting("downloadFolder");
+  const isCustom = mode === "custom" || (!mode && Boolean(savedCustom));
+  if (isCustom) return savedCustom;
+  try { return await archiveRoot.getDirectoryHandle("视频下载"); }
+  catch (error) {
+    if (error?.name === "NotFoundError") return null;
+    throw error;
+  }
+}
+
+async function scanDownloadedDirectories(archiveRoot) {
+  let parent;
+  try { parent = await getDownloadParentHandle(archiveRoot); }
+  catch (_) { return null; }
+  if (!parent) return new Map();
+  try {
+    const permission = await parent.queryPermission({ mode: "read" });
+    if (permission !== "granted") return null;
+    const index = new Map();
+    for await (const entry of parent.values()) {
+      if (entry.kind !== "directory") continue;
+      const identifiers = downloadDirectoryIdentifiers(entry.name);
+      if (!identifiers.size || !await directoryContainsFiles(entry)) continue;
+      for (const identifier of identifiers) {
+        if (!index.has(identifier)) index.set(identifier, { name: entry.name, handle: entry });
+      }
+    }
+    return index;
+  } catch (_) { return null; }
+}
+
+function matchDownloadedDirectory(video, index) {
+  for (const identifier of videoIdentifierKeys(video)) {
+    const match = index.get(identifier);
+    if (match) return match;
+  }
+  return null;
+}
+
 async function scanRoot(handle) {
   const scanned = [];
   const issues = [];
+  const downloadIndex = await scanDownloadedDirectories(handle);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
   for await (const collectionEntry of handle.values()) {
-    if (collectionEntry.kind !== "directory" || collectionEntry.name === "错误报告") continue;
+    if (collectionEntry.kind !== "directory" || ["错误报告", "视频下载"].includes(collectionEntry.name)) continue;
     const videos = [];
     for await (const recordEntry of collectionEntry.values()) {
       if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
@@ -179,14 +250,20 @@ async function scanRoot(handle) {
         const url = field(info, "视频链接");
         const title = field(info, "视频标题") || recordEntry.name;
         const date = field(info, "视频收藏时间") || recordEntry.name;
+        const bvid = field(info, "BV号");
+        const aid = field(info, "av号");
+        const download = downloadIndex ? matchDownloadedDirectory({ bvid, aid }, downloadIndex) : null;
         videos.push({
           id: `${collectionEntry.name}/${recordEntry.name}`,
           collection: collectionEntry.name,
           directory: recordEntry.name,
           title,
           url: /^https?:\/\//i.test(url) ? url : "",
-          bvid: field(info, "BV号"),
-          aid: field(info, "av号"),
+          bvid,
+          aid,
+          downloaded: Boolean(download),
+          downloadDirectoryName: download?.name || "",
+          downloadDirectoryHandle: download?.handle || null,
           isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
           upName: field(info, "UP主昵称"),
           upMid: field(info, "UP主UID"),
@@ -471,7 +548,7 @@ function renderVideos() {
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", selectionMode ? `选择视频：${video.title}` : `查看视频：${video.title}`);
-    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">已失效</span><span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="选择视频"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date"></span></div></div>`;
+    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">已失效</span><span class="downloaded-badge"${video.downloaded ? "" : " hidden"}>已下载</span><span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="选择视频"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date"></span></div></div>`;
     const checkbox = card.querySelector(".card-select");
     checkbox.checked = selectedVideoIds.has(video.id);
     checkbox.addEventListener("click", (event) => event.stopPropagation());
@@ -542,7 +619,8 @@ function openDetail(video) {
   addField(rows, "av 号", video.aid);
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频资料</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.dataset.videoId = video.id;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频资料</button><button class="button button-quiet open-download-directory" type="button"${video.downloaded ? "" : " hidden"}>打开本地视频目录</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -553,12 +631,24 @@ function openDetail(video) {
   const moveButton = detailContent.querySelector(".move-local");
   moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
   detailContent.querySelector(".download-local").addEventListener("click", () => openDownloadInterface([video]));
+  detailContent.querySelector(".open-download-directory").addEventListener("click", () => openDownloadDirectory(video));
   detailContent.querySelector(".delete-local").addEventListener("click", () => askToDeleteVideo(video));
   detailPanel.classList.add("open");
   detailPanel.setAttribute("aria-hidden", "false");
   detailBackdrop.hidden = false;
   document.body.style.overflow = "hidden";
   closeDetailButton.focus();
+}
+
+function openDownloadDirectory(video) {
+  if (!video.downloaded || !video.downloadDirectoryName) return;
+  const target = new URL(chrome.runtime.getURL("download-folder.html"));
+  target.searchParams.set("directory", video.downloadDirectoryName);
+  target.searchParams.set("bvid", video.bvid || "");
+  target.searchParams.set("aid", video.aid || "");
+  target.searchParams.set("title", video.title || "本地视频目录");
+  const tab = window.open(target.href, "_blank");
+  if (!tab) showToast("浏览器拦截了本地目录页面，请允许本地收藏库打开新标签页。");
 }
 
 function closeDetail() {
@@ -1032,7 +1122,36 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = "已读
   library.hidden = false;
   renderCollections();
   renderVideos();
+  syncDetailDownloadAction();
   showToast(`${toastVerb} ${allVideos().length} 个视频`);
+}
+
+function syncDetailDownloadAction() {
+  const button = detailContent.querySelector(".open-download-directory");
+  if (!button) return;
+  const video = allVideos().find((item) => item.id === detailContent.dataset.videoId);
+  button.hidden = !video?.downloaded;
+}
+
+async function refreshDownloadStatuses() {
+  if (!rootHandle || downloadStatusCheckRunning) return;
+  downloadStatusCheckRunning = true;
+  try {
+    const index = await scanDownloadedDirectories(rootHandle);
+    // A denied custom-folder permission means the status is unknown, not that files vanished.
+    if (!index) return;
+    let changed = false;
+    for (const video of allVideos()) {
+      const match = matchDownloadedDirectory(video, index);
+      const downloaded = Boolean(match);
+      if (video.downloaded !== downloaded || video.downloadDirectoryName !== (match?.name || "")) changed = true;
+      video.downloaded = downloaded;
+      video.downloadDirectoryName = match?.name || "";
+      video.downloadDirectoryHandle = match?.handle || null;
+    }
+    if (changed) renderVideos();
+    syncDetailDownloadAction();
+  } finally { downloadStatusCheckRunning = false; }
 }
 
 function setBusy(isBusy, buttonText = "正在读取…") {
@@ -1168,4 +1287,14 @@ document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !library.hidden) { event.preventDefault(); searchInput.focus(); }
 });
 window.addEventListener("beforeunload", () => coverUrls.forEach(URL.revokeObjectURL));
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.downloadRevision && rootHandle) refreshDownloadStatuses();
+});
+window.addEventListener("focus", refreshDownloadStatuses);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshDownloadStatuses();
+});
+window.setInterval(() => {
+  if (!library.hidden && document.visibilityState === "visible") refreshDownloadStatuses();
+}, 15000);
 restoreCollectionOrder().catch(() => { collectionOrder = []; }).finally(() => restoreLastRoot());
