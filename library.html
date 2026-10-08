@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f4f5f7">
+  <meta name="theme-color" content="#00a1d6">
   <title>本地收藏库 · B站收藏信息归档</title>
   <link rel="stylesheet" href="library.css">
 </head>
@@ -15,13 +15,13 @@
         <span><strong>本地收藏库</strong><small>LOCAL VIDEO LIBRARY</small></span>
       </a>
       <div class="collection-heading">
-        <div class="side-label">我的收藏夹 <span id="collectionTotal">—</span></div>
+        <div class="side-label">我的收藏夹 <span id="collectionTotal">—</span><span class="collection-sort-hint">· 拖动 ⠿ 排序</span></div>
         <button id="createCollection" class="collection-create" type="button"><span aria-hidden="true">＋</span> 新建收藏夹</button>
       </div>
       <nav id="collectionList" class="collection-list" aria-label="收藏夹"></nav>
       <div class="sidebar-bottom">
         <div class="privacy-note"><span class="lock-icon">▣</span><span>归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
-        <div class="side-version">B站收藏信息归档 · 3.0</div>
+        <div class="side-version">B站收藏信息归档 · 3.1</div>
       </div>
     </aside>
 
@@ -30,6 +30,7 @@
         <div class="breadcrumb"><span>本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection">全部收藏</strong></div>
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel">尚未选择目录</span></div>
+          <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录"><span aria-hidden="true">↻</span> 刷新</button>
           <button id="chooseRoot" class="button button-primary"><span aria-hidden="true">＋</span> 选择收藏根目录</button>
         </div>
       </header>

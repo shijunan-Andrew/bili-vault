@@ -49,19 +49,19 @@ footer { padding: 12px 2px 0; text-align: center; }
 
 /* 2.3 visual refresh */
 :root { color-scheme: light; }
-body { width: 440px; max-height: 720px; color: #2c3432; background: #f5f3ef; }
+body { width: 440px; max-height: 720px; color: #2c3432; background: #f4f7fa; }
 main { padding: 16px; }
-.brand-icon { background: #318779; box-shadow: 0 7px 17px #31877930; }
+.brand-icon { background: #00a1d6; box-shadow: 0 7px 17px #00a1d630; }
 .brand-icon.disabled { background: #a7adb6; box-shadow: none; }
-.feature-card, .folder-card, .status-card, .import-card { border-color: #e8e5df; background: #fffefa; }
+.feature-card, .folder-card, .status-card, .import-card { border-color: #e8e5df; background: #ffffff; }
 .feature-card { margin-top: -3px; }
 .feature-title { color: #40534c; }
-.toggle-switch { background: #318779; }
-.toggle-switch:focus-visible { outline-color: #31877940; }
+.toggle-switch { background: #00a1d6; }
+.toggle-switch:focus-visible { outline-color: #00a1d640; }
 .folder-card, .status-card { padding: 12px 14px; }
 .folder-name { margin-bottom: 9px; }
-.primary { color: #fff; background: #318779; }
-.primary:hover { background: #286f64; }
+.primary { color: #fff; background: #00a1d6; }
+.primary:hover { background: #008bb8; }
 .secondary { color: #66563e; background: #f4efe6; }
 .secondary:hover { background: #eee5d7; }
 .hint, footer { color: #818078; }
@@ -73,11 +73,11 @@ main { padding: 16px; }
 .import-heading { margin: 7px 0 6px; }
 .import-selection-label { color: #77746d; font-size: 11px; font-weight: 650; }
 .import-selected-count { color: #9a9589; font-size: 10px; }
-.import-folder-list { max-height: 148px; border-color: #e8e5df; background: #fcfbf8; }
+.import-folder-list { max-height: 148px; border-color: #e8e5df; background: #f9fbfd; }
 .import-folder-row { min-height: 34px; border-color: #efede8; }
-.import-folder-row input { accent-color: #318779; }
-.text-button { color: #397f71; }
-.text-button:hover { color: #265d53; }
+.import-folder-row input { accent-color: #00a1d6; }
+.text-button { color: #007fa9; }
+.text-button:hover { color: #006b8f; }
 .import-selection-actions { margin: 4px 2px 7px; }
 .import-status { margin-top: 5px; color: #77756e; }
 .import-status:empty { display: none; }
@@ -90,11 +90,25 @@ main { padding: 16px; }
 .result-path { max-height: 90px; margin-top: 5px; overflow: auto; color: #8b8a82; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .error-block { border-color: #eee9df; }
 .error-title { color: #b94b4b; }
-.library-link { border-color: #d9e9df; color: #34786a; background: #edf5ef; }
+.library-link { border-color: #ccebf4; color: #34786a; background: #edf9fc; }
 .library-link:hover { background: #e4efe6; }
-.import-progress-view { display: flex; align-items: center; gap: 11px; min-height: 74px; padding: 14px; border: 1px solid #e8e5df; border-radius: 10px; color: #4e5c54; background: #fcfbf8; }
+.import-progress-view { display: flex; align-items: center; gap: 11px; min-height: 74px; padding: 14px; border: 1px solid #e8e5df; border-radius: 10px; color: #4e5c54; background: #f9fbfd; }
 .import-progress-view strong { display: block; font-size: 12px; }
 .import-progress-view p { margin: 4px 0 0; color: #87867e; font-size: 10px; line-height: 1.5; }
-.progress-spinner { width: 22px; height: 22px; flex: 0 0 auto; border: 2px solid #dfe9e1; border-top-color: #318779; border-radius: 50%; animation: spin .8s linear infinite; }
+.progress-spinner { width: 22px; height: 22px; flex: 0 0 auto; border: 2px solid #dfe9e1; border-top-color: #00a1d6; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 [hidden] { display: none !important; }
+
+/* 3.1: restore the blue extension theme; keep warnings and secondary actions distinct. */
+body { background: #f4f7fa; }
+.brand-icon { background: #00a1d6; box-shadow: 0 7px 17px #00a1d630; }
+.toggle-switch { background: #00a1d6; }
+.toggle-switch:focus-visible { outline-color: #00a1d640; }
+.primary { background: #00a1d6; }
+.primary:hover { background: #008bb8; }
+.import-folder-row input { accent-color: #00a1d6; }
+.text-button { color: #007fa9; }
+.text-button:hover { color: #006b8f; }
+.library-link { border-color: #ccebf4; color: #007fa9; background: #edf9fc; }
+.library-link:hover { background: #e2f5fa; }
+.progress-spinner { border-top-color: #00a1d6; }

@@ -6,6 +6,7 @@ const collectionTotal = document.getElementById("collectionTotal");
 const rootLabel = document.getElementById("rootLabel");
 const statusDot = document.querySelector(".status-dot");
 const chooseRoot = document.getElementById("chooseRoot");
+const refreshLibraryButton = document.getElementById("refreshLibrary");
 const welcomeChoose = document.getElementById("welcomeChoose");
 const welcome = document.getElementById("welcome");
 const welcomeCopy = document.querySelector(".welcome-copy");
@@ -76,6 +77,8 @@ let showInvalidOnly = false;
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
 let pendingCollectionAction = null;
+let collectionOrder = [];
+let draggedCollectionName = "";
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -269,6 +272,78 @@ function renderTargetChoices(container, chosenNames = []) {
   container.replaceChildren(...labels);
 }
 
+function installCollectionDrag(wrapper, name) {
+  wrapper.draggable = true;
+  wrapper.dataset.collectionName = name;
+  wrapper.addEventListener("dragstart", (event) => {
+    if (event.target.closest(".collection-delete")) { event.preventDefault(); return; }
+    draggedCollectionName = name;
+    wrapper.classList.add("dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", name);
+    }
+  });
+  wrapper.addEventListener("dragover", (event) => {
+    if (!draggedCollectionName || draggedCollectionName === name) return;
+    event.preventDefault();
+    const after = isDroppedAfter(event, wrapper);
+    wrapper.classList.toggle("drop-after", after);
+    wrapper.classList.toggle("drop-before", !after);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  });
+  wrapper.addEventListener("dragleave", () => wrapper.classList.remove("drop-before", "drop-after"));
+  wrapper.addEventListener("drop", (event) => {
+    if (!draggedCollectionName || draggedCollectionName === name) return;
+    event.preventDefault();
+    const after = isDroppedAfter(event, wrapper);
+    reorderCollection(draggedCollectionName, name, after);
+  });
+  wrapper.addEventListener("dragend", clearCollectionDragStyles);
+}
+
+function isDroppedAfter(event, wrapper) {
+  const rect = wrapper.getBoundingClientRect();
+  if (getComputedStyle(collectionList).display === "flex") return event.clientX > rect.left + rect.width / 2;
+  return event.clientY > rect.top + rect.height / 2;
+}
+
+function clearCollectionDragStyles() {
+  draggedCollectionName = "";
+  collectionList.querySelectorAll(".collection-row").forEach((row) => row.classList.remove("dragging", "drop-before", "drop-after"));
+}
+
+function reorderCollection(sourceName, targetName, afterTarget) {
+  const reordered = [...collections];
+  const sourceIndex = reordered.findIndex((collection) => collection.name === sourceName);
+  if (sourceIndex < 0) return clearCollectionDragStyles();
+  const [source] = reordered.splice(sourceIndex, 1);
+  const targetIndex = reordered.findIndex((collection) => collection.name === targetName);
+  if (targetIndex < 0) return clearCollectionDragStyles();
+  reordered.splice(targetIndex + (afterTarget ? 1 : 0), 0, source);
+  collections = reordered;
+  collectionOrder = collections.map((collection) => collection.name);
+  clearCollectionDragStyles();
+  renderCollections();
+  chrome.storage.local.set({ collectionOrder }).then(() => showToast("收藏夹顺序已保存")).catch((error) => showToast(`保存排序失败：${error?.message || "插件存储不可用"}`));
+}
+
+function applyCollectionOrder(items) {
+  const orderIndex = new Map(collectionOrder.map((name, index) => [name, index]));
+  items.sort((left, right) => {
+    const leftIndex = orderIndex.has(left.name) ? orderIndex.get(left.name) : Number.MAX_SAFE_INTEGER;
+    const rightIndex = orderIndex.has(right.name) ? orderIndex.get(right.name) : Number.MAX_SAFE_INTEGER;
+    return leftIndex - rightIndex || left.name.localeCompare(right.name, "zh-CN");
+  });
+  collectionOrder = items.map((collection) => collection.name);
+  return items;
+}
+
+async function restoreCollectionOrder() {
+  const saved = await chrome.storage.local.get("collectionOrder");
+  collectionOrder = Array.isArray(saved.collectionOrder) ? saved.collectionOrder.filter((name) => typeof name === "string") : [];
+}
+
 function renderCollections() {
   const total = allVideos().length;
   collectionTotal.textContent = String(collections.length);
@@ -280,7 +355,7 @@ function renderCollections() {
     button.className = `collection-button${selectedCollection === row.key ? " active" : ""}`;
     button.type = "button";
     button.setAttribute("aria-current", selectedCollection === row.key ? "page" : "false");
-    button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${row.glyph}</span><span class="collection-name"></span><span class="collection-count">${row.count}</span>`;
+    button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${row.glyph}</span><span class="collection-name"></span>${row.key === "*" ? "" : '<span class="collection-drag-handle" title="按住拖动调整顺序" aria-hidden="true">⠿</span>'}<span class="collection-count">${row.count}</span>`;
     button.querySelector(".collection-name").textContent = row.name;
     button.addEventListener("click", () => {
       if (selectedCollection !== row.key) selectedVideoIds.clear();
@@ -291,6 +366,8 @@ function renderCollections() {
     });
     wrapper.append(button);
     if (row.key !== "*") {
+      wrapper.classList.add("collection-row-draggable");
+      installCollectionDrag(wrapper, row.name);
       const deleteButton = document.createElement("button");
       deleteButton.className = "collection-delete";
       deleteButton.type = "button";
@@ -937,31 +1014,47 @@ videoForm.addEventListener("submit", async (event) => {
 collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInProgress) event.preventDefault(); });
 videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
 
-async function displayRoot(handle, collectionToSelect = "*") {
+async function displayRoot(handle, collectionToSelect = "*", toastVerb = "已读取") {
   for (const url of coverUrls) URL.revokeObjectURL(url);
   coverUrls = [];
   rootHandle = handle;
   const result = await scanRoot(handle);
-  collections = result.collections;
+  collections = applyCollectionOrder(result.collections);
   const existingVideoIds = new Set(allVideos().map((video) => video.id));
   for (const id of selectedVideoIds) if (!existingVideoIds.has(id)) selectedVideoIds.delete(id);
   selectedCollection = collectionToSelect === "*" || result.collections.some((collection) => collection.name === collectionToSelect) ? collectionToSelect : "*";
   rootLabel.textContent = handle.name;
   statusDot.classList.add("ready");
+  refreshLibraryButton.disabled = false;
   scanNotice.hidden = result.issues.length === 0;
   scanNotice.textContent = result.issues.length ? `有 ${result.issues.length} 个目录未能读取：${result.issues.slice(0, 4).join("；")}${result.issues.length > 4 ? "；…" : ""}` : "";
   welcome.hidden = true;
   library.hidden = false;
   renderCollections();
   renderVideos();
-  showToast(`已读取 ${allVideos().length} 个视频`);
+  showToast(`${toastVerb} ${allVideos().length} 个视频`);
 }
 
 function setBusy(isBusy, buttonText = "正在读取…") {
   chooseRoot.disabled = isBusy;
+  refreshLibraryButton.disabled = isBusy || !rootHandle;
+  refreshLibraryButton.classList.toggle("is-loading", isBusy);
   welcomeChoose.disabled = isBusy;
   if (isBusy) chooseRoot.textContent = buttonText;
   else chooseRoot.innerHTML = '<span aria-hidden="true">＋</span> 选择收藏根目录';
+}
+
+async function refreshCurrentRoot() {
+  if (!rootHandle) { showToast("请先选择本地收藏根目录。"); return; }
+  const collectionToKeep = selectedCollection;
+  setBusy(true, "正在刷新…");
+  try {
+    const permissionRequest = rootHandle.requestPermission({ mode: "read" });
+    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录读取权限。");
+    await displayRoot(rootHandle, collectionToKeep, "已刷新");
+  } catch (error) {
+    if (error?.name !== "AbortError") showToast(`刷新失败：${error?.message || "无法读取本地目录。"}`);
+  } finally { setBusy(false); }
 }
 
 async function chooseAndScan() {
@@ -1019,6 +1112,7 @@ async function restoreLastRoot() {
 }
 
 chooseRoot.addEventListener("click", chooseAndScan);
+refreshLibraryButton.addEventListener("click", refreshCurrentRoot);
 welcomeChoose.addEventListener("click", () => rootHandle ? continueWithLastRoot() : chooseAndScan());
 createCollectionButton.addEventListener("click", openCreateCollectionDialog);
 addVideoButton.addEventListener("click", openAddVideoDialog);
@@ -1074,4 +1168,4 @@ document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !library.hidden) { event.preventDefault(); searchInput.focus(); }
 });
 window.addEventListener("beforeunload", () => coverUrls.forEach(URL.revokeObjectURL));
-restoreLastRoot();
+restoreCollectionOrder().catch(() => { collectionOrder = []; }).finally(() => restoreLastRoot());
