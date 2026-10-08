@@ -251,6 +251,41 @@ body { background: #f5f3ef; }
 .collection-action-hint { margin: 12px 1px 0; color: #85847d; font-size: 10px; line-height: 1.7; }
 .collection-action-footer { align-items: center; margin-top: 17px; }
 .collection-action-footer .collection-action-count { margin-right: auto; color: #85847d; font-size: 10px; }
+
+/* 3.4: increase card and detail typography for easier reading. */
+.downloaded-badge {
+  top: 11px;
+  right: 11px;
+  padding: 7px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.library-view.batch-mode .downloaded-badge { right: 45px; }
+.card-title { min-height: 48px; font-size: 15px; line-height: 1.55; }
+.video-card.downloaded-video .card-title { color: #32845c; }
+.detail-collection { font-size: 12px; }
+.detail-title { font-size: 23px; line-height: 1.55; letter-spacing: -.3px; }
+.detail-bvid { font-size: 12px; }
+.detail-panel .open-video { min-height: 44px; font-size: 13px; }
+.detail-management { padding: 17px; }
+.detail-management h3 { font-size: 14px; }
+.detail-management .button { min-height: 43px; font-size: 13px; }
+.detail-management .management-note { font-size: 11px; line-height: 1.75; }
+.detail-section-title { margin-top: 25px; font-size: 13px; letter-spacing: .3px; }
+.detail-fields { grid-template-columns: 118px minmax(0, 1fr); }
+.detail-fields dt, .detail-fields dd { padding: 13px 0; font-size: 14px; line-height: 1.75; }
+.detail-description { max-height: 300px; font-size: 14px; line-height: 1.9; }
+.detail-tag { padding: 6px 9px; font-size: 12px; }
+@media (max-width: 760px) {
+  .card-title { min-height: 44px; font-size: 13px; }
+  .detail-title { font-size: 21px; }
+  .detail-fields { grid-template-columns: 95px minmax(0, 1fr); }
+  .detail-fields dt, .detail-fields dd { font-size: 13px; }
+}
+@media (max-width: 420px) {
+  .card-title { min-height: auto; font-size: 14px; }
+  .detail-panel { padding: 18px 16px 28px; }
+}
 .collection-action-footer .button { min-width: 86px; }
 .collection-action-dialog .button-primary { box-shadow: none; }
 @media (max-width: 760px) {

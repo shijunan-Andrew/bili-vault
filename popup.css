@@ -112,3 +112,20 @@ body { background: #f4f7fa; }
 .library-link { border-color: #ccebf4; color: #007fa9; background: #edf9fc; }
 .library-link:hover { background: #e2f5fa; }
 .progress-spinner { border-top-color: #00a1d6; }
+
+/* 3.4: make the local library the clearest action in the popup. */
+.library-link {
+  min-height: 54px;
+  margin-top: 13px;
+  padding: 13px 16px;
+  border-color: #b9dfc8;
+  border-radius: 12px;
+  color: #267548;
+  background: linear-gradient(135deg, #edf8f0, #e2f2e7);
+  box-shadow: 0 4px 12px #39875a18;
+  font-size: 14px;
+  font-weight: 750;
+}
+.library-link:hover { border-color: #91c9a5; color: #1d6840; background: #d9eddf; }
+.library-link span { font-size: 19px; }
+.library-link:focus-visible { outline: 3px solid #4a9b6838; outline-offset: 2px; }

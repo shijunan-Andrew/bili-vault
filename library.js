@@ -543,6 +543,7 @@ function renderVideos() {
     const card = document.createElement("article");
     card.className = "video-card";
     card.classList.toggle("invalid-video", video.isInvalid);
+    card.classList.toggle("downloaded-video", video.downloaded);
     card.dataset.videoId = video.id;
     card.classList.toggle("selected", selectedVideoIds.has(video.id));
     card.tabIndex = 0;
@@ -642,13 +643,25 @@ function openDetail(video) {
 
 function openDownloadDirectory(video) {
   if (!video.downloaded || !video.downloadDirectoryName) return;
-  const target = new URL(chrome.runtime.getURL("download-folder.html"));
-  target.searchParams.set("directory", video.downloadDirectoryName);
-  target.searchParams.set("bvid", video.bvid || "");
-  target.searchParams.set("aid", video.aid || "");
-  target.searchParams.set("title", video.title || "本地视频目录");
-  const tab = window.open(target.href, "_blank");
-  if (!tab) showToast("浏览器拦截了本地目录页面，请允许本地收藏库打开新标签页。");
+  try {
+    chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", {
+      action: "open-directory",
+      directoryName: video.downloadDirectoryName
+    }, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        showToast("无法启动文件资源管理器。请先运行插件目录中的 install-native-folder-opener.bat 并按提示设置下载目录。");
+        return;
+      }
+      if (!response?.ok) {
+        showToast(`无法打开本地目录：${response?.message || "Windows 辅助程序未能完成请求。"}`);
+        return;
+      }
+      showToast("已在文件资源管理器中打开视频目录。");
+    });
+  } catch (error) {
+    showToast(`无法启动文件资源管理器：${error.message}`);
+  }
 }
 
 function closeDetail() {
