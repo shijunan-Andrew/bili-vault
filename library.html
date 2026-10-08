@@ -14,7 +14,10 @@
         <span class="brand-mark">B</span>
         <span><strong>本地收藏库</strong><small>LOCAL VIDEO LIBRARY</small></span>
       </a>
-      <div class="side-label">我的收藏夹 <span id="collectionTotal">—</span></div>
+      <div class="collection-heading">
+        <div class="side-label">我的收藏夹 <span id="collectionTotal">—</span></div>
+        <button id="createCollection" class="collection-create" type="button"><span aria-hidden="true">＋</span> 新建收藏夹</button>
+      </div>
       <nav id="collectionList" class="collection-list" aria-label="收藏夹"></nav>
       <div class="sidebar-bottom">
         <div class="privacy-note"><span class="lock-icon">▣</span><span>归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
@@ -27,8 +30,6 @@
         <div class="breadcrumb"><span>本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection">全部收藏</strong></div>
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel">尚未选择目录</span></div>
-          <button id="createCollection" class="button button-quiet" type="button">新建收藏夹</button>
-          <button id="addVideo" class="button button-primary" type="button" disabled>添加视频</button>
           <button id="chooseRoot" class="button button-primary"><span aria-hidden="true">＋</span> 选择收藏根目录</button>
         </div>
       </header>
@@ -49,8 +50,24 @@
             <h1 id="pageTitle">全部收藏</h1>
             <p id="resultSummary" class="heading-subtitle"></p>
           </div>
+          <button id="batchManage" class="button button-quiet" type="button" aria-pressed="false">批量管理</button>
+        </div>
+        <div class="library-toolbar">
+          <section id="batchToolbar" class="batch-toolbar" aria-label="批量管理工具" hidden>
+            <div class="batch-selection-tools">
+              <strong id="selectedCount">已选 0 个</strong>
+              <button id="selectVisible" class="text-button" type="button">全选当前结果</button>
+              <button id="exitBatch" class="text-button" type="button">完成</button>
+            </div>
+            <div class="batch-actions">
+              <select id="batchTarget" aria-label="批量移动目标收藏夹"><option value="">移动到收藏夹…</option></select>
+              <button id="moveSelected" class="button button-primary" type="button" disabled>移动</button>
+              <button id="deleteSelected" class="button button-danger" type="button" disabled>删除</button>
+            </div>
+          </section>
           <div class="view-controls">
             <label class="search-box"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索标题、UP 主或 BV 号" autocomplete="off"><kbd>Ctrl K</kbd></label>
+            <button id="addVideo" class="button button-primary" type="button" disabled>添加视频</button>
             <label class="sort-select"><span>排序</span><select id="sortSelect" aria-label="排序方式"><option value="newest">最近收藏</option><option value="oldest">最早收藏</option><option value="title">标题 A–Z</option></select></label>
           </div>
         </div>
