@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f5f7">
+  <title>本地收藏库 · B站收藏信息归档</title>
+  <link rel="stylesheet" href="library.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="本地收藏库首页">
+        <span class="brand-mark">B</span>
+        <span><strong>本地收藏库</strong><small>LOCAL VIDEO LIBRARY</small></span>
+      </a>
+      <div class="side-label">我的收藏夹 <span id="collectionTotal">—</span></div>
+      <nav id="collectionList" class="collection-list" aria-label="收藏夹"></nav>
+      <div class="sidebar-bottom">
+        <div class="privacy-note"><span class="lock-icon">▣</span><span>资料只在本地读取<br>不会上传到网络</span></div>
+        <div class="side-version">B站收藏信息归档</div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="breadcrumb"><span>本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection">全部收藏</strong></div>
+        <div class="top-actions">
+          <div class="root-label"><span class="status-dot"></span><span id="rootLabel">尚未选择目录</span></div>
+          <button id="chooseRoot" class="button button-primary"><span aria-hidden="true">＋</span> 选择收藏根目录</button>
+        </div>
+      </header>
+
+      <section id="welcome" class="welcome-state">
+        <div class="welcome-art" aria-hidden="true"><div class="art-folder"></div><span class="art-star">✦</span><span class="art-play">▶</span></div>
+        <p class="eyebrow">YOUR PERSONAL ARCHIVE</p>
+        <h1>让收藏的视频，<span>一目了然</span></h1>
+        <p class="welcome-copy">首次选择归档根目录后会记住路径；下次打开时自动读取。</p>
+        <button id="welcomeChoose" class="button button-primary button-large">选择本地收藏目录 <span>→</span></button>
+        <p class="welcome-footnote">支持“收藏夹 / 时间文件夹 / 视频信息.txt + 封面.png”结构</p>
+      </section>
+
+      <section id="library" class="library-view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">YOUR COLLECTIONS</p>
+            <h1 id="pageTitle">全部收藏</h1>
+            <p id="resultSummary" class="heading-subtitle"></p>
+          </div>
+          <div class="view-controls">
+            <label class="search-box"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索标题、UP 主或 BV 号" autocomplete="off"><kbd>Ctrl K</kbd></label>
+            <label class="sort-select"><span>排序</span><select id="sortSelect" aria-label="排序方式"><option value="newest">最近收藏</option><option value="oldest">最早收藏</option><option value="title">标题 A–Z</option></select></label>
+          </div>
+        </div>
+        <div id="scanNotice" class="scan-notice" hidden></div>
+        <div id="videoGrid" class="video-grid"></div>
+        <div id="emptySearch" class="empty-search" hidden><div class="empty-search-icon">⌕</div><h2>没有找到相关视频</h2><p>试试其他标题、UP 主名称或 BV 号。</p><button id="clearSearch" class="button button-quiet">清除搜索</button></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="detailBackdrop" class="detail-backdrop" hidden></div>
+  <aside id="detailPanel" class="detail-panel" aria-label="视频详情" aria-hidden="true">
+    <button id="closeDetail" class="close-detail" aria-label="关闭详情">×</button>
+    <div id="detailContent"></div>
+  </aside>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="library.js"></script>
+</body>
+</html>

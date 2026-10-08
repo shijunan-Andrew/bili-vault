@@ -1,0 +1,26 @@
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { width: 340px; margin: 0; color: #25282b; background: #f7f8fa; }
+main { padding: 18px; }
+.brand-row { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.brand-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: #fff; background: #00a1d6; font-size: 22px; font-weight: 800; }
+h1 { margin: 0; font-size: 16px; line-height: 1.3; }
+.subtitle { margin: 4px 0 0; color: #777e86; font-size: 12px; }
+.folder-card, .status-card { padding: 14px; border: 1px solid #e8eaed; border-radius: 12px; background: #fff; }
+.status-card { margin-top: 12px; }
+.section-label { margin-bottom: 8px; color: #6b7178; font-size: 12px; font-weight: 700; }
+.folder-name { margin-bottom: 11px; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+button { width: 100%; min-height: 36px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 650; }
+button:disabled { cursor: wait; opacity: .65; }
+.primary { color: white; background: #00a1d6; }
+.secondary { margin-top: 8px; color: #333; background: #eef1f4; }
+.hint, footer { color: #7c828a; font-size: 11px; line-height: 1.5; }
+.hint { margin: 9px 0 0; }
+.muted { color: #565d65; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.error-block { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+.error-title { color: #b3261e; font-size: 12px; font-weight: 700; }
+.error-block pre { max-height: 110px; margin: 6px 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #62676d; font: 11px/1.45 system-ui, sans-serif; }
+.report-path { color: #6b7178; font-size: 10px; overflow-wrap: anywhere; }
+.library-link { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding: 10px 13px; border: 1px solid #d8eef5; border-radius: 10px; color: #008dbb; background: #f1fbfd; font-size: 12px; font-weight: 650; text-decoration: none; }
+.library-link:hover { background: #e7f8fc; }
+footer { padding: 12px 2px 0; text-align: center; }

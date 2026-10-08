@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "B站收藏信息归档",
+  "version": "1.1.3",
+  "description": "收藏 B 站视频后归档视频信息和封面，并可在本地收藏库中浏览。",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.hdslb.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "B站收藏信息归档",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.bilibili.com/video/*",
+        "https://bilibili.com/video/*",
+        "https://m.bilibili.com/video/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
