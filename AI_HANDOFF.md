@@ -1,14 +1,15 @@
-# AI 项目交接说明：B站收藏信息归档 3.7
+# AI 项目交接说明：B站收藏信息归档 3.8
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\cdx1\b_catch_3.7`
-- 扩展版本：`3.7.0`，Chrome Manifest V3，最低 Chrome 版本 111。
-- `b_catch_3.6` 是 3.7 的来源稳定基线，原目录保持不变。用户此前要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
-- 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_3.8`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`；`cdx1\b_catch_3.8` 是早期草稿，与本目录内容不同）。
+- 扩展版本：`3.8.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- `b_catch_3.7` 是 3.8 的来源稳定基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
+- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.7 → 3.8）ID 就会变，安装原生助手时必须填入新 ID。
 
 ## 功能概览
 
@@ -21,26 +22,28 @@
 ## 目录结构
 
 ```text
-b_catch_3.6/
+b_catch_3.8/
 ├── manifest.json                 # MV3 权限、后台 worker、页面脚本注册
 ├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
 ├── popup.html/js/css              # 插件弹窗、自动归档开关、根目录和导入界面
 ├── library.html/js/css            # 本地收藏库页面
-├── archive-core.js                # 可复用的安全名称、下载目录匹配和状态逻辑
+├── archive-core.js                # 可复用的安全名称、下载目录匹配、下载路径与状态逻辑
 ├── download.html/js/css           # 视频解析和下载界面
-├── download-folder.html/js/css    # 兼容的本地下载目录浏览页面
+├── download-folder.html/js/css    # 兼容的本地下载目录浏览页面（当前无引用）
 ├── native/
-│   └── folder-opener-host.ps1     # Native Messaging 主机脚本
+│   ├── folder-opener-launcher.cs  # 3.8 新增：原生消息宿主启动器源码（编译成 exe）
+│   └── folder-opener-host.ps1     # 原生消息主机工作脚本
 ├── install-native-folder-opener.bat / .ps1
 ├── uninstall-native-folder-opener.ps1
-├── test/stability.test.cjs        # Node 内置测试，无第三方依赖
-├── README.md                      # 面向使用者的安装与功能说明
-└── AI_HANDOFF.md                  # 本文件
+├── test-native-folder-opener.ps1   # 3.8 新增：不依赖 Chrome 的安装自检脚本
+├── test/stability.test.cjs         # Node 内置测试，无第三方依赖
+├── README.md                       # 面向使用者的安装与功能说明
+└── AI_HANDOFF.md                   # 本文件
 ```
 
-3.7 针对下载报告中的 `directory is not defined` 修复了下载目录日志引用：目录句柄保存在 `directoryInfo.directory`，日志不能再使用不存在的局部变量 `directory`。
+3.8 修复了原生目录助手无法启动的问题，详见下文“Native Messaging 原生目录助手”一节。
 
 ## 主要数据流
 
@@ -98,9 +101,20 @@ b_catch_3.6/
 
 下载后写入 `chrome.storage.local.downloadRevision`，收藏库监听此变化并扫描状态；页面聚焦/显示时检查，前台定时扫描间隔为 60 秒。
 
-### 文件资源管理器辅助程序
+### Native Messaging 原生目录助手
 
-详情页通过 `chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", …)` 请求打开下载目录。`install-native-folder-opener.ps1` 会把主机脚本、设置和 Chrome Native Messaging 清单安装到 `%LOCALAPPDATA%\BcaFolderOpener`，并写入当前用户注册表。安装时需要扩展 ID 和下载根目录完整路径。源代码中不预置生成后的清单；卸载由 `uninstall-native-folder-opener.ps1` 完成。Windows PowerShell 5.1 中文编码问题已修复，修改脚本后应重新进行 PowerShell 语法检查。
+详情页通过 `chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", …)` 请求打开下载目录。`install-native-folder-opener.ps1` 会把工作脚本、编译出的宿主启动器、设置和 Chrome 原生消息清单安装到 `%LOCALAPPDATA%\BcaFolderOpener`，并写入 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.bcatch.folder_opener`。安装时可以交互输入，也支持参数 `-ExtensionId`、`-DownloadBasePath`、`-HostRoot`、`-SkipRegistry`（自检与自动化用它把产物写进沙箱目录）。
+
+**两个必须记住的硬约束（3.7 的失效就是它们造成的）：**
+
+1. **Chrome 的原生消息清单只识别 `name`、`description`、`path`、`type`、`allowed_origins`，不解析 `args`。** 3.7 把 PowerShell 的启动参数写进了 `args`，Chrome 忽略该字段后启动了一个没有任何参数的 `powershell.exe`：它把二进制帧当成命令读，协议当场损坏，扩展只能看到 `chrome.runtime.lastError`，于是永远提示“无法启动文件资源管理器”。因此清单的 `path` 必须指向一个不带参数即可运行的可执行文件，现在指向编译产物 `folder-opener-launcher.exe`。**任何后续改动都不要重新引入 `args`**（`test/stability.test.cjs` 里有对应的回归断言）。
+2. **`settings.json` 必须用 `-Encoding UTF8` 读取。** 3.7 的安装脚本以无 BOM 的 UTF-8 写该文件，而工作脚本用 `Get-Content -Raw`（PowerShell 5.1 默认按系统 ANSI 代码页）读取，中文下载路径被解坏，`ConvertFrom-Json` 直接抛出“无法识别的转义序列”，即使修好 `args` 也会继续失败。现在安装脚本写 UTF-8 带 BOM，工作脚本始终显式 `-Encoding UTF8`。所有 `.ps1` 与 `.cs` 源文件本身也必须保存为 **UTF-8 带 BOM**，否则 PowerShell 5.1 解析中文会乱码；写成不带 BOM 后必须补回。
+
+**运行链路**：Chrome 启动 `folder-opener-launcher.exe` → 启动器读取一条带 4 字节长度前缀的请求 → 转发给同目录的 `folder-opener-host.ps1`（`-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`，`CreateNoWindow`，不闪窗）→ 把响应帧原样写回 Chrome。启动器在自身失败时也会回一条 `{"ok":false,"message":…}` 帧，所以扩展能显示真正原因，而不是只有 Chrome 的 `native host has exited`。`sendNativeMessage` 每次调用都会新起一个宿主进程，因此启动器只处理一条消息后退出；若将来改用 `connectNative` 长连接，必须改成循环处理。
+
+**工作脚本协议**：`get-config` 返回 `downloadBasePath` 与 `version`；`resolve-directory` 只校验并返回绝对路径（不打开窗口），供“复制视频目录路径”使用；`open-directory` 校验后调用 `explorer.exe` 并返回 `targetPath`。三者都会校验目录名不含分隔符、目标路径必须仍在配置的下载根目录之内。
+
+**排错顺序**：先运行 `test-native-folder-opener.ps1`（默认不打开资源管理器）。它检查宿主目录四个文件、清单是否含 `args`、`path` 是否指向启动器、注册表项，然后直接按帧协议调用启动器。自检通过说明原生侧没问题，剩下的就是扩展重载或 Chrome 未重启。改脚本后务必重新做 PowerShell 语法检查并重新编译启动器（重跑安装脚本即可）。
 
 ## 页面与消息接口
 
@@ -153,23 +167,27 @@ b_catch_3.6/
 node test/stability.test.cjs
 ```
 
-当前包含 6 项纯逻辑回归检查：收藏夹传递、BV/av 下载目录识别、同收藏夹优先与 3.5 旧目录回退、媒体文件判定、扫描权限不明时保留状态、收藏夹目录名安全处理。无第三方包。
+当前包含 9 项纯逻辑回归检查：收藏夹传递、BV/av 下载目录识别、同收藏夹优先与 3.5 旧目录回退、媒体文件判定、扫描权限不明时保留状态、收藏夹目录名安全处理、下载相对路径拼接、原生消息清单不得含 `args`、工作脚本必须以 UTF-8 读取设置。无第三方包。
 
 每次改动还应执行：
 
 1. 对所有 `.js` 执行 `node --check`。
 2. 解析 `manifest.json` 并确认脚本、弹窗等本地引用存在。
 3. 检查每个 HTML 的本地 JS/CSS 引用存在，确认 `library.html` 和 `download.html` 在业务脚本之前加载 `archive-core.js`。
-4. 若改动 PowerShell，使用 PowerShell Parser 解析所有 `.ps1`，不要仅靠运行安装脚本验证。
-5. 有条件时在 Chrome 加载扩展，登录 B 站验证收藏、导入、下载、暂停/取消、移动/删除和徽标状态。Node 检查不能替代真实 B 站登录/API 测试。
+4. 若改动 PowerShell，使用 PowerShell Parser 解析所有 `.ps1`，不要仅靠运行安装脚本验证。注意本机执行策略禁止直接运行 `.ps1`，要用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …`。
+5. 读取 `manifest.json`、`settings.json` 一类 UTF-8 文件时显式指定编码，PowerShell 5.1 的 `Get-Content` 默认按 ANSI 读取，中文会乱码。
+6. 改动原生助手时，重新运行安装脚本（沙箱验证可加 `-SkipRegistry -HostRoot <临时目录>`）并执行 `test-native-folder-opener.ps1`，它会真正按帧协议调用编译出的启动器。
+7. 有条件时在 Chrome 加载扩展，登录 B 站验证收藏、导入、下载、暂停/取消、移动/删除和徽标状态。Node 检查不能替代真实 B 站登录/API 测试。
 
 ## 已知限制与历史背景
 
 - B 站收藏弹窗、收藏夹 API、播放流权限和失效视频恢复来源可能变化；发生 API 变化时优先保留现有部分结果和错误报告，不要因单条失败中断整个批次。
 - 失效视频只有在 B 站的 APP 收藏、稍后再看、观看历史或其他资料源中仍有记录时才可能恢复；无法找回时缺失字段用“未知”。
-- Native Messaging 仅用于 Windows 资源管理器打开目录。没有安装或设置不正确时，网页不能直接启动 Explorer，应保留“查看路径/复制路径”之类的退路提示。
+- Native Messaging 仅用于 Windows 资源管理器打开目录。它的清单不允许 `args`，`path` 必须是无参数可执行文件；没有安装或设置不正确时，网页不能直接启动 Explorer，详情页必须保留“复制视频目录路径”这类退路提示。
 - 用户曾报告收藏成功但本地归档失败，并看到 B 站收藏弹窗提示 `The next() called multiple times`。另一次控制台网络错误指向 Kaspersky 浏览器组件的 `gc.kis.v2.scr.kaspersky-labs.com`。后者不是本项目域名；判断归因前需在禁用相关第三方扩展的环境中复现。不要把这类外部错误直接归为本扩展故障。
-- 3.6 完成过纯逻辑回归和静态语法/文件引用检查；本次 3.7 下载修复需要在 Chrome/B 站实际触发一次验证，因为历史报告表明错误发生于目录创建流程的运行时。
+- 3.8 修复的两个原生助手缺陷都是运行时问题，Node 静态检查发现不了：一个是 Chrome 静默忽略清单 `args`，一个是 PowerShell 5.1 的默认 ANSI 读取。改动这一块必须跑 `test-native-folder-opener.ps1`，不能只做语法检查。
+- 待确认（尚未定性）：`content.js` 在 MV3 隔离世界中读取页面变量 `window.__INITIAL_STATE__`，而清单未声明 `world: "MAIN"`，该变量很可能始终读不到，元数据实际走 DOM/meta 回退，自动归档的“分区/视频时长/视频发布时间/标签”容易落成“未知”。需要用一份真实的 `视频信息.txt` 核对后再决定是否改用其他采集方式。
+- 3.7 的下载目录日志修复仍建议在 Chrome/B 站实际触发一次验证，因为历史报告表明错误发生在目录创建的运行时路径。
 
 ## 修改原则
 
@@ -177,4 +195,5 @@ node test/stability.test.cjs
 2. 先读本文件、`README.md`、相关页面和消息两端，不要只改单侧响应协议。
 3. 保持用户本地文件格式向后兼容，尤其是时间目录、`视频信息.txt` 字段名、`000视频下载`/`001错误报告` 和历史 `未分类收藏` 下载。
 4. 目录删除、移动、覆盖属于数据操作；保持显式确认，复制失败时回滚新建目录，不删除未被明确选中的下载文件。
-5. 完成后报告改动内容、检查方式和未验证的真实环境行为。
+5. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
+6. 完成后报告改动内容、检查方式和未验证的真实环境行为。

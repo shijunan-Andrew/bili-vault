@@ -300,6 +300,10 @@ body { background: #f5f3ef; }
 .detail-profile-link:hover { background: #e1f5fb; }
 .detail-management > .download-local { color: #fff; border-color: #146a45; background: #16784e; box-shadow: 0 5px 12px #16784e24; }
 .detail-management > .download-local:hover:not(:disabled) { border-color: #105a39; background: #105f3d; }
+/* 3.8: copy-path fallback and native-helper diagnostics inside the detail panel. */
+.detail-management > .copy-download-path { width: 100%; margin: -8px 0 12px; }
+.download-path-note { margin: 0 0 17px; padding: 10px 12px; border: 1px solid #dfe9e4; border-radius: 9px; color: #347757; background: #f3faf6; font-size: 11px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.download-path-note.error { border-color: #f0d5d1; color: #a63a2e; background: #fdf4f3; }
 @media (max-width: 760px) {
   .collection-action-dialog { padding: 21px 17px 15px; }
   .collection-action-footer { flex-wrap: wrap; }

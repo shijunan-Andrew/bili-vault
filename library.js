@@ -642,7 +642,7 @@ function openDetail(video) {
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>打开本地视频目录</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>打开本地视频目录</button><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>复制视频目录路径</button><p class="download-path-note" role="status" hidden></p><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -654,6 +654,7 @@ function openDetail(video) {
   moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
   detailContent.querySelector(".download-local").addEventListener("click", () => openDownloadInterface([video]));
   detailContent.querySelector(".open-download-directory").addEventListener("click", () => openDownloadDirectory(video));
+  detailContent.querySelector(".copy-download-path").addEventListener("click", () => copyDownloadPath(video));
   detailContent.querySelector(".delete-local").addEventListener("click", () => askToDeleteVideo(video));
   detailPanel.classList.add("open");
   detailPanel.setAttribute("aria-hidden", "false");
@@ -662,27 +663,99 @@ function openDetail(video) {
   closeDetailButton.focus();
 }
 
-function openDownloadDirectory(video) {
-  if (!video.hasDownloadFiles || !video.downloadDirectoryName) return;
+const NATIVE_HOST_NAME = "com.bcatch.folder_opener";
+
+// 原生助手（宿主启动器）以 Native Messaging 帧协议应答。失败时它会回一条
+// { ok: false, message } 的响应，这里把 message 原样带出去，避免只看到
+// Chrome 的 “native host has exited” 而不知道真正原因。
+function nativeHostRequest(message) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback) => { if (!settled) { settled = true; callback(); } };
+    try {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, (response) => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          finish(() => reject(new Error(runtimeError.message || "Chrome 无法启动 Windows 原生目录助手。")));
+          return;
+        }
+        if (!response) { finish(() => reject(new Error("Windows 原生目录助手没有返回结果。"))); return; }
+        if (!response.ok) { finish(() => reject(new Error(response.message || "Windows 原生目录助手未能完成请求。"))); return; }
+        finish(() => resolve(response));
+      });
+    } catch (error) {
+      finish(() => reject(error));
+    }
+  });
+}
+
+function detailVideo() {
+  return allVideos().find((video) => video.id === detailContent.dataset.videoId) || null;
+}
+
+function setDownloadPathNote(text, isError = false) {
+  const note = detailContent.querySelector(".download-path-note");
+  if (!note) return;
+  note.hidden = !text;
+  note.textContent = text || "";
+  note.classList.toggle("error", Boolean(text) && isError);
+}
+
+function downloadPathParts(video) {
+  return {
+    collection: String(video?.downloadCollectionName || ""),
+    directory: String(video?.downloadDirectoryName || "")
+  };
+}
+
+// 优先向原生助手要真实绝对路径；助手不可用时退回相对路径，
+// 这样即使没装助手也能手动在资源管理器里打开。
+async function resolveDownloadPath(video) {
+  const { collection, directory } = downloadPathParts(video);
+  if (!directory) return { path: "", source: "none" };
   try {
-    chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", {
-      action: "open-directory",
-      collectionName: video.downloadCollectionName,
-      directoryName: video.downloadDirectoryName
-    }, (response) => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        showToast("无法启动文件资源管理器。请先运行插件目录中的 install-native-folder-opener.bat 并按提示设置下载目录。");
-        return;
-      }
-      if (!response?.ok) {
-        showToast(`无法打开本地目录：${response?.message || "Windows 辅助程序未能完成请求。"}`);
-        return;
-      }
-      showToast("已在文件资源管理器中打开视频目录。");
-    });
+    const response = await nativeHostRequest({ action: "resolve-directory", collectionName: collection, directoryName: directory });
+    if (response.targetPath) return { path: response.targetPath, source: "host" };
+  } catch (_) {}
+  return { path: BcaArchiveCore.downloadPathLabel(collection, directory), source: "relative" };
+}
+
+async function openDownloadDirectory(video) {
+  if (!video.hasDownloadFiles || !video.downloadDirectoryName) return;
+  const { collection, directory } = downloadPathParts(video);
+  setDownloadPathNote("正在连接 Windows 原生目录助手…");
+  try {
+    const response = await nativeHostRequest({ action: "open-directory", collectionName: collection, directoryName: directory });
+    setDownloadPathNote(response.targetPath ? `已打开：${response.targetPath}` : "");
+    showToast("已在文件资源管理器中打开视频目录。");
   } catch (error) {
-    showToast(`无法启动文件资源管理器：${error.message}`);
+    const fallback = await resolveDownloadPath(video).catch(() => ({ path: "", source: "none" }));
+    const lines = [`无法打开本地视频目录：${error.message}`];
+    if (fallback.path) {
+      lines.push(fallback.source === "host"
+        ? `视频目录：${fallback.path}`
+        : `视频目录（相对下载根目录）：${BcaArchiveCore.joinDownloadPath("下载根目录", collection, directory)}`);
+    }
+    lines.push("若尚未安装原生助手：运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。");
+    lines.push("可以点击上面的“复制视频目录路径”手动在资源管理器地址栏粘贴打开。");
+    setDownloadPathNote(lines.join("\n"), true);
+    showToast("无法打开本地视频目录，详情见视频详情页。");
+  }
+}
+
+async function copyDownloadPath(video) {
+  if (!video.downloadDirectoryName) { showToast("这条记录没有可用的下载目录信息。"); return; }
+  const resolved = await resolveDownloadPath(video);
+  if (!resolved.path) { showToast("这条记录没有可用的下载目录信息。"); return; }
+  try {
+    await navigator.clipboard.writeText(resolved.path);
+    setDownloadPathNote(resolved.source === "host"
+      ? `已复制完整路径：${resolved.path}`
+      : `已复制相对路径：${resolved.path}（完整路径 = 下载根目录\\${resolved.path}）`);
+    showToast("已复制视频目录路径。");
+  } catch (error) {
+    setDownloadPathNote(`复制失败，请手动记录：${resolved.path}`, true);
+    showToast(`复制路径失败：${error?.message || "浏览器拒绝了剪贴板访问"}`);
   }
 }
 
@@ -1289,8 +1362,12 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = "已读
 function syncDetailDownloadAction() {
   const button = detailContent.querySelector(".open-download-directory");
   if (!button) return;
-  const video = allVideos().find((item) => item.id === detailContent.dataset.videoId);
-  button.hidden = !video?.hasDownloadFiles;
+  const video = detailVideo();
+  const hasDownloadFiles = Boolean(video?.hasDownloadFiles);
+  button.hidden = !hasDownloadFiles;
+  const copyButton = detailContent.querySelector(".copy-download-path");
+  if (copyButton) copyButton.hidden = !hasDownloadFiles;
+  if (!hasDownloadFiles) setDownloadPathNote("");
 }
 
 async function refreshDownloadStatuses() {

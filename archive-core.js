@@ -69,6 +69,23 @@
     return MEDIA_EXTENSIONS.has(extension);
   }
 
+  function normalizePathSegment(value) {
+    return String(value || "").trim().replace(/^[\\/]+/, "").replace(/[\\/]+$/, "");
+  }
+
+  // 下载目录相对路径：“收藏夹\视频目录”。用于原生助手不可用时的手动打开提示。
+  function downloadPathLabel(collectionName, directoryName) {
+    return [normalizePathSegment(collectionName), normalizePathSegment(directoryName)].filter(Boolean).join("\\");
+  }
+
+  function joinDownloadPath(basePath, collectionName, directoryName) {
+    const base = String(basePath || "").trim().replace(/[\\/]+$/, "");
+    const label = downloadPathLabel(collectionName, directoryName);
+    if (!base) return label;
+    if (!label) return base;
+    return `${base}\\${label}`;
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     withSourceCollection,
@@ -76,7 +93,9 @@
     downloadIndexKey,
     findDownloadMatch,
     downloadStateFromIndex,
-    isMediaFileName
+    isMediaFileName,
+    downloadPathLabel,
+    joinDownloadPath
   });
   global.BcaArchiveCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
