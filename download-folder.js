@@ -2,6 +2,7 @@ const DB_NAME = "bili-fav-archiver";
 const DB_STORE = "settings";
 const params = new URLSearchParams(location.search);
 const directoryName = params.get("directory") || "";
+const collectionName = params.get("collection") || "";
 const $ = (id) => document.getElementById(id);
 const videoTitle = $("videoTitle");
 const folderPath = $("folderPath");
@@ -127,15 +128,16 @@ async function loadDirectory(requestPermission = false) {
   grantAccess.hidden = true;
   try {
     if (!directoryName) throw new Error("缺少视频目录名称。请从本地收藏库的视频详情页打开此页面。");
-    const parent = await getParentFolder();
-    let permission = await parent.queryPermission({ mode: "read" });
-    if (permission !== "granted" && requestPermission) permission = await parent.requestPermission({ mode: "read" });
+    const base = await getParentFolder();
+    let permission = await base.queryPermission({ mode: "read" });
+    if (permission !== "granted" && requestPermission) permission = await base.requestPermission({ mode: "read" });
     if (permission !== "granted") {
       grantAccess.hidden = false;
       throw new Error("需要授权读取本地下载目录。点击上方按钮后按浏览器提示继续。");
     }
+    const parent = collectionName ? await base.getDirectoryHandle(collectionName) : base;
     const directory = await parent.getDirectoryHandle(directoryName);
-    folderPath.textContent = `${parent.name} / ${directory.name}`;
+    folderPath.textContent = `${base.name}${collectionName ? ` / ${collectionName}` : ""} / ${directory.name}`;
     renderFiles(await collectFiles(directory));
     // 通知仍打开的收藏库页面重新核对徽标状态。
     await chrome.storage.local.set({ downloadRevision: crypto.randomUUID() });

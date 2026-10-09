@@ -28,6 +28,8 @@ const closeDetailButton = document.getElementById("closeDetail");
 const confirmBackdrop = document.getElementById("confirmBackdrop");
 const confirmTitle = document.getElementById("confirmTitle");
 const confirmMessage = document.getElementById("confirmMessage");
+const deleteDownloadsOption = document.getElementById("deleteDownloadsOption");
+const deleteAssociatedDownloads = document.getElementById("deleteAssociatedDownloads");
 const cancelDeleteButton = document.getElementById("cancelDelete");
 const confirmDeleteButton = document.getElementById("confirmDelete");
 const toast = document.getElementById("toast");
@@ -170,21 +172,19 @@ async function readCover(fileHandle) {
 
 function field(info, key) { return info.fields[key] || ""; }
 
-function downloadDirectoryIdentifiers(name) {
-  const identifiers = new Set();
-  const bvid = String(name || "").match(/(?:^| - )(BV[0-9A-Za-z]{10})(?: \(\d+\))?$/);
-  const aid = String(name || "").match(/(?:^| - )av(\d+)(?: \(\d+\))?$/i);
-  if (bvid) identifiers.add(`bvid:${bvid[1]}`);
-  if (aid) identifiers.add(`aid:${aid[1]}`);
-  return identifiers;
-}
-
-async function directoryContainsFiles(directory) {
+async function inspectDownloadDirectory(directory) {
+  const result = { hasFiles: false, hasMedia: false };
   for await (const entry of directory.values()) {
-    if (entry.kind === "file") return true;
-    if (entry.kind === "directory" && await directoryContainsFiles(entry)) return true;
+    if (entry.kind === "file") {
+      result.hasFiles = true;
+      result.hasMedia ||= BcaArchiveCore.isMediaFileName(entry.name);
+    } else if (entry.kind === "directory") {
+      const child = await inspectDownloadDirectory(entry);
+      result.hasFiles ||= child.hasFiles;
+      result.hasMedia ||= child.hasMedia;
+    }
   }
-  return false;
+  return result;
 }
 
 async function getDownloadParentHandle(archiveRoot) {
@@ -197,6 +197,11 @@ async function getDownloadParentHandle(archiveRoot) {
     if (error?.name === "NotFoundError") return null;
     throw error;
   }
+}
+
+function keepBestDownloadMatch(index, key, candidate) {
+  const current = index.get(key);
+  if (!current || (!current.hasMedia && candidate.hasMedia) || (!current.hasFiles && candidate.hasFiles)) index.set(key, candidate);
 }
 
 async function scanDownloadedDirectories(archiveRoot) {
@@ -212,11 +217,14 @@ async function scanDownloadedDirectories(archiveRoot) {
       if (collection.kind !== "directory") continue;
       for await (const entry of collection.values()) {
         if (entry.kind !== "directory") continue;
-        const identifiers = downloadDirectoryIdentifiers(entry.name);
-        if (!identifiers.size || !await directoryContainsFiles(entry)) continue;
+        const identifiers = BcaArchiveCore.identifiersFromDirectoryName(entry.name);
+        const contents = await inspectDownloadDirectory(entry);
+        if (!identifiers.size || !contents.hasFiles) continue;
         for (const identifier of identifiers) {
-          const match = { name: entry.name, collectionName: collection.name, handle: entry };
-          index.set(`${collection.name}\u0000${identifier}`, match);
+          const match = { name: entry.name, collectionName: collection.name, handle: entry, hasFiles: contents.hasFiles, hasMedia: contents.hasMedia };
+          keepBestDownloadMatch(index, BcaArchiveCore.downloadIndexKey(collection.name, identifier), match);
+          // Older 3.5 downloads lost their source collection and were written under this folder.
+          if (collection.name === "未分类收藏") keepBestDownloadMatch(index, `legacy\u0000${identifier}`, match);
         }
       }
     }
@@ -225,17 +233,14 @@ async function scanDownloadedDirectories(archiveRoot) {
 }
 
 function matchDownloadedDirectory(video, index) {
-  for (const identifier of videoIdentifierKeys(video)) {
-    const scopedMatch = index.get(`${video.collection || ""}\u0000${identifier}`);
-    if (scopedMatch) return scopedMatch;
-  }
-  return null;
+  return BcaArchiveCore.findDownloadMatch(video.collection || "", videoIdentifierKeys(video), index);
 }
 
-async function scanRoot(handle) {
+async function scanRoot(handle, preserveDownloadStatuses = true) {
   const scanned = [];
   const issues = [];
   const downloadIndex = await scanDownloadedDirectories(handle);
+  const previousVideos = new Map(preserveDownloadStatuses ? allVideos().map((video) => [video.id, video]) : []);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
   for await (const collectionEntry of handle.values()) {
     if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(collectionEntry.name)) continue;
@@ -256,19 +261,22 @@ async function scanRoot(handle) {
         const date = field(info, "视频收藏时间") || recordEntry.name;
         const bvid = field(info, "BV号");
         const aid = field(info, "av号");
-        const download = downloadIndex ? matchDownloadedDirectory({ bvid, aid }, downloadIndex) : null;
+        const id = `${collectionEntry.name}/${recordEntry.name}`;
+        const previous = previousVideos.get(id);
+        const downloadState = BcaArchiveCore.downloadStateFromIndex(collectionEntry.name, videoIdentifierKeys({ bvid, aid }), downloadIndex, previous);
         videos.push({
-          id: `${collectionEntry.name}/${recordEntry.name}`,
+          id,
           collection: collectionEntry.name,
           directory: recordEntry.name,
           title,
           url: /^https?:\/\//i.test(url) ? url : "",
           bvid,
           aid,
-          downloaded: Boolean(download),
-          downloadDirectoryName: download?.name || "",
-          downloadCollectionName: download?.collectionName || "",
-          downloadDirectoryHandle: download?.handle || null,
+          downloaded: downloadState.downloaded,
+          hasDownloadFiles: downloadState.hasFiles,
+          downloadDirectoryName: downloadState.name,
+          downloadCollectionName: downloadState.collectionName,
+          downloadDirectoryHandle: downloadState.handle,
           isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
           upName: field(info, "UP主昵称"),
           upMid: field(info, "UP主UID"),
@@ -603,10 +611,19 @@ function openDownloadInterface(videos) {
     title: video.title || "未知", bvid: video.bvid || "", aid: video.aid || "",
     url: video.url || "", collection: video.collection || ""
   }));
-  const target = new URL(chrome.runtime.getURL("download.html"));
-  target.searchParams.set("items", JSON.stringify(items));
-  const tab = window.open(target.href, "_blank");
-  if (!tab) showToast("浏览器拦截了下载页面，请允许本地收藏库打开新标签页。");
+  const tab = window.open("about:blank", "_blank");
+  if (!tab) { showToast("浏览器拦截了下载页面，请允许本地收藏库打开新标签页。"); return; }
+  const queueId = crypto.randomUUID();
+  const storageKey = `bcaDownloadQueue:${queueId}`;
+  chrome.storage.session.set({ [storageKey]: items }).then(() => {
+    if (tab.closed) return chrome.storage.session.remove(storageKey);
+    const target = new URL(chrome.runtime.getURL("download.html"));
+    target.searchParams.set("queueId", queueId);
+    tab.location.href = target.href;
+  }).catch((error) => {
+    try { tab.close(); } catch (_) {}
+    showToast(`无法传递下载队列：${error?.message || "插件临时存储不可用"}`);
+  });
 }
 
 function openDetail(video) {
@@ -625,7 +642,7 @@ function openDetail(video) {
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.downloaded ? "" : " hidden"}>打开本地视频目录</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>打开本地视频目录</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -646,7 +663,7 @@ function openDetail(video) {
 }
 
 function openDownloadDirectory(video) {
-  if (!video.downloaded || !video.downloadDirectoryName) return;
+  if (!video.hasDownloadFiles || !video.downloadDirectoryName) return;
   try {
     chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", {
       action: "open-directory",
@@ -684,6 +701,8 @@ function askToDeleteVideo(video) {
   confirmTitle.textContent = "删除本地归档？";
   confirmMessage.textContent = `将删除本地目录“${video.collection}/${video.directory}”及其中的封面和视频信息。B 站账户里的收藏不会改变。`;
   confirmDeleteButton.textContent = "删除本地文件";
+  deleteDownloadsOption.hidden = !video.hasDownloadFiles;
+  deleteAssociatedDownloads.checked = false;
   confirmBackdrop.hidden = false;
   confirmDeleteButton.focus();
 }
@@ -694,6 +713,8 @@ function askToDeleteCollection(collection) {
   confirmTitle.textContent = "删除整个本地收藏夹？";
   confirmMessage.textContent = `将永久删除本地收藏夹“${collection.name}”及其全部文件（当前识别到 ${collection.videos.length} 个视频）。此操作只影响本地归档，不会更改 B 站账户中的收藏。`;
   confirmDeleteButton.textContent = "删除收藏夹";
+  deleteDownloadsOption.hidden = !collection.videos.some((video) => video.hasDownloadFiles);
+  deleteAssociatedDownloads.checked = false;
   confirmBackdrop.hidden = false;
   confirmDeleteButton.focus();
 }
@@ -704,6 +725,8 @@ function askToDeleteBatch(videos) {
   confirmTitle.textContent = "删除选中的本地归档？";
   confirmMessage.textContent = `将永久删除选中的 ${videos.length} 个视频目录及其中的封面和视频信息。此操作只影响本地文件，不会更改 B 站账户中的收藏。`;
   confirmDeleteButton.textContent = `删除 ${videos.length} 个视频`;
+  deleteDownloadsOption.hidden = !videos.some((video) => video.hasDownloadFiles);
+  deleteAssociatedDownloads.checked = false;
   confirmBackdrop.hidden = false;
   confirmDeleteButton.focus();
 }
@@ -711,6 +734,8 @@ function askToDeleteBatch(videos) {
 function closeDeleteConfirmation() {
   if (deleteInProgress) return;
   confirmBackdrop.hidden = true;
+  deleteDownloadsOption.hidden = true;
+  deleteAssociatedDownloads.checked = false;
   pendingDeleteAction = null;
   confirmTitle.textContent = "删除本地归档？";
   confirmDeleteButton.textContent = "删除本地文件";
@@ -792,6 +817,99 @@ async function removeMovedSource(video) {
   await sourceCollection.removeEntry(video.directory, { recursive: true });
 }
 
+async function getWritableDownloadParent() {
+  const mode = await readSavedSetting("downloadFolderMode");
+  const savedCustom = await readSavedSetting("downloadFolder");
+  const isCustom = mode === "custom" || (!mode && Boolean(savedCustom));
+  let parent;
+  if (isCustom) {
+    if (!savedCustom) throw new Error("自选下载目录设置已丢失，请先在下载页重新选择目录。");
+    parent = savedCustom;
+  } else {
+    try { parent = await rootHandle.getDirectoryHandle("000视频下载"); }
+    catch (error) { if (error?.name === "NotFoundError") return null; throw error; }
+  }
+  let permission = await parent.queryPermission({ mode: "readwrite" });
+  if (permission !== "granted") permission = await parent.requestPermission({ mode: "readwrite" });
+  if (permission !== "granted") throw new Error("没有获得下载目录写入权限；收藏视频已保留，下载文件未整理。");
+  return parent;
+}
+
+async function listVideoDownloadDirectories(downloadParent, video) {
+  if (!downloadParent) return [];
+  const wanted = videoIdentifierKeys(video);
+  if (!wanted.size) return [];
+  const collectionNames = [...new Set([video.collection, "未分类收藏"].filter(Boolean))];
+  const matches = [];
+  for (const collectionName of collectionNames) {
+    let collectionHandle;
+    try { collectionHandle = await downloadParent.getDirectoryHandle(collectionName); }
+    catch (error) { if (error?.name === "NotFoundError") continue; throw error; }
+    for await (const entry of collectionHandle.values()) {
+      if (entry.kind !== "directory") continue;
+      const identifiers = BcaArchiveCore.identifiersFromDirectoryName(entry.name);
+      if (!identifiersOverlap(wanted, identifiers)) continue;
+      const contents = await inspectDownloadDirectory(entry);
+      if (contents.hasFiles) matches.push({ collectionName, collectionHandle, directory: entry, hasMedia: contents.hasMedia });
+    }
+  }
+  return matches;
+}
+
+async function copyDownloadDirectories(downloadParent, video, targetNames) {
+  const sources = await listVideoDownloadDirectories(downloadParent, video);
+  if (!sources.length) return { sources, created: [] };
+  const wanted = videoIdentifierKeys(video);
+  const created = [];
+  try {
+    for (const targetName of targetNames) {
+      if (targetName === video.collection) continue;
+      const targetCollection = await downloadParent.getDirectoryHandle(targetName, { create: true });
+      let alreadyPresent = false;
+      for await (const entry of targetCollection.values()) {
+        if (entry.kind !== "directory") continue;
+        if (identifiersOverlap(wanted, BcaArchiveCore.identifiersFromDirectoryName(entry.name)) && (await inspectDownloadDirectory(entry)).hasFiles) {
+          alreadyPresent = true;
+          break;
+        }
+      }
+      if (alreadyPresent) continue;
+      const source = sources.find((item) => item.collectionName !== targetName) || sources[0];
+      const targetNameOnDisk = await uniqueRecordFolderName(targetCollection, source.directory.name);
+      const targetDirectory = await targetCollection.getDirectoryHandle(targetNameOnDisk, { create: true });
+      try { await copyDirectoryContents(source.directory, targetDirectory); }
+      catch (error) {
+        await targetCollection.removeEntry(targetNameOnDisk, { recursive: true }).catch(() => {});
+        throw error;
+      }
+      created.push({ collection: targetCollection, name: targetNameOnDisk });
+    }
+    return { sources, created };
+  } catch (error) {
+    for (const entry of created.reverse()) await entry.collection.removeEntry(entry.name, { recursive: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function removeVideoDownloadDirectories(downloadParent, video) {
+  const matches = await listVideoDownloadDirectories(downloadParent, video);
+  const failures = [];
+  for (const match of matches) {
+    try { await match.collectionHandle.removeEntry(match.directory.name, { recursive: true }); }
+    catch (error) { failures.push(`${match.collectionName}/${match.directory.name}：${error.message}`); }
+  }
+  return failures;
+}
+
+async function removeCollectionDownloadDirectory(downloadParent, collectionName) {
+  if (!downloadParent) return [];
+  try { await downloadParent.removeEntry(collectionName, { recursive: true }); return []; }
+  catch (error) {
+    if (error?.name === "NotFoundError") return [];
+    return [`${collectionName}：${error.message}`];
+  }
+}
+
 function collectionAlreadyHasVideo(targetName, video) {
   const target = collections.find((collection) => collection.name === targetName);
   if (!target) return false;
@@ -799,7 +917,7 @@ function collectionAlreadyHasVideo(targetName, video) {
   return target.videos.some((existing) => existing.id !== video.id && identifiersOverlap(videoIdentifierKeys(existing), wanted));
 }
 
-async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null) {
+async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null, downloadParent = null) {
   const targets = [...new Set(targetNames)].filter((name) => collections.some((collection) => collection.name === name));
   const copyTargets = targets.filter((name) => name !== video.collection);
   if (!copyTargets.length) return { moved: false, alreadyInTargets: true };
@@ -812,14 +930,17 @@ async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null
   if (!missingTargets.length) return { moved: false, duplicate: true, duplicateTargets };
 
   const created = [];
+  let downloadTransfer = { sources: [], created: [] };
   try {
     for (const targetName of missingTargets) {
       const result = await copyVideoRecord(video, targetName);
       created.push({ name: targetName, ...result });
       if (duplicateSets?.has(targetName)) wantedKeys.forEach((key) => duplicateSets.get(targetName).add(key));
     }
+    downloadTransfer = await copyDownloadDirectories(downloadParent, video, targets);
     if (!targets.includes(video.collection)) await removeMovedSource(video);
   } catch (error) {
+    for (const entry of downloadTransfer.created.reverse()) await entry.collection.removeEntry(entry.name, { recursive: true }).catch(() => {});
     for (const entry of created.reverse()) {
       await entry.targetCollection.removeEntry(entry.targetRecordName, { recursive: true }).catch(() => {});
       if (duplicateSets?.has(entry.name)) {
@@ -829,7 +950,14 @@ async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null
     }
     throw error;
   }
-  return { moved: !targets.includes(video.collection), copied: missingTargets.length, duplicateTargets };
+  let downloadCleanupFailures = [];
+  if (!targets.includes(video.collection)) {
+    for (const source of downloadTransfer.sources) {
+      try { await source.collectionHandle.removeEntry(source.directory.name, { recursive: true }); }
+      catch (error) { downloadCleanupFailures.push(`${source.collectionName}/${source.directory.name}：${error.message}`); }
+    }
+  }
+  return { moved: !targets.includes(video.collection), copied: missingTargets.length, duplicateTargets, downloadCleanupFailures };
 }
 
 function selectedActionTargetNames() {
@@ -905,6 +1033,7 @@ async function confirmCollectionAction() {
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const downloadParent = action.videos.some((video) => video.hasDownloadFiles) ? await getWritableDownloadParent() : null;
     const duplicateSets = new Map(targetNames.map((name) => [
       name,
       new Set(allVideos().filter((video) => video.collection === name).flatMap((video) => Array.from(videoIdentifierKeys(video))))
@@ -913,12 +1042,14 @@ async function confirmCollectionAction() {
     let copied = 0;
     let duplicates = 0;
     let alreadyThere = 0;
+    const downloadCleanupWarnings = [];
     const failures = [];
     const remainingIds = new Set();
     for (const video of action.videos) {
       try {
-        const result = await moveVideoRecordToTargets(video, targetNames, duplicateSets);
+        const result = await moveVideoRecordToTargets(video, targetNames, duplicateSets, downloadParent);
         duplicates += result.duplicateTargets?.length || 0;
+        downloadCleanupWarnings.push(...(result.downloadCleanupFailures || []));
         if (result.duplicate) remainingIds.add(video.id);
         else if (result.alreadyInTargets) { alreadyThere += 1; remainingIds.add(video.id); }
         else if (result.moved) moved += 1;
@@ -944,6 +1075,7 @@ async function confirmCollectionAction() {
     if (copied) messages.push(`已复制 ${copied} 个视频`);
     if (duplicates) messages.push(`重复项 ${duplicates} 个，已跳过`);
     if (alreadyThere) messages.push(`${alreadyThere} 个视频已在所选收藏夹中`);
+    if (downloadCleanupWarnings.length) messages.push(`下载文件已复制，但有 ${downloadCleanupWarnings.length} 个旧目录未能清理`);
     if (failures.length) messages.push(`${failures.length} 个失败，仍保留选中：${failures[0]}`);
     showToast(messages.join("；") || "没有需要整理的视频。原视频已保留。");
   } catch (error) {
@@ -969,10 +1101,17 @@ async function confirmPendingDelete() {
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const deleteDownloads = deleteAssociatedDownloads.checked;
+    const downloadParent = deleteDownloads ? await getWritableDownloadParent() : null;
+    const downloadCleanupFailures = [];
     let batchResult = null;
     if (action.type === "collection") {
       await rootHandle.removeEntry(action.collection.name, { recursive: true });
       if (selectedCollection === action.collection.name) selectedCollection = "*";
+      if (deleteDownloads && downloadParent) {
+        downloadCleanupFailures.push(...await removeCollectionDownloadDirectory(downloadParent, action.collection.name));
+        for (const video of action.collection.videos) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
+      }
     } else if (action.type === "batch") {
       let deleted = 0;
       const failures = [];
@@ -980,6 +1119,7 @@ async function confirmPendingDelete() {
         try {
           const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
           await collectionHandle.removeEntry(video.directory, { recursive: true });
+          if (deleteDownloads && downloadParent) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
           selectedVideoIds.delete(video.id);
           deleted += 1;
         } catch (error) {
@@ -991,20 +1131,21 @@ async function confirmPendingDelete() {
       const video = action.video;
       const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
       await collectionHandle.removeEntry(video.directory, { recursive: true });
+      if (deleteDownloads && downloadParent) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
     }
     deleteInProgress = false;
     closeDeleteConfirmation();
     closeDetail();
     await displayRoot(rootHandle, selectedCollection);
     if (action.type === "collection") {
-      showToast(`已删除本地收藏夹“${action.collection.name}”`);
+      showToast(`已删除本地收藏夹“${action.collection.name}”${downloadCleanupFailures.length ? `；${downloadCleanupFailures.length} 个下载目录未能删除` : ""}`);
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       showToast(batchResult.failures.length
         ? `已删除 ${batchResult.deleted} 个，${batchResult.failures.length} 个失败并保留选中。${batchResult.failures[0]}`
-        : `已删除 ${batchResult.deleted} 个本地视频`);
+        : `已删除 ${batchResult.deleted} 个本地视频${downloadCleanupFailures.length ? `；${downloadCleanupFailures.length} 个下载目录未能删除` : ""}`);
     } else {
-      showToast("已删除本地归档");
+      showToast(downloadCleanupFailures.length ? `已删除本地归档；${downloadCleanupFailures.length} 个下载目录未能删除` : "已删除本地归档");
     }
   } catch (error) {
     showToast(`删除失败：${error?.message || "本地文件操作失败。"}`);
@@ -1125,8 +1266,9 @@ videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) even
 async function displayRoot(handle, collectionToSelect = "*", toastVerb = "已读取") {
   for (const url of coverUrls) URL.revokeObjectURL(url);
   coverUrls = [];
+  const preserveDownloadStatuses = rootHandle === handle;
   rootHandle = handle;
-  const result = await scanRoot(handle);
+  const result = await scanRoot(handle, preserveDownloadStatuses);
   collections = applyCollectionOrder(result.collections);
   const existingVideoIds = new Set(allVideos().map((video) => video.id));
   for (const id of selectedVideoIds) if (!existingVideoIds.has(id)) selectedVideoIds.delete(id);
@@ -1148,7 +1290,7 @@ function syncDetailDownloadAction() {
   const button = detailContent.querySelector(".open-download-directory");
   if (!button) return;
   const video = allVideos().find((item) => item.id === detailContent.dataset.videoId);
-  button.hidden = !video?.downloaded;
+  button.hidden = !video?.hasDownloadFiles;
 }
 
 async function refreshDownloadStatuses() {
@@ -1161,12 +1303,13 @@ async function refreshDownloadStatuses() {
     let changed = false;
     for (const video of allVideos()) {
       const match = matchDownloadedDirectory(video, index);
-      const downloaded = Boolean(match);
-      if (video.downloaded !== downloaded || video.downloadDirectoryName !== (match?.name || "") || video.downloadCollectionName !== (match?.collectionName || "")) changed = true;
+      const downloaded = Boolean(match?.hasMedia);
+      const hasDownloadFiles = Boolean(match?.hasFiles);
+      if (video.downloaded !== downloaded || video.hasDownloadFiles !== hasDownloadFiles || video.downloadDirectoryName !== (match?.name || "") || video.downloadCollectionName !== (match?.collectionName || "")) changed = true;
       video.downloaded = downloaded;
+      video.hasDownloadFiles = hasDownloadFiles;
       video.downloadDirectoryName = match?.name || "";
       video.downloadCollectionName = match?.collectionName || "";
-      video.downloadDirectoryHandle = match?.handle || null;
       video.downloadDirectoryHandle = match?.handle || null;
     }
     if (changed) renderVideos();
@@ -1316,5 +1459,5 @@ document.addEventListener("visibilitychange", () => {
 });
 window.setInterval(() => {
   if (!library.hidden && document.visibilityState === "visible") refreshDownloadStatuses();
-}, 15000);
+}, 60000);
 restoreCollectionOrder().catch(() => { collectionOrder = []; }).finally(() => restoreLastRoot());

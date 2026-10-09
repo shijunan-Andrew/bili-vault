@@ -21,7 +21,7 @@
       <nav id="collectionList" class="collection-list" aria-label="收藏夹"></nav>
       <div class="sidebar-bottom">
         <div class="privacy-note"><span class="lock-icon">▣</span><span>归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
-        <div class="side-version">B站收藏信息归档 · 3.5</div>
+        <div class="side-version">B站收藏信息归档 · 3.6 Stable</div>
       </div>
     </aside>
 
@@ -130,6 +130,7 @@
       <div class="confirm-icon" aria-hidden="true">!</div>
       <h2 id="confirmTitle">删除本地归档？</h2>
       <p id="confirmMessage"></p>
+      <label id="deleteDownloadsOption" class="delete-downloads-option" hidden><input id="deleteAssociatedDownloads" type="checkbox"><span>同时删除关联的本地下载文件</span></label>
       <div class="confirm-actions">
         <button id="cancelDelete" class="button button-quiet" type="button">取消</button>
         <button id="confirmDelete" class="button button-danger" type="button">删除本地文件</button>
@@ -137,6 +138,7 @@
     </section>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="archive-core.js"></script>
   <script src="library.js"></script>
 </body>
 </html>

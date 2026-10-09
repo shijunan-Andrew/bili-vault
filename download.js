@@ -49,6 +49,8 @@ let savedFileCount = 0;
 let failedCount = 0;
 let plannedTasks = 0;
 let completedTasks = 0;
+let downloadErrors = [];
+let activeDownloadContext = null;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -85,11 +87,11 @@ function runtimeMessage(message) {
   });
 }
 
-function safeName(value, fallback = "未知") {
+function safeName(value, fallback = "未知", maxLength = 100) {
   let name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
   if (!name || name === "." || name === "..") name = fallback;
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) name = `_${name}`;
-  return name.slice(0, 100);
+  return name.slice(0, maxLength);
 }
 
 function displayBytes(value) {
@@ -224,7 +226,7 @@ function normalizeIdentifier(item) {
   return item.url || item.bvid || (item.aid ? `av${String(item.aid).replace(/^av/i, "")}` : "");
 }
 
-async function parseAndAdd(identifier) {
+async function parseAndAdd(identifier, sourceItem = {}) {
   const input = String(identifier || "").trim();
   if (!input) throw new Error("请粘贴 B 站视频网址、BV 号或 av 号。");
   const item = { id: crypto.randomUUID(), video: null, pageSelection: "all", error: "" };
@@ -232,7 +234,7 @@ async function parseAndAdd(identifier) {
   renderQueue();
   try {
     const response = await runtimeMessage({ type: "bca-download-parse", identifier: input });
-    item.video = response.video;
+    item.video = BcaArchiveCore.withSourceCollection(response.video, sourceItem);
     item.pageSelection = response.video.pages.length > 1 ? "all" : String(response.video.pages[0]?.cid || "all");
     addLog(`已解析：${response.video.title}${response.video.bvid ? `（${response.video.bvid}）` : ""}`, "success");
   } catch (error) {
@@ -379,6 +381,26 @@ async function getWritableDirectory(parent, name) {
     }
   }
   throw new Error("无法创建唯一的视频目录。 ");
+}
+
+async function findOrCreateVideoDirectory(parent, video, index) {
+  const preferredName = videoDirectoryLabel(video, index);
+  const wanted = new Set();
+  const bvid = String(video.bvid || "").trim();
+  const aid = String(video.aid || "").trim().replace(/^av/i, "");
+  if (bvid) wanted.add(`bvid:${bvid}`);
+  if (aid) wanted.add(`aid:${aid}`);
+  let match = null;
+  let exact = null;
+  for await (const entry of parent.values()) {
+    if (entry.kind !== "directory") continue;
+    if (entry.name === preferredName) exact = entry;
+    const existingIds = BcaArchiveCore.identifiersFromDirectoryName(entry.name);
+    if ([...wanted].some((identifier) => existingIds.has(identifier))) { match = entry; break; }
+  }
+  if (!match && !wanted.size) match = exact;
+  if (match) return { directory: match, created: false };
+  return { directory: await getWritableDirectory(parent, preferredName), created: true };
 }
 
 function videoDirectoryLabel(video, index) {
@@ -582,10 +604,45 @@ async function runAsset(label, operation) {
   catch (error) {
     if (error?.name === "AbortError") throw error;
     failedCount += 1;
+    downloadErrors.push({ ...activeDownloadContext, task: label, message: error?.message || String(error), time: new Date().toISOString() });
     addLog(`${label}：${error.message}`, "error");
   } finally {
     completedTasks += 1;
     updateProgress();
+  }
+}
+
+function recordDownloadFailure(context, error) {
+  downloadErrors.push({ ...context, message: error?.message || String(error), time: new Date().toISOString() });
+}
+
+async function persistDownloadErrorReport() {
+  if (!downloadErrors.length) return;
+  try {
+    const root = archiveRootHandle || await folderSetting("get", null, "rootHandle");
+    if (!root) throw new Error("尚未设置本地收藏根目录");
+    let permission = await root.queryPermission({ mode: "readwrite" });
+    if (permission !== "granted") permission = await root.requestPermission({ mode: "readwrite" });
+    if (permission !== "granted") throw new Error("没有获得错误报告目录的写入权限");
+    const reportDirectory = await root.getDirectoryHandle("001错误报告", { create: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = await reportDirectory.getFileHandle(`下载错误报告_${stamp}.txt`, { create: true });
+    const lines = ["B站视频下载错误报告", `生成时间：${new Date().toLocaleString("zh-CN")}`, `错误数：${downloadErrors.length}`, ""];
+    downloadErrors.forEach((entry, index) => {
+      lines.push(`${index + 1}. ${entry.title || "未知视频"}`);
+      if (entry.collection) lines.push(`收藏夹：${entry.collection}`);
+      if (entry.bvid) lines.push(`BV号：${entry.bvid}`);
+      if (entry.aid) lines.push(`av号：${entry.aid}`);
+      if (entry.page) lines.push(`分P：${entry.page}`);
+      if (entry.task) lines.push(`任务：${entry.task}`);
+      lines.push(`时间：${entry.time || new Date().toISOString()}`, `错误：${entry.message || "未知错误"}`, "");
+    });
+    const writable = await file.createWritable();
+    await writable.write(new Blob(["\uFEFF", lines.join("\n")], { type: "text/plain;charset=utf-8" }));
+    await writable.close();
+    addLog(`错误报告已保存到 001错误报告/${file.name}`, "success");
+  } catch (error) {
+    addLog(`未能写入本地错误报告：${error?.message || "写入失败"}`, "error");
   }
 }
 
@@ -668,6 +725,8 @@ async function start() {
   cancelController = new AbortController();
   savedFileCount = 0;
   failedCount = 0;
+  downloadErrors = [];
+  activeDownloadContext = null;
   completedTasks = 0;
   plannedTasks = taskCountForCurrentSettings(pagesToDownload.length);
   updateProgress();
@@ -695,15 +754,16 @@ async function start() {
       let folderInfo = folderCache.get(item.id);
       if (!folderInfo) {
         try {
-          const collectionName = safeName(video.collection || "未分类收藏");
+          const collectionName = safeName(video.collection || "未分类收藏", "未分类收藏", 120);
           const collectionDirectory = await downloadFolder.getDirectoryHandle(collectionName, { create: true });
-          const directory = await getWritableDirectory(collectionDirectory, videoDirectoryLabel(video, index));
-          folderInfo = { collectionDirectory, directory, collectionName };
+          const directoryInfo = await findOrCreateVideoDirectory(collectionDirectory, video, index);
+          folderInfo = { collectionDirectory, directory: directoryInfo.directory, collectionName, created: directoryInfo.created };
           folderCache.set(item.id, folderInfo);
           addLog(`保存位置：${downloadFolder.name}/${collectionName}/${directory.name}`, "info");
         } catch (error) {
           const skippedTasks = taskCountForCurrentSettings(selectedPages(item).length);
           failedCount += skippedTasks;
+          recordDownloadFailure({ title: video.title, collection: video.collection, bvid: video.bvid, aid: video.aid, time: new Date().toISOString() }, error);
           completedTasks += skippedTasks;
           failedFolders.add(item.id);
           addLog(`无法创建“${video.title}”的目录：${error.message}`, "error");
@@ -711,17 +771,21 @@ async function start() {
         }
       }
       progressSummary.textContent = `正在处理 ${index + 1}/${total} · ${video.title}`;
+      activeDownloadContext = { title: video.title, collection: video.collection, bvid: video.bvid, aid: video.aid, page: pageLabel(page) };
       addLog(`开始处理：${video.title} · ${pageLabel(page)}`, "info");
       try { await processPage(item, page, folderInfo.directory, index + 1, total); }
       catch (error) {
         if (error?.name === "AbortError") break;
         failedCount += 1;
+        recordDownloadFailure({ ...activeDownloadContext, time: new Date().toISOString() }, error);
         addLog(`处理失败：${video.title} · ${error.message}`, "error");
       }
     }
     const cancelled = cancelController.signal.aborted;
     if (cancelled) {
-      const createdDirectories = [...folderCache.values()];
+      const allDirectories = [...folderCache.values()];
+      const createdDirectories = allDirectories.filter((folderInfo) => folderInfo.created);
+      const preservedDirectories = allDirectories.length - createdDirectories.length;
       let removedDirectories = 0;
       for (const folderInfo of createdDirectories) {
         try {
@@ -732,17 +796,13 @@ async function start() {
           addLog(`未能清理“${folderInfo.collectionName}/${folderInfo.directory.name}”：${error.message}`, "error");
         }
       }
-      if (removedDirectories === createdDirectories.length) {
-        savedFileCount = 0;
-        updateProgress();
-      }
       setBadge("已取消", "error");
-      progressSummary.textContent = createdDirectories.length === 0
-        ? "已取消 · 尚未创建本地下载目录"
-        : removedDirectories === createdDirectories.length
-          ? `已取消 · 本次下载文件已清理（${removedDirectories} 个目录）`
-          : `已取消 · ${removedDirectories}/${createdDirectories.length} 个本次下载目录已清理`;
-      addLog(`下载已取消，已清理 ${removedDirectories}/${createdDirectories.length} 个本次创建的目录。`, removedDirectories === createdDirectories.length ? "success" : "error");
+      progressSummary.textContent = allDirectories.length === 0
+        ? "已取消 · 尚未处理视频目录"
+        : createdDirectories.length === 0
+          ? `已取消 · 已保留 ${preservedDirectories} 个原有目录及其中的文件`
+          : `已取消 · 清理本次新建目录 ${removedDirectories}/${createdDirectories.length} 个${preservedDirectories ? `，保留 ${preservedDirectories} 个原有目录` : ""}`;
+      addLog(`下载已取消，已清理 ${removedDirectories}/${createdDirectories.length} 个本次创建的目录${preservedDirectories ? `；保留 ${preservedDirectories} 个原有目录及其中的文件` : ""}。`, removedDirectories === createdDirectories.length ? "success" : "error");
     } else if (failedCount) {
       setBadge("部分完成", "error");
       progressSummary.textContent = `完成 · ${savedFileCount} 个文件成功，${failedCount} 项失败`;
@@ -752,6 +812,7 @@ async function start() {
       progressSummary.textContent = `下载完成 · 已保存 ${savedFileCount} 个文件`;
       addLog(`下载完成：已保存 ${savedFileCount} 个文件。`, "success");
     }
+    await persistDownloadErrorReport();
     if (!cancelled) { completedTasks = plannedTasks; updateProgress(); }
   } finally {
     if (savedFileCount > 0 || cancelController?.signal.aborted) {
@@ -800,15 +861,25 @@ async function initialize() {
   await restoreFolder();
   const params = new URLSearchParams(location.search);
   let initialItems = [];
-  try { initialItems = JSON.parse(params.get("items") || "[]"); }
-  catch (_) { addLog("无法读取来自本地收藏库的视频队列。", "error"); }
+  const queueId = params.get("queueId");
+  try {
+    if (queueId && /^[0-9a-f-]{36}$/i.test(queueId)) {
+      const storageKey = `bcaDownloadQueue:${queueId}`;
+      const stored = await chrome.storage.session.get(storageKey);
+      initialItems = stored[storageKey] || [];
+      await chrome.storage.session.remove(storageKey);
+    } else if (params.has("items")) {
+      // Keep compatibility with links created by older 3.5 pages.
+      initialItems = JSON.parse(params.get("items") || "[]");
+    }
+  } catch (_) { addLog("无法读取来自本地收藏库的视频队列。", "error"); }
   if (Array.isArray(initialItems) && initialItems.length) {
     progressSummary.textContent = `正在解析 ${initialItems.length} 个视频`;
     let cursor = 0;
     const workers = Array.from({ length: Math.min(4, initialItems.length) }, async () => {
       while (cursor < initialItems.length) {
         const item = initialItems[cursor++];
-        try { await parseAndAdd(normalizeIdentifier(item)); }
+        try { await parseAndAdd(normalizeIdentifier(item), item); }
         catch (_) { /* Keep failed queue entries visible for inspection. */ }
       }
     });
