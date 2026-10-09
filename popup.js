@@ -28,6 +28,7 @@ const importPanelHeading = document.getElementById("importPanelHeading");
 const resultDetails = document.getElementById("resultDetails");
 const resultDetailsSummary = document.getElementById("resultDetailsSummary");
 const resultPath = document.getElementById("resultPath");
+const popupVersion = document.getElementById("popupVersion");
 let errorReport = "";
 let rootHandle = null;
 let permissionNotice = "";
@@ -139,7 +140,7 @@ async function startImport() {
     const response = await sendTabMessage(tab.id, { type: "bca-import-selected-folders", folderIds });
     if (!response?.ok) throw new Error(response?.message || "导入失败。");
     importStatus.classList.remove("error");
-    importStatus.textContent = response.message || `导入完成：${response.imported || 0} 个，跳过 ${response.skipped || 0} 个。`;
+    importStatus.textContent = response.message || `导入/更新完成：${response.imported || 0} 个，跳过 ${response.skipped || 0} 个。`;
     if (response.reportPath) importStatus.textContent += ` 错误报告：${response.reportPath}`;
   } catch (error) {
     importStatus.textContent = error?.message || "导入失败。";
@@ -207,6 +208,7 @@ async function refreshStatus() {
   const status = await chrome.runtime.sendMessage({ type: "get-status" });
   rootHandle = await loadRootHandle().catch(() => null);
   folderName.textContent = status.baseFolderName || "尚未选择文件夹";
+  folderName.classList.toggle("unselected", !status.baseFolderName);
   if (status.lastResult) {
     const messageLines = String(status.lastResult.message || "已完成").split(/\r?\n/).filter(Boolean);
     lastResult.textContent = messageLines.shift() || "已完成";
@@ -351,3 +353,4 @@ loadImportFolders();
 refreshStatus().catch((error) => {
   lastResult.textContent = error?.message || "无法读取插件状态。";
 });
+if (popupVersion) popupVersion.textContent = `版本 ${chrome.runtime.getManifest().version}`;

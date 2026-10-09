@@ -325,8 +325,8 @@ async function useDefaultFolder() {
     downloadFolder = null;
     await folderSetting("put", "default", "downloadFolderMode");
     archiveRootHandle = await folderSetting("get", null, "rootHandle");
-    downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 视频下载（默认）` : "本地收藏根目录 / 视频下载（默认）";
-    downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“视频下载”文件夹。";
+    downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 000视频下载（默认）` : "本地收藏根目录 / 000视频下载（默认）";
+    downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。";
     folderPermissionHint.hidden = Boolean(archiveRootHandle);
     if (!archiveRootHandle) folderPermissionHint.textContent = "请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。";
     addLog("已切换到本地收藏根目录下的默认下载位置。", "success");
@@ -355,8 +355,8 @@ async function restoreFolder() {
     } else {
       downloadFolderMode = "default";
       downloadFolder = null;
-      downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 视频下载（默认）` : "本地收藏根目录 / 视频下载（默认）";
-      downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“视频下载”文件夹。";
+      downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 000视频下载（默认）` : "本地收藏根目录 / 000视频下载（默认）";
+      downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。";
       folderPermissionHint.hidden = Boolean(archiveRootHandle);
       if (!archiveRootHandle) folderPermissionHint.textContent = "请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。";
     }
@@ -399,8 +399,8 @@ async function resolveDownloadFolder() {
   if (!archiveRootHandle) throw new Error("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。");
   const permission = await archiveRootHandle.requestPermission({ mode: "readwrite" });
   if (permission !== "granted") throw new Error("未获得本地收藏根目录的写入权限，请在插件弹窗中重新授权。");
-  // 使用固定目录名；已有目录时复用，不生成“视频下载 (2)”等副本。
-  return archiveRootHandle.getDirectoryHandle("视频下载", { create: true });
+  // 使用固定目录名；已有目录时复用，不生成编号副本。
+  return archiveRootHandle.getDirectoryHandle("000视频下载", { create: true });
 }
 
 function fetchOptions(signal) {
@@ -653,7 +653,7 @@ async function start() {
     const permission = await downloadFolder.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error("没有获得保存目录的写入权限，请重新授权或重新选择目录。");
     downloadFolderName.textContent = downloadFolderMode === "default"
-      ? `${archiveRootHandle.name} / 视频下载（默认）`
+      ? `${archiveRootHandle.name} / 000视频下载（默认）`
       : downloadFolder.name;
     folderPermissionHint.hidden = true;
   } catch (error) { folderPermissionHint.hidden = false; addLog(error.message, "error"); return; }
@@ -692,12 +692,15 @@ async function start() {
       const { item, page } = pagesToDownload[index];
       const video = item.video;
       if (failedFolders.has(item.id)) continue;
-      let directory = folderCache.get(item.id);
-      if (!directory) {
+      let folderInfo = folderCache.get(item.id);
+      if (!folderInfo) {
         try {
-          directory = await getWritableDirectory(downloadFolder, videoDirectoryLabel(video, index));
-          folderCache.set(item.id, directory);
-          addLog(`保存位置：${downloadFolder.name}/${directory.name}`, "info");
+          const collectionName = safeName(video.collection || "未分类收藏");
+          const collectionDirectory = await downloadFolder.getDirectoryHandle(collectionName, { create: true });
+          const directory = await getWritableDirectory(collectionDirectory, videoDirectoryLabel(video, index));
+          folderInfo = { collectionDirectory, directory, collectionName };
+          folderCache.set(item.id, folderInfo);
+          addLog(`保存位置：${downloadFolder.name}/${collectionName}/${directory.name}`, "info");
         } catch (error) {
           const skippedTasks = taskCountForCurrentSettings(selectedPages(item).length);
           failedCount += skippedTasks;
@@ -709,7 +712,7 @@ async function start() {
       }
       progressSummary.textContent = `正在处理 ${index + 1}/${total} · ${video.title}`;
       addLog(`开始处理：${video.title} · ${pageLabel(page)}`, "info");
-      try { await processPage(item, page, directory, index + 1, total); }
+      try { await processPage(item, page, folderInfo.directory, index + 1, total); }
       catch (error) {
         if (error?.name === "AbortError") break;
         failedCount += 1;
@@ -720,13 +723,13 @@ async function start() {
     if (cancelled) {
       const createdDirectories = [...folderCache.values()];
       let removedDirectories = 0;
-      for (const directory of createdDirectories) {
+      for (const folderInfo of createdDirectories) {
         try {
-          await downloadFolder.removeEntry(directory.name, { recursive: true });
+          await folderInfo.collectionDirectory.removeEntry(folderInfo.directory.name, { recursive: true });
           removedDirectories += 1;
-          addLog(`已清理本次下载目录：${directory.name}`, "success");
+          addLog(`已清理本次下载目录：${folderInfo.collectionName}/${folderInfo.directory.name}`, "success");
         } catch (error) {
-          addLog(`未能清理“${directory.name}”：${error.message}`, "error");
+          addLog(`未能清理“${folderInfo.collectionName}/${folderInfo.directory.name}”：${error.message}`, "error");
         }
       }
       if (removedDirectories === createdDirectories.length) {

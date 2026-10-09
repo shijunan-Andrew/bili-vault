@@ -38,7 +38,7 @@
     <section class="import-card">
       <div id="importPanelHeading" class="import-panel-heading">
         <div>
-          <div class="section-label">导入到本地</div>
+          <div class="section-label">导入或更新</div>
           <p class="import-subtitle">把 B 站收藏夹整理到本地资料库</p>
         </div>
         <button id="refreshImportFolders" class="secondary refresh-button" type="button">刷新列表</button>
@@ -50,6 +50,7 @@
             <span id="importSelectedCount" class="import-selected-count">已选 0 个</span>
           </div>
           <div id="importFolderList" class="import-folder-list" aria-live="polite">请先打开 B 站个人空间的收藏夹页面。</div>
+          <p class="import-warning">请勿一次选择过多收藏夹。频繁请求 B 站接口可能触发风控，导致 IP 暂时受限。</p>
           <div class="import-selection-actions">
             <button id="selectAllImportFolders" class="text-button" type="button">全选</button>
             <button id="clearImportFolders" class="text-button" type="button">清空</button>
@@ -80,6 +81,8 @@
     </section>
 
   <footer>收藏夹导入请在 B 站个人空间的收藏夹页面打开插件。</footer>
+  <a class="support-link" href="https://space.bilibili.com/1515305135" target="_blank" rel="noopener noreferrer">觉得插件还不错？给 up 一个一键三连支持一下 ↗</a>
+  <div id="popupVersion" class="popup-version"></div>
   </main>
   <script src="popup.js"></script>
 </body>

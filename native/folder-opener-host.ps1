@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $hostRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $settingsPath = Join-Path $hostRoot "settings.json"
 $inputStream = [Console]::OpenStandardInput()
@@ -41,11 +41,19 @@ while ($true) {
     if ([string]::IsNullOrWhiteSpace($directoryName) -or $directoryName -ne [System.IO.Path]::GetFileName($directoryName) -or $directoryName -match '[\\/:*?"<>|\x00-\x1f]') {
       throw "视频目录名称无效。"
     }
+    $collectionName = [string]$request.collectionName
+    if (-not [string]::IsNullOrWhiteSpace($collectionName) -and ($collectionName -ne [System.IO.Path]::GetFileName($collectionName) -or $collectionName -match '[\\/:*?"<>|\x00-\x1f]')) {
+      throw "收藏夹目录名称无效。"
+    }
     if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) { throw "找不到本地下载目录设置，请重新运行安装脚本。" }
     $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
     $basePath = [System.IO.Path]::GetFullPath([string]$settings.downloadBasePath)
     $basePrefix = $basePath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($basePath, $directoryName))
+    if ([string]::IsNullOrWhiteSpace($collectionName)) {
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($basePath, $directoryName))
+    } else {
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($basePath, $collectionName, $directoryName))
+    }
     if (-not $targetPath.StartsWith($basePrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "目标目录超出了已设置的下载目录。" }
     if (-not (Test-Path -LiteralPath $targetPath -PathType Container)) { throw "找不到视频下载目录：$targetPath" }
 

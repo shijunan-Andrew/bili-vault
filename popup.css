@@ -129,3 +129,10 @@ body { background: #f4f7fa; }
 .library-link:hover { border-color: #91c9a5; color: #1d6840; background: #d9eddf; }
 .library-link span { font-size: 19px; }
 .library-link:focus-visible { outline: 3px solid #4a9b6838; outline-offset: 2px; }
+.library-link { color: #176a3d; background: linear-gradient(135deg, #e2f3e8, #cfe9d8); border-color: #9bc9a9; box-shadow: 0 5px 15px #28774a24; }
+.library-link:hover { color: #105a33; background: #c4e3ce; }
+.folder-name.unselected { color: #c94343; }
+.import-warning { margin: 7px 1px 3px; color: #c94343; font-size: 10px; line-height: 1.55; }
+.support-link { display: block; margin: 13px 2px 0; padding: 10px 12px; border: 1px solid #d4e8dc; border-radius: 9px; color: #267548; background: #f0f8f3; font-size: 11px; font-weight: 650; line-height: 1.5; text-align: center; text-decoration: none; }
+.support-link:hover { background: #e2f2e7; }
+.popup-version { margin-top: 8px; color: #9da5ad; font-size: 10px; text-align: center; }

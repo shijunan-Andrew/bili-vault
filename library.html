@@ -21,7 +21,7 @@
       <nav id="collectionList" class="collection-list" aria-label="收藏夹"></nav>
       <div class="sidebar-bottom">
         <div class="privacy-note"><span class="lock-icon">▣</span><span>归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
-        <div class="side-version">B站收藏信息归档 · 3.4</div>
+        <div class="side-version">B站收藏信息归档 · 3.5</div>
       </div>
     </aside>
 
@@ -68,7 +68,7 @@
           </section>
           <div class="view-controls">
             <label class="search-box"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索标题、UP 主或 BV 号" autocomplete="off"><kbd>Ctrl K</kbd></label>
-            <button id="invalidOnly" class="button button-quiet invalid-filter" type="button" aria-pressed="false">只显示已失效</button>
+            <label class="video-filter"><span>筛选</span><select id="videoFilter" aria-label="筛选视频"><option value="all">全部视频</option><option value="invalid">已失效视频</option><option value="downloaded">已下载视频</option></select></label>
             <button id="addVideo" class="button button-primary" type="button" disabled>添加视频</button>
             <label class="sort-select"><span>排序</span><select id="sortSelect" aria-label="排序方式"><option value="newest">最近收藏</option><option value="oldest">最早收藏</option><option value="title">标题 A–Z</option></select></label>
           </div>

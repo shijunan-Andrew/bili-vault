@@ -285,7 +285,7 @@ async function addManualVideo(data) {
   let metadata = {};
   try {
     if (!collectionNames.length) throw new Error("请至少选择一个目标收藏夹。");
-    if (collectionNames.some((name) => safeSegment(name) !== name || name === "错误报告")) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
+    if (collectionNames.some((name) => safeSegment(name) !== name || ["错误报告", "001错误报告", "000视频下载"].includes(name))) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
     const root = await getRootHandle();
     if (!root) throw new Error("尚未设置本地收藏根目录，请先选择收藏根目录。");
     await ensureWritePermission(root);
@@ -382,10 +382,10 @@ async function persistErrorReport(text) {
   try {
     const root = await getRootHandle();
     if (!root || await root.queryPermission({ mode: "readwrite" }) !== "granted") return "";
-    const directory = await root.getDirectoryHandle("错误报告", { create: true });
+    const directory = await root.getDirectoryHandle("001错误报告", { create: true });
     const filename = `${timestampFolder(new Date())}_${Date.now()}_错误报告.txt`;
     await writeFile(directory, filename, text);
-    return `${root.name}/错误报告/${filename}`;
+    return `${root.name}/001错误报告/${filename}`;
   } catch (_) {
     return "";
   }
@@ -1042,6 +1042,12 @@ async function importBiliFavorites(data, tabId = null) {
   for (let folderIndex = 0; folderIndex < folders.length; folderIndex += 1) {
     const folder = folders[folderIndex];
     const folderLog = [];
+    if (["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(safeSegment(folder.title))) {
+      failed += 1;
+      hasIssues = true;
+      reportLines.push("", `收藏夹：${folder.title}`, "收藏夹名称与插件保留目录冲突，已跳过。请先在 B 站重命名该收藏夹后重试。");
+      continue;
+    }
     sendImportProgress(`正在读取 ${folder.title}（${folderIndex + 1}/${folders.length}）…`);
     let first;
     try { first = await fetchImportFavoritePage(folder, 1, tabId); }
@@ -1125,8 +1131,8 @@ async function importBiliFavorites(data, tabId = null) {
     await chrome.storage.local.set({ lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: Date.now() } });
   }
   const message = skipped
-    ? `导入完成：已存在相同视频 ${skipped} 个，已跳过；只导入未存在的视频。新导入 ${imported} 个，失败 ${failed} 个。`
-    : `导入完成：新导入 ${imported} 个，失败 ${failed} 个。`;
+    ? `导入/更新完成：已存在相同视频 ${skipped} 个，已跳过；只导入未存在的视频。新导入 ${imported} 个，失败 ${failed} 个。`
+    : `导入/更新完成：新导入 ${imported} 个，失败 ${failed} 个。`;
   const pathText = savedPaths.slice(0, 10).join("\n");
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
   return { ok: true, message, imported, skipped, failed, total, reportPath };

@@ -56,7 +56,7 @@ async function getParentFolder() {
   }
   const root = await readSetting("rootHandle");
   if (!root) throw new Error("找不到本地收藏根目录。请先在插件中设置保存位置。");
-  return root.getDirectoryHandle("视频下载");
+  return root.getDirectoryHandle("000视频下载");
 }
 
 function fileIcon(name) {

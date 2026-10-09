@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.bcatch.folder_opener"
 $hostRoot = Join-Path $env:LOCALAPPDATA "BcaFolderOpener"
 if (Test-Path -LiteralPath $registryPath) { Remove-Item -LiteralPath $registryPath -Recurse -Force }

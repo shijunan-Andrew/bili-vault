@@ -53,7 +53,7 @@ const cancelCollectionActionButton = document.getElementById("cancelCollectionAc
 const confirmCollectionActionButton = document.getElementById("confirmCollectionAction");
 const selectAllActionTargetsButton = document.getElementById("selectAllActionTargets");
 const clearActionTargetsButton = document.getElementById("clearActionTargets");
-const invalidOnlyButton = document.getElementById("invalidOnly");
+const videoFilterSelect = document.getElementById("videoFilter");
 const batchManageButton = document.getElementById("batchManage");
 const batchToolbar = document.getElementById("batchToolbar");
 const selectedCount = document.getElementById("selectedCount");
@@ -73,7 +73,7 @@ let deleteInProgress = false;
 let collectionCreateInProgress = false;
 let videoAddInProgress = false;
 let selectionMode = false;
-let showInvalidOnly = false;
+let videoFilter = "all";
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
 let pendingCollectionAction = null;
@@ -192,7 +192,7 @@ async function getDownloadParentHandle(archiveRoot) {
   const savedCustom = await readSavedSetting("downloadFolder");
   const isCustom = mode === "custom" || (!mode && Boolean(savedCustom));
   if (isCustom) return savedCustom;
-  try { return await archiveRoot.getDirectoryHandle("视频下载"); }
+  try { return await archiveRoot.getDirectoryHandle("000视频下载"); }
   catch (error) {
     if (error?.name === "NotFoundError") return null;
     throw error;
@@ -208,12 +208,16 @@ async function scanDownloadedDirectories(archiveRoot) {
     const permission = await parent.queryPermission({ mode: "read" });
     if (permission !== "granted") return null;
     const index = new Map();
-    for await (const entry of parent.values()) {
-      if (entry.kind !== "directory") continue;
-      const identifiers = downloadDirectoryIdentifiers(entry.name);
-      if (!identifiers.size || !await directoryContainsFiles(entry)) continue;
-      for (const identifier of identifiers) {
-        if (!index.has(identifier)) index.set(identifier, { name: entry.name, handle: entry });
+    for await (const collection of parent.values()) {
+      if (collection.kind !== "directory") continue;
+      for await (const entry of collection.values()) {
+        if (entry.kind !== "directory") continue;
+        const identifiers = downloadDirectoryIdentifiers(entry.name);
+        if (!identifiers.size || !await directoryContainsFiles(entry)) continue;
+        for (const identifier of identifiers) {
+          const match = { name: entry.name, collectionName: collection.name, handle: entry };
+          index.set(`${collection.name}\u0000${identifier}`, match);
+        }
       }
     }
     return index;
@@ -222,8 +226,8 @@ async function scanDownloadedDirectories(archiveRoot) {
 
 function matchDownloadedDirectory(video, index) {
   for (const identifier of videoIdentifierKeys(video)) {
-    const match = index.get(identifier);
-    if (match) return match;
+    const scopedMatch = index.get(`${video.collection || ""}\u0000${identifier}`);
+    if (scopedMatch) return scopedMatch;
   }
   return null;
 }
@@ -234,7 +238,7 @@ async function scanRoot(handle) {
   const downloadIndex = await scanDownloadedDirectories(handle);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
   for await (const collectionEntry of handle.values()) {
-    if (collectionEntry.kind !== "directory" || ["错误报告", "视频下载"].includes(collectionEntry.name)) continue;
+    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(collectionEntry.name)) continue;
     const videos = [];
     for await (const recordEntry of collectionEntry.values()) {
       if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
@@ -263,6 +267,7 @@ async function scanRoot(handle) {
           aid,
           downloaded: Boolean(download),
           downloadDirectoryName: download?.name || "",
+          downloadCollectionName: download?.collectionName || "",
           downloadDirectoryHandle: download?.handle || null,
           isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
           upName: field(info, "UP主昵称"),
@@ -528,15 +533,14 @@ function renderVideos() {
   batchManageButton.disabled = videos.length === 0;
   addVideoButton.disabled = selectedCollection === "*";
   addVideoButton.title = selectedCollection === "*" ? "请先选择一个收藏夹" : `添加视频到“${selectedCollection}”`;
-  invalidOnlyButton.setAttribute("aria-pressed", String(showInvalidOnly));
-  invalidOnlyButton.textContent = showInvalidOnly ? "显示全部视频" : "只显示已失效";
+  videoFilter = videoFilterSelect.value;
   const query = searchInput.value.trim().toLocaleLowerCase();
-  const matching = videos.filter((video) => (!showInvalidOnly || video.isInvalid) && (!query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query)));
+  const matching = videos.filter((video) => (videoFilter === "all" || (videoFilter === "invalid" && video.isInvalid) || (videoFilter === "downloaded" && video.downloaded)) && (!query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query)));
   visibleVideoIds = matching.map((video) => video.id);
   const sort = sortSelect.value;
   matching.sort((a, b) => sort === "title" ? a.title.localeCompare(b.title, "zh-CN") : sort === "oldest" ? a.timestamp - b.timestamp : b.timestamp - a.timestamp);
-  const countLabel = showInvalidOnly
-    ? `${matching.length} / ${videos.filter((video) => video.isInvalid).length} 个失效视频`
+  const countLabel = videoFilter !== "all"
+    ? `${matching.length} / ${videos.filter((video) => videoFilter === "invalid" ? video.isInvalid : video.downloaded).length} 个${videoFilter === "invalid" ? "失效" : "已下载"}视频`
     : query ? `${matching.length} / ${videos.length} 个视频` : `${videos.length} 个视频`;
   resultSummary.textContent = selectedCollection === "*" ? `${countLabel}，来自 ${collections.length} 个收藏夹` : countLabel;
   videoGrid.replaceChildren(...matching.map((video) => {
@@ -569,9 +573,9 @@ function renderVideos() {
   }));
   emptySearch.hidden = matching.length > 0 || videos.length === 0;
   if (!matching.length && videos.length) {
-    emptySearch.querySelector("h2").textContent = showInvalidOnly ? "没有已失效视频" : "没有找到相关视频";
-    emptySearch.querySelector("p").textContent = showInvalidOnly ? "当前收藏范围内没有检测到失效视频。" : "试试其他标题、UP 主名称或 BV 号。";
-    clearSearch.hidden = showInvalidOnly && !query;
+    emptySearch.querySelector("h2").textContent = videoFilter === "invalid" ? "没有已失效视频" : videoFilter === "downloaded" ? "没有已下载视频" : "没有找到相关视频";
+    emptySearch.querySelector("p").textContent = videoFilter === "invalid" ? "当前收藏范围内没有检测到失效视频。" : videoFilter === "downloaded" ? "当前收藏范围内没有已下载的视频。" : "试试其他标题、UP 主名称或 BV 号。";
+    clearSearch.hidden = videoFilter !== "all" && !query;
   } else {
     clearSearch.hidden = false;
   }
@@ -612,7 +616,7 @@ function openDetail(video) {
   addField(rows, "信息保存于", video.savedAt);
   addField(rows, "UP 主", video.upName);
   addField(rows, "UP 主 UID", video.upMid);
-  addField(rows, "UP 主主页", video.upHome);
+  if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>UP 主主页</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">打开 UP 主主页 ↗</a></dd>`);
   addField(rows, "分区", video.category);
   addField(rows, "视频时长", video.duration);
   addField(rows, "发布时间", video.publishDate);
@@ -621,7 +625,7 @@ function openDetail(video) {
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频资料</button><button class="button button-quiet open-download-directory" type="button"${video.downloaded ? "" : " hidden"}>打开本地视频目录</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.downloaded ? "" : " hidden"}>打开本地视频目录</button><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -646,6 +650,7 @@ function openDownloadDirectory(video) {
   try {
     chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", {
       action: "open-directory",
+      collectionName: video.downloadCollectionName,
       directoryName: video.downloadDirectoryName
     }, (response) => {
       const runtimeError = chrome.runtime.lastError;
@@ -1028,7 +1033,7 @@ function validateCollectionName(rawName) {
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
     throw new Error("这个名称是 Windows 保留名称，请换一个名称。");
   }
-  if (name === "错误报告") throw new Error("“错误报告”是插件保留目录，请换一个名称。");
+  if (["错误报告", "001错误报告", "000视频下载", "视频下载"].includes(name)) throw new Error("这是插件保留目录，请换一个名称。");
   return name;
 }
 
@@ -1157,9 +1162,11 @@ async function refreshDownloadStatuses() {
     for (const video of allVideos()) {
       const match = matchDownloadedDirectory(video, index);
       const downloaded = Boolean(match);
-      if (video.downloaded !== downloaded || video.downloadDirectoryName !== (match?.name || "")) changed = true;
+      if (video.downloaded !== downloaded || video.downloadDirectoryName !== (match?.name || "") || video.downloadCollectionName !== (match?.collectionName || "")) changed = true;
       video.downloaded = downloaded;
       video.downloadDirectoryName = match?.name || "";
+      video.downloadCollectionName = match?.collectionName || "";
+      video.downloadDirectoryHandle = match?.handle || null;
       video.downloadDirectoryHandle = match?.handle || null;
     }
     if (changed) renderVideos();
@@ -1256,7 +1263,7 @@ downloadSelectedButton.addEventListener("click", () => openDownloadInterface(sel
 deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRecords()));
 searchInput.addEventListener("input", renderVideos);
 sortSelect.addEventListener("change", renderVideos);
-invalidOnlyButton.addEventListener("click", () => { showInvalidOnly = !showInvalidOnly; renderVideos(); });
+videoFilterSelect.addEventListener("change", renderVideos);
 clearSearch.addEventListener("click", () => { searchInput.value = ""; renderVideos(); searchInput.focus(); });
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
