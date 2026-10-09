@@ -158,12 +158,24 @@ Say "  [$([char]0x2713)] 全部检查通过" $C_GREEN
 
 # ───────── 5. 确认 ─────────
 $msg = if ($说明) { "$Tag：$说明" } else { $Tag }
-Say "`n【5/6】即将提交" $C_DIM
+Say "`n【5/6】发布前人工确认" $C_DIM
+Say "  自动检查全过了，但下面这些只有真机能验证。没做过的话先别发。" $C_YELLOW
+Say "  （照着 SMOKE_TEST.md 走，约 5 分钟）" $C_DIM
+Say ""
+Say "    [ ] 1. 导入一个小收藏夹，完成消息里的条数与实际一致"
+Say "    [ ] 2. 点开一条记录，封面正常显示（不是裂图）"
+Say "    [ ] 3. 进收藏库，扫描进度不是 0/0，关闭按钮在"
+Say "    [ ] 4. 标记一条「已下载」，000视频下载 被创建"
+Say "    [ ] 5. 打开本地视频目录（原生助手可用）"
+Say "    [ ] 6. 切一次主题与语言，立即生效"
+Say ""
+Say "  前置：已在 chrome://extensions 点过「重新加载」" $C_YELLOW
+Say ""
 Say "  版本：$oldVersion → $版本（界面显示 $Tag）"
 Say "  提交：$msg"
 Say "  tag ：$Tag → 推送到 origin/main"
 if (-not $Yes) {
-  $ans = Read-Host "`n确认发布？(y/N)"
+  $ans = Read-Host "`n上面 6 项都验证过了吗？确认发布？(y/N)"
   if ($ans -notmatch '^[yY]') { & $rollback; Say "`n已取消，版本号改动已回滚。" $C_YELLOW; exit 0 }
 }
 
