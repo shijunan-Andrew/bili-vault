@@ -426,13 +426,10 @@ async function findOrCreateVideoDirectory(parent, video, index) {
   return { directory: await getWritableDirectory(parent, preferredName), created: true };
 }
 
+// 4.8：实现移到了 archive-core.js，收藏库的「点击标记」要用同一套命名，
+// 否则手动建的目录将来下载时认不出来。
 function videoDirectoryLabel(video, index) {
-  const rawBvid = String(video.bvid || "").trim();
-  const rawAid = String(video.aid || "").trim().replace(/^av/i, "");
-  const suffix = /^BV[0-9A-Za-z]{10}$/.test(rawBvid) ? rawBvid : /^\d+$/.test(rawAid) ? `av${rawAid}` : `视频${index + 1}`;
-  const tail = ` - ${suffix}`;
-  const title = safeName(video.title, "未知").slice(0, Math.max(1, 100 - tail.length));
-  return `${title}${tail}`;
+  return BcaArchiveCore.videoDirectoryLabel(video, index);
 }
 
 async function resolveDownloadFolder() {

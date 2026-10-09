@@ -126,6 +126,31 @@ button:disabled { cursor: wait; opacity: .6; }
 .muted { color: var(--text); font-size: var(--fs-base); line-height: 1.6; overflow-wrap: anywhere; }
 
 /* ---------- 可折叠的导入区块 ---------- */
+/* 4.8：顶部静态开源横幅。做成吸顶，滚动时也看得到；高度压到 26px，
+   尽量少占弹窗本来就紧张的垂直空间。 */
+.popup-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 26px;
+  /* 负外边距是为了通栏：抵消 main 的上内边距（sp-3）和左右内边距（sp-4），
+     让横幅紧贴弹窗顶边、左右顶满。下边距只留 sp-1，尽量少占本来就紧张的垂直空间。
+     净增高 = 26 - 12 + 4 = 18px。 */
+  margin: calc(var(--sp-3) * -1) calc(var(--sp-4) * -1) var(--sp-1);
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  background: linear-gradient(90deg, var(--success-solid), var(--success));
+  color: #fff;                       /* 绿色底上的白字，不随主题变 */
+  font-size: var(--fs-micro);
+}
+/* 刻意不做 position: sticky。sticky 的 top 是「吸附阈值」，
+   写成负值会让横幅往上滚一段才吸附、顶部被切掉一截；
+   而且它常驻可视区会一直占掉 26px，反而让弹窗更挤。
+   作为普通块级元素，它随内容滚走，可视区就还给了内容。 */
+.popup-banner-link { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; color: inherit; text-decoration: none; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.popup-banner-link > span:first-child { flex: 0 0 auto; font-size: var(--fs-sm); }
+.popup-banner-close { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border: 0; border-radius: var(--r-xs); background: transparent; color: inherit; opacity: .85; }
+.popup-banner-close:hover { background: #ffffff2e; opacity: 1; }
+
 .import-card { margin-top: var(--sp-3); padding: 0; overflow: hidden; }
 /* 4.7：「导入或更新」是弹窗里最主要的入口，用橘黄把它突出来。
    颜色全部走 --feature 系列令牌，深浅主题各一套。 */

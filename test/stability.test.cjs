@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.7.0");
+  assert.equal(manifest.version, "4.8.0");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -831,6 +831,103 @@ test("the dark theme only redefines tokens, and both triggers agree", () => {
   // 滚动条也要走令牌，否则深色下会留一条亮灰
   assert.match(css, /scrollbar-color: var\(--scroll-thumb\)/);
   assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
+});
+
+/* ------------------------- 4.8 标记与站外搜索 ------------------------- */
+
+test("the download-directory naming lives in one place", () => {
+  const core = readProjectFile("archive-core.js");
+  const download = readProjectFile("download.js");
+  const library = readProjectFile("library.js");
+  assert.match(core, /function videoDirectoryLabel\(video, index = 0\)/);
+  assert.match(core, /function safeName\(value, fallback = "未知", maxLength = 100\)/);
+  // download.js 与 library.js 都必须用共享实现，否则「手动标记」建的目录
+  // 将来真正下载时会认不出来，又建一个副本
+  assert.match(download, /function videoDirectoryLabel\(video, index\) \{\s*return BcaArchiveCore\.videoDirectoryLabel\(video, index\);/);
+  assert.match(library, /BcaArchiveCore\.videoDirectoryLabel\(video, 0\)/);
+  assert.equal(/const title = safeName\(video\.title, "未知"\)/.test(download), false, "download.js 里不该再留一份命名实现");
+});
+
+test("a marked video directory is recognised as downloaded", () => {
+  const core = readProjectFile("archive-core.js");
+  const library = readProjectFile("library.js");
+  // 说明文件必须被扫描认出来，并且算作「已下载」
+  assert.match(library, /const DOWNLOAD_MARKER_FILE = "请将视频放到这里\.txt";/);
+  assert.match(library, /const DOWNLOAD_MARKER_TEXT = "请将别的地方下载的视频复制或移动到此处";/);
+  assert.match(library, /result\.marked \|\|= entry\.name === DOWNLOAD_MARKER_FILE/);
+  assert.match(library, /marked: contents\.marked/);
+  assert.match(core, /downloaded: Boolean\(match\?\.hasMedia \|\| match\?\.marked\)/);
+  // 说明文件让 hasFiles 成立，所以扫描的既有条件不用放宽
+  assert.match(library, /if \(!identifiers\.size \|\| !contents\.hasFiles\) continue;/);
+});
+
+test("the mark-as-downloaded flow is wired end to end", () => {
+  const library = readProjectFile("library.js");
+  const html = readProjectFile("library.html");
+  for (const id of ["markDownloadedDialog", "markDownloadedPath", "markDownloadedStatus", "markDownloadedGo", "markDownloadedCancel"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
+  }
+  // 已下载的记录不显示这个按钮
+  assert.match(library, /class="button button-quiet mark-downloaded" type="button"\$\{video\.downloaded \? " hidden" : ""\}/);
+  assert.match(library, /async function markVideoDownloaded\(video\)/);
+  assert.match(library, /markDownloadedGo\?\.addEventListener\("click", runMarkDownloaded\)/);
+  assert.match(library, /markDownloadedCancel\?\.addEventListener\("click"/);
+  // 标记后要立刻反映到卡片与详情，不必等下一次重扫
+  assert.match(library, /video\.downloaded = true;/);
+  assert.match(library, /video\.hasDownloadFiles = true;/);
+  // 说明做不到的事要说清楚：不能声称会下载视频
+  assert.equal(/markVideoDownloaded[\s\S]{0,600}fetch\(/.test(library), false, "标记过程不该发起任何网络请求");
+});
+
+test("invalid videos get an off-site search escape hatch", () => {
+  const library = readProjectFile("library.js");
+  const css = readProjectFile("library.css");
+  assert.match(library, /video\.isInvalid \? `<a class="button button-quiet search-invalid"/);
+  assert.match(library, /https:\/\/www\.bing\.com\/search\?q=\$\{encodeURIComponent\(video\.title \|\| ""\)\}/);
+  assert.match(library, /target="_blank" rel="noopener noreferrer" href=""[^>]*>\$\{BcaIcons\.svg\("search"\)\}/);
+  assert.match(css, /\.search-invalid \{/);
+  // 搜索的是标题，且必须转义，不能拼接原始字符串
+  assert.equal(/bing\.com\/search\?q=" \+ video\.title/.test(library), false, "标题必须经过 encodeURIComponent");
+});
+
+test("the popup banner is static, full-bleed, closable, and gives its height back", () => {
+  const html = readProjectFile("popup.html");
+  const js = readProjectFile("popup.js");
+  const css = readProjectFile("popup.css");
+  const theme = readProjectFile("theme.css");
+  for (const id of ["githubBanner", "githubBannerLink", "dismissGithubBanner"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `popup.html 缺少 #${id}`);
+  }
+  assert.match(html, /此项目已在 Github 上开源，点击查看/);
+  assert.match(html, /https:\/\/github\.com\/shijunan-Andrew\/bili-vault/);
+  assert.match(html, /rel="noopener noreferrer"/);
+
+  const bannerBlock = css.match(/\.popup-banner \{[\s\S]*?\n\}/)[0];
+  // 静态：这个横幅不该有动画（收藏库那个才是滚动的）
+  assert.equal(/animation/.test(bannerBlock), false, "插件横幅应当是静态的");
+  // 不做 sticky：sticky 的 top 是吸附阈值，负值会把顶部切掉，
+  // 而且常驻可视区会一直占掉高度
+  assert.equal(/position:\s*sticky/.test(bannerBlock), false, "横幅不该 sticky");
+  // 负外边距必须正好抵消 main 的内边距（上 sp-3、左右 sp-4），否则不通栏
+  assert.match(readProjectFile("popup.css"), /main \{ padding: var\(--sp-3\) var\(--sp-4\) var\(--sp-2\); \}/);
+  assert.match(bannerBlock, /margin: calc\(var\(--sp-3\) \* -1\) calc\(var\(--sp-4\) \* -1\) var\(--sp-1\);/);
+  // 净增高要小：高度 - 抵消掉的上内边距 + 下外边距
+  const height = Number(bannerBlock.match(/height: (\d+)px/)[1]);
+  const growth = height - 12 + 4;
+  assert.ok(growth <= 20, `横幅净增高 ${growth}px，太多`);
+
+  // 关掉之后必须真的让出高度：靠的是 theme.css 里那条全局规则。
+  // .popup-banner { display: flex } 的优先级高于 [hidden] 的浏览器默认值，
+  // 没有这条 !important，横幅会永远关不掉。
+  assert.match(theme, /\[hidden\] \{ display: none !important; \}/);
+  assert.match(html, /id="githubBanner" class="popup-banner" hidden/);
+  assert.match(js, /function dismissGithubBanner\(\) \{[\s\S]*?banner\.hidden = true;/);
+
+  // 关闭状态要记住，且与收藏库的横幅互不影响
+  assert.match(js, /restoreGithubBanner\(\);/);
+  assert.match(js, /addEventListener\("click", dismissGithubBanner\)/);
+  assert.match(js, /popupGithubBannerDismissed/);
+  assert.equal(/popupGithubBannerDismissed/.test(readProjectFile("library.js")), false);
 });
 
 /* ------------------------- 4.7 细节修复 ------------------------- */

@@ -572,5 +572,17 @@
   "配置已导入。": "Settings imported.",
   "导入配置失败：{message}": "Could not import settings: {message}",
   "若尚未安装原生助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。": "If the native helper is not installed yet, run install-native-folder-opener.bat from the extension folder and fill in this extension's current ID and download folder (the default is the root folder \\000视频下载); afterwards reload the extension at chrome://extensions and restart Chrome completely.",
-  "从 chrome://extensions 导入插件后请不要移动插件文件夹位置，否则可能导致插件失效，需要重新导入。": "After loading the extension from chrome://extensions, do not move its folder — moving it can break the extension, and you would have to load it again."
+  "从 chrome://extensions 导入插件后请不要移动插件文件夹位置，否则可能导致插件失效，需要重新导入。": "After loading the extension from chrome://extensions, do not move its folder — moving it can break the extension, and you would have to load it again.",
+  "已下载？点击标记": "Downloaded elsewhere? Mark it",
+  "全网搜索该视频": "Search the web for this video",
+  "标记为已下载": "Mark as downloaded",
+  "如果你是在别的地方下载的这个视频，可以用这个操作把它标记为已下载。": "If you downloaded this video somewhere else, use this to mark the record as downloaded.",
+  "插件会在该视频的下载路径里新建一个文件夹，里面只放一个说明文件、没有视频内容，并把这条记录标记为已下载。": "The extension creates a folder in this video's download path containing only a readme — no video — and marks the record as downloaded.",
+  "你只要把在别处下载好的视频复制或移动进那个文件夹就可以了。": "You just need to copy or move the video you downloaded elsewhere into that folder.",
+  "新建文件夹并标记": "Create the folder and mark it",
+  "正在建立文件夹…": "Creating the folder…",
+  "还没有下载目录：请先到下载页选择保存位置。": "There is no download folder yet — choose a save location on the download page first.",
+  "标记失败：{message}": "Could not mark it: {message}",
+  "已标记为已下载，文件夹：{name}": "Marked as downloaded. Folder: {name}",
+  "此项目已在 Github 上开源，点击查看": "This project is open source on Github — click to see it"
 }

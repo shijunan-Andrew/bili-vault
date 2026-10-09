@@ -5,7 +5,7 @@
 ## 项目基线
 
 - 项目目录：`<项目目录>`（历史版本另存于 `<历史版本目录>`）。
-- 扩展版本：`4.7.0`（界面显示 `beta4.7`），Chrome Manifest V3，最低 Chrome 版本 111。
+- 扩展版本：`4.8.0`（界面显示 `beta4.8`），Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -138,6 +138,24 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 ```
 
 后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+### 弹窗高度与顶部横幅（4.8）
+
+- **弹窗 600px 上限**是硬约束（Chrome 弹窗最大高度），4.5.1 时把默认视图压到了约 596.8px。4.8 加了顶部开源横幅后**净增高 18px**（`26 - 12 + 4`：高度 26px、抵消掉 main 的上内边距 `--sp-3`、自己的下外边距 `--sp-1`），所以**首次打开时默认视图会轻微滚动约 18px**。
+  **这是有意的取舍**：横幅可关闭且状态记住，关掉之后它 `display: none` 离开布局，高度就回到原来的约 596.8px，不再滚动。
+- **横幅不做 `position: sticky`**。两个原因：① sticky 的 `top` 是「吸附阈值」而不是偏移量，写成负值会让横幅往上滚一段才吸附、顶部被切掉一截；② 常驻可视区会一直占掉 26px，反而让弹窗更挤。普通块级元素会随内容滚走，可视区还给内容。
+- **负外边距必须与 `main` 的内边距对应**：`margin: calc(var(--sp-3) * -1) calc(var(--sp-4) * -1) var(--sp-1)`。上边抵消 `--sp-3`、左右抵消 `--sp-4`（`main` 是 `padding: var(--sp-3) var(--sp-4) var(--sp-2)`）。**改 `main` 的内边距时必须同步改这里**，否则横幅不通栏、会缩进去一截。内边距用 `--sp-4` 是为了让横幅里的文字和正文左对齐。
+- **横幅能关掉，靠的是 `theme.css` 里那条全局的 `[hidden] { display: none !important; }`**。`.popup-banner { display: flex }` 的优先级高于浏览器给 `[hidden]` 的默认 `display: none`——**那条 `!important` 不能删**，删了横幅就永远关不掉。同样的坑在 `.batch-toolbar` 等 flex 元素上也存在，所以那条规则是全局的。
+
+### 手动标记已下载（4.8）
+
+- **目录命名只有一份实现**：`videoDirectoryLabel()` / `safeName()` 在 `archive-core.js`，`download.js` 和 `library.js` 都调它。**不要在任何一边重新实现**——手动标记建的目录必须和下载器建的目录同名（至少 ` - BV号` 后缀一致），否则将来真下载时 `findOrCreateVideoDirectory` 认不出来，会又建一个副本。
+- **标记的做法**：在 `下载根目录/收藏夹/视频目录/` 下写一个 `请将视频放到这里.txt`（`DOWNLOAD_MARKER_FILE` / `DOWNLOAD_MARKER_TEXT` 两个常量）。**这个 txt 是设计的一部分，不是随手加的**：
+  1. 目录里有文件 → 扫描的 `hasFiles` 判定天然成立，不必放宽 `if (!identifiers.size || !contents.hasFiles) continue;` 这个既有条件；
+  2. 它同时是「已下载」的信号 —— `downloadStateFromIndex` 里的判据是 `match?.hasMedia || match?.marked`；
+  3. 内容顺便告诉用户下一步该做什么。
+- **改标记文件名要三处一起改**：`DOWNLOAD_MARKER_FILE` 常量、`inspectDownloadDirectory` 里的比对、以及文档。改名后**已标记过的旧目录会失去标记**（会退回未下载状态），用户重新点一次即可。
+- **标记过程不发任何网络请求**，只写本地文件系统（测试里有一条断言守着这点）。写失败时错误要显示对话框里，不要静默。
+
 ### 版本渠道与界面约定（4.7）
 
 - **界面版本号带渠道前缀**：`displayVersion()` 在 `library.js` 与 `popup.js` 各有一份，**必须保持同步**（测试会抽出两份实现比对同一批输入的输出）。改渠道只需把 `RELEASE_CHANNEL` 从 `"beta"` 改成别的值：beta 显示 `beta4.7`（去掉末尾的 `.0`），正式版显示 `V1.0.0`。

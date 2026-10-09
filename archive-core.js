@@ -18,6 +18,26 @@
     };
   }
 
+  // 4.8：视频目录命名原本只写在 download.js 里。收藏库的「已下载？点击标记」
+  // 也必须用同一套规则建目录，将来真正下载时才能凭 BV 号认出这个目录并复用，
+  // 所以提到这里共享。
+  function safeName(value, fallback = "未知", maxLength = 100) {
+    const name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
+    if (!name || name === "." || name === "..") return fallback.slice(0, maxLength);
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return `_${name}`.slice(0, maxLength);
+    return name.slice(0, maxLength);
+  }
+
+  // 目录名以 " - BV号"（或 av 号）结尾，identifiersFromDirectoryName 靠这个后缀认人。
+  function videoDirectoryLabel(video, index = 0) {
+    const rawBvid = String(video?.bvid || "").trim();
+    const rawAid = String(video?.aid || "").trim().replace(/^av/i, "");
+    const suffix = /^BV[0-9A-Za-z]{10}$/.test(rawBvid) ? rawBvid : /^\d+$/.test(rawAid) ? `av${rawAid}` : `视频${index + 1}`;
+    const tail = ` - ${suffix}`;
+    const title = safeName(video?.title, "未知").slice(0, Math.max(1, 100 - tail.length));
+    return `${title}${tail}`;
+  }
+
   function identifiersFromDirectoryName(name) {
     const identifiers = new Set();
     const text = String(name || "");
@@ -56,7 +76,8 @@
     }
     const match = findDownloadMatch(collection, identifiers, index);
     return {
-      downloaded: Boolean(match?.hasMedia),
+      // 4.8：目录里有真实媒体文件，或者有「手动标记」留下的说明文件，都算已下载
+      downloaded: Boolean(match?.hasMedia || match?.marked),
       hasFiles: Boolean(match?.hasFiles),
       name: match?.name || "",
       collectionName: match?.collectionName || "",
@@ -262,6 +283,8 @@
     withSourceCollection,
     identifiersFromDirectoryName,
     downloadIndexKey,
+    safeName,
+    videoDirectoryLabel,
     findDownloadMatch,
     downloadStateFromIndex,
     isMediaFileName,

@@ -33,6 +33,11 @@ const viewGridButton = document.getElementById("viewGrid");
 const viewListButton = document.getElementById("viewList");
 
 const safetyNotice = document.getElementById("safetyNotice");
+const markDownloadedDialog = document.getElementById("markDownloadedDialog");
+const markDownloadedPath = document.getElementById("markDownloadedPath");
+const markDownloadedStatus = document.getElementById("markDownloadedStatus");
+const markDownloadedGo = document.getElementById("markDownloadedGo");
+const markDownloadedCancel = document.getElementById("markDownloadedCancel");
 const githubBanner = document.getElementById("githubBanner");
 const githubBannerLink = document.getElementById("githubBannerLink");
 const dismissGithubBannerButton = document.getElementById("dismissGithubBanner");
@@ -253,16 +258,23 @@ function statsFromInfo(info, fallbackStats = {}) {
   return stats;
 }
 
+// 4.8：「已下载？点击标记」会在视频目录里放一个说明文件。有它在，目录就不是空的，
+// 扫描能正常识别；文件内容也顺便告诉用户下一步该做什么。
+const DOWNLOAD_MARKER_FILE = "请将视频放到这里.txt";
+const DOWNLOAD_MARKER_TEXT = "请将别的地方下载的视频复制或移动到此处";
+
 async function inspectDownloadDirectory(directory) {
-  const result = { hasFiles: false, hasMedia: false };
+  const result = { hasFiles: false, hasMedia: false, marked: false };
   for await (const entry of directory.values()) {
     if (entry.kind === "file") {
       result.hasFiles = true;
       result.hasMedia ||= BcaArchiveCore.isMediaFileName(entry.name);
+      result.marked ||= entry.name === DOWNLOAD_MARKER_FILE;
     } else if (entry.kind === "directory") {
       const child = await inspectDownloadDirectory(entry);
       result.hasFiles ||= child.hasFiles;
       result.hasMedia ||= child.hasMedia;
+      result.marked ||= child.marked;
     }
   }
   return result;
@@ -302,7 +314,7 @@ async function scanDownloadedDirectories(archiveRoot) {
         const contents = await inspectDownloadDirectory(entry);
         if (!identifiers.size || !contents.hasFiles) continue;
         for (const identifier of identifiers) {
-          const match = { name: entry.name, collectionName: collection.name, handle: entry, hasFiles: contents.hasFiles, hasMedia: contents.hasMedia };
+          const match = { name: entry.name, collectionName: collection.name, handle: entry, hasFiles: contents.hasFiles, hasMedia: contents.hasMedia, marked: contents.marked };
           keepBestDownloadMatch(index, BcaArchiveCore.downloadIndexKey(collection.name, identifier), match);
           // Older 3.5 downloads lost their source collection and were written under this folder.
           if (collection.name === "未分类收藏") keepBestDownloadMatch(index, `legacy\u0000${identifier}`, match);
@@ -1862,7 +1874,7 @@ function openDetail(video, restoreTo, options = {}) {
     ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>`
     : `<p class="detail-empty">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("这个归档没有记录标签"))}</p>`;
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}${escapeHtml(BcaI18n.t("下载视频"))}</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频状态"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span><p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}${video.isInvalid ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}${escapeHtml(BcaI18n.t("下载视频"))}</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("已下载？点击标记"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频状态"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span><p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · ${BcaI18n.t("已失效")}` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -1896,6 +1908,13 @@ function openDetail(video, restoreTo, options = {}) {
 
   const link = detailContent.querySelector(".open-video");
   if (link) link.href = video.url;
+  // 4.8：失效视频在 B 站已经没有可看的页面，给一个站外搜索的出口
+  const searchInvalidLink = detailContent.querySelector(".search-invalid");
+  if (searchInvalidLink) {
+    searchInvalidLink.href = `https://www.bing.com/search?q=${encodeURIComponent(video.title || "")}`;
+  }
+  const markDownloadedButton = detailContent.querySelector(".mark-downloaded");
+  if (markDownloadedButton) markDownloadedButton.addEventListener("click", () => openMarkDownloadedDialog(video));
   const moveButton = detailContent.querySelector(".move-local");
   moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
   detailContent.querySelector(".refresh-status").addEventListener("click", () => openStatusConfirm([video], "detail"));
@@ -2152,6 +2171,70 @@ async function copyVideoRecord(video, targetName) {
 async function removeMovedSource(video) {
   const sourceCollection = await rootHandle.getDirectoryHandle(video.collection);
   await sourceCollection.removeEntry(video.directory, { recursive: true });
+}
+
+/* ---------------- 4.8：把「在别处下载的」视频标记为已下载 ----------------
+
+   做法：在下载根目录的「收藏夹 / 视频目录」下建一个只有说明文件的文件夹。
+   这样安排有三个好处：
+   1. 目录里有文件，扫描的 hasFiles 判定天然成立，不必放宽任何既有条件；
+   2. 目录名以 " - BV号" 结尾，将来真正下载时 findOrCreateVideoDirectory 能凭
+      BV 号认出这个目录并直接复用，不会又建一个副本；
+   3. 用户把别处下载好的视频拖进去，它就成了一个完全正常的已下载视频。 */
+
+async function markVideoDownloaded(video) {
+  const parent = await getWritableDownloadParent();
+  if (!parent) throw new Error(BcaI18n.t("还没有下载目录：请先到下载页选择保存位置。"));
+  const collectionName = BcaArchiveCore.safeName(video.collection || "未分类收藏", "未分类收藏", 120);
+  const directoryName = BcaArchiveCore.videoDirectoryLabel(video, 0);
+  const collectionHandle = await parent.getDirectoryHandle(collectionName, { create: true });
+  const directoryHandle = await collectionHandle.getDirectoryHandle(directoryName, { create: true });
+  const markerHandle = await directoryHandle.getFileHandle(DOWNLOAD_MARKER_FILE, { create: true });
+  const writable = await markerHandle.createWritable();
+  await writable.write(DOWNLOAD_MARKER_TEXT);
+  await writable.close();
+  // 立刻更新内存状态，不必等下一次整表重扫
+  video.downloaded = true;
+  video.hasDownloadFiles = true;
+  video.downloadDirectoryName = directoryName;
+  video.downloadCollectionName = collectionName;
+  video.downloadDirectoryHandle = directoryHandle;
+  return { collectionName, directoryName };
+}
+
+let markDownloadedVideo = null;
+let markDownloadedBusy = false;
+
+function openMarkDownloadedDialog(video) {
+  markDownloadedVideo = video;
+  markDownloadedPath.textContent = BcaArchiveCore.downloadPathLabel(
+    BcaArchiveCore.safeName(video.collection || "未分类收藏", "未分类收藏", 120),
+    BcaArchiveCore.videoDirectoryLabel(video, 0)
+  );
+  markDownloadedStatus.hidden = true;
+  markDownloadedStatus.textContent = "";
+  markDownloadedGo.disabled = false;
+  if (!markDownloadedDialog.open) markDownloadedDialog.showModal();
+}
+
+async function runMarkDownloaded() {
+  if (!markDownloadedVideo || markDownloadedBusy) return;
+  markDownloadedBusy = true;
+  markDownloadedGo.disabled = true;
+  markDownloadedStatus.hidden = false;
+  markDownloadedStatus.textContent = BcaI18n.t("正在建立文件夹…");
+  try {
+    const { directoryName } = await markVideoDownloaded(markDownloadedVideo);
+    markDownloadedDialog.close();
+    showToast(BcaI18n.t("已标记为已下载，文件夹：{name}", { name: directoryName }));
+    renderVideos();
+    if (currentDetailVideo && currentDetailVideo.id === markDownloadedVideo.id) openDetail(markDownloadedVideo);
+  } catch (error) {
+    markDownloadedStatus.textContent = BcaI18n.t("标记失败：{message}", { message: error.message });
+  } finally {
+    markDownloadedBusy = false;
+    markDownloadedGo.disabled = false;
+  }
 }
 
 async function getWritableDownloadParent() {
@@ -2795,6 +2878,8 @@ deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRe
 searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
 sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
 dismissGithubBannerButton?.addEventListener("click", dismissGithubBanner);
+markDownloadedGo?.addEventListener("click", runMarkDownloaded);
+markDownloadedCancel?.addEventListener("click", () => markDownloadedDialog?.close());
 let bannerResizeTimer = 0;
 window.addEventListener("resize", () => {
   if (githubBanner?.hidden) return;

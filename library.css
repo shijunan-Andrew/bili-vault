@@ -866,6 +866,10 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .detail-bvid { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-4); color: var(--muted); font-size: var(--fs-sm); }
 .detail-bvid .tnum { color: var(--text); font-weight: 600; }
 .open-video { width: 100%; margin: 0 0 var(--sp-4); }
+/* 4.8：失效视频在 B 站没有可看的页面了，给一个站外搜索的出口 */
+.search-invalid { width: 100%; margin: calc(var(--sp-2) * -1) 0 var(--sp-4); }
+/* 4.8：从别的下载器下载的用户，用它把记录标记成已下载（已下载的记录不显示） */
+.mark-downloaded { width: 100%; margin: 0 0 var(--sp-3); }
 
 /* 复制字段：BV 号 / 链接 / UP 主 UID 一点即复制 */
 .detail-copy-field {

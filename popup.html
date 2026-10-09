@@ -13,6 +13,14 @@
 </head>
 <body>
   <main>
+    <!-- 4.8：顶部静态开源横幅。链接地址与 library.js 的 PROJECT_REPO_URL 保持一致 -->
+    <div id="githubBanner" class="popup-banner" hidden>
+      <a id="githubBannerLink" class="popup-banner-link" href="https://github.com/shijunan-Andrew/bili-vault" target="_blank" rel="noopener noreferrer">
+        <span data-icon="sparkle"></span>
+        <span data-i18n="此项目已在 Github 上开源，点击查看">此项目已在 Github 上开源，点击查看</span>
+      </a>
+      <button id="dismissGithubBanner" class="popup-banner-close" type="button" aria-label="关闭" data-i18n-aria="关闭"><span data-icon="close"></span></button>
+    </div>
     <details id="safetyNotice" class="card safety-notice">
       <summary>
         <span class="safety-summary-icon" data-icon="alert"></span>

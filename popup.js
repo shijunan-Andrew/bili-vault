@@ -554,7 +554,36 @@ async function boot() {
   refreshStatus().catch((error) => {
     lastResult.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法读取插件状态。");
   });
-  if (popupVersion) popupVersion.textContent = BcaI18n.t("版本 {version}", { version: displayVersion(chrome.runtime.getManifest().version) });
+  /* ---------------- 4.8：顶部开源横幅 ---------------- */
+
+// 与 library.js 的 PROJECT_REPO_URL 保持一致
+const PROJECT_REPO_URL = "https://github.com/shijunan-Andrew/bili-vault";
+const GITHUB_BANNER_KEY = "popupGithubBannerDismissed";
+
+async function restoreGithubBanner() {
+  const banner = document.getElementById("githubBanner");
+  if (!banner) return;
+  let dismissed = false;
+  try {
+    const saved = await chrome.storage.local.get(GITHUB_BANNER_KEY);
+    dismissed = saved?.[GITHUB_BANNER_KEY] === true;
+  } catch (_) {}
+  if (dismissed) return;
+  const link = document.getElementById("githubBannerLink");
+  if (link) link.href = PROJECT_REPO_URL;
+  banner.hidden = false;
+}
+
+function dismissGithubBanner() {
+  const banner = document.getElementById("githubBanner");
+  if (banner) banner.hidden = true;
+  chrome.storage.local.set({ [GITHUB_BANNER_KEY]: true }).catch(() => {});
+}
+
+if (popupVersion) popupVersion.textContent = BcaI18n.t("版本 {version}", { version: displayVersion(chrome.runtime.getManifest().version) });
+  // 4.8：顶部开源横幅（关闭状态记在 chrome.storage，下次不再出现）
+  restoreGithubBanner();
+  document.getElementById("dismissGithubBanner")?.addEventListener("click", dismissGithubBanner);
 }
 
 boot().catch(() => {});

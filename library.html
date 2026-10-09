@@ -230,6 +230,20 @@
     </div>
   </dialog>
 
+  <!-- 4.8：从别的下载器下载的用户，用这个把记录标记成已下载 -->
+  <dialog id="markDownloadedDialog" class="editor-dialog" aria-labelledby="markDownloadedTitle">
+    <div class="editor-heading"><span class="editor-heading-icon" data-icon="download"></span><h2 id="markDownloadedTitle" data-i18n="标记为已下载">标记为已下载</h2></div>
+    <p class="editor-hint" data-i18n="如果你是在别的地方下载的这个视频，可以用这个操作把它标记为已下载。">如果你是在别的地方下载的这个视频，可以用这个操作把它标记为已下载。</p>
+    <p class="editor-hint" data-i18n="插件会在该视频的下载路径里新建一个文件夹，里面只放一个说明文件、没有视频内容，并把这条记录标记为已下载。">插件会在该视频的下载路径里新建一个文件夹，里面只放一个说明文件、没有视频内容，并把这条记录标记为已下载。</p>
+    <p class="editor-hint" data-i18n="你只要把在别处下载好的视频复制或移动进那个文件夹就可以了。">你只要把在别处下载好的视频复制或移动进那个文件夹就可以了。</p>
+    <p id="markDownloadedPath" class="editor-hint tnum"></p>
+    <p id="markDownloadedStatus" class="dialog-progress" role="status" hidden></p>
+    <div class="editor-actions">
+      <button id="markDownloadedCancel" class="button button-quiet" type="button" data-i18n="取消">取消</button>
+      <button id="markDownloadedGo" class="button button-primary" type="button" data-i18n="新建文件夹并标记">新建文件夹并标记</button>
+    </div>
+  </dialog>
+
   <dialog id="statusConfirm" class="editor-dialog" aria-labelledby="statusConfirmTitle">
     <div class="editor-heading"><span class="editor-heading-icon" data-icon="refresh"></span><h2 id="statusConfirmTitle" data-i18n="更新视频状态">更新视频状态</h2></div>
     <p id="statusConfirmCount" class="editor-hint"></p>
