@@ -168,6 +168,9 @@ body {
 .top-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .root-label { display: flex; align-items: center; gap: var(--sp-2); max-width: 220px; color: var(--muted); font-size: var(--fs-sm); }
 .root-label span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 本地收藏夹占用：与 #rootLabel 同排的只读展示，数值异步算完后替换“正在计算…” */
+.usage-label { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+.usage-label b { color: var(--text); font-weight: 650; }
 .status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--ghost); }
 .status-dot.ready { background: var(--success); box-shadow: 0 0 0 3px #2f90681f; }
 
@@ -356,6 +359,24 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   font-size: var(--fs-sm);
   line-height: 1.7;
 }
+
+/* 导入提示：品牌蓝的信息条，和黄色的扫描告警区分开；可关闭 */
+.import-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-sm);
+  color: var(--brand-deep);
+  background: var(--brand-soft);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+.import-hint p { margin: 0; }
+.import-hint-icon { display: inline-flex; color: var(--brand); font-size: var(--fs-md); }
+.import-hint .text-button { flex: 0 0 auto; margin-left: auto; }
 
 /* 扫描进度条：大目录读取时不再只有按钮文字变化 */
 .scan-progress { position: relative; height: 3px; margin: 0 0 var(--sp-4); overflow: hidden; border-radius: var(--r-pill); background: var(--surface-sunken); }
@@ -652,6 +673,15 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .detail-profile-link { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 var(--sp-3); border: 1px solid var(--brand-line); border-radius: var(--r-xs); color: var(--brand-deep); background: var(--brand-soft); font-size: var(--fs-sm); font-weight: 650; text-decoration: none; }
 .detail-profile-link:hover { background: var(--brand-soft-strong); }
 
+/* 4.2：UP 主那一行末尾的粉丝数小徽标 */
+.detail-up-fans { display: inline-flex; align-items: center; gap: 3px; margin-left: var(--sp-2); padding: 2px 7px; border: 1px solid var(--brand-line); border-radius: var(--r-pill); color: var(--brand-deep); background: var(--brand-soft); font-size: var(--fs-sm); font-weight: 600; vertical-align: middle; }
+
+/* 4.2：互动数据卡片行（播放/弹幕/点赞/投币/收藏/转发），没有数据时整块不渲染 */
+.detail-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: var(--sp-2); margin: var(--sp-4) 0 0; }
+.detail-stat { display: grid; gap: 2px; padding: var(--sp-3) var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); text-align: center; }
+.detail-stat-value { color: var(--ink); font-size: var(--fs-md); font-weight: 700; }
+.detail-stat-label { color: var(--muted); font-size: var(--fs-sm); }
+
 .detail-description { max-height: 320px; margin: 0; overflow: hidden; color: var(--text); font-size: var(--fs-base); line-height: 1.9; white-space: pre-wrap; }
 /* 4.1：标签/简介缺失时的空状态。注意不能复用 .detail-description，
    否则 querySelector(".detail-description") 会先取到占位符，把简介写错位置。 */
@@ -682,9 +712,6 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .editor-dialog input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 .editor-dialog select { width: 100%; height: 42px; padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); outline: none; color: var(--text); background: var(--surface); font-size: var(--fs-base); cursor: pointer; }
 .editor-dialog select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
-/* 4.1beta：补全进度提示 */
-.enrich-progress { margin: var(--sp-3) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; overflow-wrap: anywhere; }
-.enrich-progress:not(:empty) { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--brand-line); border-radius: var(--r-sm); background: var(--brand-soft); color: var(--brand-deep); }
 .editor-hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; }
 .editor-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-5); }
 .editor-actions .button { min-width: 108px; }
@@ -789,7 +816,7 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   .collection-delete, .collection-drag-handle { display: none; }
   .main-area { margin-left: 0; }
   .topbar { position: static; min-height: 60px; padding: 0 var(--sp-4); }
-  .root-label { display: none; }
+  .root-label, .usage-label { display: none; }
   .library-view { padding: var(--sp-5) var(--sp-4) 40px; }
   .page-heading { align-items: center; margin-bottom: var(--sp-4); }
   .view-controls { flex-wrap: wrap; justify-content: flex-start; }

@@ -69,8 +69,13 @@
           </div>
           <div id="importProgressView" class="import-progress-view" hidden>
             <span class="progress-spinner" aria-hidden="true"></span>
-            <div><strong>正在导入收藏夹</strong><p id="importProgressText">正在准备…</p></div>
+            <div><strong id="importProgressTitle">正在导入收藏夹</strong><p id="importProgressText">正在准备…</p></div>
           </div>
+          <div id="importControl" class="import-control" hidden>
+            <button id="pauseImport" class="secondary" type="button">暂停导入</button>
+            <button id="cancelImport" class="secondary danger" type="button">取消导入</button>
+          </div>
+          <p id="importControlHint" class="import-control-hint" hidden>取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。</p>
           <div id="importStatus" class="import-status" role="status"></div>
         </div>
       </div>

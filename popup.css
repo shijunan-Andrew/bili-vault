@@ -94,6 +94,13 @@ button:disabled { cursor: wait; opacity: .6; }
 .import-summary-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .import-summary-copy strong { color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
 .import-summary-copy small { color: var(--muted); font-size: var(--fs-sm); }
+/* 4.2：导入过程的暂停 / 取消 */
+.import-progress-view.paused .progress-spinner { animation-play-state: paused; border-top-color: var(--warning); }
+.import-control { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-2); }
+.import-control .secondary { margin-top: 0; }
+.import-control .danger { border-color: var(--danger-line); color: var(--danger-strong); background: var(--danger-soft); }
+.import-control .danger:hover:not(:disabled) { border-color: var(--danger); background: #fbe6e3; }
+.import-control-hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
 .import-card > summary .chevron { color: var(--faint); font-size: var(--fs-md); transition: transform var(--dur) var(--ease); }
 .import-card[open] > summary .chevron { transform: rotate(180deg); }
 .import-body { padding: 0 var(--sp-4) var(--sp-4); border-top: 1px solid var(--line-soft); }

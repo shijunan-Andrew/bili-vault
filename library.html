@@ -31,6 +31,7 @@
         <div class="breadcrumb"><span>本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection">全部收藏</strong></div>
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel">尚未选择目录</span></div>
+          <div class="usage-label">本地收藏夹占用：<b id="storageUsage" class="tnum">—</b></div>
           <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录"><span data-icon="refresh"></span>刷新</button>
           <button id="chooseRoot" class="button button-primary"><span data-icon="plus"></span>选择收藏根目录</button>
         </div>
@@ -74,7 +75,6 @@
             <p id="resultSummary" class="heading-subtitle"></p>
           </div>
           <div class="page-heading-actions">
-            <button id="enrichLibrary" class="button button-quiet" type="button" disabled title="为缺少标签或简介的归档补抓资料">补全缺失资料</button>
             <button id="batchManage" class="button button-quiet" type="button" aria-pressed="false">批量管理</button>
           </div>
         </div>
@@ -110,6 +110,11 @@
 
         <div id="scanProgress" class="scan-progress" hidden></div>
         <div id="scanNotice" class="scan-notice" hidden></div>
+        <div id="importHint" class="import-hint" hidden>
+          <span class="import-hint-icon" data-icon="info"></span>
+          <p>如果需要导入或更新本地文件夹内的视频，请在 B 站收藏夹页面点击插件的「导入或更新」。</p>
+          <button id="dismissImportHint" class="text-button" type="button">知道了</button>
+        </div>
         <div id="videoGrid" class="video-grid"></div>
         <nav id="videoPager" class="pager" aria-label="分页" hidden></nav>
         <div id="emptySearch" class="empty-search" hidden>
@@ -168,24 +173,6 @@
       <span id="collectionActionCount" class="collection-action-count">已选 0 个收藏夹</span>
       <button id="cancelCollectionAction" class="button button-quiet" type="button">取消</button>
       <button id="confirmCollectionAction" class="button button-primary" type="button" disabled>确认</button>
-    </div>
-  </dialog>
-
-  <dialog id="enrichDialog" class="editor-dialog" aria-labelledby="enrichDialogTitle">
-    <h2 id="enrichDialogTitle">补全缺失的标签和简介</h2>
-    <p id="enrichSummary" class="editor-hint"></p>
-    <label for="enrichBatchSize">本次处理数量</label>
-    <select id="enrichBatchSize">
-      <option value="10">10 条（约 10–20 次接口请求）</option>
-      <option value="20" selected>20 条（约 20–40 次接口请求）</option>
-      <option value="40">40 条（约 40–80 次接口请求）</option>
-    </select>
-    <p class="editor-hint">B 站接口有风控，建议分批处理，处理完可以再点一次继续，直到全部补完。</p>
-    <p class="editor-hint">只会写入缺失的标签和简介，已经有内容的字段不会被覆盖；抓不到或失败的记录保持原样。</p>
-    <p id="enrichProgress" class="enrich-progress" role="status"></p>
-    <div class="editor-actions">
-      <button id="cancelEnrich" class="button button-quiet" type="button">关闭</button>
-      <button id="confirmEnrich" class="button button-primary" type="button">开始补全</button>
     </div>
   </dialog>
 

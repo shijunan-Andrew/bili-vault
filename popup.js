@@ -17,6 +17,11 @@ const downloadButton = document.getElementById("downloadReport");
 const importSelectionView = document.getElementById("importSelectionView");
 const importProgressView = document.getElementById("importProgressView");
 const importProgressText = document.getElementById("importProgressText");
+const importProgressTitle = document.getElementById("importProgressTitle");
+const importControl = document.getElementById("importControl");
+const importControlHint = document.getElementById("importControlHint");
+const pauseImportButton = document.getElementById("pauseImport");
+const cancelImportButton = document.getElementById("cancelImport");
 const importFolderList = document.getElementById("importFolderList");
 const importCard = document.getElementById("importCard");
 const importStatus = document.getElementById("importStatus");
@@ -36,6 +41,37 @@ let permissionNotice = "";
 let extensionEnabled = true;
 let importFolders = [];
 let importBusy = false;
+// 4.2：导入过程的暂停 / 取消。重开弹窗时会从后台的 importState 恢复。
+let importPaused = false;
+let cancelArmed = false;
+let cancelArmTimer = 0;
+
+function renderImportControl() {
+  importControl.hidden = !importBusy;
+  importControlHint.hidden = !importBusy || cancelArmed;
+  importProgressView.classList.toggle("paused", importPaused);
+  importProgressTitle.textContent = importPaused ? "导入已暂停" : "正在导入收藏夹";
+  pauseImportButton.textContent = importPaused ? "继续导入" : "暂停导入";
+  if (!cancelArmed) {
+    cancelImportButton.textContent = "取消导入";
+    cancelImportButton.classList.remove("danger");
+  }
+  pauseImportButton.disabled = false;
+  cancelImportButton.disabled = false;
+}
+
+function disarmCancel() {
+  cancelArmed = false;
+  window.clearTimeout(cancelArmTimer);
+  cancelImportButton.classList.remove("danger");
+  renderImportControl();
+}
+
+async function sendImportControl(action) {
+  const result = await chrome.runtime.sendMessage({ type: "bca-import-control", action });
+  if (!result?.ok) throw new Error(result?.message || "操作失败。");
+  return result;
+}
 
 function queryCurrentTab() {
   return new Promise((resolve, reject) => {
@@ -98,6 +134,7 @@ function updateImportSelection() {
   importSelectedCount.textContent = `已选 ${selected} 个`;
   startImportButton.disabled = importBusy || selected === 0;
   startImportButton.textContent = selected ? `开始导入（${selected} 个收藏夹）` : "开始导入";
+  renderImportControl();
 }
 
 async function loadImportFolders() {
@@ -134,6 +171,8 @@ async function startImport() {
     return;
   }
   importBusy = true;
+  importPaused = false;
+  disarmCancel();
   importStatus.textContent = "";
   updateImportSelection();
   importStatus.classList.remove("error");
@@ -143,15 +182,21 @@ async function startImport() {
     if (permission !== "granted") throw new Error("未获得本地保存文件夹的写入权限，请重新选择保存文件夹后重试。");
     const tab = await queryCurrentTab();
     const response = await sendTabMessage(tab.id, { type: "bca-import-selected-folders", folderIds });
+    if (response?.cancelled) {
+      importStatus.classList.add("error");
+      importStatus.textContent = response.message || "导入已取消，本次改动已回滚。";
+      return;
+    }
     if (!response?.ok) throw new Error(response?.message || "导入失败。");
     importStatus.classList.remove("error");
-    importStatus.textContent = response.message || `导入/更新完成：${response.imported || 0} 个，跳过 ${response.skipped || 0} 个。`;
+    importStatus.textContent = response.message || `导入/更新完成：新导入 ${response.imported || 0} 个，更新 ${response.refreshed || 0} 个。`;
     if (response.reportPath) importStatus.textContent += ` 错误报告：${response.reportPath}`;
   } catch (error) {
     importStatus.textContent = error?.message || "导入失败。";
     importStatus.classList.add("error");
   } finally {
     importBusy = false;
+    importPaused = false;
     updateImportSelection();
   }
 }
@@ -212,6 +257,14 @@ async function loadRootHandle() {
 async function refreshStatus() {
   const status = await chrome.runtime.sendMessage({ type: "get-status" });
   rootHandle = await loadRootHandle().catch(() => null);
+  // 4.2：弹窗可能在导入进行中被关闭又打开，这里按后台状态恢复进度与按钮
+  const state = status.importState || {};
+  if (state.running) {
+    importPaused = Boolean(state.paused);
+    importBusy = true;
+    updateImportSelection();
+    if (state.text) importProgressText.textContent = state.text;
+  }
   folderName.textContent = status.baseFolderName || "尚未选择文件夹";
   folderName.classList.toggle("unselected", !status.baseFolderName);
   if (status.lastResult) {
@@ -335,6 +388,41 @@ downloadButton.addEventListener("click", () => {
 
 refreshImportFoldersButton.addEventListener("click", loadImportFolders);
 startImportButton.addEventListener("click", startImport);
+pauseImportButton.addEventListener("click", async () => {
+  pauseImportButton.disabled = true;
+  try {
+    const result = await sendImportControl(importPaused ? "resume" : "pause");
+    importPaused = Boolean(result.paused);
+    renderImportControl();
+  } catch (error) {
+    importStatus.textContent = error?.message || "操作失败。";
+    importStatus.classList.add("error");
+    pauseImportButton.disabled = false;
+  }
+});
+cancelImportButton.addEventListener("click", async () => {
+  if (!cancelArmed) {
+    cancelArmed = true;
+    cancelImportButton.textContent = "确认取消并回滚";
+    cancelImportButton.classList.add("danger");
+    importControlHint.hidden = true;
+    window.clearTimeout(cancelArmTimer);
+    cancelArmTimer = window.setTimeout(disarmCancel, 5000);
+    return;
+  }
+  window.clearTimeout(cancelArmTimer);
+  cancelImportButton.disabled = true;
+  pauseImportButton.disabled = true;
+  cancelImportButton.textContent = "正在取消…";
+  importProgressText.textContent = "正在删除本次新建的目录并还原被更新的记录…";
+  try {
+    await sendImportControl("cancel");
+  } catch (error) {
+    importStatus.textContent = error?.message || "取消失败。";
+    importStatus.classList.add("error");
+    disarmCancel();
+  }
+});
 selectAllImportFoldersButton.addEventListener("click", () => {
   importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = true; });
   updateImportSelection();
@@ -351,6 +439,23 @@ chrome.runtime.onMessage.addListener((message) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.enabled) renderEnabledState(changes.enabled.newValue !== false);
+  if (areaName === "local" && changes.importState) {
+    const state = changes.importState.newValue || {};
+    importPaused = Boolean(state.paused);
+    if (state.running) {
+      importBusy = true;
+      updateImportSelection();
+      if (state.text) importProgressText.textContent = state.text;
+    } else if (importBusy) {
+      // 导入结束（完成或取消）：回到收藏夹选择视图，并把结果显示出来
+      importBusy = false;
+      disarmCancel();
+      updateImportSelection();
+      importStatus.classList.remove("error");
+      importStatus.textContent = state.summary || "导入已结束。";
+      if (state.summary?.includes("取消")) importStatus.classList.add("error");
+    }
+  }
   refreshStatus().catch(() => {});
 });
 refreshEnabledState().catch(() => renderEnabledState(true));

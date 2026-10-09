@@ -183,6 +183,9 @@ function buildInfo(data, folderName, savedAt) {
   const upName = metadata.upName || "未知";
   const upHome = metadata.upMid ? `https://space.bilibili.com/${metadata.upMid}` : "未知";
   const description = String(metadata.description || "未知").replace(/\r\n/g, "\n");
+  const stats = metadata.stats || {};
+  const hasStats = IMPORT_STAT_KEYS.some((key) => !importIsPlaceholder(stats[key]));
+  const fansText = importIsPlaceholder(metadata.upFans) ? "未知" : String(metadata.upFans);
   const lines = [
     "【基本信息】",
     `视频收藏时间：${favoriteAtText}`,
@@ -199,15 +202,27 @@ function buildInfo(data, folderName, savedAt) {
     "【UP主】",
     `UP主昵称：${upName}`,
     `UP主UID：${upMid}`,
+    `UP主粉丝数：${fansText}`,
     `UP主主页：${upHome}`,
-    "",
+    ""
+  ];
+  // 互动数据单独成段，不再和简介挤在一起（只有确实抓到时才写）
+  if (hasStats) {
+    lines.push("【互动数据】");
+    for (const key of IMPORT_STAT_KEYS) {
+      const value = stats[key];
+      lines.push(`${IMPORT_STAT_LABELS[key]}：${importIsPlaceholder(value) ? "未知" : String(value)}`);
+    }
+    lines.push("");
+  }
+  lines.push(
     "【标签】",
     tags,
     "",
     "【视频简介】",
     description,
     ""
-  ];
+  );
   if (metadata.imported) {
     lines.splice(6, 0, `视频状态：${metadata.invalid ? "已失效视频（已尝试恢复）" : "正常"}`);
     lines.splice(7, 0, `恢复情况：${metadata.recoverySummary || "未知"}`);
@@ -599,6 +614,9 @@ function normalizeImportMedia(media, folder) {
   const aidKeys = [...new Set([explicitAid, explicitOid, linkOid, linkSourceId, mediaId].map(importAidKey).filter(Boolean))];
   const aid = explicitAid || explicitOid || linkOid || linkSourceId || mediaId || importBvToAid(bvid);
   const title = importClean(media.title || "");
+  // 收藏夹接口的 intro 常常是 B 站分享文案，统计信息挤在简介里；这里先拆开，
+  // 真正的简介后面还会用 /x/web-interface/view 的 desc 覆盖（如果有的话）
+  const shareSplit = splitShareText(String(media.intro || media.desc || "").replace(/\r\n?/g, "\n").trim());
   return {
     title: title || "已失效视频",
     originalTitle: title,
@@ -606,7 +624,8 @@ function normalizeImportMedia(media, folder) {
     aid,
     link,
     cover: normalizeUrl(media.cover || media.pic || ""),
-    description: String(media.intro || media.desc || "").replace(/\r\n?/g, "\n").trim(),
+    description: shareSplit.description,
+    shareStats: shareSplit.stats,
     author: importClean(upper.name || media.upper_name || ""),
     authorMid: String(upper.mid || ""),
     category: importClean(media.tname || media.type_name || ""),
@@ -737,6 +756,8 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
     let page = 1;
     let passFailed = false;
     for (; page <= 100; page += 1) {
+      // 4.2：失效视频的跨页扫描也可能很久，这里也要能响应暂停/取消
+      await importWaitIfPaused();
       let payload = null;
       let lastError = null;
       for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -839,6 +860,7 @@ async function enrichImportedInvalidVideos(items, folder, tabId = null) {
   }
 
   await importRunLimited(invalid, 3, async (item) => {
+    await importWaitIfPaused();
     if (!item.bvid) return;
     try {
       const data = await biliImportApiGet("/x/web-interface/view", { bvid: item.bvid }, 10000, tabId);
@@ -873,21 +895,23 @@ async function importRunLimited(items, limit, worker) {
 }
 
 /* ==========================================================================
-   4.1beta：为「正常」条目补全标签和简介
-   4.1 之前只有失效视频会走 /x/web-interface/view 和 /x/tag/archive/tags，
-   导入进来的正常条目 tags 恒为 []、简介常为空，于是归档里写着「未知 / -」。
-   这里让正常条目也补一次，并且：
-   - 只补缺失的字段，已有内容绝不覆盖；
-   - 单次导入的补全条数设上限，避免一次打太多接口触发 B 站风控；
-   - 本地收藏库另有「补全缺失资料」可以对老档案增量补，逐批推进。
+   4.2：导入/更新的完整重构
+   与 4.1beta 的区别：
+   - 每条视频都抓一次完整资料（标签、简介、发布时间、分区、互动数据、UP 主粉丝数），
+     不再只补“缺失”的字段；
+   - 支持暂停 / 继续 / 取消，取消时回滚本次新建的目录与被改写的文件，
+     导入前就在本地收藏夹里的内容保持不动；
+   - 本地没有同名收藏夹时全量导入，已有同名收藏夹时补齐缺失视频，
+     并按新格式刷新数据不完整的旧记录。
    ========================================================================== */
 
-// 归档里字段缺失会写成这些占位值，补全时一律当成“空”
+// 归档里字段缺失会写成这些占位值，判断“数据是否完整”时一律当成空
 const IMPORT_PLACEHOLDER_VALUES = new Set(["", "无", "未知", "-", "--", "—", "暂无", "/", "N/A", "n/a", "null", "undefined"]);
 
-const IMPORT_ENRICH_LIMIT = 30;          // 每次导入最多补全多少条
-const IMPORT_ENRICH_CONCURRENCY = 2;     // 并发请求数
-const IMPORT_ENRICH_DELAY_MS = 420;      // 每条之间的间隔，给 B 站接口留余地
+const IMPORT_STAT_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
+const IMPORT_STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" };
+const IMPORT_DETAIL_CONCURRENCY = 2;   // 详情抓取并发
+const IMPORT_DETAIL_DELAY_MS = 350;    // 详情抓取间隔，给 B 站接口留余地
 
 function importIsPlaceholder(value) {
   return IMPORT_PLACEHOLDER_VALUES.has(importClean(value));
@@ -898,186 +922,278 @@ function importTagNames(tagData) {
   return [...new Set(tagData.map((tag) => importClean(tag?.tag_name || tag?.name)).filter(Boolean))];
 }
 
-// 只替换【标签】那一行。归档格式里标签永远是单行，所以正则限定在行内。
-function replaceInfoTagLine(text, tagsLine) {
-  return String(text).replace(/(【标签】[^\n]*\n)([^\n]*)/, (match, prefix) => `${prefix}${tagsLine}`);
-}
+/* ---------- B 站分享文案拆分（与 archive-core.js 的实现等价，测试会比对两者） ---------- */
 
-// 【视频简介】是最后一个区块，直接替换到文件末尾。用函数式 replace 避免 $ 被当成替换模式。
-function replaceInfoDescription(text, description) {
-  const normalized = String(description ?? "").replace(/\r\n/g, "\n").replace(/\n+$/, "");
-  return String(text).replace(/(【视频简介】[^\n]*\n)([\s\S]*)$/, (match, prefix) => `${prefix}${normalized}\n`);
-}
+const SHARE_STATS_PATTERN = /视频播放量\s*([\d.]+)\s*[、,]?\s*弹幕量\s*([\d.]+)/;
 
-function importNeedsEnrichment(item) {
-  if (!item?.bvid) return false;
-  const missingTags = !Array.isArray(item.tags) || !item.tags.length;
-  return missingTags || importIsPlaceholder(item.description);
-}
-
-// 抓一条视频的缺失资料。只写缺失字段，已存在的简介/标签不会被覆盖。
-async function fetchMissingVideoData(item, tabId = null) {
-  let changed = false;
-  if (importIsPlaceholder(item.description)) {
-    try {
-      const data = await biliImportApiGet("/x/web-interface/view", { bvid: item.bvid }, 10000, tabId);
-      const description = String(data?.desc ?? "").trim();
-      if (description && !importIsPlaceholder(description)) { item.description = description; changed = true; }
-      // 顺手补齐收藏夹接口没给的字段
-      if (!item.cover && data?.pic) item.cover = normalizeUrl(data.pic);
-      if (!item.author && data?.owner?.name) item.author = importClean(data.owner.name);
-      if (!item.authorMid && data?.owner?.mid) item.authorMid = String(data.owner.mid);
-      if (!item.category && data?.tname) item.category = importClean(data.tname);
-      if (!(Number(item.duration) > 0) && data?.duration) item.duration = Number(data.duration) || 0;
-      if (!(Number(item.pubdate) > 0) && data?.pubdate) item.pubdate = Number(data.pubdate) || 0;
-    } catch (error) {
-      item.enrichErrors = [...(item.enrichErrors || []), `${item.title || item.bvid}：视频资料接口：${error.message}`];
-    }
-  }
-  if (!Array.isArray(item.tags) || !item.tags.length) {
-    try {
-      const tags = importTagNames(await biliImportApiGet("/x/tag/archive/tags", { bvid: item.bvid }, 9000, tabId));
-      if (tags.length) { item.tags = tags; changed = true; }
-    } catch (error) {
-      item.enrichErrors = [...(item.enrichErrors || []), `${item.title || item.bvid}：标签接口：${error.message}`];
-    }
-  }
-  if (changed) {
-    if (item.recoverySources instanceof Set) item.recoverySources.add("视频资料接口");
-    else item.recoverySources = new Set(["视频资料接口"]);
-  }
-  return changed;
-}
-
-// 导入流程里的补全：条数受 IMPORT_ENRICH_LIMIT 限制，超出的留给收藏库的增量补全
-async function enrichPendingImportedItems(items, folder, tabId = null) {
-  const candidates = items.filter(importNeedsEnrichment);
-  if (!candidates.length) return { requested: 0, enriched: 0, failed: 0, skipped: 0 };
-  const targets = candidates.slice(0, IMPORT_ENRICH_LIMIT);
-  let cursor = 0;
-  let enriched = 0;
-  let failed = 0;
-  const runners = Array.from({ length: Math.min(IMPORT_ENRICH_CONCURRENCY, targets.length) }, async () => {
-    while (cursor < targets.length) {
-      const item = targets[cursor];
-      cursor += 1;
-      sendImportProgress(`正在补全「${folder.title}」的标签和简介：${cursor}/${targets.length}`);
-      try {
-        if (await fetchMissingVideoData(item, tabId)) enriched += 1;
-      } catch (_) { failed += 1; }
-      await importDelay(IMPORT_ENRICH_DELAY_MS);
-    }
-  });
-  await Promise.all(runners);
-  return { requested: targets.length, enriched, failed, skipped: candidates.length - targets.length };
-}
-
-function sendEnrichProgress(text) {
-  chrome.runtime.sendMessage({ type: "bca-enrich-progress", text }, () => { void chrome.runtime.lastError; });
-}
-
-// 给一条已归档记录增量补全：直接改写 视频信息.txt，只动【标签】和【视频简介】两个区块
-async function enrichArchiveRecord(root, target, tabId) {
-  const directoryName = String(target?.directory || "");
-  if (!directoryName) throw new Error("缺少归档目录名。");
-  const collection = await root.getDirectoryHandle(safeSegment(target.collection));
-  const directory = await collection.getDirectoryHandle(directoryName);
-  const fileHandle = await directory.getFileHandle("视频信息.txt");
-  const text = await (await fileHandle.getFile()).text();
-
-  const bvid = text.match(/^BV号：(.+)$/m)?.[1]?.trim() || "";
-  const aid = text.match(/^av号：(.+)$/m)?.[1]?.trim().replace(/^av/i, "") || "";
-  let resolvedBvid = /^BV[0-9A-Za-z]{10}$/.test(bvid) ? bvid : "";
-  const aidKey = /^\d+$/.test(aid) ? aid : "";
-  if (!resolvedBvid && !aidKey) throw new Error("这条归档没有可用的 BV/av 号。");
-
-  const currentTagsLine = text.match(/【标签】[^\n]*\n([^\n]*)/)?.[1]?.trim() || "";
-  const currentDescription = (text.match(/【视频简介】[^\n]*\n([\s\S]*)$/)?.[1] || "").trim();
-  const needTags = !currentTagsLine || importIsPlaceholder(currentTagsLine);
-  const needDescription = importIsPlaceholder(currentDescription);
-  if (!needTags && !needDescription) return "unchanged";
-
-  let nextTagsLine = currentTagsLine;
-  let nextDescription = currentDescription;
-
-  // 需要简介、或者只有 av 号要先换出 BV 号时，才请求视频资料接口
-  if (needDescription || !resolvedBvid) {
-    const data = await biliImportApiGet("/x/web-interface/view", resolvedBvid ? { bvid: resolvedBvid } : { aid: aidKey }, 10000, tabId);
-    resolvedBvid = String(data?.bvid || resolvedBvid || "");
-    if (needDescription) {
-      const description = String(data?.desc ?? "").trim();
-      if (description && !importIsPlaceholder(description)) nextDescription = description;
-    }
-  }
-  if (needTags && resolvedBvid) {
-    const tags = importTagNames(await biliImportApiGet("/x/tag/archive/tags", { bvid: resolvedBvid }, 9000, tabId));
-    if (tags.length) nextTagsLine = tags.join("、");
-  }
-
-  if (nextTagsLine === currentTagsLine && nextDescription === currentDescription) return "unchanged";
-
-  const updated = replaceInfoDescription(replaceInfoTagLine(text, nextTagsLine), nextDescription);
-  // 写入前做一次完整性校验，宁可跳过也不能把归档写坏
-  if (!updated.includes("【基本信息】") || !updated.includes("【视频简介】") || updated.length < text.length / 2) {
-    throw new Error("补全后的内容未通过校验，已跳过这条记录。");
-  }
-  await writeFile(directory, "视频信息.txt", updated);
-  return "updated";
-}
-
-// 收藏库发起的批量补全。targets 是全部候选，limit 是这一批实际处理多少条。
-async function enrichArchiveRecords(data, tabId = null) {
-  const root = await getRootHandle();
-  if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
-  await ensureWritePermission(root);
-  const targets = (Array.isArray(data?.targets) ? data.targets : []).filter((target) => target?.collection && target?.directory);
-  if (!targets.length) throw new Error("没有需要补全的记录。");
-  const limit = Math.max(1, Math.min(Number(data?.limit) || 20, 80));
-  const queue = targets.slice(0, limit);
-  const failures = [];
-  let updated = 0;
-  let unchanged = 0;
-  let failed = 0;
-  let cursor = 0;
-  const runners = Array.from({ length: Math.min(IMPORT_ENRICH_CONCURRENCY, queue.length) }, async () => {
-    while (cursor < queue.length) {
-      const index = cursor;
-      const target = queue[cursor];
-      cursor += 1;
-      sendEnrichProgress(`正在补全 ${index + 1}/${queue.length}：${target.directory}`);
-      try {
-        const result = await enrichArchiveRecord(root, target, tabId);
-        if (result === "updated") updated += 1; else unchanged += 1;
-      } catch (error) {
-        failed += 1;
-        failures.push(`${target.collection}/${target.directory}：${error?.message || "补全失败"}`);
-      }
-      await importDelay(IMPORT_ENRICH_DELAY_MS);
-    }
-  });
-  await Promise.all(runners);
-
-  let reportPath = "";
-  if (failures.length) {
-    reportPath = await persistErrorReport([
-      "B站收藏归档补全报告",
-      `时间：${formatChineseDateTime(new Date(), true)}`,
-      `处理 ${queue.length} 条：更新 ${updated}，无新数据 ${unchanged}，失败 ${failed}`,
-      "",
-      ...failures.slice(0, 200)
-    ].join("\n"));
-  }
-  return {
-    ok: true,
-    processed: queue.length,
-    updated,
-    unchanged,
-    failed,
-    remaining: Math.max(0, targets.length - queue.length),
-    reportPath,
-    message: `本次处理 ${queue.length} 条：更新 ${updated} 条，无新数据 ${unchanged} 条，失败 ${failed} 条。`
+function parseShareStats(text) {
+  const source = String(text ?? "");
+  const stats = {};
+  const patterns = {
+    view: /视频播放量\s*([\d.]+)/,
+    danmaku: /弹幕量\s*([\d.]+)/,
+    like: /点赞数\s*([\d.]+)/,
+    coin: /投硬币枚数\s*([\d.]+)/,
+    favorite: /收藏人数\s*([\d.]+)/,
+    share: /转发人数\s*([\d.]+)/
   };
+  for (const [key, pattern] of Object.entries(patterns)) {
+    const match = source.match(pattern);
+    if (match) stats[key] = match[1];
+  }
+  return stats;
 }
+
+function splitShareText(text) {
+  const source = String(text ?? "");
+  const match = source.match(SHARE_STATS_PATTERN);
+  if (!match) return { description: source.trim(), stats: parseShareStats(source), isShareText: false };
+  const cut = source.slice(0, match.index).replace(/[\s,，、]+$/, "").trim();
+  return { description: cut, stats: parseShareStats(source), isShareText: true };
+}
+
+/* ---------- 运行控制：暂停 / 继续 / 取消 ---------- */
+
+let importRun = { active: false, paused: false, cancelled: false, waiters: [] };
+let importState = { running: false, paused: false, text: "", startedAt: 0, finishedAt: 0, summary: "" };
+let upFansCache = new Map();
+let importStatePublishAt = 0;
+
+function importThrowIfCancelled() {
+  if (!importRun.cancelled) return;
+  const error = new Error("导入已取消。");
+  error.name = "ImportCancelled";
+  throw error;
+}
+
+// 暂停时挂起；继续或取消都会唤醒
+async function importWaitIfPaused() {
+  importThrowIfCancelled();
+  while (importRun.paused && !importRun.cancelled) {
+    await new Promise((resolve) => importRun.waiters.push(resolve));
+  }
+  importThrowIfCancelled();
+}
+
+function importReleaseWaiters() {
+  const waiters = importRun.waiters;
+  importRun.waiters = [];
+  waiters.forEach((resolve) => resolve());
+}
+
+// 进度更新很密集，写 storage 要节流；关键状态变化用 force 立即落盘
+function publishImportState(patch, force = false) {
+  importState = { ...importState, ...patch };
+  const now = Date.now();
+  if (!force && now - importStatePublishAt < 500) return;
+  importStatePublishAt = now;
+  chrome.storage.local.set({ importState }).catch(() => {});
+}
+
+function importProgress(text) {
+  publishImportState({ text });
+  sendImportProgress(text);
+}
+
+/* ---------- 回滚日志：取消时把本次改动全部撤销 ---------- */
+
+function createImportJournal() {
+  return { createdCollections: [], createdRecords: [], modifiedFiles: [] };
+}
+
+async function rollbackImport(journal) {
+  let removedRecords = 0;
+  let restoredFiles = 0;
+  let removedCollections = 0;
+  // 先删本次新建的记录目录，再把被改写的文件还原，最后清掉本次新建的空收藏夹
+  for (const entry of [...journal.createdRecords].reverse()) {
+    try { await entry.collectionHandle.removeEntry(entry.name, { recursive: true }); removedRecords += 1; } catch (_) {}
+  }
+  for (const entry of [...journal.modifiedFiles].reverse()) {
+    try { await writeFile(entry.directoryHandle, entry.name, entry.text); restoredFiles += 1; } catch (_) {}
+  }
+  for (const entry of [...journal.createdCollections].reverse()) {
+    try {
+      let empty = true;
+      for await (const child of entry.handle.values()) { void child; empty = false; break; }
+      if (!empty) continue;
+      await entry.parentHandle.removeEntry(entry.name, { recursive: true });
+      removedCollections += 1;
+    } catch (_) {}
+  }
+  return { removedRecords, restoredFiles, removedCollections };
+}
+
+/* ---------- 已有记录的读取与“是否需要刷新”判断 ---------- */
+
+// 既返回去重用的标识符，也返回每条记录的原文，供“更新”模式判断哪些记录要按新格式重写
+async function readExistingImportRecords(collection) {
+  const identifiers = new Set();
+  const records = new Map();
+  for await (const entry of collection.values()) {
+    if (entry.kind !== "directory") continue;
+    let text = "";
+    try {
+      const file = await entry.getFileHandle("视频信息.txt");
+      text = await (await file.getFile()).text();
+    } catch (_) { continue; }
+    const bvid = text.match(/^BV号：(.+)$/m)?.[1]?.trim();
+    const aid = text.match(/^av号：(.+)$/m)?.[1]?.trim().replace(/^av/i, "");
+    const keys = [];
+    if (bvid && bvid !== "未知") {
+      keys.push(`bvid:${bvid}`);
+      const derived = importBvToAid(bvid);
+      if (derived) keys.push(`aid:${derived}`);
+    }
+    if (aid && aid !== "未知") {
+      keys.push(`aid:${aid}`);
+      const derived = importAidToBv(aid);
+      if (derived) keys.push(`bvid:${derived}`);
+    }
+    if (!keys.length) continue;
+    const record = { directory: entry.name, text };
+    for (const key of keys) {
+      identifiers.add(key);
+      if (!records.has(key)) records.set(key, record);
+    }
+  }
+  return { identifiers, records };
+}
+
+// 缺新字段（粉丝数、互动数据）或标签/简介/发布时间还是占位值时，更新模式会重写它
+function recordNeedsRefresh(record) {
+  const text = String(record?.text || "");
+  if (!text) return false;
+  const tagsLine = text.match(/【标签】[^\n]*\n([^\n]*)/)?.[1]?.trim() || "";
+  const description = (text.match(/【视频简介】[^\n]*\n([\s\S]*)$/)?.[1] || "").trim();
+  const pubdate = text.match(/^视频发布时间：(.+)$/m)?.[1]?.trim() || "";
+  return importIsPlaceholder(tagsLine)
+    || importIsPlaceholder(description)
+    || importIsPlaceholder(pubdate)
+    || !/^UP主粉丝数：/m.test(text)
+    || !/【互动数据】/.test(text);
+}
+
+function parseChineseDateTime(text) {
+  const match = String(text).match(/(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
+}
+
+// 用最新资料按新格式重写已有记录，保留原来的收藏时间与目录名；原文进回滚日志
+async function refreshImportedRecord(collection, record, item, journal) {
+  const directory = await collection.getDirectoryHandle(record.directory);
+  const infoHandle = await directory.getFileHandle("视频信息.txt");
+  const original = await (await infoHandle.getFile()).text();
+  const favoriteAtText = original.match(/^视频收藏时间：(.+)$/m)?.[1]?.trim() || "";
+  const favoriteTimeUnknown = importIsPlaceholder(favoriteAtText);
+  const parsed = favoriteTimeUnknown ? null : parseChineseDateTime(favoriteAtText);
+  const favoriteAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date();
+  const metadata = importMetadata(item, null);
+  metadata.favoriteTimeUnknown = favoriteTimeUnknown;
+  const text = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.directory, new Date());
+  if (text === original) return false;
+  journal.modifiedFiles.push({ directoryHandle: directory, name: "视频信息.txt", text: original });
+  await writeFile(directory, "视频信息.txt", text);
+  return true;
+}
+
+/* ---------- 视频详情抓取 ---------- */
+
+async function fetchUpFans(mid, tabId = null) {
+  const key = String(mid || "").trim();
+  if (!/^\d+$/.test(key)) return "";
+  if (upFansCache.has(key)) return upFansCache.get(key);
+  let fans = "";
+  try {
+    const data = await biliImportApiGet("/x/relation/stat", { vmid: key }, 9000, tabId);
+    if (data && Number.isFinite(Number(data.follower))) fans = String(Number(data.follower));
+  } catch (_) { fans = ""; }
+  upFansCache.set(key, fans);
+  return fans;
+}
+
+// 一条视频的完整资料：简介、发布时间、分区、时长、UP 主、互动数据、标签、粉丝数
+async function fetchVideoDetail(item, tabId = null) {
+  const detail = { stats: {}, errors: [] };
+  const query = item.bvid ? { bvid: item.bvid } : (item.aid ? { aid: String(item.aid).replace(/^av/i, "") } : null);
+  if (query) {
+    try {
+      const data = await biliImportApiGet("/x/web-interface/view", query, 12000, tabId);
+      if (data) {
+        if (data.bvid) detail.bvid = String(data.bvid);
+        if (data.aid) detail.aid = String(data.aid);
+        if (data.title) detail.title = importClean(data.title);
+        if (data.desc) detail.description = String(data.desc).trim();
+        if (Number(data.pubdate) > 0) detail.pubdate = Number(data.pubdate);
+        if (Number(data.duration) > 0) detail.duration = Number(data.duration);
+        if (data.tname) detail.category = importClean(data.tname);
+        if (data.pic) detail.cover = normalizeUrl(data.pic);
+        if (data.owner?.name) detail.upName = importClean(data.owner.name);
+        if (data.owner?.mid) detail.upMid = String(data.owner.mid);
+        const stat = data.stat || {};
+        for (const key of IMPORT_STAT_KEYS) {
+          if (stat[key] !== undefined && stat[key] !== null) detail.stats[key] = stat[key];
+        }
+      }
+    } catch (error) {
+      detail.errors.push(`视频资料接口：${error.message}`);
+    }
+  }
+  if (detail.upMid) {
+    const fans = await fetchUpFans(detail.upMid, tabId);
+    if (fans) detail.upFans = fans;
+  }
+  const tagKey = detail.bvid || item.bvid;
+  if (tagKey) {
+    try {
+      const tags = importTagNames(await biliImportApiGet("/x/tag/archive/tags", { bvid: tagKey }, 9000, tabId));
+      if (tags.length) detail.tags = tags;
+    } catch (error) {
+      detail.errors.push(`标签接口：${error.message}`);
+    }
+  }
+  return detail;
+}
+
+function applyVideoDetail(item, detail) {
+  if (!detail) return;
+  if (detail.bvid) item.bvid = detail.bvid;
+  if (detail.aid) item.aid = detail.aid;
+  if (detail.title && importUsefulTitle(detail.title)) item.title = detail.title;
+  if (detail.cover) item.cover = detail.cover;
+  if (detail.upName) item.author = detail.upName;
+  if (detail.upMid) item.authorMid = detail.upMid;
+  if (detail.upFans) item.upFans = detail.upFans;
+  if (detail.category) item.category = detail.category;
+  if (Number(detail.pubdate) > 0) item.pubdate = Number(detail.pubdate);
+  if (Number(detail.duration) > 0) item.duration = Number(detail.duration);
+  if (detail.description) item.description = detail.description;
+  if (Array.isArray(detail.tags) && detail.tags.length) item.tags = detail.tags;
+  if (detail.stats && Object.keys(detail.stats).length) item.stats = { ...(item.stats || {}), ...detail.stats };
+  if (detail.errors?.length) item.enrichErrors = [...(item.enrichErrors || []), ...detail.errors];
+}
+
+async function fetchImportDetails(items, folder, tabId) {
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(IMPORT_DETAIL_CONCURRENCY, items.length) }, async () => {
+    while (cursor < items.length) {
+      await importWaitIfPaused();
+      const item = items[cursor];
+      cursor += 1;
+      importProgress(`正在读取「${folder.title}」的视频资料：${cursor}/${items.length}`);
+      try {
+        applyVideoDetail(item, await fetchVideoDetail(item, tabId));
+      } catch (error) {
+        if (error?.name === "ImportCancelled") throw error;
+        item.enrichErrors = [...(item.enrichErrors || []), error.message];
+      }
+      await importDelay(IMPORT_DETAIL_DELAY_MS);
+    }
+  });
+  await Promise.all(runners);
+}
+
 
 function importedUnknownCover() {
   const canvas = new OffscreenCanvas(640, 360);
@@ -1180,6 +1296,8 @@ function importMetadata(item, cover) {
     description: item.description || "未知",
     upName: item.author || "未知",
     upMid: item.authorMid || "",
+    upFans: item.upFans || "",
+    stats: item.stats || {},
     category: item.category || "未知",
     duration: Number(item.duration) || 0,
     pubdate: Number(item.pubdate) || 0,
@@ -1202,7 +1320,7 @@ function importIdentifierKeys(item) {
   ].filter(Boolean);
 }
 
-async function saveImportedItem(root, folder, item) {
+async function saveImportedItem(root, folder, item, journal = null) {
   const collectionName = safeSegment(folder.title);
   const collection = await root.getDirectoryHandle(collectionName, { create: true });
 
@@ -1219,6 +1337,8 @@ async function saveImportedItem(root, folder, item) {
   const favoriteAt = favoriteTimeUnknown ? new Date() : parsedFavoriteAt;
   metadata.favoriteTimeUnknown = favoriteTimeUnknown;
   const record = await uniqueTimeFolder(collection, timestampFolder(favoriteAt));
+  // 先登记再写，取消时才能把这个目录一起清掉
+  journal?.createdRecords.push({ collectionHandle: collection, name: record.name });
   try {
     await writeFile(record, "视频信息.txt", buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, new Date()));
     await writeFile(record, "封面.png", cover.blob);
@@ -1240,124 +1360,201 @@ async function importBiliFavorites(data, tabId = null) {
   if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
   await ensureWritePermission(root);
   if (!selectedIds.size) throw new Error("请至少勾选一个 B 站收藏夹。");
-  const allFolders = await listBiliFavoriteFolders(data?.uid, tabId);
-  const folders = allFolders.filter((folder) => selectedIds.has(String(folder.id)));
-  if (!folders.length) throw new Error("所选收藏夹已不存在或没有读取权限，请刷新列表后重试。");
 
-  let imported = 0, skipped = 0, failed = 0, total = 0, hasIssues = false, enrichedTotal = 0;
-  const folderNotes = [];
+  importRun = { active: true, paused: false, cancelled: false, waiters: [] };
+  upFansCache = new Map();
+  const journal = createImportJournal();
+  publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "" }, true);
+
+  let imported = 0, refreshed = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
+  let cancelled = false;
   const savedPaths = [];
-  for (let folderIndex = 0; folderIndex < folders.length; folderIndex += 1) {
-    const folder = folders[folderIndex];
-    const folderLog = [];
-    if (["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(safeSegment(folder.title))) {
-      failed += 1;
-      hasIssues = true;
-      reportLines.push("", `收藏夹：${folder.title}`, "收藏夹名称与插件保留目录冲突，已跳过。请先在 B 站重命名该收藏夹后重试。");
-      continue;
-    }
-    sendImportProgress(`正在读取 ${folder.title}（${folderIndex + 1}/${folders.length}）…`);
-    let first;
-    try { first = await fetchImportFavoritePage(folder, 1, tabId); }
-    catch (error) {
-      failed += 1;
-      hasIssues = true;
-      reportLines.push("", `收藏夹：${folder.title}`, `读取第 1 页失败：${error.message}`);
-      continue;
-    }
-    const allItems = [...first.items];
-    const pageLimit = first.total ? Math.ceil(first.total / 40) : (first.hasMore || first.items.length === 40 ? 1000 : 1);
-    for (let page = 2; page <= Math.min(pageLimit, 1000); page += 1) {
-      try {
-        const result = await fetchImportFavoritePage(folder, page, tabId);
-        allItems.push(...result.items);
-        if (!result.items.length || (!first.total && !result.hasMore)) break;
-      } catch (error) {
+  const folderNotes = [];
+
+  try {
+    const allFolders = await listBiliFavoriteFolders(data?.uid, tabId);
+    const folders = allFolders.filter((folder) => selectedIds.has(String(folder.id)));
+    if (!folders.length) throw new Error("所选收藏夹已不存在或没有读取权限，请刷新列表后重试。");
+
+    for (let folderIndex = 0; folderIndex < folders.length; folderIndex += 1) {
+      await importWaitIfPaused();
+      const folder = folders[folderIndex];
+      const folderLog = [];
+      if (["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(safeSegment(folder.title))) {
         failed += 1;
-        folderLog.push(`读取第 ${page} 页失败：${error.message}`);
-        break;
+        hasIssues = true;
+        reportLines.push("", `收藏夹：${folder.title}`, "收藏夹名称与插件保留目录冲突，已跳过。请先在 B 站重命名该收藏夹后重试。");
+        continue;
       }
-      if (page % 4 === 0) await importDelay(150);
-    }
-    total += allItems.length;
-    allItems.forEach((item) => {
-      item.coverCandidates = item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [];
-      item.recoverySources = new Set();
-      if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
-    });
 
-    const collection = await root.getDirectoryHandle(safeSegment(folder.title), { create: true });
-    const duplicateSet = await readExistingImportIdentifiers(collection);
-    const pendingItems = [];
-    for (const item of allItems) {
-      const keys = importIdentifierKeys(item);
-      if (keys.some((key) => duplicateSet.has(key))) { skipped += 1; continue; }
-      keys.forEach((key) => duplicateSet.add(key));
-      pendingItems.push(item);
-    }
-
-    try { await enrichImportedInvalidVideos(pendingItems, folder, tabId); }
-    catch (error) { folderLog.push(`失效视频恢复流程异常：${error.message}`); }
-    for (const item of pendingItems) {
-      for (const message of item.recoveryErrors || []) {
-        if (!folderLog.includes(message)) folderLog.push(message);
+      importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`);
+      let first;
+      try { first = await fetchImportFavoritePage(folder, 1, tabId); }
+      catch (error) {
+        failed += 1;
+        hasIssues = true;
+        reportLines.push("", `收藏夹：${folder.title}`, `读取第 1 页失败：${error.message}`);
+        continue;
       }
-    }
+      const allItems = [...first.items];
+      const pageLimit = first.total ? Math.ceil(first.total / 40) : (first.hasMore || first.items.length === 40 ? 1000 : 1);
+      for (let page = 2; page <= Math.min(pageLimit, 1000); page += 1) {
+        await importWaitIfPaused();
+        try {
+          const result = await fetchImportFavoritePage(folder, page, tabId);
+          allItems.push(...result.items);
+          if (!result.items.length || (!first.total && !result.hasMore)) break;
+        } catch (error) {
+          failed += 1;
+          folderLog.push(`读取第 ${page} 页失败：${error.message}`);
+          break;
+        }
+        if (page % 4 === 0) await importDelay(150);
+      }
+      total += allItems.length;
+      allItems.forEach((item) => {
+        item.coverCandidates = item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [];
+        item.recoverySources = new Set();
+        if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
+      });
 
-    // 4.1beta：正常条目也补一次标签和简介（失效视频上一步已经处理过）
-    try {
-      const enrichment = await enrichPendingImportedItems(pendingItems.filter((item) => !item.isInvalid), folder, tabId);
-      enrichedTotal += enrichment.enriched;
-      if (enrichment.skipped) folderNotes.push(`「${folder.title}」还有 ${enrichment.skipped} 条未补全（每次导入最多 ${IMPORT_ENRICH_LIMIT} 条），可在本地收藏库用“补全缺失资料”继续。`);
+      // 本地没有同名收藏夹 → 整体新建、全量导入；已有同名收藏夹 → 只补缺失的视频，
+      // 并把数据不完整（缺粉丝数/互动数据、标签简介还是占位值）的旧记录按新格式刷新
+      let collection;
+      let collectionExisted = true;
+      const collectionName = safeSegment(folder.title);
+      try {
+        collection = await root.getDirectoryHandle(collectionName);
+      } catch (error) {
+        if (error?.name !== "NotFoundError") throw error;
+        collectionExisted = false;
+        collection = await root.getDirectoryHandle(collectionName, { create: true });
+        journal.createdCollections.push({ parentHandle: root, handle: collection, name: collectionName });
+      }
+      if (!collectionExisted) folderNotes.push(`「${folder.title}」本地没有同名收藏夹，本次按全量导入处理。`);
+
+      const existing = await readExistingImportRecords(collection);
+      const pendingItems = [];
+      const refreshTargets = [];
+      for (const item of allItems) {
+        const keys = importIdentifierKeys(item);
+        const matched = keys.find((key) => existing.identifiers.has(key));
+        if (!matched) {
+          keys.forEach((key) => existing.identifiers.add(key));
+          pendingItems.push(item);
+          continue;
+        }
+        skipped += 1;
+        const record = existing.records.get(matched);
+        if (record && recordNeedsRefresh(record)) refreshTargets.push({ item, record });
+      }
+
+      // 失效视频先走原有的恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）
+      try { await enrichImportedInvalidVideos(pendingItems, folder, tabId); }
+      catch (error) {
+        if (error?.name === "ImportCancelled") throw error;
+        folderLog.push(`失效视频恢复流程异常：${error.message}`);
+      }
+      for (const item of pendingItems) {
+        for (const message of item.recoveryErrors || []) {
+          if (!folderLog.includes(message)) folderLog.push(message);
+        }
+      }
+
+      // 4.2：每条视频都抓一次完整资料（标签 / 简介 / 发布时间 / 分区 / 互动数据 / UP 主粉丝数）
+      const detailTargets = [...pendingItems, ...refreshTargets.map((entry) => entry.item)];
+      if (detailTargets.length) await fetchImportDetails(detailTargets, folder, tabId);
+
+      // 更新模式：按新格式重写数据不完整的旧记录（原文进回滚日志）
+      for (const entry of refreshTargets) {
+        await importWaitIfPaused();
+        try {
+          if (await refreshImportedRecord(collection, entry.record, entry.item, journal)) refreshed += 1;
+        } catch (error) {
+          if (error?.name === "ImportCancelled") throw error;
+          failed += 1;
+          folderLog.push(`${entry.item.title || entry.record.directory}：刷新失败：${error.message}`);
+        }
+      }
+
+      for (let offset = 0; offset < pendingItems.length; offset += 12) {
+        await importWaitIfPaused();
+        const batch = pendingItems.slice(offset, offset + 12);
+        importProgress(`正在准备「${folder.title}」的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`);
+        await importRunLimited(batch, 4, async (item) => {
+          item.coverCandidates = [
+            ...item.coverCandidates,
+            ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
+          ];
+          try { item.preparedCover = await loadImportCover(item.coverCandidates, item.isInvalid); }
+          catch (error) { item.coverPreparationError = error; }
+        });
+        for (let index = 0; index < batch.length; index += 1) {
+          await importWaitIfPaused();
+          const item = batch[index];
+          importProgress(`正在导入「${folder.title}」：${offset + index + 1}/${pendingItems.length}（已保存 ${imported} 个）`);
+          try {
+            const result = await saveImportedItem(root, folder, item, journal);
+            imported += 1;
+            savedPaths.push(result.path);
+          } catch (error) {
+            if (error?.name === "ImportCancelled") throw error;
+            failed += 1;
+            folderLog.push(`${item.title || "未知"} (${item.bvid || item.aid || "无编号"})：${error.message}`);
+          }
+        }
+      }
+
       for (const item of pendingItems) {
         for (const message of item.enrichErrors || []) {
           if (!folderLog.includes(message)) folderLog.push(message);
         }
       }
-    } catch (error) { folderLog.push(`补全标签/简介异常：${error.message}`); }
-
-    for (let offset = 0; offset < pendingItems.length; offset += 12) {
-      const batch = pendingItems.slice(offset, offset + 12);
-      sendImportProgress(`正在准备 ${folder.title} 的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`);
-      await importRunLimited(batch, 4, async (item) => {
-        item.coverCandidates = [
-          ...item.coverCandidates,
-          ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
-        ];
-        try { item.preparedCover = await loadImportCover(item.coverCandidates, item.isInvalid); }
-        catch (error) { item.coverPreparationError = error; }
-      });
-      for (let index = 0; index < batch.length; index += 1) {
-        const item = batch[index];
-        sendImportProgress(`正在导入 ${folder.title}：${offset + index + 1}/${pendingItems.length}（已保存 ${imported} 个）`);
-        try {
-          const result = await saveImportedItem(root, folder, item);
-          imported += 1;
-          savedPaths.push(result.path);
-        } catch (error) {
-          failed += 1;
-          folderLog.push(`${item.title || "未知"} (${item.bvid || item.aid || "无编号"})：${error.message}`);
-        }
-      }
+      if (folderLog.length) reportLines.push("", `收藏夹：${folder.title}`, ...folderLog.slice(0, 500));
+      if (folderLog.length) hasIssues = true;
     }
-    if (folderLog.length) reportLines.push("", `收藏夹：${folder.title}`, ...folderLog.slice(0, 500));
-    if (folderLog.length) hasIssues = true;
+  } catch (error) {
+    if (error?.name === "ImportCancelled") {
+      cancelled = true;
+    } else {
+      importRun.active = false;
+      importRun.paused = false;
+      publishImportState({ running: false, paused: false, finishedAt: Date.now() }, true);
+      throw error;
+    }
   }
 
-  reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`, `读取视频：${total}`, `新导入：${imported}`, `已存在跳过：${skipped}`, `补全资料：${enrichedTotal}`, `失败：${failed}`);
+  let rollback = { removedRecords: 0, restoredFiles: 0, removedCollections: 0 };
+  if (cancelled) {
+    publishImportState({ text: "正在取消并回滚本次导入…" });
+    rollback = await rollbackImport(journal);
+  }
+  importRun.active = false;
+  importRun.paused = false;
+
+  const finishedAt = Date.now();
+  if (cancelled) {
+    const summary = `导入已取消：已回滚本次新建的 ${rollback.removedRecords} 个视频目录`
+      + `${rollback.removedCollections ? `、${rollback.removedCollections} 个新建收藏夹` : ""}`
+      + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。导入前的本地内容没有被改动。`;
+    publishImportState({ running: false, paused: false, finishedAt, text: summary, summary }, true);
+    await chrome.storage.local.set({ lastResult: { message: summary, createdAt: finishedAt } });
+    return { ok: false, cancelled: true, message: summary, imported: 0, refreshed: 0, skipped, failed, total, reportPath: "" };
+  }
+
+  reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`,
+    `读取视频：${total}`, `新导入：${imported}`, `更新记录：${refreshed}`, `已存在跳过：${skipped}`, `失败：${failed}`);
   if (folderNotes.length) reportLines.push("", "备注：", ...folderNotes);
   let reportPath = "";
-  if (failed || hasIssues || reportLines.some((line) => line.includes("失败：") || line.includes("失败"))) {
+  if (failed || hasIssues || reportLines.some((line) => line.includes("失败"))) {
     reportPath = await persistErrorReport(reportLines.join("\n"));
     await chrome.storage.local.set({ lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: Date.now() } });
   }
-  const enrichNote = enrichedTotal ? `已补全 ${enrichedTotal} 条视频的标签/简介。` : "";
-  const message = skipped
-    ? `导入/更新完成：已存在相同视频 ${skipped} 个，已跳过；只导入未存在的视频。新导入 ${imported} 个，失败 ${failed} 个。${enrichNote}`
-    : `导入/更新完成：新导入 ${imported} 个，失败 ${failed} 个。${enrichNote}`;
+  const message = `导入/更新完成：新导入 ${imported} 个，更新 ${refreshed} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`;
   const pathText = savedPaths.slice(0, 10).join("\n");
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
-  return { ok: true, message, imported, skipped, failed, total, reportPath };
+  publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);
+  return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath };
 }
 
 function importBiliFavoritesInOrder(data, tabId = null) {
@@ -1506,11 +1703,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getDownloadSubtitles(message).then((subtitles) => sendResponse({ ok: true, subtitles })).catch((error) => sendResponse({ ok: false, message: error?.message || "读取字幕失败。" }));
     return true;
   }
-  if (message?.type === "bca-enrich-records") {
-    // 走同一条串行队列，避免和保存/导入同时改写归档文件
-    const task = saveQueue.then(() => enrichArchiveRecords(message.data, sender?.tab?.id ?? null));
-    saveQueue = task.catch(() => undefined);
-    task.then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "补全失败。" }));
+  if (message?.type === "bca-import-control") {
+    const action = String(message.action || "");
+    if (!importRun.active) { sendResponse({ ok: false, message: "当前没有正在进行的导入。" }); return true; }
+    if (action === "pause") {
+      importRun.paused = true;
+      publishImportState({ paused: true, text: "导入已暂停，可继续或取消。" }, true);
+    } else if (action === "resume") {
+      importRun.paused = false;
+      publishImportState({ paused: false }, true);
+      importReleaseWaiters();
+    } else if (action === "cancel") {
+      importRun.cancelled = true;
+      importRun.paused = false;
+      publishImportState({ paused: false, text: "正在取消并回滚本次导入…" }, true);
+      importReleaseWaiters();
+    } else {
+      sendResponse({ ok: false, message: "不支持的操作。" });
+      return true;
+    }
+    sendResponse({ ok: true, paused: importRun.paused, cancelled: importRun.cancelled });
+    return true;
+  }
+  if (message?.type === "bca-import-state") {
+    sendResponse({ ok: true, importState });
     return true;
   }
   if (message?.type === "list-bili-favorite-folders") {
@@ -1547,7 +1763,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "get-status") {
-    chrome.storage.local.get(["baseFolderName", "lastResult", "lastError", "pendingFavorite", "authorizedErrorAt"]).then(sendResponse);
+    chrome.storage.local.get(["baseFolderName", "lastResult", "lastError", "pendingFavorite", "authorizedErrorAt"]).then((status) => {
+      sendResponse({ ...status, importState });
+    });
     return true;
   }
 });

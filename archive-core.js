@@ -160,6 +160,40 @@
     return sequence;
   }
 
+  /* ---------- B 站分享文案拆分（4.2） ----------
+     B 站收藏夹接口的 intro 字段常常带一整套分享文案：
+       <真正的简介>, 视频播放量 71953、弹幕量 82、点赞数 642、投硬币枚数 172、
+       收藏人数 269、转发人数 10, 视频作者 XXX, 作者简介 YYY, 相关视频：...
+     这些统计信息不该挤在简介里，这里把它拆出来单独成段。 */
+
+  const SHARE_STATS_PATTERN = /视频播放量\s*([\d.]+)\s*[、,]?\s*弹幕量\s*([\d.]+)/;
+
+  function parseShareStats(text) {
+    const source = String(text ?? "");
+    const stats = {};
+    const patterns = {
+      view: /视频播放量\s*([\d.]+)/,
+      danmaku: /弹幕量\s*([\d.]+)/,
+      like: /点赞数\s*([\d.]+)/,
+      coin: /投硬币枚数\s*([\d.]+)/,
+      favorite: /收藏人数\s*([\d.]+)/,
+      share: /转发人数\s*([\d.]+)/
+    };
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const match = source.match(pattern);
+      if (match) stats[key] = match[1];
+    }
+    return stats;
+  }
+
+  function splitShareText(text) {
+    const source = String(text ?? "");
+    const match = source.match(SHARE_STATS_PATTERN);
+    if (!match) return { description: source.trim(), stats: parseShareStats(source), isShareText: false };
+    const cut = source.slice(0, match.index).replace(/[\s,，、]+$/, "").trim();
+    return { description: cut, stats: parseShareStats(source), isShareText: true };
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     withSourceCollection,
@@ -174,7 +208,9 @@
     parseInfoFile,
     descriptionFromInfo,
     tagsFromInfo,
-    pageSequence
+    pageSequence,
+    splitShareText,
+    parseShareStats
   });
   global.BcaArchiveCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

@@ -10,15 +10,20 @@ const readProjectFile = (relativePath) => fs.readFileSync(path.join(projectRoot,
 // 从 background.js 里取出指定的顶层函数并在测试里执行。
 // background.js 是模块化 service worker，不能 require，但它里面的文本处理函数是纯函数，
 // 直接按函数体抽出来测，测的就是真正跑在生产代码里的那份实现。
-function loadBackgroundFunctions(names) {
+function loadBackgroundFunctions(names, constants = []) {
   const source = readProjectFile("background.js");
+  const constSource = constants.map((name) => {
+    const match = source.match(new RegExp(`^const ${name} = [^\\n]*;`, "m"));
+    assert.ok(match, `background.js 中找不到常量 ${name}`);
+    return match[0];
+  });
   const bodies = names.map((name) => {
     const pattern = new RegExp(`^function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, "m");
     const match = source.match(pattern);
     assert.ok(match, `background.js 中找不到函数 ${name}`);
     return match[0];
   });
-  return new Function(`${bodies.join("\n\n")}\nreturn { ${names.join(", ")} };`)();
+  return new Function(`${constSource.join("\n")}\n${bodies.join("\n\n")}\nreturn { ${names.join(", ")} };`)();
 }
 
 test("library download queue preserves its source collection after Bilibili parsing", () => {
@@ -192,94 +197,74 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("manifest opens the library page to Bilibili pages only", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.1.1");
+  assert.equal(manifest.version, "4.2.0");
   const entry = (manifest.web_accessible_resources || []).find((item) => item.resources.includes("library.html"));
   assert.ok(entry, "缺少 library.html 的 web_accessible_resources");
   assert.ok(entry.matches.every((pattern) => pattern.includes("bilibili.com")), "library.html 只应对 B 站页面开放");
   assert.ok(manifest.permissions.includes("clipboardWrite"));
 });
 
-/* ---------------- 4.1beta：为正常条目补全标签和简介 ---------------- */
+/* ---------------- 4.2：归档改为整条重写，不再做定点补丁 ---------------- */
 
-const ARCHIVE_SAMPLE = [
-  "【基本信息】",
-  "视频收藏时间：2026年09月10日 15时02分20秒.000",
-  "信息保存于：2026-10-09 01:11:21",
-  "保存文件夹：2026年09月10日15时02分20秒",
-  "视频标题：这下是17岁未亡人了😡",
-  "视频链接：https://www.bilibili.com/video/BV1LKGm6ZErR/",
-  "BV号：BV1LKGm6ZErR",
-  "av号：av116645959959066",
-  "",
-  "【UP主】",
-  "UP主昵称：长崎素世",
-  "UP主主页：https://space.bilibili.com/3706936430168922",
-  "",
-  "【标签】",
-  "未知",
-  "",
-  "【视频简介】",
-  "-",
-  ""
-].join("\n");
+// 4.1beta 用 replaceInfoTagLine / replaceInfoDescription 只改「标签」那一行和「视频简介」块，
+// 4.2 取消了这个补丁路径（补全并入导入时的整条重写），两个函数已删除。
+// 视频信息.txt 的区块名和字段名是收藏库解析时的对外契约，这里做静态兜底。
+test("archive files are rewritten as a whole and keep the parsed section contract", () => {
+  const source = readProjectFile("background.js");
+  assert.equal(/function replaceInfoTagLine\(/.test(source), false, "replaceInfoTagLine 应已删除");
+  assert.equal(/function replaceInfoDescription\(/.test(source), false, "replaceInfoDescription 应已删除");
+  assert.match(source, /function buildInfo\(/, "归档文本必须仍由 buildInfo 统一生成");
 
-test("patching an archive file only rewrites the tag line and the description block", () => {
-  const { replaceInfoTagLine, replaceInfoDescription } = loadBackgroundFunctions(["replaceInfoTagLine", "replaceInfoDescription"]);
-
-  const withTags = replaceInfoTagLine(ARCHIVE_SAMPLE, "cos、Banddream、白栎、Mygo、Cosplay、长崎素世");
-  assert.match(withTags, /【标签】\ncos、Banddream、白栎、Mygo、Cosplay、长崎素世\n\n【视频简介】\n-\n$/);
-  // 除标签那一行外，其余内容必须逐字不变
-  assert.equal(withTags.replace(/【标签】\n[^\n]*/, "【标签】\n未知"), ARCHIVE_SAMPLE);
-
-  const patched = replaceInfoDescription(withTags, "第一行\n第二行");
-  assert.match(patched, /【视频简介】\n第一行\n第二行\n$/);
-  assert.ok(patched.includes("【UP主】\nUP主昵称：长崎素世"), "不该动到前面的区块");
-  assert.ok(patched.includes("【标签】\ncos、Banddream、白栎、Mygo、Cosplay、长崎素世"));
-
-  // 简介里出现 $ 时不能被当成替换模式
-  const dollar = replaceInfoDescription(ARCHIVE_SAMPLE, "价格是 $& 和 $1 元");
-  assert.match(dollar, /价格是 \$& 和 \$1 元/);
+  for (const heading of ["【基本信息】", "【UP主】", "【互动数据】", "【标签】", "【视频简介】"]) {
+    assert.ok(source.includes(`"${heading}"`), `buildInfo 缺少区块 ${heading}`);
+  }
+  // 收藏库 scanRoot() 按 background.js 的 IMPORT_STAT_LABELS 里这些字段名取统计
+  const labels = source.match(/const IMPORT_STAT_LABELS = \{([^}]*)\}/);
+  assert.ok(labels, "background.js 缺少 IMPORT_STAT_LABELS");
+  for (const label of ["播放量", "弹幕量", "点赞数", "投硬币枚数", "收藏人数", "转发人数"]) {
+    assert.ok(labels[1].includes(`"${label}"`), `统计字段缺少 ${label}`);
+  }
+  assert.match(source, /UP主粉丝数：/);
 });
 
-test("the backfill treats the archive placeholders as missing data", () => {
+test("the import still treats the archive placeholders as missing data", () => {
   const source = readProjectFile("background.js");
   const declaration = source.match(/const IMPORT_PLACEHOLDER_VALUES = new Set\(\[([^\]]*)\]\)/);
   assert.ok(declaration, "background.js 缺少 IMPORT_PLACEHOLDER_VALUES");
   for (const value of ['"未知"', '"无"', '"-"', '"暂无"']) {
     assert.ok(declaration[1].includes(value), `占位值集合缺少 ${value}`);
   }
-  // 风控保护：必须有单次上限与请求间隔
-  assert.match(source, /const IMPORT_ENRICH_LIMIT = \d+;/, "缺少每次导入的补全上限");
-  assert.match(source, /const IMPORT_ENRICH_DELAY_MS = \d+;/, "缺少请求间隔");
-  assert.match(source, /Math\.min\(Number\(data\?\.limit\) \|\| 20, 80\)/, "收藏库补全缺少条数上限");
+  // 风控保护：详情抓取必须有并发上限与请求间隔
+  assert.match(source, /const IMPORT_DETAIL_CONCURRENCY = \d+;/, "缺少详情抓取并发上限");
+  assert.match(source, /const IMPORT_DETAIL_DELAY_MS = \d+;/, "缺少详情抓取请求间隔");
 });
 
-test("the import flow now enriches normal items through the two Bilibili endpoints", () => {
+test("the import flow fetches full metadata for every entry through the Bilibili endpoints", () => {
   const source = readProjectFile("background.js");
-  assert.match(source, /function enrichPendingImportedItems\(/);
-  assert.match(source, /function enrichArchiveRecord\(/);
-  assert.match(source, /function enrichArchiveRecords\(/);
-  assert.match(source, /enrichPendingImportedItems\(pendingItems\.filter\(\(item\) => !item\.isInvalid\)/, "正常条目必须也走补全");
+  assert.match(source, /function fetchVideoDetail\(/);
+  assert.match(source, /function fetchImportDetails\(/);
+  assert.match(source, /function fetchUpFans\(/, "UP 主粉丝数需要单独请求");
+  // 失效条目仍走原有的恢复补全
+  assert.match(source, /enrichImportedInvalidVideos\(pendingItems/);
   assert.match(source, /"\/x\/web-interface\/view"/);
   assert.match(source, /"\/x\/tag\/archive\/tags"/);
-  // 补全要串在同一队列里，避免和保存/导入同时改写归档文件
-  assert.match(source, /saveQueue\.then\(\(\) => enrichArchiveRecords/);
-  assert.match(source, /"bca-enrich-records"/);
-  // 写回前必须做完整性校验
-  assert.match(source, /补全后的内容未通过校验/);
+  // 互动数据与粉丝数要写进视频信息.txt，收藏库详情面板直接读它们
+  assert.match(source, /"【互动数据】"/);
+  assert.match(source, /UP主粉丝数：/);
+  // 抓取结果串在同一队列里，避免和保存/导入同时改写归档文件
+  assert.match(source, /saveQueue\.then\(\(\) => importBiliFavorites\(/);
 });
 
-test("the library offers a batched backfill for records already on disk", () => {
+// 4.2：收藏库的「补全缺失资料」入口已整体删除（补全回到插件端的导入流程），
+// 这条断言随之反过来：页面和脚本里都不允许再残留 enrich 相关的 id 或代码。
+test("the library no longer offers a batched backfill for records already on disk", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
-  assert.match(html, /id="enrichLibrary"/);
-  assert.match(html, /id="enrichDialog"/);
-  assert.match(html, /id="enrichBatchSize"/);
-  assert.match(html, /id="enrichProgress"/);
-  assert.match(library, /function enrichmentCandidates\(/);
-  assert.match(library, /function runEnrichment\(/);
-  assert.match(library, /type: "bca-enrich-records"/);
-  assert.match(library, /bca-enrich-progress/);
+  for (const id of ["enrichLibrary", "enrichDialog", "enrichBatchSize", "enrichProgress", "cancelEnrich", "confirmEnrich"]) {
+    assert.equal(html.includes(`id="${id}"`), false, `library.html 不应再出现 ${id}`);
+  }
+  assert.equal(/enrich/i.test(html), false, "library.html 不应再出现 enrich 相关代码");
+  assert.equal(/enrich/i.test(library), false, "library.js 不应再出现 enrich 相关代码");
 });
 
 /* ------------------------- 4.1 归档解析与浏览 ------------------------- */
@@ -374,3 +359,179 @@ test("the library paginates and can switch between grid and list view", () => {
   assert.match(readProjectFile("library.css"), /\.video-grid\.list-view/);
   assert.match(readProjectFile("library.css"), /\.pager-page\.current/);
 });
+
+/* ------------------------- 4.2 导入重构与展示 ------------------------- */
+
+// 用户档案里 蜡笔小新 那条的真实简介，B 站把分享文案塞进了 intro
+const SHARE_TEXT = "【蜡笔小新】冷天煮超大锅浓汤牛肠火锅，白菜韭菜和拉面热乎乎涮着吃哦小新超想这样子吃哦, 视频播放量 71953、弹幕量 82、点赞数 642、投硬币枚数 172、收藏人数 269、转发人数 10, 视频作者 蜡笔小新美食频道, 作者简介  大家能不能帮忙点个关注谢谢啦, 相关视频：【蜡笔小新】扒满满一大碗肉汁拌牛肉饭";
+
+test("the share text splitter in background.js matches the shared implementation", () => {
+  // background.js 是模块化 service worker，不能 require archive-core.js，所以有一份等价实现；
+  // 这里从两边各取一份真身，逐个输入比对，防止将来改歪
+  const local = loadBackgroundFunctions(["parseShareStats", "splitShareText"], ["SHARE_STATS_PATTERN"]);
+  const samples = [SHARE_TEXT, "bgm：小雨天气", "", "-", "普通简介，带逗号、顿号，和（括号）"];
+  for (const sample of samples) {
+    assert.deepEqual(local.splitShareText(sample), core.splitShareText(sample), `splitShareText 不一致：${sample.slice(0, 20)}`);
+    assert.deepEqual(local.parseShareStats(sample), core.parseShareStats(sample));
+  }
+});
+
+test("the share text splitter pulls the stats out of a real archive description", () => {
+  const split = core.splitShareText(SHARE_TEXT);
+  assert.equal(split.isShareText, true);
+  assert.equal(split.description, "【蜡笔小新】冷天煮超大锅浓汤牛肠火锅，白菜韭菜和拉面热乎乎涮着吃哦小新超想这样子吃哦");
+  assert.deepEqual(split.stats, { view: "71953", danmaku: "82", like: "642", coin: "172", favorite: "269", share: "10" });
+  const plain = core.splitShareText("bgm：小雨天气");
+  assert.equal(plain.isShareText, false);
+  assert.equal(plain.description, "bgm：小雨天气");
+  assert.deepEqual(plain.stats, {});
+});
+
+test("update mode only refreshes records that are actually incomplete", () => {
+  const { recordNeedsRefresh } = loadBackgroundFunctions(
+    ["importClean", "importIsPlaceholder", "recordNeedsRefresh"],
+    ["IMPORT_PLACEHOLDER_VALUES"]
+  );
+  // 4.1 之前的旧档案：没有粉丝数、没有互动数据
+  assert.equal(recordNeedsRefresh({ text: PLACEHOLDER_INFO }), true);
+  // 标签、简介、发布时间是占位值也要刷新
+  assert.equal(recordNeedsRefresh({ text: "【标签】\n未知\n\n【视频简介】\n- 参考\n\nUP主粉丝数：1\n【互动数据】\n播放量：1\n视频发布时间：2020-01-01 00:00:00 星期三" }), true);
+  // 4.2 写出来的完整档案不该被反复重写
+  const complete = [
+    "【基本信息】",
+    "视频发布时间：2026-08-14 06:00:00 星期五",
+    "",
+    "【UP主】",
+    "UP主粉丝数：123456",
+    "",
+    "【互动数据】",
+    "播放量：73798",
+    "",
+    "【标签】",
+    "拉面、治愈",
+    "",
+    "【视频简介】",
+    "真正的简介",
+    ""
+  ].join("\n");
+  assert.equal(recordNeedsRefresh({ text: complete }), false);
+  assert.equal(recordNeedsRefresh({ text: "" }), false);
+});
+
+test("the new info layout carries the followers count and a separate stats block", () => {
+  const source = readProjectFile("background.js");
+  assert.match(source, /UP主粉丝数：\$\{fansText\}/);
+  assert.match(source, /lines\.push\("【互动数据】"\)/);
+  assert.match(source, /const IMPORT_STAT_LABELS = \{ view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" \}/);
+  // 只有真的抓到互动数据时才写这一区块，自动归档的老格式不受影响
+  assert.match(source, /const hasStats = IMPORT_STAT_KEYS\.some\(\(key\) => !importIsPlaceholder\(stats\[key\]\)\)/);
+});
+
+test("the 4.2 layout round-trips through the archive parser", () => {
+  // 与 buildInfo 生成的结构保持一致，确认网页端能原样读回来
+  const sample = [
+    "【基本信息】",
+    "视频收藏时间：2026年10月09日 01时19分50秒.175",
+    "信息保存于：2026-10-09 01:19:50",
+    "保存文件夹：2026年10月09日01时19分50秒",
+    "视频标题：【蜡笔小新】冷天煮超大锅浓汤牛肠火锅",
+    "视频链接：https://www.bilibili.com/video/BV1pMgp6aEbu/",
+    "视频状态：正常",
+    "恢复情况：收藏夹资料 + 视频资料接口",
+    "BV号：BV1pMgp6aEbu",
+    "av号：av116645959959066",
+    "分区：美食 / 美食制作",
+    "视频时长：17:37",
+    "视频发布时间：2026-08-14 06:00:00 星期五",
+    "",
+    "【UP主】",
+    "UP主昵称：蜡笔小新美食频道",
+    "UP主UID：87795103",
+    "UP主粉丝数：123456",
+    "UP主主页：https://space.bilibili.com/87795103",
+    "",
+    "【互动数据】",
+    "播放量：73798",
+    "弹幕量：84",
+    "点赞数：652",
+    "投硬币枚数：178",
+    "收藏人数：270",
+    "转发人数：10",
+    "",
+    "【标签】",
+    "发现《夏天》、拉面、治愈",
+    "",
+    "【视频简介】",
+    "真正的简介第一行",
+    "第二行",
+    ""
+  ].join("\n");
+  const info = core.parseInfoFile(sample);
+  assert.equal(info.fields["UP主粉丝数"], "123456");
+  assert.equal(info.fields["播放量"], "73798");
+  assert.equal(info.fields["转发人数"], "10");
+  assert.equal(info.fields["视频发布时间"], "2026-08-14 06:00:00 星期五");
+  assert.equal(info.fields["视频状态"], "正常");
+  assert.deepEqual(core.tagsFromInfo(info), ["发现《夏天》", "拉面", "治愈"]);
+  assert.equal(core.descriptionFromInfo(info), "真正的简介第一行\n第二行");
+  // 老档案没有这两块，解析不能报错
+  const legacy = core.parseInfoFile(PLACEHOLDER_INFO);
+  assert.equal(legacy.fields["UP主粉丝数"], undefined);
+  assert.equal(legacy.fields["播放量"], undefined);
+});
+
+test("the import can be paused, resumed and cancelled with a rollback journal", () => {
+  const source = readProjectFile("background.js");
+  for (const name of ["importWaitIfPaused", "importReleaseWaiters", "createImportJournal", "rollbackImport", "refreshImportedRecord", "readExistingImportRecords", "fetchVideoDetail", "fetchUpFans", "fetchImportDetails"]) {
+    assert.match(source, new RegExp(`^function ${name}\\(|^async function ${name}\\(`, "m"), `缺少 ${name}`);
+  }
+  // 取消靠一个专用错误向上冒泡
+  assert.match(source, /error\.name = "ImportCancelled"/);
+  assert.match(source, /if \(error\?\.name === "ImportCancelled"\)/);
+  // 回滚要做三件事：删新建目录、还原被改写的文件、清空的新建收藏夹
+  assert.match(source, /for \(const entry of \[\.\.\.journal\.createdRecords\]\.reverse\(\)\)/);
+  assert.match(source, /for \(const entry of \[\.\.\.journal\.modifiedFiles\]\.reverse\(\)\)/);
+  assert.match(source, /for \(const entry of \[\.\.\.journal\.createdCollections\]\.reverse\(\)\)/);
+  // 登记必须在写之前，否则取消时会漏掉
+  assert.match(source, /journal\?\.createdRecords\.push\(\{ collectionHandle: collection, name: record\.name \}\)/);
+  const registerIndex = source.indexOf("journal?.createdRecords.push");
+  const writeIndex = source.indexOf('await writeFile(record, "视频信息.txt"', registerIndex);
+  assert.ok(registerIndex > 0, "找不到 createdRecords 登记");
+  assert.ok(writeIndex > registerIndex, "createdRecords 必须先于写文件登记");
+  // 三个接口都要用上
+  assert.match(source, /"\/x\/web-interface\/view"/);
+  assert.match(source, /"\/x\/tag\/archive\/tags"/);
+  assert.match(source, /"\/x\/relation\/stat"/);
+});
+
+test("the popup exposes pause and cancel for a running import", () => {
+  const html = readProjectFile("popup.html");
+  const popup = readProjectFile("popup.js");
+  for (const id of ["importControl", "pauseImport", "cancelImport", "importProgressTitle"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `popup.html 缺少 #${id}`);
+  }
+  assert.match(popup, /type: "bca-import-control"/);
+  assert.match(popup, /importState/);
+  assert.match(popup, /pauseImportButton\.addEventListener/);
+  assert.match(popup, /cancelImportButton\.addEventListener/);
+  // 取消是两步，避免误触
+  assert.match(popup, /cancelArmed/);
+  // 弹窗可能在导入中被关闭又打开，状态要从后台恢复
+  assert.match(popup, /const state = status\.importState \|\| \{\}/);
+  assert.match(readProjectFile("background.js"), /sendResponse\(\{ \.\.\.status, importState \}\)/);
+});
+
+test("the web side shows storage usage and no longer offers the backfill button", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /id="storageUsage"/);
+  assert.match(html, /id="importHint"/);
+  assert.match(library, /function updateStorageUsage\(/);
+  assert.match(library, /function formatCount\(/);
+  assert.match(library, /detail-stats/);
+  assert.match(library, /importHintDismissed/);
+  assert.equal(/id="enrichLibrary"/.test(html), false, "补全缺失资料按钮应已删除");
+  assert.equal(/id="enrichDialog"/.test(html), false, "补全对话框应已删除");
+  assert.equal(/bca-enrich-records/.test(readProjectFile("background.js")), false, "后台不应再保留补全消息");
+});
+

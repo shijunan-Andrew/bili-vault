@@ -4,6 +4,7 @@ const DB_STORE = "settings";
 const collectionList = document.getElementById("collectionList");
 const collectionTotal = document.getElementById("collectionTotal");
 const rootLabel = document.getElementById("rootLabel");
+const storageUsage = document.getElementById("storageUsage");
 const statusDot = document.querySelector(".status-dot");
 const chooseRoot = document.getElementById("chooseRoot");
 const refreshLibraryButton = document.getElementById("refreshLibrary");
@@ -16,6 +17,8 @@ const currentCollection = document.getElementById("currentCollection");
 const pageTitle = document.getElementById("pageTitle");
 const resultSummary = document.getElementById("resultSummary");
 const scanNotice = document.getElementById("scanNotice");
+const importHint = document.getElementById("importHint");
+const dismissImportHintButton = document.getElementById("dismissImportHint");
 const scanProgress = document.getElementById("scanProgress");
 const videoPager = document.getElementById("videoPager");
 const viewGridButton = document.getElementById("viewGrid");
@@ -61,13 +64,6 @@ const selectAllActionTargetsButton = document.getElementById("selectAllActionTar
 const clearActionTargetsButton = document.getElementById("clearActionTargets");
 const videoFilterSelect = document.getElementById("videoFilter");
 const batchManageButton = document.getElementById("batchManage");
-const enrichLibraryButton = document.getElementById("enrichLibrary");
-const enrichDialog = document.getElementById("enrichDialog");
-const enrichSummary = document.getElementById("enrichSummary");
-const enrichBatchSize = document.getElementById("enrichBatchSize");
-const enrichProgress = document.getElementById("enrichProgress");
-const cancelEnrichButton = document.getElementById("cancelEnrich");
-const confirmEnrichButton = document.getElementById("confirmEnrich");
 const batchToolbar = document.getElementById("batchToolbar");
 const selectedCount = document.getElementById("selectedCount");
 const selectVisibleButton = document.getElementById("selectVisible");
@@ -100,7 +96,9 @@ let pageSize = PAGE_SIZES[0];
 let currentPage = 1;
 let pageCount = 1;
 let viewMode = "grid";
-let enrichInProgress = false;
+// 顶部“本地收藏夹占用”的递归统计状态：防止重复并发扫描，只保留最后一次请求的根目录
+let storageUsageRunning = false;
+let storageUsageQueuedRoot = null;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -166,6 +164,45 @@ async function readCover(fileHandle) {
 }
 
 function field(info, key) { return info.fields[key] || ""; }
+
+// “未知 / 无 / -”这类占位值等于没有数据，不能当成内容显示
+function realField(info, key) {
+  const value = field(info, key);
+  return value && !BcaArchiveCore.isPlaceholderValue(value) ? value : "";
+}
+
+/* ---------------- 4.2：互动数据与分享文案 ---------------- */
+
+// 「【互动数据】播放量：73798」这类字段名 → video.stats 的键
+const STAT_FIELDS = {
+  view: "播放量",
+  danmaku: "弹幕量",
+  like: "点赞数",
+  coin: "投硬币枚数",
+  favorite: "收藏人数",
+  share: "转发人数"
+};
+
+// 详情卡片上的短标签，键顺序与 STAT_FIELDS 一致
+const STAT_LABELS = { view: "播放量", danmaku: "弹幕", like: "点赞", coin: "投币", favorite: "收藏", share: "转发" };
+
+// 老档案的简介里混着 B 站分享文案（“<简介>, 视频播放量 71953、弹幕量 82、…, 相关视频：…”）。
+// 展示前交给 archive-core.js 砍掉分享文案，顺便用它解析出的统计给老档案兜底；
+// 4.2 起写入的【互动数据】区块优先级更高（见 statsFromInfo）。
+function splitInfoDescription(info) {
+  const raw = descriptionFromInfo(info);
+  const split = BcaArchiveCore.splitShareText?.(raw);
+  return { description: split?.description ?? raw, stats: split?.stats || {} };
+}
+
+function statsFromInfo(info, fallbackStats = {}) {
+  const stats = {};
+  for (const [key, label] of Object.entries(STAT_FIELDS)) {
+    const value = realField(info, label) || String(fallbackStats[key] || "");
+    if (value) stats[key] = value;
+  }
+  return stats;
+}
 
 async function inspectDownloadDirectory(directory) {
   const result = { hasFiles: false, hasMedia: false };
@@ -250,6 +287,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
         if (!raw.includes("【基本信息】")) continue;
         const info = parseInfo(raw);
         if (!field(info, "视频标题")) continue;
+        const share = splitInfoDescription(info);
         const cover = await readCover(coverHandle);
         const url = field(info, "视频链接");
         const title = field(info, "视频标题") || recordEntry.name;
@@ -276,13 +314,15 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
           upName: field(info, "UP主昵称"),
           upMid: field(info, "UP主UID"),
           upHome: field(info, "UP主主页"),
+          upFans: realField(info, "UP主粉丝数"),
           favoriteAt: date,
           savedAt: field(info, "信息保存于"),
           timestamp: parseDate(date, recordEntry.name),
           category: field(info, "分区"),
           duration: field(info, "视频时长"),
           publishDate: field(info, "视频发布时间"),
-          description: descriptionFromInfo(info),
+          description: share.description,
+          stats: statsFromInfo(info, share.stats),
           tags: tagsFromInfo(info),
           info,
           cover
@@ -606,75 +646,7 @@ function renderVideos() {
   }
   renderPager(matching.length);
   updateBatchControls();
-  updateEnrichButton();
 }
-
-/* ---------------- 4.1beta：补全缺失的标签和简介 ---------------- */
-
-// 归档里缺数据时写的是“未知 / 无 / -”，这些都不算有内容
-function hasRealValue(value) {
-  return !BcaArchiveCore.isPlaceholderValue(value);
-}
-
-function enrichmentCandidates() {
-  return selectedVideos().filter((video) => video.bvid && (!video.tags.length || !hasRealValue(video.description)));
-}
-
-function updateEnrichButton() {
-  if (!enrichLibraryButton) return;
-  const count = rootHandle ? enrichmentCandidates().length : 0;
-  enrichLibraryButton.disabled = count === 0 || enrichInProgress;
-  enrichLibraryButton.textContent = count ? `补全缺失资料（${count}）` : "补全缺失资料";
-  enrichLibraryButton.title = count
-    ? `为 ${count} 条缺少标签或简介的归档补抓资料`
-    : "当前范围没有需要补全的记录";
-}
-
-function openEnrichDialog() {
-  if (!rootHandle) { showToast("请先打开本地收藏根目录。"); return; }
-  const candidates = enrichmentCandidates();
-  if (!candidates.length) { showToast("当前范围没有需要补全的记录。"); return; }
-  const scope = selectedCollection === "*" ? "全部收藏" : selectedCollection;
-  enrichSummary.textContent = `「${scope}」里有 ${candidates.length} 条记录缺少标签或简介。`;
-  enrichProgress.textContent = "";
-  confirmEnrichButton.disabled = false;
-  cancelEnrichButton.disabled = false;
-  confirmEnrichButton.textContent = "开始补全";
-  enrichDialog.showModal();
-}
-
-async function runEnrichment() {
-  if (enrichInProgress) return;
-  const candidates = enrichmentCandidates();
-  if (!candidates.length) { showToast("当前范围没有需要补全的记录。"); return; }
-  const limit = Number(enrichBatchSize.value) || 20;
-  const targets = candidates.map((video) => ({ collection: video.collection, directory: video.directory }));
-  enrichInProgress = true;
-  updateEnrichButton();
-  confirmEnrichButton.disabled = true;
-  cancelEnrichButton.disabled = true;
-  confirmEnrichButton.textContent = "正在补全…";
-  enrichProgress.textContent = "正在请求 B 站接口，请勿关闭页面…";
-  try {
-    const permission = await rootHandle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("没有获得本地目录写入权限。");
-    const result = await chrome.runtime.sendMessage({ type: "bca-enrich-records", data: { targets, limit } });
-    if (!result?.ok) throw new Error(result?.message || "补全失败。");
-    const remaining = Number(result.remaining) || 0;
-    enrichProgress.textContent = `${result.message}${remaining ? `还有 ${remaining} 条没处理，可以再点一次继续。` : "当前范围已处理完。"}${result.reportPath ? ` 失败明细：${result.reportPath}` : ""}`;
-    await displayRoot(rootHandle, selectedCollection, "已刷新");
-  } catch (error) {
-    enrichProgress.textContent = `补全失败：${error?.message || "未知错误"}`;
-  } finally {
-    enrichInProgress = false;
-    confirmEnrichButton.disabled = false;
-    cancelEnrichButton.disabled = false;
-    confirmEnrichButton.textContent = "再补一批";
-    updateEnrichButton();
-  }
-}
-
-
 
 /* ---------------- 4.1：分页与视图切换 ---------------- */
 
@@ -809,13 +781,51 @@ async function restoreViewSettings() {
   } catch (_) {}
 }
 
+/* ---------------- 4.2：导入提示条 ---------------- */
+
+// 提示条默认 hidden（避免存储读取前闪一下），只有没被关过才显示
+async function restoreImportHint() {
+  if (!importHint) return;
+  let dismissed = false;
+  try {
+    const saved = await chrome.storage.local.get("importHintDismissed");
+    dismissed = saved?.importHintDismissed === true;
+  } catch (_) {}
+  importHint.hidden = dismissed;
+}
+
+function dismissImportHint() {
+  if (importHint) importHint.hidden = true;
+  chrome.storage.local.set({ importHintDismissed: true }).catch(() => {});
+}
+
 function compactDate(value) {
   const match = value.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
   return match ? `${match[1]}.${String(match[2]).padStart(2, "0")}.${String(match[3]).padStart(2, "0")}` : value;
 }
 
-function addField(rows, label, value) { if (value && value !== "未知") rows.push(`<dt>${label}</dt><dd>${escapeHtml(value)}</dd>`); }
+// extra 用来在值后面追加徽标等附加内容（例如 UP 主那一行的粉丝数）
+function addField(rows, label, value, extra = "") { if (value && value !== "未知") rows.push(`<dt>${label}</dt><dd>${escapeHtml(value)}${extra}</dd>`); }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
+
+// 4.2：超过 1 万显示“7.4 万”，超过 1 亿显示“1.2 亿”，其余原样（“1.2万”这类已带单位的也原样）
+function formatCount(value) {
+  const text = String(value ?? "").trim();
+  const number = Number(text.replace(/[,\s]/g, ""));
+  if (!text || !Number.isFinite(number)) return text;
+  if (number >= 100000000) return `${(number / 100000000).toFixed(1)} 亿`;
+  if (number >= 10000) return `${(number / 10000).toFixed(1)} 万`;
+  return text;
+}
+
+// 互动数据卡片行：一个值都没有（老档案还没写【互动数据】）时整块不渲染，避免一排“未知”
+function detailStatsHtml(stats) {
+  const cards = Object.entries(STAT_LABELS)
+    .map(([key, label]) => ({ label, value: formatCount(stats?.[key]) }))
+    .filter((item) => item.value)
+    .map((item) => `<div class="detail-stat"><span class="detail-stat-value tnum">${escapeHtml(item.value)}</span><span class="detail-stat-label">${item.label}</span></div>`);
+  return cards.length ? `<div class="detail-stats">${cards.join("")}</div>` : "";
+}
 
 // 搜索命中时高亮卡片标题里的关键词（先转义再插入 <mark>，避免标题里的尖括号被当成标签）
 function highlightMatches(text, query) {
@@ -873,14 +883,16 @@ function copyFieldButton(value, label) {
   return button;
 }
 
+// B / KB / MB / GB，KB 及以上保留 2 位小数（顶部占用和详情里的下载体积共用）
 function formatBytes(value) {
   const bytes = Number(value) || 0;
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(2)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
+// 递归累加整个根目录的文件大小，包含 000视频下载、001错误报告 等所有子目录
 async function directorySize(directory) {
   let total = 0;
   for await (const entry of directory.values()) {
@@ -888,6 +900,29 @@ async function directorySize(directory) {
     else total += (await entry.getFile()).size;
   }
   return total;
+}
+
+/* ---------------- 4.2：顶部“本地收藏夹占用” ---------------- */
+
+// 统计放在 displayRoot() 渲染之后异步跑，先出界面再慢慢算。
+// 同一时刻只允许一次递归扫描：期间再来请求只记下最新根目录，等本轮结束后补算。
+async function updateStorageUsage(handle) {
+  if (!storageUsage) return;
+  if (!handle) { storageUsage.textContent = "—"; return; }
+  if (storageUsageRunning) { storageUsageQueuedRoot = handle; return; }
+  storageUsageRunning = true;
+  storageUsage.textContent = "正在计算…";
+  try {
+    const total = await directorySize(handle);
+    if (rootHandle === handle) storageUsage.textContent = formatBytes(total);
+  } catch (_) {
+    if (rootHandle === handle) storageUsage.textContent = "统计失败";
+  } finally {
+    storageUsageRunning = false;
+    const queued = storageUsageQueuedRoot;
+    storageUsageQueuedRoot = null;
+    if (queued && queued !== handle) updateStorageUsage(queued);
+  }
 }
 
 // 详情页顺带统计本地下载体积；只读，失败就安静隐藏。
@@ -931,7 +966,8 @@ function openDetail(video) {
   const rows = [];
   addField(rows, "收藏时间", video.favoriteAt);
   addField(rows, "信息保存于", video.savedAt);
-  addField(rows, "UP 主", video.upName);
+  // 粉丝数按原值显示（例如“粉丝 12345”），不套用统计卡片的万/亿缩写
+  addField(rows, "UP 主", video.upName, video.upFans ? `<span class="detail-up-fans">粉丝 <span class="tnum">${escapeHtml(video.upFans)}</span></span>` : "");
   addField(rows, "UP 主 UID", video.upMid);
   if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>UP 主主页</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">打开 UP 主主页 ${BcaIcons.svg("external")}</a></dd>`);
   addField(rows, "分区", video.category);
@@ -946,7 +982,7 @@ function openDetail(video) {
     ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>`
     : `<p class="detail-empty">${BcaIcons.svg("tag")}这个归档没有记录标签</p>`;
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}在 B 站打开视频</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}本地视频</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}打开目录</button></div><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}复制视频目录路径</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}本地收藏管理</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}移动或复制</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">${BcaIcons.svg("file")}视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}标签</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}视频简介</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>展开全部简介</button>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}在 B 站打开视频</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}本地视频</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}打开目录</button></div><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}复制视频目录路径</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}本地收藏管理</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}移动或复制</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section>${detailStatsHtml(video.stats)}<h3 class="detail-section-title">${BcaIcons.svg("file")}视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}标签</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}视频简介</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>展开全部简介</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
@@ -1688,6 +1724,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = "已读
   renderVideos();
   syncDetailDownloadAction();
   showToast(`${toastVerb} ${allVideos().length} 个视频`);
+  // 大目录的递归体积统计很慢，放在渲染之后异步跑，不阻塞界面
+  updateStorageUsage(handle);
 }
 
 function syncDetailDownloadAction() {
@@ -1805,6 +1843,7 @@ async function restoreLastRoot() {
   } catch (error) {
     rootHandle = null;
     rootLabel.textContent = "上次目录无法访问";
+    updateStorageUsage(null);
     statusDot.classList.remove("ready");
     welcomeCopy.textContent = "上次选择的目录暂时无法访问，请重新选择收藏根目录。";
     welcomeChoose.innerHTML = `选择本地收藏目录 ${BcaIcons.svg("chevron-right")}`;
@@ -1829,15 +1868,7 @@ videoFilterSelect.addEventListener("change", () => { resetPaging(); renderVideos
 clearSearch.addEventListener("click", () => { searchInput.value = ""; resetPaging(); renderVideos(); searchInput.focus(); });
 viewGridButton?.addEventListener("click", () => setViewMode("grid"));
 viewListButton?.addEventListener("click", () => setViewMode("list"));
-enrichLibraryButton?.addEventListener("click", openEnrichDialog);
-confirmEnrichButton?.addEventListener("click", runEnrichment);
-cancelEnrichButton?.addEventListener("click", () => { if (!enrichInProgress) enrichDialog.close(); });
-enrichDialog?.addEventListener("cancel", (event) => { if (enrichInProgress) event.preventDefault(); });
-
-chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type !== "bca-enrich-progress") return;
-  if (enrichProgress && enrichInProgress) enrichProgress.textContent = message.text || "正在补全…";
-});
+dismissImportHintButton?.addEventListener("click", dismissImportHint);
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
 cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
@@ -1897,7 +1928,8 @@ window.setInterval(() => {
 }, 60000);
 Promise.all([
   restoreCollectionOrder().catch(() => { collectionOrder = []; }),
-  restoreViewSettings()
+  restoreViewSettings(),
+  restoreImportHint()
 ]).finally(() => {
   applyViewMode();
   restoreLastRoot();
