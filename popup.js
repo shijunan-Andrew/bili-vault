@@ -74,13 +74,13 @@ async function sendImportControl(action) {
   return result;
 }
 
-// 4.3：失效视频恢复会伪造官方 APP 客户端请求 APP 接口，默认关闭，由用户显式开启
+// 4.4.1：失效视频恢复改为默认开启。只有用户明确关掉（存成 false）才不勾选。
 async function restoreRecoverInvalid() {
   try {
     const saved = await chrome.storage.local.get("recoverInvalidVideos");
-    recoverInvalidCheckbox.checked = saved?.recoverInvalidVideos === true;
+    recoverInvalidCheckbox.checked = saved?.recoverInvalidVideos !== false;
   } catch (_) {
-    recoverInvalidCheckbox.checked = false;
+    recoverInvalidCheckbox.checked = true;
   }
 }
 

@@ -34,12 +34,12 @@ body {
 .download-intro h1 { margin: 0; color: var(--ink); font-size: var(--fs-2xl); letter-spacing: -.8px; }
 .download-intro > p:last-child { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-base); line-height: 1.85; }
 
-/* 使用须知：中性浅色卡片，不抢队列面板的视觉重心 */
-.safety-notice { margin: 0 0 var(--sp-4); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-soft); }
-.safety-notice-heading { display: flex; align-items: center; gap: 6px; margin: 0 0 var(--sp-3); color: var(--brand-deep); font-size: var(--fs-base); }
-.safety-notice-heading .icon { font-size: var(--fs-md); color: var(--brand); }
+/* 使用须知（4.4.1：与收藏库、弹窗统一的黄色底与大字号） */
+.safety-notice { margin: 0 0 var(--sp-4); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--warning-line); border-radius: var(--r-lg); background: var(--warning-soft); }
+.safety-notice-heading { display: flex; align-items: center; gap: 6px; margin: 0 0 var(--sp-3); color: var(--warning); font-size: var(--fs-md); }
+.safety-notice-heading .icon { font-size: var(--fs-lg); color: var(--warning); }
 .safety-notice-list { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
-.safety-notice-list li { color: var(--text); font-size: var(--fs-base); line-height: 1.7; overflow-wrap: anywhere; }
+.safety-notice-list li { color: var(--text); font-size: var(--fs-md); line-height: 1.8; overflow-wrap: anywhere; }
 .safety-notice-list a { color: var(--brand-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .safety-notice-list a:hover { color: var(--brand-strong); }
 

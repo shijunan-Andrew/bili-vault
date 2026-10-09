@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.4.0");
+  assert.equal(manifest.version, "4.4.1");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -243,16 +243,17 @@ test("the import asks Bilibili slowly instead of in bursts", () => {
   assert.ok(concurrency / (delay / 1000) <= 2, `每秒请求数不应超过 2，当前 ${(concurrency / (delay / 1000)).toFixed(2)}`);
 });
 
-test("invalid-video recovery through the APP API is opt-in and off by default", () => {
+test("invalid-video recovery through the APP API is on by default but still switchable", () => {
   const background = readProjectFile("background.js");
   const popup = readProjectFile("popup.js");
   const html = readProjectFile("popup.html");
-  assert.match(background, /const recoverInvalidVideos = settings\?\.recoverInvalidVideos === true/);
-  assert.match(html, /id="recoverInvalid"/);
+  // 4.4.1：默认开启，只有明确存成 false 才关闭
+  assert.match(background, /const recoverInvalidVideos = settings\?\.recoverInvalidVideos !== false/);
+  assert.match(popup, /recoverInvalidCheckbox\.checked = saved\?\.recoverInvalidVideos !== false/);
+  // 弹窗里的复选框默认勾选
+  assert.match(html, /<input id="recoverInvalid" type="checkbox" checked>/);
   assert.match(popup, /recoverInvalidVideos: recoverInvalidCheckbox\.checked/);
-  // 默认关闭：只有显式存过 true 才勾选
-  assert.match(popup, /recoverInvalidCheckbox\.checked = saved\?\.recoverInvalidVideos === true/);
-  // 恢复流程必须被开关包住
+  // 恢复流程仍然必须被开关包住，用户能关掉
   const gateIndex = background.indexOf("if (recoverInvalidVideos) {");
   const callIndex = background.indexOf("await enrichImportedInvalidVideos(pendingItems, folder, tabId)");
   assert.ok(gateIndex > 0 && callIndex > gateIndex, "APP 接口恢复流程必须在开关之内");
@@ -791,8 +792,45 @@ test("the same safety notice appears verbatim on all three surfaces", () => {
   }
   // 弹窗里必须默认折叠，不能把弹窗撑高
   assert.equal(/<details id="safetyNotice"[^>]*\sopen\b/.test(readProjectFile("popup.html")), false, "弹窗的须知应默认折叠");
-  // 收藏库里可以永久收起，状态记在本地
+  // 收藏库里默认展开
   assert.match(readProjectFile("library.html"), /<details id="safetyNotice" class="safety-notice" open>/);
-  assert.match(readProjectFile("library.js"), /safetyNoticeDismissed/);
+});
+
+test("the safety notice is collapsible but can no longer be dismissed", () => {
+  const libraryHtml = readProjectFile("library.html");
+  const libraryJs = readProjectFile("library.js");
+  const popupHtml = readProjectFile("popup.html");
+  // 4.4.1：去掉「知道了，不再显示」按钮，也不再写任何“已关闭”状态
+  assert.equal(/id="dismissSafety"/.test(libraryHtml), false, "不该再有不再提示按钮");
+  assert.equal(/dismissSafetyButton/.test(libraryJs), false, "不该再有不再提示的绑定");
+  assert.equal(/safetyNoticeDismissed:\s*true/.test(libraryJs), false, "不该再写入关闭状态");
+  assert.equal(/safetyNotice\.hidden\s*=\s*true/.test(libraryJs), false, "不该再隐藏须知");
+  // 但保留可折叠
+  assert.match(libraryHtml, /<details id="safetyNotice"/);
+  assert.equal(/<details id="safetyNotice" class="safety-notice" hidden/.test(libraryHtml), false, "须知不能默认隐藏");
+});
+
+// 只挑出选择器里含 .safety 的规则，避免把相邻组件的样式算进来
+function safetyRules(css) {
+  return [...css.matchAll(/([^\n{}]*\.safety[^\n{}]*)\{([^}]*)\}/g)].map((match) => `${match[1]}{${match[2]}}`);
+}
+
+test("the safety notice uses the warning palette with larger type", () => {
+  const popupHtml = readProjectFile("popup.html");
+  for (const file of ["library.css", "download.css", "popup.css"]) {
+    const rules = safetyRules(readProjectFile(file));
+    assert.ok(rules.length >= 5, `${file} 里找不到须知样式`);
+    const all = rules.join("\n");
+    assert.match(all, /var\(--warning-soft\)/, `${file} 的须知应为黄色底`);
+    assert.match(all, /var\(--warning-line\)/, `${file} 的须知应为黄色描边`);
+    // 4.4.1 要求字号调大：须知正文（列表）至少 --fs-md(15px)
+    assert.ok(
+      rules.some((rule) => /\.safety[-a-z]*list[^{]*\{[^}]*font-size: var\(--fs-md\)/.test(rule)),
+      `${file} 的须知正文字号应调到 --fs-md`
+    );
+    assert.equal(/var\(--brand-soft\)/.test(all), false, `${file} 的须知不该再用品牌蓝底`);
+  }
+  // 弹窗里须知必须排在 brand-row 之前（置顶）
+  assert.ok(popupHtml.indexOf('id="safetyNotice"') < popupHtml.indexOf('class="brand-row"'), "弹窗的须知应置顶");
 });
 

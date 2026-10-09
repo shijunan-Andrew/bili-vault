@@ -1,13 +1,13 @@
-# AI 项目交接说明：B站收藏信息归档 4.4
+# AI 项目交接说明：B站收藏信息归档 4.4.1
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.4`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
-- 扩展版本：`4.4.0`，Chrome Manifest V3，最低 Chrome 版本 111。
-- `b_catch_4.3` 是 4.4 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
-- **4.4 新增两件事**：三个界面统一加入「使用须知」安全声明；本地收藏库新增「更新视频状态」，用 patchVolatileFields() 只覆盖会变化的数值，并在检测到视频失效时保留原数据、只写失效标记。window.top !== window.self 防嵌套检查必须保留，且早于任何目录读取。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.4.1`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
+- 扩展版本：`4.4.1`，Chrome Manifest V3，最低 Chrome 版本 111。
+- `b_catch_4.4` 是 4.4.1 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **4.4.1 是 4.4 的补丁版**：使用须知改为黄色底、字号调到 15px、可折叠但**不可永久关闭**；插件弹窗的须知**置顶**；失效视频恢复改为**默认开启**。没有其它功能变化。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
 - 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.8 → 4.0）ID 就会变，安装原生助手时必须填入新 ID。
@@ -105,7 +105,9 @@ b_catch_4.1/
 
 ### 使用须知（4.4 新增）
 
-同一份六条安全声明必须同时出现在 `library.html`、`download.html`、`popup.html`，**逐字一致**（测试会逐条比对）。收藏库里可以点「知道了，不再显示」永久收起（`safetyNoticeDismissed`）；下载页常驻；弹窗里默认折叠（`<details>` 不带 `open`），避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要。**
+同一份六条安全声明必须同时出现在 `library.html`、`download.html`、`popup.html`，**逐字一致**（测试会逐条比对）。
+
+4.4.1 起：三处统一用 --warning-soft / --warning-line 黄色底、正文 --fs-md(15px)；收藏库默认展开、可折叠，但**不允许永久关闭**（dismissSafety 按钮与 safetyNoticeDismissed 写入都已删除，只保留一次性的旧标记清理）；弹窗里**置顶**（排在 rand-row 之前）且默认折叠，避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要；也不要把「不再提示」加回来。**
 
 ### 本地收藏库
 
@@ -254,8 +256,8 @@ UP主主页：https://space.bilibili.com/……
 - `importState`：4.2 起导入的运行状态 `{ running, paused, text, startedAt, finishedAt, summary }`。弹窗靠它恢复按钮；`publishImportState()` 对进度更新做了 500ms 节流，关键状态变化传 `force=true` 立即落盘。导入结束后不会清空，只把 `running` 置 false。
 - `libraryViewMode` / `libraryPageSize`：4.1 起收藏库的网格/竖列与每页数量。
 - `importHintDismissed`：4.2 起收藏库顶部导入提示条是否已被关闭。
-- `recoverInvalidVideos`：4.3 引入的「尝试恢复失效视频」开关。**4.4 起默认开启**（判定为 `!== false`，只有明确存成 false 才关闭）。关闭时导入不会调用 APP 接口恢复流程。
-- safetyNoticeDismissed：4.4 起收藏库「使用须知」是否已被永久收起。
+- `recoverInvalidVideos`：4.3 引入的「尝试恢复失效视频」开关。**4.4.1 起默认开启**（判定为 `!== false`，只有明确存成 false 才关闭）。关闭时导入不会调用 APP 接口恢复流程。
+- `safetyNoticeDismissed`：4.4 的遗留键。4.4.1 起不再生效（须知必须常驻），`library.js` 启动时会把它清掉。
 - 还可能包含导入任务进度及其他 UI 状态；改动前搜索全项目读写点。
 
 **`chrome.storage.session`**：临时批量下载队列，键名 `bcaDownloadQueue:<UUID>`。下载页读取后删除。
@@ -268,7 +270,7 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 49 项检查：9 项纯逻辑回归、9 项表现层静态回归、7 项 4.1 回归、11 项 4.2 回归（分享文案拆分两边实现必须一致、真实档案拆分正确、`recordNeedsRefresh` 只挑真正不完整的记录、新格式含粉丝数与独立互动数据区块、暂停/取消/回滚与三个接口的接线、登记先于写入、弹窗暂停取消与状态恢复、网页端占用统计与提示条、补全功能彻底移除）、6 项 4.3 安全回归（扩展页不对任何网页暴露且改走 `tabs.create`、收藏库拒绝被 iframe 嵌套且检查早于目录读取、封面协议白名单与转义、错误报告含提示行、导入串行且每秒请求数 ≤2、失效视频恢复默认关闭且被开关包住），以及 7 项 4.4 回归（两份 `patchVolatileFields` 输出必须一致、更新只动易变字段且行数不变、失效时逐行核对只有状态行变化、老档案能正确补出互动数据块与粉丝数行、失效判定只认接口错误码、网页端分批刷新接线、三处使用须知逐字一致且弹窗默认折叠）。无第三方包。
+当前包含 51 项检查：9 项纯逻辑回归、9 项表现层静态回归、7 项 4.1 回归、11 项 4.2 回归、6 项 4.3 安全回归（扩展页不对任何网页暴露且改走 `tabs.create`、收藏库拒绝被 iframe 嵌套且检查早于目录读取、封面协议白名单与转义、错误报告含提示行、导入串行且每秒请求数 ≤2、恢复流程被开关包住）、7 项 4.4 回归（两份 `patchVolatileFields` 输出必须一致、更新只动易变字段且行数不变、失效时逐行核对只有状态行变化、老档案能正确补出互动数据块与粉丝数行、失效判定只认接口错误码、网页端分批刷新接线、三处使用须知逐字一致），以及 2 项 4.4.1 回归（须知可折叠但不可永久关闭、须知使用黄色底且字号调到 15px 并在弹窗置顶）。无第三方包。
 
 其中 4.1beta 的两项会**从 `background.js` 里把函数源码抽出来执行**（`loadBackgroundFunctions`），因为 background.js 是模块化 service worker、无法 `require`；这样测到的就是生产代码本身，而不是复制品。
 
@@ -316,7 +318,7 @@ node test/import-trial.cjs "C:\Users\Maxwell\Desktop\本地收藏夹" 3
 **由此确立的硬约束**：
 
 1. **导入必须保持低速**：`IMPORT_DETAIL_CONCURRENCY = 1`、`IMPORT_DETAIL_DELAY_MS >= 600`（当前 800）。测试会断言每秒请求数 ≤ 2。**不要为了性能调回去**；要提速请先和用户确认。
-2. **失效视频恢复必须保持可选且默认关闭**：它伪造成官方 iOS 客户端（`platform: ios, mobi_app: iphone`）请求 APP 接口，是合规上最勉强的一环。`enrichImportedInvalidVideos()` 只能被 `recoverInvalidVideos` 开关包住调用。
+2. **失效视频恢复必须保持可选**：它伪造成官方 iOS 客户端（`platform: ios, mobi_app: iphone`）请求 APP 接口，是合规上最勉强的一环。**用户已明确要求 4.4.1 起默认开启**，因此默认值改为开，但**开关必须保留**——`enrichImportedInvalidVideos()` 只能被 `recoverInvalidVideos` 包住调用，用户取消勾选后必须真的不执行。
 3. **不得新增写操作**：全项目只有 GET。任何 POST/PUT/DELETE 都可能改变用户线上账号状态，属于必须避免的类别。
 4. **不得新增第三方域名**：出网只能到 bilibili.com / hdslb.com / bilivideo.com(.cn) / akamaized.net。不要引入任何统计、遥测、CDN 或"更新检查"。
 5. **不得引入远程代码或 npm 依赖**：无 `eval`、无 `new Function`、无动态插标签；MV3 默认严格 CSP。

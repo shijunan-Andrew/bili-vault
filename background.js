@@ -1558,9 +1558,10 @@ async function importBiliFavorites(data, tabId = null) {
 
   importRun = { active: true, paused: false, cancelled: false, waiters: [] };
   upFansCache = new Map();
-  // 4.3：失效视频恢复依赖伪造官方 APP 客户端去请求 APP 接口，默认关闭
+  // 4.4.1：失效视频恢复默认开启（它需要伪造成官方 APP 客户端请求 APP 接口，
+  // 是合规上最勉强的一环，因此保留开关让用户能关掉；只有明确存成 false 才关闭）
   const settings = await chrome.storage.local.get("recoverInvalidVideos").catch(() => ({}));
-  const recoverInvalidVideos = settings?.recoverInvalidVideos === true;
+  const recoverInvalidVideos = settings?.recoverInvalidVideos !== false;
   const journal = createImportJournal();
   publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "" }, true);
 
@@ -1648,8 +1649,8 @@ async function importBiliFavorites(data, tabId = null) {
       }
 
       // 失效视频先走原有的恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）。
-      // 4.3：这条路径会伪造成官方 iOS 客户端请求 APP 接口，默认关闭，
-      // 只有用户在插件弹窗里显式开启（recoverInvalidVideos）才会执行。
+      // 4.4.1：这条路径会伪造成官方 iOS 客户端请求 APP 接口，默认开启，
+      // 用户可以在插件弹窗里取消勾选（recoverInvalidVideos=false）来关闭。
       if (recoverInvalidVideos) {
         try { await enrichImportedInvalidVideos(pendingItems, folder, tabId); }
         catch (error) {

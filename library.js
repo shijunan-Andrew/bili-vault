@@ -39,7 +39,6 @@ const statusProgress = document.getElementById("statusProgress");
 const cancelStatusButton = document.getElementById("cancelStatus");
 const confirmStatusButton = document.getElementById("confirmStatus");
 const safetyNotice = document.getElementById("safetyNotice");
-const dismissSafetyButton = document.getElementById("dismissSafety");
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
@@ -863,14 +862,11 @@ async function runStatusRefresh() {
   }
 }
 
-/* ---------------- 4.4：使用须知 ---------------- */
-
-async function restoreSafetyNotice() {
-  if (!safetyNotice) return;
-  try {
-    const saved = await chrome.storage.local.get("safetyNoticeDismissed");
-    if (saved?.safetyNoticeDismissed === true) safetyNotice.hidden = true;
-  } catch (_) {}
+/* ---------------- 使用须知（4.4.1：可折叠，但不允许永久关闭） ---------------- */
+// 以前用 safetyNoticeDismissed 记住“不再显示”，4.4.1 起必须常驻，
+// 因此这里只清掉可能残留的旧标记，不再读写它。
+async function clearLegacySafetyDismissed() {
+  try { await chrome.storage.local.remove("safetyNoticeDismissed"); } catch (_) {}
 }
 
 
@@ -1964,10 +1960,6 @@ refreshVideoStatusButton?.addEventListener("click", openStatusDialog);
 confirmStatusButton?.addEventListener("click", runStatusRefresh);
 cancelStatusButton?.addEventListener("click", () => { if (!statusRefreshInProgress) statusDialog.close(); });
 statusDialog?.addEventListener("cancel", (event) => { if (statusRefreshInProgress) event.preventDefault(); });
-dismissSafetyButton?.addEventListener("click", () => {
-  if (safetyNotice) safetyNotice.hidden = true;
-  chrome.storage.local.set({ safetyNoticeDismissed: true }).catch(() => {});
-});
 
 // 4.4：更新状态时的进度回报
 chrome.runtime.onMessage.addListener((message) => {
@@ -2036,7 +2028,7 @@ Promise.all([
   restoreCollectionOrder().catch(() => { collectionOrder = []; }),
   restoreViewSettings(),
   restoreImportHint(),
-  restoreSafetyNotice()
+  clearLegacySafetyDismissed()
 ]).finally(() => {
   applyViewMode();
   restoreLastRoot();
