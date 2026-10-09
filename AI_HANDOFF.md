@@ -5,7 +5,7 @@
 ## 项目基线
 
 - 项目目录：`<项目目录>`（历史版本另存于 `<历史版本目录>`）。
-- 扩展版本：`4.6.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- 扩展版本：`4.7.0`（界面显示 `beta4.7`），Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -138,6 +138,14 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 ```
 
 后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+### 版本渠道与界面约定（4.7）
+
+- **界面版本号带渠道前缀**：`displayVersion()` 在 `library.js` 与 `popup.js` 各有一份，**必须保持同步**（测试会抽出两份实现比对同一批输入的输出）。改渠道只需把 `RELEASE_CHANNEL` 从 `"beta"` 改成别的值：beta 显示 `beta4.7`（去掉末尾的 `.0`），正式版显示 `V1.0.0`。
+- **顶部横幅的跑马灯**由 `buildBannerMarquee()` 在显示横幅后构建、窗口 resize 时重建。它按容器宽度补足份数并保证前后两半等宽（位移 50% 才能无缝）。`library.css` 里有一条 `@media (prefers-reduced-motion: reduce)` 显式豁免——**不要删**：`theme.css` 的全局规则会把动画压成「跑一次就弹回原位」，而 `animation-fill-mode` 默认是 `none`，元素会退回无位移状态，跑马灯就完全不动了。
+- **工具栏的下拉框有固定宽度**（`.video-filter select` 132px、`.sort-select select` 124px）。工具栏是 `justify-content: flex-end` 右对齐的，**如果让 select 宽度跟着选中项文字变，整行都会左右窜**。
+- **颜色令牌新增 `--feature` / `--feature-soft` / `--feature-line`**（橘黄，用于突出「导入或更新」这类主入口）。浅色 `#a5560a`、深色 `#efa45a`，对比度 4.76 / 7.39。深色那两处仍然必须完全一致。
+- **使用须知现在是七条**（新增「不要移动插件文件夹位置」）。三个界面必须逐字一致，测试断言条数为 7。
+
 ### 收藏库的性能与可访问性（4.6）
 
 - **增量扫描**：`scanRoot()` 现在带缓存。键 = `收藏夹/目录名`，值 = `{size, lastModified, 解析结果}`；按根目录 handle 用 `WeakMap` 发自增 id 隔离。命中时**只调 `getFile()` 取元数据、不读正文**；`size` 或 `lastModified` 变一个字节就只重读那一条。目录列表**每轮重新枚举**，所以新增/删除目录一定反映。

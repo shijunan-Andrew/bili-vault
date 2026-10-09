@@ -1475,6 +1475,44 @@ async function runStatusRefresh() {
 }
 /* ---------------- 4.5.2：GitHub 开源横幅 ---------------- */
 
+
+// 4.7：界面上的版本号带渠道前缀——测试版 beta4.7、正式版 V1.0.0。
+// popup.js 里有一份同样的实现，改动时两边必须同步（测试会比对两份输出）。
+const RELEASE_CHANNEL = "beta";
+
+function displayVersion(raw) {
+  const version = String(raw || "");
+  if (!version) return "";
+  if (RELEASE_CHANNEL === "beta") return `beta${version.replace(/\.0$/, "")}`;
+  return `V${version}`;
+}
+
+// 轨道只有两份文字时，宽屏上右边会空一大块；而系统开了「减少动画」后
+// 动画会被压成跑一次就弹回原位，看着像坏了。这里按容器宽度补足份数，
+// 并保证前后两半严格等宽，位移 50% 才能无缝衔接。
+function buildBannerMarquee() {
+  const track = githubBannerLink?.querySelector(".banner-scroll");
+  const seed = track?.querySelector(".banner-run");
+  if (!track || !seed || !githubBanner) return;
+  const measure = seed.cloneNode(true);
+  track.replaceChildren(measure);
+  const unitWidth = measure.getBoundingClientRect().width || 260;
+  const need = Math.max(1, Math.ceil(githubBanner.clientWidth / Math.max(unitWidth, 1)));
+  const half = Array.from({ length: need }, (_, index) => {
+    const node = seed.cloneNode(true);
+    if (index > 0) node.setAttribute("aria-hidden", "true");
+    return node;
+  });
+  const second = half.map((node) => {
+    const copy = node.cloneNode(true);
+    copy.setAttribute("aria-hidden", "true");
+    return copy;
+  });
+  track.replaceChildren(...half, ...second);
+  // 速度恒定：大约每秒 60px，短则不少于 14 秒
+  track.style.animationDuration = `${Math.max(14, Math.round((unitWidth * need) / 60))}s`;
+}
+
 // 正式开源后只改这一处
 const PROJECT_REPO_URL = "https://github.com/shijunan-Andrew/bili-vault";
 
@@ -1490,6 +1528,7 @@ async function restoreGithubBanner() {
   githubBanner.hidden = false;
   // 侧栏/顶栏/主区靠这个 class 一起下移，见 library.css 的 --banner-h
   document.documentElement.classList.add("banner-visible");
+  buildBannerMarquee();
 }
 
 function dismissGithubBanner() {
@@ -1904,12 +1943,20 @@ function detailVideo() {
   return allVideos().find((video) => video.id === detailContent.dataset.videoId) || null;
 }
 
-function setDownloadPathNote(text, isError = false) {
+// 4.7：help 是一句放在最顶上并加粗的说明（原生助手未安装时的操作步骤）
+function setDownloadPathNote(text, isError = false, help = "") {
   const note = detailContent.querySelector(".download-path-note");
   if (!note) return;
-  note.hidden = !text;
-  note.textContent = text || "";
-  note.classList.toggle("error", Boolean(text) && isError);
+  note.hidden = !text && !help;
+  note.textContent = "";
+  if (help) {
+    const strong = document.createElement("strong");
+    strong.className = "download-path-help";
+    strong.textContent = help;
+    note.append(strong);
+  }
+  if (text) note.append(document.createTextNode(text));
+  note.classList.toggle("error", Boolean(text || help) && isError);
 }
 
 function downloadPathParts(video) {
@@ -1947,9 +1994,10 @@ async function openDownloadDirectory(video) {
         ? BcaI18n.t("视频目录：{path}", { path: fallback.path })
         : BcaI18n.t("视频目录（相对下载根目录）：{path}", { path: BcaArchiveCore.joinDownloadPath(BcaI18n.t("下载根目录"), collection, directory) }));
     }
-    lines.push(BcaI18n.t("若尚未安装原生助手：运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。"));
     lines.push(BcaI18n.t("可以点击上面的“复制视频目录路径”手动在资源管理器地址栏粘贴打开。"));
-    setDownloadPathNote(lines.join("\n"), true);
+      // 4.7：安装步骤放到最顶上并加粗——这才是用户真正要照做的一步
+      const help = BcaI18n.t("若尚未安装原生助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。");
+      setDownloadPathNote(lines.join("\n"), true, help);
     showToast(BcaI18n.t("无法打开本地视频目录，详情见视频详情页。"));
   }
 }
@@ -2747,6 +2795,12 @@ deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRe
 searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
 sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
 dismissGithubBannerButton?.addEventListener("click", dismissGithubBanner);
+let bannerResizeTimer = 0;
+window.addEventListener("resize", () => {
+  if (githubBanner?.hidden) return;
+  clearTimeout(bannerResizeTimer);
+  bannerResizeTimer = setTimeout(buildBannerMarquee, 150);
+});
 
 /* ---------------- 4.5.1：主题与语言悬浮球 ---------------- */
 
@@ -3025,5 +3079,5 @@ BcaI18n.init().catch(() => {}).then(() => Promise.all([
 // 侧栏版本号从 manifest 读取，避免再次出现“界面写着 3.6、实际是 3.7”的错位
 try {
   const sideVersion = document.getElementById("sideVersion");
-  if (sideVersion) sideVersion.textContent = chrome.runtime.getManifest().version;
+  if (sideVersion) sideVersion.textContent = displayVersion(chrome.runtime.getManifest().version);
 } catch (_) {}

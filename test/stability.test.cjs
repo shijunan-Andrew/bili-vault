@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.6.0");
+  assert.equal(manifest.version, "4.7.0");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -833,6 +833,80 @@ test("the dark theme only redefines tokens, and both triggers agree", () => {
   assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
 });
 
+/* ------------------------- 4.7 细节修复 ------------------------- */
+
+test("the banner marquee fills the width and survives reduced-motion", () => {
+  const library = readProjectFile("library.js");
+  const css = readProjectFile("library.css");
+  // 轨道只有两份文字时宽屏右边会空一大块：要按容器宽度补足份数
+  assert.match(library, /function buildBannerMarquee/);
+  assert.match(library, /Math\.ceil\(githubBanner\.clientWidth/, "份数要按容器宽度算");
+  // 前后两半必须等宽，位移 50% 才能无缝
+  assert.match(library, /track\.replaceChildren\(\.\.\.half, \.\.\.second\)/);
+  // 窗口变宽要重建
+  assert.match(library, /addEventListener\("resize"/);
+  // theme.css 的全局 reduced-motion 会把动画压成「跑一次就弹回原位」，
+  // 对跑马灯等于完全不动，所以必须有一条豁免
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.banner-scroll \{ animation-duration: 40s !important; animation-iteration-count: infinite !important; \}/);
+});
+
+test("filter dropdowns keep a stable width", () => {
+  const css = readProjectFile("library.css");
+  // 工具栏是右对齐的，select 宽度随选中项变长就会让整行窜动
+  assert.match(css, /\.video-filter select \{ width: 132px; \}/);
+  assert.match(css, /\.sort-select select \{ width: 124px; \}/);
+  assert.match(css, /\.view-controls \{ display: flex; align-items: center; justify-content: flex-end/);
+});
+
+test("the native helper instructions come first and are bold", () => {
+  const library = readProjectFile("library.js");
+  const css = readProjectFile("library.css");
+  assert.match(library, /function setDownloadPathNote\(text, isError = false, help = ""\)/);
+  assert.match(library, /strong\.className = "download-path-help"/);
+  assert.match(css, /\.download-path-help \{ display: block; margin-bottom: var\(--sp-2\); font-weight: 700; \}/);
+  // 旧措辞必须彻底消失
+  assert.equal(/若尚未安装原生助手：运行插件目录/.test(library), false, "旧的安装说明应已被替换");
+  assert.match(library, /请运行插件目录中的 install-native-folder-opener\.bat/);
+  // 调用点必须把 help 传进去（才会置顶加粗）
+  assert.match(library, /setDownloadPathNote\(lines\.join\("\\n"\), true, help\)/);
+});
+
+test("the version shown in the UI carries a release-channel prefix", () => {
+  // 两份实现必须给出同样的结果，否则收藏库和弹窗会显示不同的版本号
+  const extract = (source) => {
+    const match = source.match(/const RELEASE_CHANNEL = "(\w+)";[\s\S]*?function displayVersion\(raw\) \{[\s\S]*?\n\}/);
+    if (!match) throw new Error("找不到 displayVersion");
+    return new Function(match[0] + "; return displayVersion;")();
+  };
+  const fromLibrary = extract(readProjectFile("library.js"));
+  const fromPopup = extract(readProjectFile("popup.js"));
+  for (const raw of ["4.7.0", "4.7.1", "1.0.0", ""]) {
+    assert.equal(fromLibrary(raw), fromPopup(raw), "两个文件的 displayVersion 对 " + raw + " 结果不一致");
+  }
+  assert.equal(fromLibrary("4.7.0"), "beta4.7");
+  assert.equal(fromLibrary("4.7.1"), "beta4.7.1");
+  assert.match(readProjectFile("library.js"), /sideVersion\.textContent = displayVersion\(/);
+  assert.match(readProjectFile("popup.js"), /displayVersion\(chrome\.runtime\.getManifest\(\)\.version\)/);
+});
+
+test("the import card is highlighted in orange", () => {
+  const css = readProjectFile("popup.css");
+  const theme = readProjectFile("theme.css");
+  for (const token of ["--feature:", "--feature-soft:", "--feature-line:"]) {
+    assert.ok(theme.includes(token), "theme.css 缺少 " + token);
+  }
+  assert.match(css, /\.import-card \{ border-color: var\(--feature-line\); \}/);
+  assert.match(css, /\.import-card > summary strong \{ color: var\(--feature\); \}/);
+  assert.match(css, /\.import-card > summary \.import-summary-icon \{ color: var\(--feature\); background: var\(--feature-soft\); \}/);
+});
+
+test("the folder-move warning is part of the shared notice", () => {
+  const warning = "从 chrome://extensions 导入插件后请不要移动插件文件夹位置";
+  for (const page of ["library.html", "download.html", "popup.html"]) {
+    assert.ok(readProjectFile(page).includes(warning), page + " 缺少「不要移动插件文件夹」的提示");
+  }
+});
+
 /* ------------------------- 4.6 收藏库改造 ------------------------- */
 
 test("the library scans incrementally but always keeps a full-scan escape", () => {
@@ -1067,11 +1141,11 @@ function noticeItems(html) {
     .trim());
 }
 
-test("all three surfaces show the same six safety items, abuse warning first", () => {
+test("all three surfaces show the same seven safety items, abuse warning first", () => {
   const surfaces = ["library.html", "download.html", "popup.html"];
   const lists = Object.fromEntries(surfaces.map((file) => [file, noticeItems(readProjectFile(file))]));
   for (const file of surfaces) {
-    assert.equal(lists[file].length, 6, `${file} 的使用须知应正好六条`);
+    assert.equal(lists[file].length, 7, `${file} 的使用须知应正好七条`);
     // 4.5：请勿滥用提到最前面
     assert.ok(lists[file][0].startsWith("请勿滥用："), `${file} 的第一条必须是「请勿滥用」`);
     assert.equal(lists[file].filter((item) => item.startsWith("请勿滥用：")).length, 1, `${file} 的「请勿滥用」只应出现一次`);

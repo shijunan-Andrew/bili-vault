@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "哔哩藏库",
-  "version": "4.6.0",
-  "description": "把 B 站收藏夹完整搬到本地：可搜索、可筛选、可离线，视频被删了也还在。支持弹幕、字幕、封面的本地归档与失效视频恢复。",
+  "version": "4.7.0",
+  "description": "把 B 站收藏夹备份本地，启用后，收藏成功自动保存视频资料到本地，支持已有收藏夹视频的本地归档与失效视频恢复，支持本地收藏夹浏览、搜索、筛选与视频下载。",
   "minimum_chrome_version": "111",
-  "permissions": ["storage", "nativeMessaging", "clipboardWrite"],
+  "permissions": [
+    "storage",
+    "nativeMessaging",
+    "clipboardWrite"
+  ],
   "host_permissions": [
     "https://*.hdslb.com/*",
     "https://api.bilibili.com/*",
@@ -27,14 +31,19 @@
         "https://bilibili.com/video/*",
         "https://m.bilibili.com/video/*"
       ],
-      "js": ["i18n.js", "content.js"],
+      "js": [
+        "i18n.js",
+        "content.js"
+      ],
       "run_at": "document_start"
     },
     {
       "matches": [
         "https://space.bilibili.com/*/favlist*"
       ],
-      "js": ["favorites-import.js"],
+      "js": [
+        "favorites-import.js"
+      ],
       "run_at": "document_idle"
     }
   ]

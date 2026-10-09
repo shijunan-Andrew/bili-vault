@@ -50,6 +50,20 @@ let importPaused = false;
 let cancelArmed = false;
 let cancelArmTimer = 0;
 
+
+/* ---------------- 4.7：版本号渠道前缀 ---------------- */
+
+// 测试版显示 beta4.7、正式版显示 V1.0.0。
+// library.js 里有一份同样的实现，改动时两边必须同步（测试会比对两份输出）。
+const RELEASE_CHANNEL = "beta";
+
+function displayVersion(raw) {
+  const version = String(raw || "");
+  if (!version) return "";
+  if (RELEASE_CHANNEL === "beta") return `beta${version.replace(/\.0$/, "")}`;
+  return `V${version}`;
+}
+
 function renderImportControl() {
   importControl.hidden = !importBusy;
   importControlHint.hidden = !importBusy || cancelArmed;
@@ -540,7 +554,7 @@ async function boot() {
   refreshStatus().catch((error) => {
     lastResult.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法读取插件状态。");
   });
-  if (popupVersion) popupVersion.textContent = BcaI18n.t("版本 {version}", { version: chrome.runtime.getManifest().version });
+  if (popupVersion) popupVersion.textContent = BcaI18n.t("版本 {version}", { version: displayVersion(chrome.runtime.getManifest().version) });
 }
 
 boot().catch(() => {});

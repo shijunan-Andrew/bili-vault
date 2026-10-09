@@ -219,7 +219,6 @@
   "让收藏的视频，<span>一目了然</span>": "All your collected videos, <span>at a glance</span>",
   "如果目录已移动或删除，再使用右上角按钮选择新位置。": "If the folder was moved or deleted, use the button at the top right to choose a new location.",
   "如果需要导入或更新本地文件夹内的视频，请在 B 站收藏夹页面点击插件的「导入或更新」。": "To import or update videos in your local folders, click “Import or update” in the extension on a Bilibili collection page.",
-  "若尚未安装原生助手：运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。": "If the native helper is not installed yet, run install-native-folder-opener.bat from the extension folder and enter this extension's current extension ID and download folder. Afterwards, reload the extension at chrome://extensions and fully restart Chrome.",
   "筛选视频": "Filter videos",
   "删除": "Delete",
   "删除 {count} 个视频": "Delete {count} videos",
@@ -571,5 +570,7 @@
   "{count} 个月前": "{count} months ago",
   "已复制失败清单。": "Failure list copied.",
   "配置已导入。": "Settings imported.",
-  "导入配置失败：{message}": "Could not import settings: {message}"
+  "导入配置失败：{message}": "Could not import settings: {message}",
+  "若尚未安装原生助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。": "If the native helper is not installed yet, run install-native-folder-opener.bat from the extension folder and fill in this extension's current ID and download folder (the default is the root folder \\000视频下载); afterwards reload the extension at chrome://extensions and restart Chrome completely.",
+  "从 chrome://extensions 导入插件后请不要移动插件文件夹位置，否则可能导致插件失效，需要重新导入。": "After loading the extension from chrome://extensions, do not move its folder — moving it can break the extension, and you would have to load it again."
 }

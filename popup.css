@@ -127,6 +127,14 @@ button:disabled { cursor: wait; opacity: .6; }
 
 /* ---------- 可折叠的导入区块 ---------- */
 .import-card { margin-top: var(--sp-3); padding: 0; overflow: hidden; }
+/* 4.7：「导入或更新」是弹窗里最主要的入口，用橘黄把它突出来。
+   颜色全部走 --feature 系列令牌，深浅主题各一套。 */
+.import-card { border-color: var(--feature-line); }
+.import-card > summary .import-summary-icon { color: var(--feature); background: var(--feature-soft); }
+.import-card > summary strong { color: var(--feature); }
+.import-card > summary:hover { background: var(--feature-soft); }
+.import-card[open] > summary { background: var(--feature-soft); }
+
 .import-card > summary {
   display: flex;
   align-items: center;

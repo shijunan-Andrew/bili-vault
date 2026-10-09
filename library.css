@@ -35,6 +35,14 @@ html.banner-visible { --banner-h: 42px; }
 /* 两段一模一样的文字，位移 50% 正好接上，循环看不出接缝 */
 @keyframes banner-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .banner-track:hover .banner-scroll { animation-play-state: paused; }
+/* theme.css 里有一条全局的 prefers-reduced-motion 规则，会把动画压成
+   「跑一次然后弹回原位」——对跑马灯来说等于完全不动，而且因为
+   animation-fill-mode 默认是 none，元素会退回无位移状态，看着像坏了。
+   这条横幅的存在意义就是滚动，所以这里显式豁免；它本身是可关闭的，
+   对不希望有动效的用户不构成困扰。 */
+@media (prefers-reduced-motion: reduce) {
+  .banner-scroll { animation-duration: 40s !important; animation-iteration-count: infinite !important; }
+}
 .banner-run { flex: 0 0 auto; padding-right: 120px; font-size: var(--fs-base); font-weight: 650; white-space: nowrap; }
 .banner-close {
   display: grid;
@@ -486,7 +494,13 @@ html.banner-visible { --banner-h: 42px; }
 .search-box:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-radius: var(--r-xs); color: var(--faint); background: var(--surface-soft); font: var(--fs-micro)/1 var(--font-sans); }
 
+/* 4.7：工具栏是右对齐的（justify-content: flex-end），而 select 的宽度会随
+   选中项文字长短变化——选「全部视频」和「已失效视频」宽度不同，整行就会左右窜。
+   给它们固定宽度，布局就不再动。 */
 .video-filter, .sort-select { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-sm); }
+.video-filter select { width: 132px; }
+.sort-select select { width: 124px; }
+.video-filter select, .sort-select select { text-overflow: ellipsis; }
 .video-filter select, .sort-select select {
   min-height: 40px;
   padding: 0 30px 0 var(--sp-3);
@@ -893,6 +907,8 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   overflow-wrap: anywhere;
 }
 .download-path-note.error { border-color: var(--danger-line); color: var(--danger-strong); background: var(--danger-soft); }
+/* 4.7：原生助手未安装的说明要显眼，放在提示顶部并加粗 */
+.download-path-help { display: block; margin-bottom: var(--sp-2); font-weight: 700; }
 .management-note { margin: var(--sp-3) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; }
 .detail-size { display: inline-flex; align-items: center; gap: 5px; margin-top: var(--sp-2); color: var(--muted); font-size: var(--fs-sm); }
 

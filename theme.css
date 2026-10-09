@@ -35,6 +35,9 @@
   --accent-soft: #f8f0e2;
   --warning-soft-strong: #f8ecd2;
   --accent-line: #e8d5b2;
+  --feature: #a5560a;
+  --feature-soft: #fdf0e0;
+  --feature-line: #f0d2ad;
 
   /* —— 中性阶：正文对比度均达到 WCAG AA（≥4.5:1）—— */
   --ink: #1d2330;
@@ -132,6 +135,9 @@
   --accent: #d6a463;
   --accent-soft: #2a2317;
   --accent-line: #463823;
+  --feature: #efa45a;
+  --feature-soft: #2e2318;
+  --feature-line: #4a3823;
   --ink: #eef2f7;
   --text: #c6cfda;
   --muted: #99a3b1;
@@ -178,6 +184,9 @@
     --accent: #d6a463;
     --accent-soft: #2a2317;
     --accent-line: #463823;
+  --feature: #efa45a;
+  --feature-soft: #2e2318;
+  --feature-line: #4a3823;
     --ink: #eef2f7;
     --text: #c6cfda;
     --muted: #99a3b1;
