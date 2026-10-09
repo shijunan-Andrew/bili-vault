@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.4.1");
+  assert.equal(manifest.version, "4.5.0");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -755,47 +755,175 @@ test("invalid detection relies on API error codes, not on network failures", () 
   assert.match(source, /currentStatus === STATUS_INVALID_MARKER \? "正常" : undefined/);
 });
 
-test("the library exposes a batched status refresh", () => {
+test("the status refresh lives in the video detail, one video at a time", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
-  for (const id of ["refreshVideoStatus", "statusDialog", "statusBatchSize", "statusProgress"]) {
-    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
-  }
-  assert.match(library, /function openStatusDialog\(/);
-  assert.match(library, /function runStatusRefresh\(/);
-  assert.match(library, /type: "bca-refresh-video-stats"/);
+  // 4.5：页面标题栏不再有批量刷新的入口，批量对话框也一并删除
+  assert.equal(/id="refreshVideoStatus"/.test(html), false, "标题栏不该再有批量刷新按钮");
+  assert.equal(/id="statusDialog"/.test(html), false, "批量刷新对话框应已删除");
+  assert.equal(/id="statusBatchSize"/.test(html), false, "批量数量选择应已删除");
+  assert.equal(/statusDialog|statusBatchSize|confirmStatusButton/.test(library), false, "library.js 不该再有批量刷新残留");
+  // 按钮改到详情面板的互动数据下面
+  const statsIndex = library.indexOf("${detailStatsHtml(video.stats)}");
+  const refreshIndex = library.indexOf('class="button button-quiet refresh-status"', statsIndex);
+  assert.ok(statsIndex > 0 && refreshIndex > statsIndex, "刷新按钮必须排在互动数据之后");
+  assert.match(library, /function refreshOneVideoStatus\(/);
+  assert.match(library, /\.refresh-status"\)\.addEventListener\("click", \(\) => refreshOneVideoStatus\(video\)\)/);
+  // 一次只提交一条，避免批量打接口
+  assert.match(library, /type: "bca-refresh-video-stats", data: \{ targets: \[target\], limit: 1 \}/);
   assert.match(library, /bca-status-progress/);
   assert.match(readProjectFile("background.js"), /"bca-refresh-video-stats"/);
   // 和保存/导入共用串行队列
   assert.match(readProjectFile("background.js"), /saveQueue\.then\(\(\) => refreshVideoStatus/);
 });
 
-// 使用须知必须在三个界面逐字一致，否则用户在不同入口看到的说法会不一样
-const SAFETY_ITEMS = [
-  '本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href="https://github.com/leiurayer/downkyi" target="_blank" rel="noopener noreferrer">DownKyi</a>。',
-  "下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。",
-  "请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。",
-  "本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。",
-  "插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。",
-  "所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。"
-];
+test("number formatting follows the interface language", () => {
+  // 数字单位是语言相关的：中文用 万/亿，英文用 K/M/B。
+  // 这里钉死换算关系——曾经用 t("{value} 万") 当模板硬拼，英文补成 "{value}0K"，
+  // 结果 7.4 万（74000）显示成 7.40K，小了十倍，而且只在英文模式下出现。
+  const source = readProjectFile("library.js");
+  const match = source.match(/^function formatCount\([\s\S]*?\n\}/m);
+  assert.ok(match, "library.js 里找不到 formatCount");
+  const build = (locale) => new Function("BcaI18n", `${match[0]}\nreturn formatCount;`)({ locale: () => locale });
 
-test("the same safety notice appears verbatim on all three surfaces", () => {
-  for (const file of ["library.html", "download.html", "popup.html"]) {
-    const html = readProjectFile(file);
-    for (const item of SAFETY_ITEMS) {
-      assert.ok(html.includes(item), `${file} 缺少或改动了须知条目：${item.slice(0, 24)}…`);
-    }
-    const anchor = (html.match(/<a [^>]*downkyi[^>]*>/i) || [""])[0];
-    assert.ok(anchor.includes('target="_blank"'), `${file} 的 DownKyi 链接应新窗口打开`);
-    assert.ok(anchor.includes('rel="noopener noreferrer"'), `${file} 的 DownKyi 链接缺少 rel 保护`);
+  const cn = build("zh-CN");
+  const tw = build("zh-TW");
+  const en = build("en");
+
+  assert.equal(cn("73798"), "7.4 万");
+  assert.equal(tw("73798"), "7.4 萬");
+  assert.equal(en("73798"), "73.8K");
+  assert.equal(cn("29044453"), "2904.4 万");
+  assert.equal(en("29044453"), "29.0M");
+  assert.equal(cn("999999999"), "10.0 亿");
+  assert.equal(en("999999999"), "1.0B");
+  // 小于 1 万/1 千的原样显示
+  assert.equal(cn("642"), "642");
+  assert.equal(en("642"), "642");
+  // 不能出现 1000.0K / 1000.0M 这种没进位的写法
+  for (const value of ["999949", "999999999", "1000000000"]) {
+    assert.equal(/1000\.0[KMB]/.test(en(value)), false, `英文进位错误：${value} → ${en(value)}`);
   }
-  // 弹窗里必须默认折叠，不能把弹窗撑高
-  assert.equal(/<details id="safetyNotice"[^>]*\sopen\b/.test(readProjectFile("popup.html")), false, "弹窗的须知应默认折叠");
-  // 收藏库里默认展开
-  assert.match(readProjectFile("library.html"), /<details id="safetyNotice" class="safety-notice" open>/);
+  // 空值与非数字原样返回，不能抛
+  assert.equal(cn(""), "");
+  assert.equal(en("未知"), "未知");
+});
+test("the library can sort by view count", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /<option value="views"[^>]*>播放量从高到低<\/option>/);
+  assert.match(library, /if \(sort === "views"\) return viewsOf\(b\) - viewsOf\(a\)/);
+  // 没有播放量数据的记录排到最后，而不是当成 0 播放
+  assert.match(library, /Number\.isFinite\(value\) && value > 0 \? value : -1/);
 });
 
+test("the video card shows the view count at the bottom-right of the cover", () => {
+  const library = readProjectFile("library.js");
+  const css = readProjectFile("library.css");
+  assert.match(library, /<span class="cover-views tnum" hidden><\/span>/);
+  assert.match(library, /const viewsBadge = card\.querySelector\("\.cover-views"\)/);
+  assert.match(library, /const viewsText = formatCount\(video\.stats\?\.view\)/);
+  // 右下角定位
+  const rule = (css.match(/\.cover-views \{[^}]*\}/) || [""])[0];
+  assert.match(rule, /right:/, "播放量徽标应贴右边");
+  assert.match(rule, /bottom:/, "播放量徽标应贴底边");
+  assert.match(rule, /position: absolute/);
+});
+
+/* ------------------------- 4.5 主题与多语言 ------------------------- */
+
+test("the dark theme only redefines tokens, and both triggers agree", () => {
+  const css = readProjectFile("theme.css");
+  const tokensOf = (block) => [...block.matchAll(/(--[a-z0-9-]+):/g)].map((match) => match[1]).sort();
+  const manual = css.match(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/);
+  const system = css.match(/:root:not\(\[data-theme="light"\]\) \{([\s\S]*?)\n  \}/);
+  assert.ok(manual, "缺少手动深色的令牌块");
+  assert.ok(system, "缺少跟随系统的令牌块");
+  const a = tokensOf(manual[1]);
+  const b = tokensOf(system[1]);
+  assert.ok(a.length >= 30, `深色令牌太少：${a.length}`);
+  assert.deepEqual(a, b, "两处深色令牌必须完全一致");
+  // 关键令牌都要覆盖到，否则会出现深色下读不清的文字
+  for (const token of ["--ink", "--text", "--muted", "--surface", "--bg", "--line", "--brand-deep", "--warning-soft", "--danger"]) {
+    assert.ok(a.includes(token), `深色主题缺少 ${token}`);
+  }
+  // 浅色块自身要有 color-scheme，滚动条也要走令牌
+  assert.match(css, /color-scheme: light;/);
+  assert.match(css, /color-scheme: dark;/);
+  // 滚动条也要走令牌，否则深色下会留一条亮灰
+  assert.match(css, /scrollbar-color: var\(--scroll-thumb\)/);
+  assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
+});
+
+test("the theme switcher is offered on the library page", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /<script src="theme\.js"><\/script>/);
+  assert.match(html, /id="themeSelect"/);
+  assert.match(library, /BcaTheme\.modes\(\)/);
+  assert.match(library, /themeSelect\.addEventListener\("change", \(\) => BcaTheme\.use\(themeSelect\.value\)\)/);
+  // theme.js 必须在 head 里同步跑，否则会先闪一下浅色
+  const head = html.slice(0, html.indexOf("</head>"));
+  assert.ok(head.includes('src="theme.js"'), "theme.js 必须放在 head 里");
+  const theme = readProjectFile("theme.js");
+  for (const mode of ["system", "light", "dark"]) {
+    assert.ok(theme.includes(`id: "${mode}"`), `theme.js 缺少 ${mode} 模式`);
+  }
+  // 跟随系统时不能挂 data-theme，交给媒体查询
+  assert.match(theme, /if \(mode === "system"\) root\.removeAttribute\("data-theme"\)/);
+  // 同步读取，避免闪烁
+  assert.match(theme, /localStorage/);
+});
+
+test("the interface language switcher offers three locales", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /<script src="i18n\.js"><\/script>/);
+  assert.match(html, /id="localeSelect"/);
+  assert.match(library, /BcaI18n\.locales\(\)/);
+  assert.match(library, /await BcaI18n\.use\(localeSelect\.value\)/);
+  assert.match(library, /BcaI18n\.init\(\)/);
+  const i18n = readProjectFile("i18n.js");
+  for (const locale of ["zh-CN", "zh-TW", "en"]) {
+    assert.ok(i18n.includes(`id: "${locale}"`), `i18n.js 缺少 ${locale}`);
+  }
+  // 简体中文是原文语言，不需要词典文件
+  assert.match(i18n, /用中文原文当 key/);
+  assert.match(i18n, /查不到就返回原文/);
+  // 内容脚本不能翻译宿主页面
+  assert.match(i18n, /inExtensionPage\(\)/);
+  // 切语言后要重画动态内容
+  assert.match(library, /BcaI18n\.onChange\(/);
+});
+// 使用须知必须在三个界面逐字一致，否则用户在不同入口看到的说法会不一样。
+// 4.5 起条目上带了 data-i18n，所以这里剥掉标签只比文字。
+function noticeItems(html) {
+  // 先剥掉 data-i18n* 属性：其中 data-i18n-html 的值里含 "&quot;>"，
+  // 直接去匹配 <li[^>]*> 会在属性中间就截断。
+  const cleaned = html.replace(/\sdata-i18n(?:-html|-title|-placeholder|-aria)?="[^"]*"/g, "");
+  const list = (cleaned.match(/<ul class="safety-(?:notice-)?list"[^>]*>([\s\S]*?)<\/ul>/) || ["", ""])[1];
+  return [...list.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)].map((match) => match[1]
+    .replace(/<[^>]+>/g, "")
+    .replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim());
+}
+
+test("all three surfaces show the same six safety items, abuse warning first", () => {
+  const surfaces = ["library.html", "download.html", "popup.html"];
+  const lists = Object.fromEntries(surfaces.map((file) => [file, noticeItems(readProjectFile(file))]));
+  for (const file of surfaces) {
+    assert.equal(lists[file].length, 6, `${file} 的使用须知应正好六条`);
+    // 4.5：请勿滥用提到最前面
+    assert.ok(lists[file][0].startsWith("请勿滥用："), `${file} 的第一条必须是「请勿滥用」`);
+    assert.equal(lists[file].filter((item) => item.startsWith("请勿滥用：")).length, 1, `${file} 的「请勿滥用」只应出现一次`);
+    const html = readProjectFile(file);
+    assert.ok(html.includes("github.com/leiurayer/downkyi"), `${file} 缺少 DownKyi 链接`);
+    assert.ok(html.includes("_blank") && html.includes("noopener"), `${file} 的 DownKyi 链接缺少新窗口保护`);
+  }
+  assert.deepEqual(lists["download.html"], lists["library.html"], "下载页与收藏库的须知必须一致");
+  assert.deepEqual(lists["popup.html"], lists["library.html"], "弹窗与收藏库的须知必须一致");
+});
 test("the safety notice is collapsible but can no longer be dismissed", () => {
   const libraryHtml = readProjectFile("library.html");
   const libraryJs = readProjectFile("library.js");
@@ -832,5 +960,336 @@ test("the safety notice uses the warning palette with larger type", () => {
   }
   // 弹窗里须知必须排在 brand-row 之前（置顶）
   assert.ok(popupHtml.indexOf('id="safetyNotice"') < popupHtml.indexOf('class="brand-row"'), "弹窗的须知应置顶");
+});
+
+/* ------------------------- 4.5 多语言词典 ------------------------- */
+
+// 在沙箱里加载 theme.js / i18n.js：它们都是 IIFE，参数化 globalThis 就能隔离测试
+function loadThemeModule({ stored = null, prefersDark = false } = {}) {
+  const attributes = {};
+  const storage = { value: stored, getItem() { return this.value; }, setItem(_key, next) { this.value = next; } };
+  const sandbox = { localStorage: storage, matchMedia: () => ({ matches: prefersDark, addEventListener() {} }) };
+  const fakeDocument = {
+    documentElement: {
+      dataset: {},
+      setAttribute(name, value) { attributes[name] = value; },
+      removeAttribute(name) { delete attributes[name]; }
+    }
+  };
+  new Function("globalThis", "document", readProjectFile("theme.js"))(sandbox, fakeDocument);
+  return { api: sandbox.BcaTheme, attributes, storage };
+}
+
+test("theme.js resolves 白天 / 夜晚 / 跟随系统 correctly", () => {
+  // 默认跟随系统：不挂 data-theme，交给 theme.css 的媒体查询
+  let theme = loadThemeModule({ prefersDark: false });
+  assert.equal(theme.api.current(), "system");
+  assert.equal(theme.attributes["data-theme"], undefined, "跟随系统时不该挂 data-theme");
+  assert.equal(theme.api.resolved(), "light");
+
+  theme = loadThemeModule({ prefersDark: true });
+  assert.equal(theme.api.resolved(), "dark", "系统是深色时要解析成 dark");
+
+  // 手选白天：必须挂 data-theme="light"，否则挡不住系统的深色
+  theme = loadThemeModule({ prefersDark: true, stored: "light" });
+  assert.equal(theme.attributes["data-theme"], "light");
+  assert.equal(theme.api.resolved(), "light", "手选白天要压过系统深色");
+
+  theme = loadThemeModule({ stored: "dark" });
+  assert.equal(theme.attributes["data-theme"], "dark");
+  assert.equal(theme.api.resolved(), "dark");
+
+  // 切回跟随系统要摘掉属性
+  theme.api.use("system");
+  assert.equal(theme.attributes["data-theme"], undefined, "切回跟随系统要摘掉 data-theme");
+
+  // 存储里是非法值时退回默认，不能让页面挂掉
+  theme = loadThemeModule({ stored: "neon" });
+  assert.equal(theme.api.current(), "system");
+});
+
+function loadI18nModule({ locale = null, dictionary = null, contentScript = false } = {}) {
+  const sandbox = {
+    location: { protocol: contentScript ? "https:" : "chrome-extension:" },
+    // 内容脚本模式下让 fetch 直接抛错：真走了 fetch 测试就会挂，
+    // 这样能证明它确实改走了后台代取
+    fetch: async () => {
+      if (contentScript) throw new Error("内容脚本不该直接 fetch 扩展资源");
+      return { ok: dictionary !== null, json: async () => dictionary };
+    },
+    chrome: {
+      runtime: {
+        getURL: (path) => `chrome-extension://test/${path}`,
+        sendMessage: async (message) => (message?.type === "bca-locale"
+          ? { ok: dictionary !== null, dictionary }
+          : { ok: false })
+      },
+      storage: { local: { get: async () => (locale ? { interfaceLocale: locale } : {}), set: async () => {} } }
+    }
+  };
+  const fakeDocument = { documentElement: { lang: "" }, querySelectorAll: () => [] };
+  // i18n.js 里用的是裸 chrome / fetch 全局，必须作为函数参数注入才遮得住
+  new Function("globalThis", "document", "chrome", "fetch", readProjectFile("i18n.js"))(
+    sandbox, fakeDocument, sandbox.chrome, sandbox.fetch
+  );
+  return sandbox.BcaI18n;
+}
+
+test("i18n uses the Chinese source as key and falls back to it", async () => {
+  const i18n = loadI18nModule({ dictionary: { "使用须知": "Before you start", "已选 {count} 个": "{count} selected" } });
+  await i18n.init();
+  assert.equal(i18n.locale(), "zh-CN");
+  // 简体中文没有词典文件，一律回退原文
+  assert.equal(i18n.t("使用须知"), "使用须知");
+  assert.equal(i18n.t("词典里没有的键"), "词典里没有的键");
+  assert.equal(i18n.t("已选 {count} 个", { count: 3 }), "已选 3 个");
+
+  await i18n.use("en");
+  assert.equal(i18n.locale(), "en");
+  assert.equal(i18n.t("使用须知"), "Before you start");
+  assert.equal(i18n.t("已选 {count} 个", { count: 7 }), "7 selected");
+  // 词典没覆盖的仍然回退原文，不会显示成空白或键名
+  assert.equal(i18n.t("词典里没有的键"), "词典里没有的键");
+
+  // 非法语言退回简体中文
+  await i18n.use("ja");
+  assert.equal(i18n.locale(), "zh-CN");
+});
+
+test("a content script gets its dictionary from the background, not by fetching", async () => {
+  const i18n = loadI18nModule({ contentScript: true, dictionary: { "使用须知": "Before you start", "已选 {count} 个": "{count} selected" } });
+  await i18n.init();
+  assert.equal(i18n.t("使用须知"), "使用须知");
+  await i18n.use("en");
+  // 词典能拿到，说明走的是 sendMessage 那条路（fetch 在这个沙箱里是抛错的）
+  assert.equal(i18n.t("使用须知"), "Before you start");
+  assert.equal(i18n.t("已选 {count} 个", { count: 2 }), "2 selected");
+});
+test("content scripts never fetch extension resources directly", () => {
+  // 4.3 起刻意移除了 web_accessible_resources（否则 B 站页面能把收藏库嵌进 iframe）。
+  // 内容脚本跑在网页里，直接 fetch 扩展资源会被浏览器拦掉，而我们的 try/catch
+  // 会把它吞成空词典 —— 表现为提示卡永远显示中文、且不报任何错。
+  // 所以内容脚本必须走后台代取。
+  const i18n = readProjectFile("i18n.js");
+  const background = readProjectFile("background.js");
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  assert.equal(manifest.web_accessible_resources, undefined, "不应为了让内容脚本读词典而重新开放扩展资源");
+  assert.match(i18n, /if \(!inExtensionPage\(\)\) \{/, "内容脚本必须走另一条加载路径");
+  assert.match(i18n, /type: "bca-locale", locale/, "内容脚本应请后台代取词典");
+  assert.match(background, /"bca-locale"/, "后台需要提供词典代理");
+  assert.match(background, /fetch\(chrome\.runtime\.getURL\(`locales\/\$\{locale\}\.json`\)\)/, "后台读自己的资源不受限");
+  // 每个非默认语言都必须真的有词典文件
+  for (const locale of ["zh-TW", "en"]) {
+    assert.ok(fs.existsSync(path.join(__dirname, "..", "locales", `${locale}.json`)), `缺少 locales/${locale}.json`);
+  }
+});
+
+test("i18n never touches the host page from a content script", async () => {
+  const i18n = loadI18nModule({ dictionary: { "使用须知": "Before you start" } });
+  const source = readProjectFile("i18n.js");
+  // 内容脚本必须走 root 参数，且不能改宿主页面的 lang
+  assert.match(source, /function inExtensionPage\(\)/);
+  assert.match(source, /global\.location\?\.protocol === "chrome-extension:"/);
+  assert.match(source, /else if \(options\.root\) \{/);
+  await i18n.use("en");
+  assert.equal(i18n.locale(), "en");
+});
+const i18nTools = require("./i18n-extract.cjs");
+
+test("every translated string uses a literal key", () => {
+  // 原文即 key，key 一旦是拼接或变量，提取工具就扫不到，词典必然漏条目。
+  // 唯一例外是「把 background 的文案在显示处翻译」——那是设计上就有的动态透传
+  // （见 AI_HANDOFF 的已知限制），这里显式放行并注明原因。
+  const ALLOWED = [
+    // 4.5：background 的文案（进度、错误）在显示处翻译，本身就是动态字符串。
+    // 静态的能在词典里查到就翻，查不到的按原文显示，不会出错。
+    /BcaI18n\.t\(\s*[A-Za-z_$][\w$.]*\.message\b/,
+    /BcaI18n\.t\(message\.text\b/
+  ];
+  // 视频标题、UP 主名、简介、标签、BV 号、路径这些是固有名称，任何语言下都不能改
+  const DATA_FIELDS = /\.(title|upName|upHome|description|tags|bvid|aid|cid|collection|directory|reportPath)\b/;
+  for (const file of ["library.js", "popup.js", "download.js", "content.js"]) {
+    const source = readProjectFile(file);
+    for (const match of source.matchAll(/(?:\bBcaI18n\.)?\bt\(\s*([^"'\s)])/g)) {
+      const call = source.slice(match.index, match.index + 120);
+      // 只关心「第一个参数不是字面量」的调用，参数对象里的字段不算
+      const argument = call.replace(/^[^(]*\(\s*/, "").split(",")[0];
+      assert.equal(
+        DATA_FIELDS.test(argument), false,
+        `${file} 把固有名称包进了 t()：${call.split("\n")[0].slice(0, 80)}`
+      );
+      if (ALLOWED.some((pattern) => pattern.test(call))) continue;
+      assert.fail(`${file} 里的 t() 第一个参数必须是字符串字面量，发现：${call.split("\n")[0].slice(0, 80)}`);
+    }
+  }
+});
+
+test("translations keep real folder and file names verbatim", () => {
+  // 归档目录名与文件名是磁盘上真实存在的。译文一旦把「000视频下载」翻成
+  // 「000 Video Downloads」，界面显示的名字就和实际文件夹对不上了。
+  // 这类名字在任何语言下都必须逐字保留。
+  const REAL_NAMES = ["000视频下载", "001错误报告", "视频信息.txt", "封面.png"];
+  const keys = [...i18nTools.collect().keys()];
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = i18nTools.readDictionary(locale) || {};
+    for (const key of keys) {
+      const value = dictionary[key];
+      if (!value) continue; // 还没翻译，由覆盖率那条测试负责报
+      for (const name of REAL_NAMES) {
+        if (key.includes(name)) {
+          assert.ok(value.includes(name), `${locale} 的译文改动了真实文件名「${name}」：${value}`);
+        }
+      }
+    }
+  }
+});
+test("the extractor also picks up strings passed as arguments", () => {
+  // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
+  // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
+  const keys = [...i18nTools.collect().keys()];
+  for (const text of [
+    "正在归档视频…",
+    "B站已完成收藏，正在保存视频信息和封面。",
+    "归档成功",
+    "归档失败",
+    "关闭",
+    "打开本地收藏库"
+  ]) {
+    assert.ok(keys.includes(text), `提取工具漏掉了内容脚本的文案：${text}`);
+  }
+});
+test("the zh-TW and en dictionaries cover every interface string", () => {
+  const keys = [...i18nTools.collect().keys()];
+  // 提取规则一旦失效就会悄悄“全过”，所以先卡一个下限
+  assert.ok(keys.length >= 150, `只提取到 ${keys.length} 条词条，提取规则可能已经失效`);
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = i18nTools.readDictionary(locale);
+    assert.ok(dictionary, `缺少 locales/${locale}.json`);
+    const missing = keys.filter((key) => !dictionary[key]);
+    assert.equal(missing.length, 0, `${locale} 还缺 ${missing.length} 条翻译：${missing.slice(0, 3).join(" / ")}`);
+    // 译文不能原样照抄中文（除非确实同形，例如专有名词）
+    const identical = keys.filter((key) => dictionary[key] === key);
+    assert.ok(identical.length < keys.length * 0.1, `${locale} 有 ${identical.length} 条译文与原文完全相同，疑似没翻`);
+  }
+});
+
+test("every data-i18n marker matches its element text exactly", () => {
+  // data-i18n 用 textContent 覆盖。属性值和元素里的中文一旦不一致，
+  // 切到别的语言再切回来就会显示成属性值那份——静默的错误。
+  // 另外带子元素的元素不能直接用 data-i18n，否则子元素会被整块清掉。
+  const problems = [];
+  for (const file of ["library.html", "download.html", "popup.html"]) {
+    const html = readProjectFile(file);
+    for (const match of html.matchAll(/<([a-z0-9-]+)((?:[^>]*?))\sdata-i18n="([^"]*)"((?:[^>]*?))>([\s\S]*?)<\/\1>/gi)) {
+      const [, tag, , key, , inner] = match;
+      if (/<[a-z]/i.test(inner)) {
+        problems.push(`${file}: <${tag} data-i18n="${key.slice(0, 18)}…"> 里还有子元素，textContent 会把它们清掉`);
+        continue;
+      }
+      const text = inner.replace(/\s+/g, " ").trim();
+      if (text !== key) problems.push(`${file}: data-i18n="${key.slice(0, 24)}…" 与元素文字「${text.slice(0, 24)}…」不一致`);
+    }
+  }
+  assert.deepEqual(problems, [], `data-i18n 标记有问题：\n${problems.join("\n")}`);
+});
+
+test("the interface strings are actually marked up across every surface", () => {
+  // 每个界面都要真的接入 i18n，不能只做一个页面
+  assert.ok(readProjectFile("library.html").includes('src="i18n.js"'), "收藏库未引入 i18n.js");
+  assert.ok(readProjectFile("download.html").includes('src="i18n.js"'), "下载页未引入 i18n.js");
+  assert.ok(readProjectFile("popup.html").includes('src="i18n.js"'), "弹窗未引入 i18n.js");
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  assert.ok(manifest.content_scripts[0].js.includes("i18n.js"), "内容脚本需要 i18n.js 才能翻译提示卡");
+  for (const file of ["library.html", "download.html", "popup.html"]) {
+    const marked = [...readProjectFile(file).matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?="/g)].length;
+    assert.ok(marked >= 15, `${file} 只标了 ${marked} 处，覆盖面明显不足`);
+  }
+  for (const file of ["library.js", "popup.js", "download.js"]) {
+    const calls = [...readProjectFile(file).matchAll(/(?:\bBcaI18n\.)?\bt\("/g)].length;
+    assert.ok(calls >= 20, `${file} 只用了 ${calls} 次 t()，动态文案覆盖不足`);
+  }
+});
+
+test("every element the scripts reach for actually exists in the markup", () => {
+  // getElementById 拿不到只会得到 null，很多地方是 `?.` 静默跳过，坏了也很难发现
+  for (const [htmlFile, jsFiles] of [
+    ["library.html", ["library.js"]],
+    ["download.html", ["download.js"]],
+    ["popup.html", ["popup.js"]]
+  ]) {
+    const ids = new Set([...readProjectFile(htmlFile).matchAll(/id="([^"]+)"/g)].map((match) => match[1]));
+    for (const jsFile of jsFiles) {
+      const wanted = [...new Set([...readProjectFile(jsFile).matchAll(/getElementById\("([^"]+)"\)/g)].map((match) => match[1]))];
+      const missing = wanted.filter((id) => !ids.has(id));
+      assert.deepEqual(missing, [], `${jsFile} 引用了 ${htmlFile} 里不存在的 id`);
+    }
+  }
+});
+
+// WCAG 相对亮度对比度：深色模式最容易悄悄出「文字读不清」，必须机器守住
+function relativeLuminance(hex) {
+  const full = hex.replace("#", "").trim();
+  const expanded = full.length === 3 ? full.split("").map((c) => c + c).join("") : full;
+  const [r, g, b] = [0, 2, 4]
+    .map((i) => parseInt(expanded.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrastRatio(a, b) {
+  const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+test("both themes keep text readable against its background", () => {
+  const css = readProjectFile("theme.css");
+  const parse = (block) => Object.fromEntries([...block.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+  const light = parse(css.match(/:root \{([\s\S]*?)\n\}/)[1]);
+  const dark = Object.assign({}, light, parse(css.match(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/)[1]));
+  // [前景, 背景, 最低对比度, 说明]
+  const PAIRS = [
+    ["--ink", "--surface", 4.5, "标题"],
+    ["--text", "--surface", 4.5, "正文"],
+    ["--muted", "--surface", 4.5, "次要文字"],
+    ["--faint", "--surface", 3.0, "弱化说明"],
+    ["--text", "--surface-soft", 4.5, "卡片正文"],
+    ["--ink", "--bg", 4.5, "页面背景上的标题"],
+    ["--brand-deep", "--brand-soft", 4.5, "品牌软底上的文字"],
+    ["--warning", "--warning-soft", 4.5, "使用须知文字"],
+    ["--danger", "--danger-soft", 4.5, "错误文字"],
+    ["--danger-strong", "--danger-soft", 4.5, "错误强调文字"],
+    ["--success-strong", "--success-soft", 4.5, "成功文字"],
+    ["--muted", "--surface-sunken", 4.5, "凹陷区文字"]
+  ];
+  const problems = [];
+  for (const [mode, table] of [["浅色", light], ["深色", dark]]) {
+    for (const [fg, bg, min, label] of PAIRS) {
+      if (!table[fg] || !table[bg]) { problems.push(`${mode} 缺少令牌 ${fg} 或 ${bg}`); continue; }
+      const ratio = contrastRatio(table[fg], table[bg]);
+      if (ratio < min) problems.push(`${mode}：${label}（${fg} on ${bg}）对比度只有 ${ratio.toFixed(2)}，低于 ${min}`);
+    }
+  }
+  assert.deepEqual(problems, [], `对比度不足：\n${problems.join("\n")}`);
+});
+test("every design token referenced by a page actually exists", () => {
+  // CSS 变量名写错不会报错，只会静默失效（颜色掉成继承值），必须靠这条兜住
+  const theme = readProjectFile("theme.css");
+  const defined = new Set([...theme.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]));
+  assert.ok(defined.size >= 50, `theme.css 只定义了 ${defined.size} 个令牌，明显不对`);
+
+  const problems = [];
+  for (const file of ["library.css", "download.css", "popup.css", "theme.css"]) {
+    const css = readProjectFile(file);
+    for (const match of css.matchAll(/var\((--[a-z0-9-]+)/g)) {
+      if (!defined.has(match[1])) problems.push(`${file} 用了未定义的令牌 ${match[1]}`);
+    }
+  }
+  // JS 里动态拼过 var(--x) 的也要算上
+  for (const file of ["library.js", "download.js", "popup.js", "icons.js"]) {
+    const source = readProjectFile(file);
+    for (const match of source.matchAll(/var\((--[a-z0-9-]+)/g)) {
+      if (!defined.has(match[1])) problems.push(`${file} 用了未定义的令牌 ${match[1]}`);
+    }
+  }
+  assert.deepEqual([...new Set(problems)], [], `发现未定义的设计令牌：\n${[...new Set(problems)].join("\n")}`);
 });
 

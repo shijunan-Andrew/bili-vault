@@ -59,7 +59,7 @@ function openDb() {
       if (!request.result.objectStoreNames.contains(DB_STORE)) request.result.createObjectStore(DB_STORE);
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("无法读取下载目录设置。"));
+    request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取下载目录设置。")));
   });
 }
 
@@ -71,7 +71,7 @@ async function folderSetting(action, value, key = "downloadFolder") {
       const store = transaction.objectStore(DB_STORE);
       const request = action === "get" ? store.get(key) : action === "delete" ? store.delete(key) : store.put(value, key);
       request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error || new Error("保存下载目录失败。"));
+      request.onerror = () => reject(request.error || new Error(BcaI18n.t("保存下载目录失败。")));
     });
   } finally { db.close(); }
 }
@@ -81,7 +81,7 @@ function runtimeMessage(message) {
     chrome.runtime.sendMessage(message, (response) => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) return reject(new Error(runtimeError.message));
-      if (!response?.ok) return reject(new Error(response?.message || "扩展未能完成请求。"));
+      if (!response?.ok) return reject(new Error(response?.message || BcaI18n.t("扩展未能完成请求。")));
       resolve(response);
     });
   });
@@ -102,9 +102,19 @@ function displayBytes(value) {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
+// 进度徽标：切换语言时 apply(document) 会把带 data-i18n 的徽标重置成 HTML 里的
+// “待开始”，所以这里记住当前状态，refreshLocaleText() 里按状态重画一次。
+let badgeView = { text: "", state: "idle" };
+
+function paintBadge() {
+  if (badgeView.state === "idle") badgeView.text = BcaI18n.t("待开始");
+  progressBadge.textContent = badgeView.text;
+  progressBadge.className = `progress-badge ${badgeView.state}`;
+}
+
 function setBadge(text, state = "idle") {
-  progressBadge.textContent = text;
-  progressBadge.className = `progress-badge ${state}`;
+  badgeView = { text, state };
+  paintBadge();
 }
 
 const LOG_ICONS = { info: "chevron-right", success: "check", error: "alert" };
@@ -128,7 +138,7 @@ function setButtonLabel(button, iconName, text) {
 function updateProgress() {
   const percent = plannedTasks ? Math.min(100, Math.round(completedTasks / plannedTasks * 100)) : 0;
   overallProgress.style.width = `${percent}%`;
-  progressFiles.textContent = `已保存 ${savedFileCount} 个文件`;
+  progressFiles.textContent = BcaI18n.t("已保存 {count} 个文件", { count: savedFileCount });
 }
 
 function updateStartButton() {
@@ -158,14 +168,14 @@ async function waitWhilePaused() {
   while (paused && !cancelController?.signal.aborted) {
     await new Promise((resolve) => { pauseWaiter = resolve; });
   }
-  if (cancelController?.signal.aborted) throw new DOMException("用户取消下载", "AbortError");
+  if (cancelController?.signal.aborted) throw new DOMException(BcaI18n.t("用户取消下载"), "AbortError");
 }
 
 function setPaused(value) {
   paused = value;
-  setButtonLabel(pauseDownload, paused ? "play" : "pause", paused ? "继续下载" : "暂停下载");
-  setBadge(paused ? "已暂停" : "下载中", paused ? "paused" : "active");
-  progressSummary.textContent = paused ? "下载已暂停，可继续或取消" : "下载继续进行中";
+  setButtonLabel(pauseDownload, paused ? "play" : "pause", paused ? BcaI18n.t("继续下载") : BcaI18n.t("暂停下载"));
+  setBadge(paused ? BcaI18n.t("已暂停") : BcaI18n.t("下载中"), paused ? "paused" : "active");
+  progressSummary.textContent = paused ? BcaI18n.t("下载已暂停，可继续或取消") : BcaI18n.t("下载继续进行中");
   if (!paused) releasePauseWaiter();
 }
 
@@ -174,18 +184,19 @@ function cancelCurrentDownload() {
   paused = false;
   releasePauseWaiter();
   cancelController.abort();
-  progressCurrent.textContent = "正在取消并清理本次下载文件…";
+  progressCurrent.textContent = BcaI18n.t("正在取消并清理本次下载文件…");
   cancelDownload.disabled = true;
   pauseDownload.disabled = true;
 }
 
+// pageLabel 会写进「视频信息.txt」和下载错误报告，属于文件内容，保持原文不翻译
 function pageLabel(page) {
   const title = page.part || `第 ${page.page || 1} P`;
   return `P${page.page || 1} · ${title}`;
 }
 
 function renderQueue() {
-  queueCount.textContent = `${queue.length} 个视频`;
+  queueCount.textContent = BcaI18n.t("{count} 个视频", { count: queue.length });
   queueEmpty.hidden = queue.length > 0;
   queueList.replaceChildren();
   queue.forEach((item, index) => {
@@ -198,16 +209,17 @@ function renderQueue() {
     copy.className = "queue-copy";
     const title = document.createElement("div");
     title.className = "queue-title";
-    title.textContent = item.video?.title || item.error || "正在解析视频…";
+    // title / error 是视频标题与后台文案，属于固有名称，不翻译
+    title.textContent = item.video?.title || item.error || BcaI18n.t("正在解析视频…");
     const meta = document.createElement("div");
     meta.className = "queue-meta";
-    meta.textContent = item.video ? `${item.video.owner || "未知 UP 主"}${item.video.bvid ? ` · ${item.video.bvid}` : ""} · ${item.video.pages.length} P` : (item.error ? "解析失败" : "读取 B 站视频信息");
+    meta.textContent = item.video ? `${item.video.owner || BcaI18n.t("未知 UP 主")}${item.video.bvid ? ` · ${item.video.bvid}` : ""} · ${item.video.pages.length} P` : (item.error ? BcaI18n.t("解析失败") : BcaI18n.t("读取 B 站视频信息"));
     copy.append(title, meta);
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "queue-remove";
-    remove.title = "移出队列";
-    remove.setAttribute("aria-label", "移出队列");
+    remove.title = BcaI18n.t("移出队列");
+    remove.setAttribute("aria-label", BcaI18n.t("移出队列"));
     remove.innerHTML = BcaIcons.svg("close");
     remove.addEventListener("click", () => {
       queue = queue.filter((entry) => entry.id !== item.id);
@@ -218,8 +230,8 @@ function renderQueue() {
     if (item.video) {
       const pageSelect = document.createElement("select");
       pageSelect.className = "queue-page";
-      pageSelect.setAttribute("aria-label", "选择下载分 P");
-      pageSelect.add(new Option("全部分 P", "all"));
+      pageSelect.setAttribute("aria-label", BcaI18n.t("选择下载分 P"));
+      pageSelect.add(new Option(BcaI18n.t("全部分 P"), "all"));
       item.video.pages.forEach((page) => pageSelect.add(new Option(pageLabel(page), String(page.cid))));
       pageSelect.value = item.pageSelection || "all";
       pageSelect.addEventListener("change", () => { item.pageSelection = pageSelect.value; refreshQualityOptions(); });
@@ -237,7 +249,7 @@ function normalizeIdentifier(item) {
 
 async function parseAndAdd(identifier, sourceItem = {}) {
   const input = String(identifier || "").trim();
-  if (!input) throw new Error("请粘贴 B 站视频网址、BV 号或 av 号。");
+  if (!input) throw new Error(BcaI18n.t("请粘贴 B 站视频网址、BV 号或 av 号。"));
   const item = { id: crypto.randomUUID(), video: null, pageSelection: "all", error: "" };
   queue.push(item);
   renderQueue();
@@ -245,10 +257,11 @@ async function parseAndAdd(identifier, sourceItem = {}) {
     const response = await runtimeMessage({ type: "bca-download-parse", identifier: input });
     item.video = BcaArchiveCore.withSourceCollection(response.video, sourceItem);
     item.pageSelection = response.video.pages.length > 1 ? "all" : String(response.video.pages[0]?.cid || "all");
-    addLog(`已解析：${response.video.title}${response.video.bvid ? `（${response.video.bvid}）` : ""}`, "success");
+    // 日志区文案：标题、BV 号是固有名称，只作为占位符参数
+    addLog(BcaI18n.t("已解析：{title}{bvid}", { title: response.video.title, bvid: response.video.bvid ? `（${response.video.bvid}）` : "" }), "success");
   } catch (error) {
     item.error = error.message;
-    addLog(`解析失败：${input} · ${error.message}`, "error");
+    addLog(BcaI18n.t("解析失败：{input} · {message}", { input, message: error.message }), "error");
     throw error;
   } finally {
     renderQueue();
@@ -274,7 +287,7 @@ function fillQualities(data) {
   const current = qualitySelect.value;
   const qualities = Array.isArray(data?.accept_quality) && data.accept_quality.length ? data.accept_quality : [127, 120, 116, 112, 80, 64, 32, 16, 8];
   const labels = Array.isArray(data?.accept_description) ? data.accept_description : [];
-  const entries = [{ value: "0", label: "自动（最高可用）" }];
+  const entries = [{ value: "0", label: BcaI18n.t("自动（最高可用）") }];
   qualities.forEach((quality, index) => {
     if (quality === 0 || entries.some((entry) => entry.value === String(quality))) return;
     entries.push({ value: String(quality), label: labels[index] || `${quality}P` });
@@ -292,7 +305,7 @@ async function refreshQualityOptions() {
     const data = await loadPlayurl(firstItem.video, page, 0);
     fillQualities(data);
   } catch (error) {
-    addLog(`读取可用清晰度失败：${error.message}`, "error");
+    addLog(BcaI18n.t("读取可用清晰度失败：{message}", { message: error.message }), "error");
   } finally { qualitySelect.disabled = false; }
 }
 
@@ -303,30 +316,30 @@ function setFormatUi() {
   audioOption.classList.toggle("disabled-option", mp4);
   audioQualitySetting.classList.toggle("disabled-setting", mp4);
   const checked = includeAudio.checked;
-  audioOption.querySelector("small").textContent = mp4 ? "MP4 已包含音频" : "DASH 音轨单独保存";
+  audioOption.querySelector("small").textContent = mp4 ? BcaI18n.t("MP4 已包含音频") : BcaI18n.t("DASH 音轨单独保存");
   formatNote.textContent = mp4
-    ? "MP4 为音视频合并的单文件模式，可用清晰度受 B 站接口限制。"
-    : "DASH 会分别保存视频与音频流（.m4s），浏览器扩展不会调用 DownKyi 的 FFmpeg 合并，因此不会生成合并后的 MP4。";
+    ? BcaI18n.t("MP4 为音视频合并的单文件模式，可用清晰度受 B 站接口限制。")
+    : BcaI18n.t("DASH 会分别保存视频与音频流（.m4s），浏览器扩展不会调用 DownKyi 的 FFmpeg 合并，因此不会生成合并后的 MP4。");
   if (mp4 && !checked) includeAudio.checked = true;
 }
 
 async function chooseFolder() {
-  if (!window.showDirectoryPicker) { addLog("当前浏览器不支持本地目录访问，请使用新版 Chrome。", "error"); return; }
+  if (!window.showDirectoryPicker) { addLog(BcaI18n.t("当前浏览器不支持本地目录访问，请使用新版 Chrome。"), "error"); return; }
   try {
     const handle = await window.showDirectoryPicker({ mode: "readwrite" });
     const permission = await handle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("没有获得此目录的写入授权。");
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得此目录的写入授权。"));
     downloadFolder = handle;
     await folderSetting("put", handle);
     downloadFolderMode = "custom";
     await folderSetting("put", downloadFolderMode, "downloadFolderMode");
     downloadFolderName.textContent = handle.name;
-    downloadFolderHelp.textContent = "当前使用自选目录；下载完成后，本地收藏库会同步显示下载状态。";
+    downloadFolderHelp.textContent = BcaI18n.t("当前使用自选目录；下载完成后，本地收藏库会同步显示下载状态。");
     folderPermissionHint.hidden = true;
-    addLog(`下载目录已选择：${handle.name}`, "success");
+    addLog(BcaI18n.t("下载目录已选择：{name}", { name: handle.name }), "success");
     updateStartButton();
   } catch (error) {
-    if (error?.name !== "AbortError") addLog(`选择目录失败：${error.message}`, "error");
+    if (error?.name !== "AbortError") addLog(BcaI18n.t("选择目录失败：{message}", { message: error.message }), "error");
   }
 }
 
@@ -336,15 +349,16 @@ async function useDefaultFolder() {
     downloadFolder = null;
     await folderSetting("put", "default", "downloadFolderMode");
     archiveRootHandle = await folderSetting("get", null, "rootHandle");
-    downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 000视频下载（默认）` : "本地收藏根目录 / 000视频下载（默认）";
-    downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。";
+    // 目录名是固有名称，只作为占位符参数；固定目录名「000视频下载」保持不变
+    downloadFolderName.textContent = archiveRootHandle ? BcaI18n.t("{name} / 000视频下载（默认）", { name: archiveRootHandle.name }) : BcaI18n.t("本地收藏根目录 / 000视频下载（默认）");
+    downloadFolderHelp.textContent = BcaI18n.t("开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。");
     folderPermissionHint.hidden = Boolean(archiveRootHandle);
-    if (!archiveRootHandle) folderPermissionHint.textContent = "请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。";
-    addLog("已切换到本地收藏根目录下的默认下载位置。", "success");
+    if (!archiveRootHandle) folderPermissionHint.textContent = BcaI18n.t("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。");
+    addLog(BcaI18n.t("已切换到本地收藏根目录下的默认下载位置。"), "success");
     updateStartButton();
   } catch (error) {
     folderPermissionHint.hidden = false;
-    folderPermissionHint.textContent = `切换默认目录失败：${error.message}`;
+    folderPermissionHint.textContent = BcaI18n.t("切换默认目录失败：{message}", { message: error.message });
   }
 }
 
@@ -357,24 +371,24 @@ async function restoreFolder() {
     downloadFolderMode = storedMode || (storedFolder ? "custom" : "default");
     if (downloadFolderMode === "custom") {
       downloadFolder = storedFolder;
-      if (!downloadFolder) throw new Error("上次选择的下载目录已丢失，请重新选择目录或恢复默认位置。");
-      downloadFolderName.textContent = downloadFolder.name || "上次选择的目录";
-      downloadFolderHelp.textContent = "当前使用自选目录；下载完成后，本地收藏库会同步显示下载状态。";
+      if (!downloadFolder) throw new Error(BcaI18n.t("上次选择的下载目录已丢失，请重新选择目录或恢复默认位置。"));
+      downloadFolderName.textContent = downloadFolder.name || BcaI18n.t("上次选择的目录");
+      downloadFolderHelp.textContent = BcaI18n.t("当前使用自选目录；下载完成后，本地收藏库会同步显示下载状态。");
       const permission = await downloadFolder.queryPermission({ mode: "readwrite" });
       folderPermissionHint.hidden = permission === "granted";
-      if (permission !== "granted") folderPermissionHint.textContent = "上次目录需要重新授权；点击“选择目录”并重新选中它。";
+      if (permission !== "granted") folderPermissionHint.textContent = BcaI18n.t("上次目录需要重新授权；点击“选择目录”并重新选中它。");
     } else {
       downloadFolderMode = "default";
       downloadFolder = null;
-      downloadFolderName.textContent = archiveRootHandle ? `${archiveRootHandle.name} / 000视频下载（默认）` : "本地收藏根目录 / 000视频下载（默认）";
-      downloadFolderHelp.textContent = "开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。";
+      downloadFolderName.textContent = archiveRootHandle ? BcaI18n.t("{name} / 000视频下载（默认）", { name: archiveRootHandle.name }) : BcaI18n.t("本地收藏根目录 / 000视频下载（默认）");
+      downloadFolderHelp.textContent = BcaI18n.t("开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。");
       folderPermissionHint.hidden = Boolean(archiveRootHandle);
-      if (!archiveRootHandle) folderPermissionHint.textContent = "请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。";
+      if (!archiveRootHandle) folderPermissionHint.textContent = BcaI18n.t("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。");
     }
     updateStartButton();
   } catch (error) {
     folderPermissionHint.hidden = false;
-    folderPermissionHint.textContent = `无法读取上次目录：${error.message}`;
+    folderPermissionHint.textContent = BcaI18n.t("无法读取上次目录：{message}", { message: error.message });
   }
 }
 
@@ -389,7 +403,7 @@ async function getWritableDirectory(parent, name) {
       return parent.getDirectoryHandle(candidate, { create: true });
     }
   }
-  throw new Error("无法创建唯一的视频目录。 ");
+  throw new Error(BcaI18n.t("无法创建唯一的视频目录。"));
 }
 
 async function findOrCreateVideoDirectory(parent, video, index) {
@@ -423,13 +437,13 @@ function videoDirectoryLabel(video, index) {
 
 async function resolveDownloadFolder() {
   if (downloadFolderMode === "custom") {
-    if (!downloadFolder) throw new Error("请先选择下载目录。");
+    if (!downloadFolder) throw new Error(BcaI18n.t("请先选择下载目录。"));
     return downloadFolder;
   }
   if (!archiveRootHandle) archiveRootHandle = await folderSetting("get", null, "rootHandle");
-  if (!archiveRootHandle) throw new Error("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。");
+  if (!archiveRootHandle) throw new Error(BcaI18n.t("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。"));
   const permission = await archiveRootHandle.requestPermission({ mode: "readwrite" });
-  if (permission !== "granted") throw new Error("未获得本地收藏根目录的写入权限，请在插件弹窗中重新授权。");
+  if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地收藏根目录的写入权限，请在插件弹窗中重新授权。"));
   // 使用固定目录名；已有目录时复用，不生成编号副本。
   return archiveRootHandle.getDirectoryHandle("000视频下载", { create: true });
 }
@@ -439,8 +453,8 @@ function fetchOptions(signal) {
 }
 
 async function writeResponseToFile(directory, fileName, response, onProgress) {
-  if (!response.ok) throw new Error(`下载请求失败：HTTP ${response.status}`);
-  if (!response.body) throw new Error("浏览器没有提供可读取的数据流。 ");
+  if (!response.ok) throw new Error(BcaI18n.t("下载请求失败：HTTP {status}", { status: response.status }));
+  if (!response.body) throw new Error(BcaI18n.t("浏览器没有提供可读取的数据流。"));
   const file = await directory.getFileHandle(fileName, { create: true });
   const writable = await file.createWritable();
   const reader = response.body.getReader();
@@ -468,13 +482,16 @@ async function writeResponseToFile(directory, fileName, response, onProgress) {
 }
 
 async function downloadUrl(directory, fileName, url) {
-  if (!/^https?:\/\//i.test(String(url || ""))) throw new Error("B 站没有提供有效的下载地址。 ");
-  progressCurrent.textContent = `正在下载 ${fileName}`;
+  if (!/^https?:\/\//i.test(String(url || ""))) throw new Error(BcaI18n.t("B 站没有提供有效的下载地址。"));
+  // fileName 是文件名，属于固有名称，只作为占位符参数传进去
+  progressCurrent.textContent = BcaI18n.t("正在下载 {fileName}", { fileName });
   const response = await fetch(url, fetchOptions(cancelController.signal));
   const bytes = await writeResponseToFile(directory, fileName, response, (received, total) => {
-    progressCurrent.textContent = total ? `正在下载 ${fileName} · ${displayBytes(received)} / ${displayBytes(total)}` : `正在下载 ${fileName} · ${displayBytes(received)}`;
+    progressCurrent.textContent = total
+      ? BcaI18n.t("正在下载 {fileName} · {received} / {total}", { fileName, received: displayBytes(received), total: displayBytes(total) })
+      : BcaI18n.t("正在下载 {fileName} · {received}", { fileName, received: displayBytes(received) });
   });
-  addLog(`已保存 ${fileName}（${displayBytes(bytes)}）`, "success");
+  addLog(BcaI18n.t("已保存 {fileName}（{size}）", { fileName, size: displayBytes(bytes) }), "success");
 }
 
 async function downloadText(directory, fileName, text, type = "text/plain;charset=utf-8") {
@@ -484,7 +501,7 @@ async function downloadText(directory, fileName, text, type = "text/plain;charse
   await writable.close();
   savedFileCount += 1;
   updateProgress();
-  addLog(`已保存 ${fileName}`, "success");
+  addLog(BcaI18n.t("已保存 {fileName}", { fileName }), "success");
 }
 
 function imageExtension(response) {
@@ -496,7 +513,7 @@ function imageExtension(response) {
 }
 
 async function fetchCover(directory, video) {
-  if (!video.cover) throw new Error("没有可用的封面地址。 ");
+  if (!video.cover) throw new Error(BcaI18n.t("没有可用的封面地址。"));
   const response = await fetch(video.cover, { ...fetchOptions(cancelController.signal), credentials: "omit" });
   const extension = imageExtension(response);
   await writeResponseToFile(directory, `封面.${extension}`, response);
@@ -518,21 +535,21 @@ function makeSrt(cues) {
 async function downloadSubtitles(directory, video, page, baseName) {
   const response = await runtimeMessage({ type: "bca-download-subtitles", bvid: video.bvid, aid: video.aid, cid: page.cid });
   const subtitles = response.subtitles || [];
-  if (!subtitles.length) throw new Error("B 站没有提供字幕。 ");
+  if (!subtitles.length) throw new Error(BcaI18n.t("B 站没有提供字幕。"));
   let saved = 0;
   for (let index = 0; index < subtitles.length; index += 1) {
     const subtitle = subtitles[index];
     const url = String(subtitle.subtitle_url || subtitle.url || "").startsWith("//") ? `https:${subtitle.subtitle_url || subtitle.url}` : String(subtitle.subtitle_url || subtitle.url || "");
     if (!url) continue;
     const responseData = await fetch(url, { ...fetchOptions(cancelController.signal), credentials: "omit" });
-    if (!responseData.ok) throw new Error(`字幕下载失败：HTTP ${responseData.status}`);
+    if (!responseData.ok) throw new Error(BcaI18n.t("字幕下载失败：HTTP {status}", { status: responseData.status }));
     const payload = await responseData.json();
     if (!Array.isArray(payload.body)) continue;
     const lang = safeName(subtitle.lan_doc || subtitle.lan || `字幕${index + 1}`, `字幕${index + 1}`);
     await downloadText(directory, `${baseName}_${lang}.srt`, makeSrt(payload.body), "application/x-subrip;charset=utf-8");
     saved += 1;
   }
-  if (!saved) throw new Error("字幕接口没有返回可转换的字幕内容。 ");
+  if (!saved) throw new Error(BcaI18n.t("字幕接口没有返回可转换的字幕内容。"));
 }
 
 function codecMatches(candidate, preference) {
@@ -546,13 +563,13 @@ function codecMatches(candidate, preference) {
 
 function chooseDashVideo(data, requestedQuality) {
   const available = [...(data?.dash?.video || [])];
-  if (!available.length) throw new Error("B 站没有提供 DASH 视频流；可尝试切换到 MP4。 ");
+  if (!available.length) throw new Error(BcaI18n.t("B 站没有提供 DASH 视频流；可尝试切换到 MP4。"));
   let candidates = available;
   const preference = codecSelect.value;
   if (preference !== "auto") {
     const matching = candidates.filter((candidate) => codecMatches(candidate, preference));
     if (matching.length) candidates = matching;
-    else addLog(`当前清晰度没有所选 ${preference.toUpperCase()} 编码，使用 B 站返回的其他编码。`, "info");
+    else addLog(BcaI18n.t("当前清晰度没有所选 {codec} 编码，使用 B 站返回的其他编码。", { codec: preference.toUpperCase() }), "info");
   } else {
     const avc = candidates.filter((candidate) => codecMatches(candidate, "avc"));
     if (avc.length) candidates = avc;
@@ -563,7 +580,7 @@ function chooseDashVideo(data, requestedQuality) {
 
 function chooseDashAudio(data) {
   const available = [...(data?.dash?.audio || [])];
-  if (!available.length) throw new Error("B 站没有提供 DASH 音频流。 ");
+  if (!available.length) throw new Error(BcaI18n.t("B 站没有提供 DASH 音频流。"));
   const selected = Number(audioQualitySelect.value) || 0;
   return available.find((candidate) => Number(candidate.id) === selected)
     || available.sort((left, right) => Number(right.bandwidth || 0) - Number(left.bandwidth || 0))[0];
@@ -571,16 +588,16 @@ function chooseDashAudio(data) {
 
 async function downloadDashStream(directory, filename, stream) {
   const url = stream?.baseUrl || stream?.base_url || stream?.backupUrl?.[0] || stream?.backup_url?.[0];
-  if (!url) throw new Error("B 站没有返回有效的 DASH 流地址。 ");
+  if (!url) throw new Error(BcaI18n.t("B 站没有返回有效的 DASH 流地址。"));
   await downloadUrl(directory, filename, url);
 }
 
 async function fetchDanmaku(directory, page, baseName) {
   const url = `https://api.bilibili.com/x/v1/dm/list.so?oid=${encodeURIComponent(page.cid)}`;
   const response = await fetch(url, fetchOptions(cancelController.signal));
-  if (!response.ok) throw new Error(`弹幕下载失败：HTTP ${response.status}`);
+  if (!response.ok) throw new Error(BcaI18n.t("弹幕下载失败：HTTP {status}", { status: response.status }));
   const xml = await response.text();
-  if (!xml.trim()) throw new Error("弹幕内容为空。 ");
+  if (!xml.trim()) throw new Error(BcaI18n.t("弹幕内容为空。"));
   await downloadText(directory, `${baseName}_弹幕.xml`, xml, "application/xml;charset=utf-8");
 }
 
@@ -607,14 +624,16 @@ function taskCountForCurrentSettings(pageCount) {
   return perPage * pageCount;
 }
 
-async function runAsset(label, operation) {
-  progressCurrent.textContent = label;
+// label 会写进「001错误报告」的「任务：」字段，属于归档数据，必须保持中文；
+// display 只用于界面（进度区与日志），跟随当前语言。
+async function runAsset(label, display, operation) {
+  progressCurrent.textContent = display;
   try { await waitWhilePaused(); await operation(); }
   catch (error) {
     if (error?.name === "AbortError") throw error;
     failedCount += 1;
     downloadErrors.push({ ...activeDownloadContext, task: label, message: error?.message || String(error), time: new Date().toISOString() });
-    addLog(`${label}：${error.message}`, "error");
+    addLog(`${display}：${error.message}`, "error");
   } finally {
     completedTasks += 1;
     updateProgress();
@@ -629,10 +648,11 @@ async function persistDownloadErrorReport() {
   if (!downloadErrors.length) return;
   try {
     const root = archiveRootHandle || await folderSetting("get", null, "rootHandle");
-    if (!root) throw new Error("尚未设置本地收藏根目录");
+    // 这两条只会进页面日志；报告正文（下面的 lines）保持中文原样，别翻译
+    if (!root) throw new Error(BcaI18n.t("尚未设置本地收藏根目录"));
     let permission = await root.queryPermission({ mode: "readwrite" });
     if (permission !== "granted") permission = await root.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("没有获得错误报告目录的写入权限");
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得错误报告目录的写入权限"));
     const reportDirectory = await root.getDirectoryHandle("001错误报告", { create: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const file = await reportDirectory.getFileHandle(`下载错误报告_${stamp}.txt`, { create: true });
@@ -656,9 +676,9 @@ async function persistDownloadErrorReport() {
     const writable = await file.createWritable();
     await writable.write(new Blob(["\uFEFF", lines.join("\n")], { type: "text/plain;charset=utf-8" }));
     await writable.close();
-    addLog(`错误报告已保存到 001错误报告/${file.name}`, "success");
+    addLog(BcaI18n.t("错误报告已保存到 {path}", { path: `001错误报告/${file.name}` }), "success");
   } catch (error) {
-    addLog(`未能写入本地错误报告：${error?.message || "写入失败"}`, "error");
+    addLog(BcaI18n.t("未能写入本地错误报告：{message}", { message: error?.message || BcaI18n.t("写入失败") }), "error");
   }
 }
 
@@ -685,15 +705,15 @@ async function processPage(item, page, directory, index, pageCount) {
     try { await ensurePlayurl(); }
     catch (error) {
       playurlError = error;
-      addLog(`读取“${video.title}”${pageCount > 1 ? ` ${pageLabel(page)}` : ""}的下载流失败：${error.message}`, "error");
+      addLog(BcaI18n.t("读取“{title}”{page}的下载流失败：{message}", { title: video.title, page: pageCount > 1 ? ` ${pageLabel(page)}` : "", message: error.message }), "error");
     }
   }
   if (includeVideo.checked) {
-    await runAsset(`视频 ${index}/${pageCount}`, async () => {
+    await runAsset(`视频 ${index}/${pageCount}`, `${BcaI18n.t("视频")} ${index}/${pageCount}`, async () => {
       await ensurePlayurl();
       if (formatSelect.value === "mp4") {
         const durls = Array.isArray(playurl.durl) ? playurl.durl : [];
-        if (!durls.length) throw new Error("B 站没有提供 MP4 单文件流；请尝试 DASH 格式。 ");
+        if (!durls.length) throw new Error(BcaI18n.t("B 站没有提供 MP4 单文件流；请尝试 DASH 格式。"));
         for (let part = 0; part < durls.length; part += 1) {
           const suffix = durls.length > 1 ? `_片段${String(part + 1).padStart(2, "0")}` : "";
           await downloadUrl(directory, `${baseName}${suffix}.mp4`, durls[part].url || durls[part].backup_url?.[0]);
@@ -705,16 +725,16 @@ async function processPage(item, page, directory, index, pageCount) {
     });
   }
   if (formatSelect.value === "dash" && includeAudio.checked) {
-    await runAsset(`音频 ${index}/${pageCount}`, async () => {
+    await runAsset(`音频 ${index}/${pageCount}`, `${BcaI18n.t("音频")} ${index}/${pageCount}`, async () => {
       await ensurePlayurl();
       const chosen = chooseDashAudio(playurl);
       await downloadDashStream(directory, `${baseName}_音频.m4s`, chosen);
     });
   }
-  if (includeDanmaku.checked) await runAsset(`弹幕 ${index}/${pageCount}`, () => fetchDanmaku(directory, page, baseName));
-  if (includeSubtitle.checked) await runAsset(`字幕 ${index}/${pageCount}`, () => downloadSubtitles(directory, video, page, baseName));
-  if (includeCover.checked) await runAsset(`封面 ${index}/${pageCount}`, () => fetchCover(directory, video));
-  if (includeInfo.checked) await runAsset(`信息 ${index}/${pageCount}`, () => downloadText(directory, `${baseName}_视频信息.txt`, buildInfo(video, page, formatSelect.value, playurl), "text/plain;charset=utf-8"));
+  if (includeDanmaku.checked) await runAsset(`弹幕 ${index}/${pageCount}`, `${BcaI18n.t("弹幕")} ${index}/${pageCount}`, () => fetchDanmaku(directory, page, baseName));
+  if (includeSubtitle.checked) await runAsset(`字幕 ${index}/${pageCount}`, `${BcaI18n.t("字幕")} ${index}/${pageCount}`, () => downloadSubtitles(directory, video, page, baseName));
+  if (includeCover.checked) await runAsset(`封面 ${index}/${pageCount}`, `${BcaI18n.t("封面")} ${index}/${pageCount}`, () => fetchCover(directory, video));
+  if (includeInfo.checked) await runAsset(`信息 ${index}/${pageCount}`, `${BcaI18n.t("信息")} ${index}/${pageCount}`, () => downloadText(directory, `${baseName}_视频信息.txt`, buildInfo(video, page, formatSelect.value, playurl), "text/plain;charset=utf-8"));
 }
 
 async function start() {
@@ -724,16 +744,16 @@ async function start() {
   try {
     downloadFolder = await resolveDownloadFolder();
     const permission = await downloadFolder.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("没有获得保存目录的写入权限，请重新授权或重新选择目录。");
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得保存目录的写入权限，请重新授权或重新选择目录。"));
     downloadFolderName.textContent = downloadFolderMode === "default"
-      ? `${archiveRootHandle.name} / 000视频下载（默认）`
+      ? BcaI18n.t("{name} / 000视频下载（默认）", { name: archiveRootHandle.name })
       : downloadFolder.name;
     folderPermissionHint.hidden = true;
   } catch (error) { folderPermissionHint.hidden = false; addLog(error.message, "error"); return; }
   const pagesToDownload = validItems.flatMap((item) => selectedPages(item).map((page) => ({ item, page })));
-  if (!pagesToDownload.length) { addLog("队列中没有可下载的分 P。", "error"); return; }
+  if (!pagesToDownload.length) { addLog(BcaI18n.t("队列中没有可下载的分 P。"), "error"); return; }
   if (!includeVideo.checked && !(formatSelect.value === "dash" && includeAudio.checked) && !includeDanmaku.checked && !includeSubtitle.checked && !includeCover.checked && !includeInfo.checked) {
-    addLog("至少选择一种下载内容。", "error"); return;
+    addLog(BcaI18n.t("至少选择一种下载内容。"), "error"); return;
   }
 
   running = true;
@@ -746,16 +766,16 @@ async function start() {
   completedTasks = 0;
   plannedTasks = taskCountForCurrentSettings(pagesToDownload.length);
   updateProgress();
-  setBadge("下载中", "active");
-  progressSummary.textContent = `准备下载 ${validItems.length} 个视频，共 ${pagesToDownload.length} 个分 P`;
-  progressCurrent.textContent = "正在创建下载目录";
+  setBadge(BcaI18n.t("下载中"), "active");
+  progressSummary.textContent = BcaI18n.t("准备下载 {videos} 个视频，共 {pages} 个分 P", { videos: validItems.length, pages: pagesToDownload.length });
+  progressCurrent.textContent = BcaI18n.t("正在创建下载目录");
   startDownload.disabled = true;
   downloadActions.hidden = false;
   cancelDownload.disabled = false;
   pauseDownload.disabled = false;
-  setButtonLabel(pauseDownload, "pause", "暂停下载");
+  setButtonLabel(pauseDownload, "pause", BcaI18n.t("暂停下载"));
   setQueueBusy(true);
-  addLog(`开始下载：${validItems.length} 个视频 / ${pagesToDownload.length} 个分 P`, "info");
+  addLog(BcaI18n.t("开始下载：{videos} 个视频 / {pages} 个分 P", { videos: validItems.length, pages: pagesToDownload.length }), "info");
   try {
     const folderCache = new Map();
     const failedFolders = new Set();
@@ -775,26 +795,26 @@ async function start() {
           const directoryInfo = await findOrCreateVideoDirectory(collectionDirectory, video, index);
           folderInfo = { collectionDirectory, directory: directoryInfo.directory, collectionName, created: directoryInfo.created };
           folderCache.set(item.id, folderInfo);
-          addLog(`保存位置：${downloadFolder.name}/${collectionName}/${directoryInfo.directory.name}`, "info");
+          addLog(BcaI18n.t("保存位置：{path}", { path: `${downloadFolder.name}/${collectionName}/${directoryInfo.directory.name}` }), "info");
         } catch (error) {
           const skippedTasks = taskCountForCurrentSettings(selectedPages(item).length);
           failedCount += skippedTasks;
           recordDownloadFailure({ title: video.title, collection: video.collection, bvid: video.bvid, aid: video.aid, time: new Date().toISOString() }, error);
           completedTasks += skippedTasks;
           failedFolders.add(item.id);
-          addLog(`无法创建“${video.title}”的目录：${error.message}`, "error");
+          addLog(BcaI18n.t("无法创建“{title}”的目录：{message}", { title: video.title, message: error.message }), "error");
           continue;
         }
       }
-      progressSummary.textContent = `正在处理 ${index + 1}/${total} · ${video.title}`;
+      progressSummary.textContent = BcaI18n.t("正在处理 {current}/{total} · {title}", { current: index + 1, total, title: video.title });
       activeDownloadContext = { title: video.title, collection: video.collection, bvid: video.bvid, aid: video.aid, page: pageLabel(page) };
-      addLog(`开始处理：${video.title} · ${pageLabel(page)}`, "info");
+      addLog(BcaI18n.t("开始处理：{title} · {page}", { title: video.title, page: pageLabel(page) }), "info");
       try { await processPage(item, page, folderInfo.directory, index + 1, total); }
       catch (error) {
         if (error?.name === "AbortError") break;
         failedCount += 1;
         recordDownloadFailure({ ...activeDownloadContext, time: new Date().toISOString() }, error);
-        addLog(`处理失败：${video.title} · ${error.message}`, "error");
+        addLog(BcaI18n.t("处理失败：{title} · {message}", { title: video.title, message: error.message }), "error");
       }
     }
     const cancelled = cancelController.signal.aborted;
@@ -807,33 +827,37 @@ async function start() {
         try {
           await folderInfo.collectionDirectory.removeEntry(folderInfo.directory.name, { recursive: true });
           removedDirectories += 1;
-          addLog(`已清理本次下载目录：${folderInfo.collectionName}/${folderInfo.directory.name}`, "success");
+          addLog(BcaI18n.t("已清理本次下载目录：{path}", { path: `${folderInfo.collectionName}/${folderInfo.directory.name}` }), "success");
         } catch (error) {
-          addLog(`未能清理“${folderInfo.collectionName}/${folderInfo.directory.name}”：${error.message}`, "error");
+          addLog(BcaI18n.t("未能清理“{path}”：{message}", { path: `${folderInfo.collectionName}/${folderInfo.directory.name}`, message: error.message }), "error");
         }
       }
-      setBadge("已取消", "error");
+      setBadge(BcaI18n.t("已取消"), "error");
       progressSummary.textContent = allDirectories.length === 0
-        ? "已取消 · 尚未处理视频目录"
+        ? BcaI18n.t("已取消 · 尚未处理视频目录")
         : createdDirectories.length === 0
-          ? `已取消 · 已保留 ${preservedDirectories} 个原有目录及其中的文件`
-          : `已取消 · 清理本次新建目录 ${removedDirectories}/${createdDirectories.length} 个${preservedDirectories ? `，保留 ${preservedDirectories} 个原有目录` : ""}`;
-      addLog(`下载已取消，已清理 ${removedDirectories}/${createdDirectories.length} 个本次创建的目录${preservedDirectories ? `；保留 ${preservedDirectories} 个原有目录及其中的文件` : ""}。`, removedDirectories === createdDirectories.length ? "success" : "error");
+          ? BcaI18n.t("已取消 · 已保留 {preserved} 个原有目录及其中的文件", { preserved: preservedDirectories })
+          : (preservedDirectories
+            ? BcaI18n.t("已取消 · 清理本次新建目录 {removed}/{created} 个，保留 {preserved} 个原有目录", { removed: removedDirectories, created: createdDirectories.length, preserved: preservedDirectories })
+            : BcaI18n.t("已取消 · 清理本次新建目录 {removed}/{created} 个", { removed: removedDirectories, created: createdDirectories.length }));
+      addLog(preservedDirectories
+        ? BcaI18n.t("下载已取消，已清理 {removed}/{created} 个本次创建的目录；保留 {preserved} 个原有目录及其中的文件。", { removed: removedDirectories, created: createdDirectories.length, preserved: preservedDirectories })
+        : BcaI18n.t("下载已取消，已清理 {removed}/{created} 个本次创建的目录。", { removed: removedDirectories, created: createdDirectories.length }), removedDirectories === createdDirectories.length ? "success" : "error");
     } else if (failedCount) {
-      setBadge("部分完成", "error");
-      progressSummary.textContent = `完成 · ${savedFileCount} 个文件成功，${failedCount} 项失败`;
-      addLog(`处理结束：保存 ${savedFileCount} 个文件，${failedCount} 项失败。`, "error");
+      setBadge(BcaI18n.t("部分完成"), "error");
+      progressSummary.textContent = BcaI18n.t("完成 · {saved} 个文件成功，{failed} 项失败", { saved: savedFileCount, failed: failedCount });
+      addLog(BcaI18n.t("处理结束：保存 {saved} 个文件，{failed} 项失败。", { saved: savedFileCount, failed: failedCount }), "error");
     } else {
-      setBadge("已完成", "done");
-      progressSummary.textContent = `下载完成 · 已保存 ${savedFileCount} 个文件`;
-      addLog(`下载完成：已保存 ${savedFileCount} 个文件。`, "success");
+      setBadge(BcaI18n.t("已完成"), "done");
+      progressSummary.textContent = BcaI18n.t("下载完成 · 已保存 {saved} 个文件", { saved: savedFileCount });
+      addLog(BcaI18n.t("下载完成：已保存 {saved} 个文件。", { saved: savedFileCount }), "success");
     }
     await persistDownloadErrorReport();
     if (!cancelled) { completedTasks = plannedTasks; updateProgress(); }
   } finally {
     if (savedFileCount > 0 || cancelController?.signal.aborted) {
       try { await chrome.storage.local.set({ downloadRevision: crypto.randomUUID() }); }
-      catch (error) { addLog(`已保存文件，但收藏库状态同步失败：${error.message}`, "error"); }
+      catch (error) { addLog(BcaI18n.t("已保存文件，但收藏库状态同步失败：{message}", { message: error.message }), "error"); }
     }
     running = false;
     paused = false;
@@ -850,7 +874,7 @@ addVideoForm.addEventListener("submit", async (event) => {
   if (running) return;
   const input = videoInput.value.trim();
   if (!input) return;
-  parseVideoButton.textContent = "正在解析…";
+  parseVideoButton.textContent = BcaI18n.t("正在解析…");
   setQueueBusy(true);
   try {
     await parseAndAdd(input);
@@ -859,7 +883,7 @@ addVideoForm.addEventListener("submit", async (event) => {
   } catch (error) {
     // 错误已经记入进度区，输入框保留方便修正。
   } finally {
-    parseVideoButton.textContent = "解析并添加";
+    parseVideoButton.textContent = BcaI18n.t("解析并添加");
     setQueueBusy(false);
   }
 });
@@ -872,7 +896,35 @@ startDownload.addEventListener("click", start);
 pauseDownload.addEventListener("click", () => { if (running) setPaused(!paused); });
 cancelDownload.addEventListener("click", cancelCurrentDownload);
 
+// 下载页没有语言切换控件；用户在插件弹窗里换了语言后，这里跟着重画一次
+// （静态节点由 BcaI18n.use() 自己 apply，动态内容在这里重建）
+function refreshLocaleText() {
+  renderQueue();
+  setFormatUi();
+  updateProgress();
+  paintBadge();
+  // 目录行是 JS 写进去的，重新读一次存储才能拿到新语言的文案
+  restoreFolder().catch(() => {});
+  setButtonLabel(pauseDownload, paused ? "play" : "pause", paused ? BcaI18n.t("继续下载") : BcaI18n.t("暂停下载"));
+  updateStartButton();
+}
+
+BcaI18n.onChange(() => refreshLocaleText());
+
+// 收藏库/弹窗改了语言时，同源的其它扩展页面靠 storage 变化同步
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[BcaI18n.STORAGE_KEY]) return;
+  const next = changes[BcaI18n.STORAGE_KEY].newValue;
+  if (BcaI18n.isSupported(next) && next !== BcaI18n.locale()) BcaI18n.use(next, { silent: true });
+});
+
 async function initialize() {
+  // 第一次渲染之前先把语言准备好，避免先闪一下中文
+  await BcaI18n.init();
+  // 进度摘要与当前动作由脚本全程改写，所以不标 data-i18n（否则切语言时
+  // apply(document) 会把正在显示的下载状态重置成初始文案），初值在这里写
+  progressSummary.textContent = BcaI18n.t("等待解析视频");
+  progressCurrent.textContent = BcaI18n.t("准备就绪");
   setFormatUi();
   await restoreFolder();
   const params = new URLSearchParams(location.search);
@@ -888,9 +940,9 @@ async function initialize() {
       // Keep compatibility with links created by older 3.5 pages.
       initialItems = JSON.parse(params.get("items") || "[]");
     }
-  } catch (_) { addLog("无法读取来自本地收藏库的视频队列。", "error"); }
+  } catch (_) { addLog(BcaI18n.t("无法读取来自本地收藏库的视频队列。"), "error"); }
   if (Array.isArray(initialItems) && initialItems.length) {
-    progressSummary.textContent = `正在解析 ${initialItems.length} 个视频`;
+    progressSummary.textContent = BcaI18n.t("正在解析 {count} 个视频", { count: initialItems.length });
     let cursor = 0;
     const workers = Array.from({ length: Math.min(4, initialItems.length) }, async () => {
       while (cursor < initialItems.length) {
@@ -900,10 +952,10 @@ async function initialize() {
       }
     });
     await Promise.all(workers);
-    progressSummary.textContent = queue.some((item) => item.video) ? "视频解析完成，可选择设置并开始下载" : "视频解析失败，请检查登录状态或视频编号";
+    progressSummary.textContent = queue.some((item) => item.video) ? BcaI18n.t("视频解析完成，可选择设置并开始下载") : BcaI18n.t("视频解析失败，请检查登录状态或视频编号");
     await refreshQualityOptions();
   }
   updateStartButton();
 }
 
-initialize().catch((error) => addLog(`下载页初始化失败：${error.message}`, "error"));
+initialize().catch((error) => addLog(BcaI18n.t("下载页初始化失败：{message}", { message: error.message }), "error"));

@@ -1,13 +1,13 @@
-# AI 项目交接说明：B站收藏信息归档 4.4.1
+# AI 项目交接说明：B站收藏信息归档 4.5
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.4.1`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
-- 扩展版本：`4.4.1`，Chrome Manifest V3，最低 Chrome 版本 111。
-- `b_catch_4.4` 是 4.4.1 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
-- **4.4.1 是 4.4 的补丁版**：使用须知改为黄色底、字号调到 15px、可折叠但**不可永久关闭**；插件弹窗的须知**置顶**；失效视频恢复改为**默认开启**。没有其它功能变化。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.5`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
+- 扩展版本：`4.5.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
 - 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.8 → 4.0）ID 就会变，安装原生助手时必须填入新 ID。
@@ -92,7 +92,7 @@ b_catch_4.1/
 
 **接口抓不到数据的处理**：`/x/web-interface/view` 的 `desc` 对不少视频就是空的或 `-`（实测 `BV1LKGm6ZErR` 返回 `-`），这时简介会退回收藏夹接口 `intro` 清理后的文本；`stat` 通常都有。
 
-### 更新视频状态（4.4 新增）
+### 更新视频状态（4.4 引入，4.5 调整见下）
 
 收藏库的「更新视频状态」按钮经 `bca-refresh-video-stats` 触发 `refreshVideoStatus()`，逐条调用 `refreshOneArchiveStatus()`：
 
@@ -103,11 +103,48 @@ b_catch_4.1/
 
 **请求密度**：复用 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，与导入同级限速，同样分批（10/20/40）并由用户点击推进。**不要为了提高刷新速度而调高频率**。
 
+### 主题系统（4.5 新增）
+
+- `theme.css` 是唯一的颜色来源。浅色令牌在 `:root`，深色令牌有**两处**必须保持完全一致：
+  `:root[data-theme="dark"]`（用户手选夜晚）与 `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }`（跟随系统）。
+  测试会比对两处的令牌集合，改一处必须改另一处。
+- `theme.js` 放在**所有页面的 `<head>` 里同步执行**，只负责挂 `data-theme`。因为要同步，它用 `localStorage`（三个扩展页面同源，共享一个键）而不是 `chrome.storage`。
+  跟随系统时**不挂** `data-theme`，交给媒体查询；手选「白天」时挂 `data-theme="light"` 用来挡住系统的深色。
+- **页面 CSS 里不要写死颜色**。唯一允许的例外是「画在封面图/遮罩上的恒定色」和「彩色按钮上的白字」——它们在任何主题下都成立，但必须写注释说明。
+  这条不是洁癖：写死的浅色在深色下会变成刺眼亮斑或读不清的文字。4.5 已经把三个页面 CSS 里的浅色写死值全部换成令牌。
+- 需要新颜色时先在 `theme.css` 加令牌，**两个深色块都要同步加**。
+
+### 多语言系统（4.5 新增）
+
+- `i18n.js` 暴露 `BcaI18n`，**用中文原文当 key**：简体中文不需要词典文件（`t()` 查不到就原样返回），`locales/zh-TW.json` 与 `locales/en.json` 只存需要改写的条目。
+- 标记方式：
+  - 静态纯文本 → `data-i18n="原文"`；**元素里有图标或子元素时必须把文字套一层 `<span data-i18n>`**，否则 `textContent` 会清掉子元素。
+  - 需要内嵌标签 → `data-i18n-html`（值里的引号写 `&quot;`）。
+  - `title` / `placeholder` / `aria-label` → `data-i18n-title` / `data-i18n-placeholder` / `data-i18n-aria`。
+  - JS 动态文字 → `BcaI18n.t("原文")`，带变量用 `t("已选 {count} 个", { count })`。**key 必须是字符串字面量**，否则提取工具扫不到。
+- **只翻译界面文字**。视频标题、UP 主名、简介、标签、收藏夹名、BV 号、目录名与文件名一律不包 `t()`。
+- 切语言后 `BcaI18n.onChange()` 会触发收藏库重画；新增的动态渲染函数如果含中文，一定要在 `onChange` 的重画路径里，并且内部用 `t()` 而不是 `data-i18n`。
+- **数字单位必须按语言换算，不能当翻译模板拼**。`formatCount()` 里中文用 万/亿、英文用 K/M/B，各自除以对应基数。曾用 `t("{value} 万")` 当模板、英文填 `{value}0K` 来「补零」，结果 7.4 万（74000）显示成 7.40K，**小了十倍，且只在英文模式下出现**。阈值要取「四舍五入后会进位到 1000.0」的位置（`999950` / `999950000`），否则 999999999 会显示成 1000.0M。
+**词典怎么加载**：扩展页面（收藏库 / 下载页 / 弹窗）直接 `fetch(chrome.runtime.getURL("locales/xx.json"))`，同源无限制。**内容脚本不行**——它跑在网页里，从网页上下文读扩展资源必须声明 `web_accessible_resources`，而那是 4.3 特意去掉的（防止 B 站页面把收藏库嵌进 iframe 做点击劫持）。所以内容脚本走 `bca-locale` 消息请后台代取。**不要为了图省事把 `locales/*` 加回 `web_accessible_resources`。**
+**后台（`background.js`）不翻译**。它是模块化 service worker，加载不了经典脚本；它产出的文案有两种处理方式：界面显示处包一层 `t()`（可以翻静态串），或者维持中文（导入进度、错误报告文件）。4.5 采用后者，见「已知限制」。
+- 词条工具：`node test/i18n-extract.cjs` 列词条、`--todo` 生成待译清单、`--check` 校验词典覆盖率（回归测试会调用 `--check`，漏译会失败）。
+
+### 更新视频状态（4.5 调整）
+
+4.4 的批量刷新（页面标题栏 + 对话框 + `statusBatchSize`）**已整体删除**。现在按钮在**视频详情面板的互动数据下方**，经 `refreshOneVideoStatus(video)` 一次只提交一条：
+
+```
+chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [target], limit: 1 } })
+```
+
+后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
 ### 使用须知（4.4 新增）
 
 同一份六条安全声明必须同时出现在 `library.html`、`download.html`、`popup.html`，**逐字一致**（测试会逐条比对）。
 
 4.4.1 起：三处统一用 --warning-soft / --warning-line 黄色底、正文 --fs-md(15px)；收藏库默认展开、可折叠，但**不允许永久关闭**（dismissSafety 按钮与 safetyNoticeDismissed 写入都已删除，只保留一次性的旧标记清理）；弹窗里**置顶**（排在 rand-row 之前）且默认折叠，避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要；也不要把「不再提示」加回来。**
+
+4.5 起：**「请勿滥用……」一条必须排在最前面**（测试会断言第一条以「请勿滥用：」开头，且三个界面的六条文字完全一致）。条目上带 data-i18n，其中含 DownKyi 链接的那条用 data-i18n-html。
 
 ### 本地收藏库
 
@@ -220,6 +257,7 @@ UP主主页：https://space.bilibili.com/……
 | `get-status` | `popup.js` → `background.js` | 读取最近状态和错误（4.2 起附带 `importState`） |
 | `bca-import-control` | `popup.js` → `background.js` | 4.2：暂停 / 继续 / 取消正在进行的导入 |
 | `bca-import-state` | 任意页面 → `background.js` | 4.2：单独查询导入运行状态 |
+| `bca-locale` | 内容脚本 `i18n.js` → `background.js` | 4.5：内容脚本请后台代取词典。**不能自己 fetch**——从网页上下文读扩展资源必须声明 `web_accessible_resources`，而 4.3 起刻意不开放任何扩展资源给网页；直接 fetch 会被拦、被 `try/catch` 吞成空词典，表现为提示卡永远中文且不报错 |
 | ca-open-library | content.js → ackground.js | 4.3：由后台 chrome.tabs.create 打开本地收藏库，扩展页因此不必暴露给网页 |
 | ca-refresh-video-stats | library.js → ackground.js | 4.4：分批重新解析并更新互动数据与粉丝数；失效只打标记 |
 | ca-status-progress | ackground.js → library.js | 4.4：更新视频状态的进度回报 |
@@ -270,7 +308,21 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 51 项检查：9 项纯逻辑回归、9 项表现层静态回归、7 项 4.1 回归、11 项 4.2 回归、6 项 4.3 安全回归（扩展页不对任何网页暴露且改走 `tabs.create`、收藏库拒绝被 iframe 嵌套且检查早于目录读取、封面协议白名单与转义、错误报告含提示行、导入串行且每秒请求数 ≤2、恢复流程被开关包住）、7 项 4.4 回归（两份 `patchVolatileFields` 输出必须一致、更新只动易变字段且行数不变、失效时逐行核对只有状态行变化、老档案能正确补出互动数据块与粉丝数行、失效判定只认接口错误码、网页端分批刷新接线、三处使用须知逐字一致），以及 2 项 4.4.1 回归（须知可折叠但不可永久关闭、须知使用黄色底且字号调到 15px 并在弹窗置顶）。无第三方包。
+当前包含 71 项检查，分四类：
+
+- **纯逻辑与解析**：B 站分享文案拆分、`视频信息.txt` 往返解析、占位值处理等。
+- **表现层静态回归**：设计令牌、图标、`[hidden]` 生效、三处须知一致、`data-i18n` 与元素文字逐字一致、页面引用的 id 与设计令牌都必须存在。
+- **历代功能回归**（4.1 / 4.2 / 4.3 / 4.4 / 4.4.1）：导入暂停取消回滚、易变字段补丁两份实现一致、失效只写标记、扩展页不暴露给网页、导入限速、须知不可永久关闭等。
+- **4.5 新增**：主题令牌两处必须一致、文字对比度达标、`theme.js` 三种模式解析、`i18n.js` 原文回退与占位符、内容脚本走后台取词典且不碰宿主页面、`t()` 只能是字面量、固有名称不得进 `t()`、真实文件名不得被译、词典覆盖率、数字单位随语言换算、按播放量排序、封面播放量徽标、单条状态刷新、须知顺序。
+
+其中多项是**从生产文件里抽源码执行的**（`loadBackgroundFunctions` / 沙箱加载 `theme.js`、`i18n.js`、`formatCount`），测的是真正跑起来的那份实现。
+
+- **纯逻辑与解析**（9 项）：包含 B 站分享文案拆分、`视频信息.txt` 往返解析、占位值处理等。
+- **表现层静态回归**（9 项）：设计令牌、图标、`[hidden]` 生效、三处须知一致等。
+- **历代功能回归**（4.1 的 7 项、4.2 的 11 项、4.3 的 6 项、4.4 的 7 项、4.4.1 的 2 项）：导入/更新的暂停取消回滚、易变字段补丁两份实现必须一致、失效只写标记、扩展页不暴露给网页、导入限速、须知不可永久关闭等。
+- **4.5 新增**（15 项）：主题令牌两处必须一致、对比度达标、令牌引用必须存在、页面脚本引用的 id 必须存在、`theme.js` 三种模式解析、`i18n.js` 原文回退与占位符、内容脚本不碰宿主页面、`t()` 只能是字面量、固有名称不得进 `t()`、词典覆盖率、`data-i18n` 与元素文字一致、按播放量排序、封面播放量徽标、单条状态刷新、须知顺序。
+
+其中多项是**从生产文件里抽源码执行的**（`loadBackgroundFunctions` / 沙箱加载 `theme.js`、`i18n.js`），测的是真正跑起来的那份实现，不是复制品。
 
 其中 4.1beta 的两项会**从 `background.js` 里把函数源码抽出来执行**（`loadBackgroundFunctions`），因为 background.js 是模块化 service worker、无法 `require`；这样测到的就是生产代码本身，而不是复制品。
 
@@ -278,6 +330,30 @@ node test/stability.test.cjs
 
 ```powershell
 node test/archive-audit.cjs "C:\Users\Maxwell\Desktop\本地收藏夹"
+```
+
+多语言的词条工具（改过任何界面文字之后都要跑）：
+
+```powershell
+node test/i18n-extract.cjs           # 列出全部待翻译词条
+node test/i18n-extract.cjs --todo    # 生成 locales/_todo.json（交给翻译）
+node test/i18n-extract.cjs --check   # 校验 zh-TW / en 覆盖了全部词条
+```
+
+**反向检查（改完界面文字一定要跑）**：
+
+```powershell
+node test/_unmarked.cjs
+```
+
+`i18n-extract` 只能证明「已经标记的能翻」，证明不了「该标的都标了」。`_unmarked` 扫描「含中文的字符串字面量、却没被 `t()` 包住」的位置，补上另一半。4.5 就是靠它发现 `library.js` 有 74 处、`download.js` 有 46 处漏标记——界面看起来正常，但切到英文时那些文案纹丝不动。
+
+它会有两类固定误报，看输出时要自己排除：
+
+1. **归档格式键名**（`视频信息.txt`、`【基本信息】`、`BV号`、`分区`、`未知`…）——写进 `.txt` 的字段名，必须保持中文，**不能标**。
+2. **匹配宿主页面的选择器**（`content.js` 里的 `添加到收藏夹`、`确定`）和**跨行模板字符串**——翻译了功能就坏，或只是脚本解析局限。
+
+规律：**文案只要不是以字面量出现在 `t()` 或 `data-i18n` 里，就一定会漏。** 已经踩过两次：主题标签写在 `theme.js` 的对象里、内容脚本提示卡走 `showNotice(...)` 传参。
 ```
 
 只读预览 4.2 的导入会抓到什么（不改任何文件，适合改完接口逻辑后先验证）：
@@ -309,6 +385,14 @@ node test/import-trial.cjs "C:\Users\Maxwell\Desktop\本地收藏夹" 3
 - 4.2 的导入会对每条视频发 2–3 个请求（view + tags + 每个 UP 一次的 relation/stat），**这是用户明确要求的完整抓取**。并发 2、间隔 350ms；如果将来风控变严，应先调 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，而不是回到“只补缺失字段”的老逻辑。
 - 3.7 的下载目录日志修复仍建议在 Chrome/B 站实际触发一次验证，因为历史报告表明错误发生在目录创建的运行时路径。
 
+### 已知限制（4.5）
+
+- **后台文案不参与多语言**。`background.js` 是模块化 service worker，加载不了经典脚本；它产出的导入进度文本、错误消息、`001错误报告` 里的正文都固定为简体中文。界面显示处会对静态串做一次 `t()`（能翻的会翻），但带变量的动态串（例如「正在更新视频状态 3/20：xxx」）会保持中文。
+  要做全的话，需要把后台改成回传**消息键 + 参数**、由界面渲染，属于一次独立重构。
+- **报告文件不入词典**。`001错误报告/` 与 `视频信息.txt` 属于归档数据，保持单一语言便于长期比对。
+- **`data-i18n` 只能用在纯文本元素上**。带图标或子元素的必须套一层 `<span data-i18n>`，否则 `textContent` 会把子元素清掉。
+- **主题设置到不了内容脚本**。主题存在 `localStorage`（为了让页面在 `<head>` 里同步应用、不闪浅色），而内容脚本跑在 B 站页面里，读到的是**宿主页面的** `localStorage`，拿不到扩展的那份。所以 `content.js` 的提示卡只跟随系统的 `prefers-color-scheme`，不跟随用户在收藏库里选的「夜晚」。
+  要打通的话：`theme.js` 在写 `localStorage` 的同时镜像一份到 `chrome.storage.local`，内容脚本改从那里读。- 繁体中文与英文词典由本项目的词条工具校验覆盖率，**漏译不会报错、只会回退成中文**，所以要靠 `test/i18n-extract.cjs --check` 兜底。
 ## 合规与安全红线（4.3 确立，后续改动不得突破）
 
 4.3 做过一次完整的安全与合规审计，结论与约束记录如下。
@@ -326,7 +410,6 @@ node test/import-trial.cjs "C:\Users\Maxwell\Desktop\本地收藏夹" 3
 7. **错误报告必须带提示行**：`ERROR_REPORT_NOTICE` 常量与 `persistErrorReport()` 的兜底拼接不要删，报告里含本地路径与视频链接。
 8. 改动以上任一项前，先回到这一节确认，并在汇报里说明原因。
 
-## 修改原则
 
 1. 先确认目标版本目录，再编辑；按用户的版本目录习惯保留已发布稳定版。
 2. 先读本文件、`README.md`、相关页面和消息两端，不要只改单侧响应协议。
@@ -335,3 +418,6 @@ node test/import-trial.cjs "C:\Users\Maxwell\Desktop\本地收藏夹" 3
 5. 界面改动遵守上文“界面与设计系统”的六条约定；改完跑 `node test/stability.test.cjs`，它会拦住字号回退、字符图标复活和页面漏引 theme.css/icons.js。
 6. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
 7. 完成后报告改动内容、检查方式和未验证的真实环境行为。
+
+## 修改原则
+

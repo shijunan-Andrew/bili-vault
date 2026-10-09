@@ -1908,7 +1908,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getDownloadSubtitles(message).then((subtitles) => sendResponse({ ok: true, subtitles })).catch((error) => sendResponse({ ok: false, message: error?.message || "读取字幕失败。" }));
     return true;
   }
-  if (message?.type === "bca-open-library") {
+  if (message?.type === "bca-locale") {
+    // 4.5：内容脚本跑在网页里，fetch 扩展资源需要 web_accessible_resources，
+    // 而 4.3 起我们不把任何扩展资源暴露给网页。所以由后台代读词典：
+    // service worker 读自己的资源不受同源限制。
+    const locale = String(message.locale || "");
+    if (!/^(zh-TW|en)$/.test(locale)) { sendResponse({ ok: false }); return true; }
+    fetch(chrome.runtime.getURL(`locales/${locale}.json`))
+      .then((response) => (response.ok ? response.json() : null))
+      .then((dictionary) => sendResponse({ ok: Boolean(dictionary), dictionary }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }  if (message?.type === "bca-open-library") {
     // 4.3：由后台打开本地收藏库，这样 library.html 不必作为 web_accessible_resource
     // 暴露给任何网页（否则 B 站页面可以把它嵌进 iframe 做点击劫持）
     chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })

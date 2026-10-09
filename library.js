@@ -5,8 +5,8 @@ const DB_STORE = "settings";
 // 虽然已从 manifest 移除 web_accessible_resources，这里再做一层兜底，
 // 避免将来有人重新开放它时被点击劫持（在透明 iframe 上盖诱导按钮）。
 if (window.top !== window.self) {
-  document.body.textContent = "本地收藏库需要在独立标签页中打开，请不要把它嵌入其他页面。";
-  throw new Error("本地收藏库不允许被嵌入其他页面。");
+  document.body.textContent = BcaI18n.t("本地收藏库需要在独立标签页中打开，请不要把它嵌入其他页面。");
+  throw new Error(BcaI18n.t("本地收藏库不允许被嵌入其他页面。"));
 }
 
 const collectionList = document.getElementById("collectionList");
@@ -31,17 +31,13 @@ const scanProgress = document.getElementById("scanProgress");
 const videoPager = document.getElementById("videoPager");
 const viewGridButton = document.getElementById("viewGrid");
 const viewListButton = document.getElementById("viewList");
-const refreshVideoStatusButton = document.getElementById("refreshVideoStatus");
-const statusDialog = document.getElementById("statusDialog");
-const statusSummary = document.getElementById("statusSummary");
-const statusBatchSize = document.getElementById("statusBatchSize");
-const statusProgress = document.getElementById("statusProgress");
-const cancelStatusButton = document.getElementById("cancelStatus");
-const confirmStatusButton = document.getElementById("confirmStatus");
+
 const safetyNotice = document.getElementById("safetyNotice");
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
+const themeSelect = document.getElementById("themeSelect");
+const localeSelect = document.getElementById("localeSelect");
 const emptySearch = document.getElementById("emptySearch");
 const clearSearch = document.getElementById("clearSearch");
 const detailBackdrop = document.getElementById("detailBackdrop");
@@ -122,7 +118,7 @@ function openDb() {
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("无法读取已保存的目录设置。"));
+    request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取已保存的目录设置。")));
   });
 }
 
@@ -133,7 +129,7 @@ async function saveHandle(handle) {
       const tx = db.transaction(DB_STORE, "readwrite");
       tx.objectStore(DB_STORE).put(handle, "rootHandle");
       tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error || new Error("保存目录授权失败。"));
+      tx.onerror = () => reject(tx.error || new Error(BcaI18n.t("保存目录授权失败。")));
     });
   } finally { db.close(); }
 }
@@ -144,7 +140,7 @@ async function loadSavedHandle() {
     return await new Promise((resolve, reject) => {
       const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get("rootHandle");
       request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error || new Error("无法读取上次选择的目录。"));
+      request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取上次选择的目录。")));
     });
   } finally { db.close(); }
 }
@@ -155,7 +151,7 @@ async function readSavedSetting(key) {
     return await new Promise((resolve, reject) => {
       const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(key);
       request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error || new Error("无法读取本地目录设置。"));
+      request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取本地目录设置。")));
     });
   } finally { db.close(); }
 }
@@ -200,8 +196,9 @@ const STAT_FIELDS = {
   share: "转发人数"
 };
 
-// 详情卡片上的短标签，键顺序与 STAT_FIELDS 一致
-const STAT_LABELS = { view: "播放量", danmaku: "弹幕", like: "点赞", coin: "投币", favorite: "收藏", share: "转发" };
+// 详情卡片上短标签的键顺序，与 STAT_FIELDS 一致。
+// 文案本体写在 detailStatsHtml() 的 t("...") 里：key 必须是字面量，词条工具才扫得到。
+const STAT_LABEL_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
 
 // 老档案的简介里混着 B 站分享文案（“<简介>, 视频播放量 71953、弹幕量 82、…, 相关视频：…”）。
 // 展示前交给 archive-core.js 砍掉分享文案，顺便用它解析出的统计给老档案兜底；
@@ -345,7 +342,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
           cover
         });
       } catch (error) {
-        issues.push(`${collectionEntry.name}/${recordEntry.name}：${error.message || "读取失败"}`);
+        issues.push(`${collectionEntry.name}/${recordEntry.name}：${error.message || BcaI18n.t("读取失败")}`);
       }
     }
     videos.sort((a, b) => b.timestamp - a.timestamp);
@@ -467,7 +464,7 @@ function reorderCollection(sourceName, targetName, afterTarget) {
   collectionOrder = collections.map((collection) => collection.name);
   clearCollectionDragStyles();
   renderCollections();
-  chrome.storage.local.set({ collectionOrder }).then(() => showToast("收藏夹顺序已保存")).catch((error) => showToast(`保存排序失败：${error?.message || "插件存储不可用"}`));
+  chrome.storage.local.set({ collectionOrder }).then(() => showToast(BcaI18n.t("收藏夹顺序已保存"))).catch((error) => showToast(BcaI18n.t("保存排序失败：{message}", { message: error?.message || BcaI18n.t("插件存储不可用") })));
 }
 
 function applyCollectionOrder(items) {
@@ -489,7 +486,7 @@ async function restoreCollectionOrder() {
 function renderCollections() {
   const total = allVideos().length;
   collectionTotal.textContent = String(collections.length);
-  const rows = [{ name: "全部收藏", key: "*", count: total, glyph: "library" }, ...collections.map((item) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: "collection" }))];
+  const rows = [{ name: BcaI18n.t("全部收藏"), key: "*", count: total, glyph: "library" }, ...collections.map((item) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: "collection" }))];
   collectionList.replaceChildren(...rows.map((row) => {
     const wrapper = document.createElement("div");
     wrapper.className = "collection-row";
@@ -497,7 +494,7 @@ function renderCollections() {
     button.className = `collection-button${selectedCollection === row.key ? " active" : ""}`;
     button.type = "button";
     button.setAttribute("aria-current", selectedCollection === row.key ? "page" : "false");
-    button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${BcaIcons.svg(row.glyph)}</span><span class="collection-name"></span>${row.key === "*" ? "" : `<span class="collection-drag-handle" title="按住拖动调整顺序" aria-hidden="true">${BcaIcons.svg("grip")}</span>`}<span class="collection-count tnum">${row.count}</span>`;
+    button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${BcaIcons.svg(row.glyph)}</span><span class="collection-name"></span>${row.key === "*" ? "" : `<span class="collection-drag-handle" title="${escapeHtml(BcaI18n.t("按住拖动调整顺序"))}" aria-hidden="true">${BcaIcons.svg("grip")}</span>`}<span class="collection-count tnum">${row.count}</span>`;
     button.querySelector(".collection-name").textContent = row.name;
     button.addEventListener("click", () => {
       if (selectedCollection !== row.key) selectedVideoIds.clear();
@@ -515,8 +512,8 @@ function renderCollections() {
       deleteButton.className = "collection-delete";
       deleteButton.type = "button";
       deleteButton.innerHTML = BcaIcons.svg("close");
-      deleteButton.title = `删除收藏夹“${row.name}”`;
-      deleteButton.setAttribute("aria-label", `删除收藏夹 ${row.name}`);
+      deleteButton.title = BcaI18n.t("删除收藏夹“{name}”", { name: row.name });
+      deleteButton.setAttribute("aria-label", BcaI18n.t("删除收藏夹 {name}", { name: row.name }));
       deleteButton.addEventListener("click", (event) => {
         event.stopPropagation();
         askToDeleteCollection(collections.find((collection) => collection.name === row.name));
@@ -533,13 +530,21 @@ function selectedRecords() {
 
 function updateBatchControls() {
   const records = selectedRecords();
-  selectedCount.textContent = `已选 ${records.length} 个`;
+  selectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: records.length });
   const allVisibleSelected = visibleVideoIds.length > 0 && visibleVideoIds.every((id) => selectedVideoIds.has(id));
-  selectVisibleButton.textContent = allVisibleSelected ? "取消当前结果选择" : "全选当前结果";
+  selectVisibleButton.textContent = allVisibleSelected ? BcaI18n.t("取消当前结果选择") : BcaI18n.t("全选当前结果");
   selectVisibleButton.disabled = visibleVideoIds.length === 0;
   moveSelectedButton.disabled = records.length === 0;
   downloadSelectedButton.disabled = records.length === 0;
   deleteSelectedButton.disabled = records.length === 0;
+}
+
+// 「批量管理 / 完成」两段文案都写在 HTML 里（各自带 data-i18n），这里只切换显示哪一个，
+// 这样切语言时全局 apply() 能把它们一起翻掉，JS 里也不会再出现中文原文。
+function showBatchManageLabel() {
+  batchManageButton.querySelectorAll("[data-label]").forEach((label) => {
+    label.hidden = label.dataset.label !== (selectionMode ? "done" : "manage");
+  });
 }
 
 function setSelectionMode(enabled) {
@@ -548,7 +553,7 @@ function setSelectionMode(enabled) {
   batchToolbar.hidden = !selectionMode;
   batchManageButton.classList.toggle("button-primary", selectionMode);
   batchManageButton.classList.toggle("button-quiet", !selectionMode);
-  batchManageButton.textContent = selectionMode ? "完成" : "批量管理";
+  showBatchManageLabel();
   batchManageButton.setAttribute("aria-pressed", String(selectionMode));
   if (!selectionMode) { selectedVideoIds.clear(); lastSelectedVideoId = ""; }
   renderVideos();
@@ -585,23 +590,34 @@ function safeCover(cover) {
   const url = String(cover || "");
   // 4.3：封面地址只允许代码自己产生的 blob: URL 与内联图片，
   // 其它一律退回占位图。否则将来若把外部字符串直接塞进来就是一个 HTML 注入点。
-  if (!/^(?:blob:|data:image\/)/i.test(url)) return '<div class="cover-fallback" aria-label="没有封面"></div>';
+  if (!/^(?:blob:|data:image\/)/i.test(url)) return `<div class="cover-fallback" aria-label="${escapeHtml(BcaI18n.t("没有封面"))}"></div>`;
   return `<img src="${escapeHtml(url)}" alt="" loading="lazy">`;
 }
 
 function renderVideos() {
-  const collectionName = selectedCollection === "*" ? "全部收藏" : selectedCollection;
+  const collectionName = selectedCollection === "*" ? BcaI18n.t("全部收藏") : selectedCollection;
   currentCollection.textContent = collectionName;
   pageTitle.textContent = collectionName;
   const videos = selectedVideos();
   batchManageButton.disabled = videos.length === 0;
   addVideoButton.disabled = selectedCollection === "*";
-  addVideoButton.title = selectedCollection === "*" ? "请先选择一个收藏夹" : `添加视频到“${selectedCollection}”`;
+  addVideoButton.title = selectedCollection === "*" ? BcaI18n.t("请先选择一个收藏夹") : BcaI18n.t("添加视频到“{name}”", { name: selectedCollection });
   videoFilter = videoFilterSelect.value;
   const query = searchInput.value.trim().toLocaleLowerCase();
   const matching = videos.filter((video) => (videoFilter === "all" || (videoFilter === "invalid" && video.isInvalid) || (videoFilter === "downloaded" && video.downloaded)) && (!query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query)));
   const sort = sortSelect.value;
-  matching.sort((a, b) => sort === "title" ? a.title.localeCompare(b.title, "zh-CN") : sort === "oldest" ? a.timestamp - b.timestamp : b.timestamp - a.timestamp);
+  // 4.5：按播放量从高到低。没有播放量数据的排在最后（用 -1 而不是 0，
+  // 否则“0 播放”会和“没有数据”混在一起），同档再按收藏时间倒序。
+  const viewsOf = (video) => {
+    const value = Number(video.stats?.view);
+    return Number.isFinite(value) && value > 0 ? value : -1;
+  };
+  matching.sort((a, b) => {
+    if (sort === "title") return a.title.localeCompare(b.title, "zh-CN");
+    if (sort === "oldest") return a.timestamp - b.timestamp;
+    if (sort === "views") return viewsOf(b) - viewsOf(a) || b.timestamp - a.timestamp;
+    return b.timestamp - a.timestamp;
+  });
 
   // 分页：网格里只渲染当前页，visibleVideoIds 也跟着当前页走
   pageCount = Math.max(1, Math.ceil(matching.length / pageSize));
@@ -612,10 +628,14 @@ function renderVideos() {
   visibleVideoIds = pageVideos.map((video) => video.id);
 
   const countLabel = videoFilter !== "all"
-    ? `${matching.length} / ${videos.filter((video) => videoFilter === "invalid" ? video.isInvalid : video.downloaded).length} 个${videoFilter === "invalid" ? "失效" : "已下载"}视频`
-    : query ? `${matching.length} / ${videos.length} 个视频` : `${videos.length} 个视频`;
-  const pageLabel = pageCount > 1 ? ` · 第 ${currentPage}/${pageCount} 页` : "";
-  resultSummary.textContent = (selectedCollection === "*" ? `${countLabel}，来自 ${collections.length} 个收藏夹` : countLabel) + pageLabel;
+    ? BcaI18n.t("{shown} / {total} 个{kind}视频", {
+        shown: matching.length,
+        total: videos.filter((video) => videoFilter === "invalid" ? video.isInvalid : video.downloaded).length,
+        kind: videoFilter === "invalid" ? BcaI18n.t("失效") : BcaI18n.t("已下载")
+      })
+    : query ? BcaI18n.t("{shown} / {total} 个视频", { shown: matching.length, total: videos.length }) : BcaI18n.t("{count} 个视频", { count: videos.length });
+  const pageLabel = pageCount > 1 ? ` · ${BcaI18n.t("第 {page}/{pages} 页", { page: currentPage, pages: pageCount })}` : "";
+  resultSummary.textContent = (selectedCollection === "*" ? BcaI18n.t("{count}，来自 {collections} 个收藏夹", { count: countLabel, collections: collections.length }) : countLabel) + pageLabel;
   videoGrid.replaceChildren(...pageVideos.map((video) => {
     const card = document.createElement("article");
     card.className = "video-card";
@@ -625,15 +645,22 @@ function renderVideos() {
     card.classList.toggle("selected", selectedVideoIds.has(video.id));
     card.tabIndex = 0;
     card.setAttribute("role", "button");
-    card.setAttribute("aria-label", selectionMode ? `选择视频：${video.title}` : `查看视频：${video.title}`);
-    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">已失效</span><span class="downloaded-badge"${video.downloaded ? "" : " hidden"}>${BcaIcons.svg("check")}已下载</span><span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="选择视频"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date tnum"></span></div></div>`;
+    card.setAttribute("aria-label", selectionMode ? BcaI18n.t("选择视频：{title}", { title: video.title }) : BcaI18n.t("查看视频：{title}", { title: video.title }));
+    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">${escapeHtml(BcaI18n.t("已失效"))}</span><span class="downloaded-badge"${video.downloaded ? "" : " hidden"}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("已下载"))}</span><span class="cover-badge"></span><span class="cover-views tnum" hidden></span><input class="card-select" type="checkbox" aria-label="${escapeHtml(BcaI18n.t("选择视频"))}"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date tnum"></span></div></div>`;
     const checkbox = card.querySelector(".card-select");
     checkbox.checked = selectedVideoIds.has(video.id);
     checkbox.addEventListener("click", (event) => event.stopPropagation());
     checkbox.addEventListener("change", () => setVideoSelected(video.id, checkbox.checked));
     card.querySelector(".cover-badge").textContent = video.collection;
+    // 4.5：播放量放在封面右下角，没有数据的记录不显示
+    const viewsBadge = card.querySelector(".cover-views");
+    const viewsText = formatCount(video.stats?.view);
+    if (viewsText) {
+      viewsBadge.textContent = `${viewsText} ${BcaI18n.t("播放")}`;
+      viewsBadge.hidden = false;
+    }
     card.querySelector(".card-title").innerHTML = highlightMatches(video.title, query);
-    card.querySelector(".card-up").textContent = video.upName || video.bvid || "本地收藏视频";
+    card.querySelector(".card-up").textContent = video.upName || video.bvid || BcaI18n.t("本地收藏视频");
     card.querySelector(".card-date").textContent = compactDate(video.favoriteAt);
     card.addEventListener("click", (event) => {
       if (!selectionMode) { openDetail(video); return; }
@@ -651,8 +678,8 @@ function renderVideos() {
   }));
   emptySearch.hidden = matching.length > 0 || videos.length === 0;
   if (!matching.length && videos.length) {
-    emptySearch.querySelector("h2").textContent = videoFilter === "invalid" ? "没有已失效视频" : videoFilter === "downloaded" ? "没有已下载视频" : "没有找到相关视频";
-    emptySearch.querySelector("p").textContent = videoFilter === "invalid" ? "当前收藏范围内没有检测到失效视频。" : videoFilter === "downloaded" ? "当前收藏范围内没有已下载的视频。" : "试试其他标题、UP 主名称或 BV 号。";
+    emptySearch.querySelector("h2").textContent = videoFilter === "invalid" ? BcaI18n.t("没有已失效视频") : videoFilter === "downloaded" ? BcaI18n.t("没有已下载视频") : BcaI18n.t("没有找到相关视频");
+    emptySearch.querySelector("p").textContent = videoFilter === "invalid" ? BcaI18n.t("当前收藏范围内没有检测到失效视频。") : videoFilter === "downloaded" ? BcaI18n.t("当前收藏范围内没有已下载的视频。") : BcaI18n.t("试试其他标题、UP 主名称或 BV 号。");
     clearSearch.hidden = videoFilter !== "all" && !query;
   } else {
     clearSearch.hidden = false;
@@ -660,13 +687,12 @@ function renderVideos() {
   videoGrid.hidden = videos.length === 0;
   if (!videos.length) {
     videoGrid.hidden = false;
-    const emptyTitle = selectedCollection === "*" ? "本地收藏库里还没有视频" : "这个收藏夹里还没有视频";
-    const emptyCopy = selectedCollection === "*" ? "选择一个收藏夹，或新建收藏夹并添加视频。" : "点击右上角“添加视频”，输入 B 站网址、BV 号或 av 号。";
-    videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">${BcaIcons.svg("collection")}</div><h2>${emptyTitle}</h2><p>${emptyCopy}</p></div>`;
+    const emptyTitle = selectedCollection === "*" ? BcaI18n.t("本地收藏库里还没有视频") : BcaI18n.t("这个收藏夹里还没有视频");
+    const emptyCopy = selectedCollection === "*" ? BcaI18n.t("选择一个收藏夹，或新建收藏夹并添加视频。") : BcaI18n.t("点击右上角“添加视频”，输入 B 站网址、BV 号或 av 号。");
+    videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">${BcaIcons.svg("collection")}</div><h2>${escapeHtml(emptyTitle)}</h2><p>${escapeHtml(emptyCopy)}</p></div>`;
   }
   renderPager(matching.length);
   updateBatchControls();
-  updateStatusButton();
 }
 
 /* ---------------- 4.1：分页与视图切换 ---------------- */
@@ -686,7 +712,7 @@ function renderPager(total) {
     if (!disabled) button.addEventListener("click", () => goToPage(target));
     return button;
   };
-  nodes.push(step("上一页", currentPage - 1, currentPage <= 1));
+  nodes.push(step(BcaI18n.t("上一页"), currentPage - 1, currentPage <= 1));
 
   for (const entry of pageSequence(currentPage, pageCount)) {
     if (entry === "gap") {
@@ -700,17 +726,17 @@ function renderPager(total) {
     button.type = "button";
     button.className = `pager-page tnum${entry === currentPage ? " current" : ""}`;
     button.textContent = String(entry);
-    button.setAttribute("aria-label", `第 ${entry} 页`);
+    button.setAttribute("aria-label", BcaI18n.t("第 {page} 页", { page: entry }));
     if (entry === currentPage) button.setAttribute("aria-current", "page");
     button.addEventListener("click", () => goToPage(entry));
     nodes.push(button);
   }
 
-  nodes.push(step("下一页", currentPage + 1, currentPage >= pageCount));
+  nodes.push(step(BcaI18n.t("下一页"), currentPage + 1, currentPage >= pageCount));
 
   const info = document.createElement("span");
   info.className = "pager-info tnum";
-  info.textContent = `共 ${pageCount} 页 / ${total} 个，跳至`;
+  info.textContent = BcaI18n.t("共 {pages} 页 / {total} 个，跳至", { pages: pageCount, total });
 
   const jump = document.createElement("input");
   jump.type = "number";
@@ -718,7 +744,7 @@ function renderPager(total) {
   jump.min = "1";
   jump.max = String(pageCount);
   jump.value = String(currentPage);
-  jump.setAttribute("aria-label", "跳转到指定页");
+  jump.setAttribute("aria-label", BcaI18n.t("跳转到指定页"));
   const applyJump = () => {
     const wanted = Number(jump.value);
     if (!Number.isFinite(wanted) || wanted < 1) { jump.value = String(currentPage); return; }
@@ -733,14 +759,14 @@ function renderPager(total) {
 
   const pageSuffix = document.createElement("span");
   pageSuffix.className = "pager-info";
-  pageSuffix.textContent = "页";
+  pageSuffix.textContent = BcaI18n.t("页");
 
   const sizeLabel = document.createElement("label");
   sizeLabel.className = "pager-size";
-  sizeLabel.append(document.createTextNode("每页"));
+  sizeLabel.append(document.createTextNode(BcaI18n.t("每页")));
   const sizeSelect = document.createElement("select");
-  sizeSelect.setAttribute("aria-label", "每页显示数量");
-  for (const value of PAGE_SIZES) sizeSelect.add(new Option(`${value} 个`, String(value)));
+  sizeSelect.setAttribute("aria-label", BcaI18n.t("每页显示数量"));
+  for (const value of PAGE_SIZES) sizeSelect.add(new Option(BcaI18n.t("{count} 个", { count: value }), String(value)));
   sizeSelect.value = String(pageSize);
   sizeSelect.addEventListener("change", () => {
     pageSize = Number(sizeSelect.value) || PAGE_SIZES[0];
@@ -804,64 +830,50 @@ async function restoreViewSettings() {
 
 /* ---------------- 4.4：更新视频状态 ---------------- */
 
-// 只有拿到本地目录、且当前范围里有带 BV/av 号的记录时才可用
-function updateStatusButton() {
-  if (!refreshVideoStatusButton) return;
-  const count = rootHandle ? statusCandidates().length : 0;
-  refreshVideoStatusButton.disabled = count === 0 || statusRefreshInProgress;
-  refreshVideoStatusButton.title = count
-    ? `重新解析并更新 ${count} 条记录的播放量、点赞、UP 主粉丝数等数值`
-    : "当前范围没有可更新的记录";
+// 4.5：「更新视频状态」从页面标题栏移到视频详情里，一次只刷新当前这一条，
+// 避免批量刷一堆接口触发风控。statusRefreshInProgress 期间禁用按钮。
+function refreshTargetOf(video) {
+  return video?.bvid || video?.aid ? { collection: video.collection, directory: video.directory } : null;
 }
 
-function statusCandidates() {
-  return selectedVideos().filter((video) => video.bvid || video.aid);
-}
-
-function openStatusDialog() {
-  if (!rootHandle) { showToast("请先打开本地收藏根目录。"); return; }
-  const candidates = statusCandidates();
-  if (!candidates.length) { showToast("当前范围没有可更新的记录。"); return; }
-  const scope = selectedCollection === "*" ? "全部收藏" : selectedCollection;
-  statusSummary.textContent = `「${scope}」里有 ${candidates.length} 条记录可以更新状态。`;
-  statusProgress.textContent = "";
-  confirmStatusButton.disabled = false;
-  cancelStatusButton.disabled = false;
-  confirmStatusButton.textContent = "开始更新";
-  statusDialog.showModal();
-}
-
-async function runStatusRefresh() {
+async function refreshOneVideoStatus(video) {
   if (statusRefreshInProgress) return;
-  const candidates = statusCandidates();
-  if (!candidates.length) { showToast("当前范围没有可更新的记录。"); return; }
-  const limit = Number(statusBatchSize.value) || 20;
-  const targets = candidates.map((video) => ({ collection: video.collection, directory: video.directory }));
-  statusRefreshInProgress = true;
-  updateStatusButton();
-  confirmStatusButton.disabled = true;
-  cancelStatusButton.disabled = true;
-  confirmStatusButton.textContent = "正在更新…";
-  statusProgress.textContent = "正在请求 B 站接口，请勿关闭页面…";
+  const target = refreshTargetOf(video);
+  if (!target) { showToast(BcaI18n.t("这条记录没有 BV/av 号，无法更新状态。")); return; }
+  const button = detailContent.querySelector(".refresh-status");
+  const status = detailContent.querySelector(".detail-refresh-status");
+  const setBusy = (busy) => {
+    statusRefreshInProgress = busy;
+    if (button) button.disabled = busy;
+    if (status) status.hidden = !busy && !status.textContent;
+  };
+  setBusy(true);
+  if (status) { status.hidden = false; status.textContent = BcaI18n.t("正在请求 B 站接口…"); }
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("没有获得本地目录写入权限。");
-    const result = await chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets, limit } });
-    if (!result?.ok) throw new Error(result?.message || "更新失败。");
-    const remaining = Number(result.remaining) || 0;
-    statusProgress.textContent = `${result.message}${remaining ? `还有 ${remaining} 条没处理，可以再点一次继续。` : "当前范围已处理完。"}${result.reportPath ? ` 失败明细：${result.reportPath}` : ""}`;
-    await displayRoot(rootHandle, selectedCollection, "已刷新");
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    const result = await chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [target], limit: 1 } });
+    if (!result?.ok) throw new Error(result?.message || BcaI18n.t("更新失败。"));
+    const detail = result.markedInvalid
+      ? BcaI18n.t("解析发现这条视频已失效：已保留原有资料，只标记为已失效。")
+      : result.updated
+        ? BcaI18n.t("已更新播放量、点赞、粉丝数等数值。")
+        : BcaI18n.t("接口返回的数据与本地一致，没有需要改写的内容。");
+    if (status) { status.hidden = false; status.textContent = detail; }
+    await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已刷新"));
+    const refreshed = allVideos().find((item) => item.id === video.id);
+    if (refreshed) {
+      openDetail(refreshed);
+      const again = detailContent.querySelector(".detail-refresh-status");
+      if (again) { again.hidden = false; again.textContent = detail; }
+    }
   } catch (error) {
-    statusProgress.textContent = `更新失败：${error?.message || "未知错误"}`;
+    if (status) { status.hidden = false; status.textContent = BcaI18n.t("更新失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }); }
   } finally {
     statusRefreshInProgress = false;
-    confirmStatusButton.disabled = false;
-    cancelStatusButton.disabled = false;
-    confirmStatusButton.textContent = "再更新一批";
-    updateStatusButton();
+    if (button) button.disabled = false;
   }
 }
-
 /* ---------------- 使用须知（4.4.1：可折叠，但不允许永久关闭） ---------------- */
 // 以前用 safetyNoticeDismissed 记住“不再显示”，4.4.1 起必须常驻，
 // 因此这里只清掉可能残留的旧标记，不再读写它。
@@ -893,25 +905,55 @@ function compactDate(value) {
 }
 
 // extra 用来在值后面追加徽标等附加内容（例如 UP 主那一行的粉丝数）
-function addField(rows, label, value, extra = "") { if (value && value !== "未知") rows.push(`<dt>${label}</dt><dd>${escapeHtml(value)}${extra}</dd>`); }
+// label 由调用方翻译好再传进来（key 必须是字面量，所以不在这个函数里翻）
+function addField(rows, label, value, extra = "") { if (value && value !== "未知") rows.push(`<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}${extra}</dd>`); }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
 
-// 4.2：超过 1 万显示“7.4 万”，超过 1 亿显示“1.2 亿”，其余原样（“1.2万”这类已带单位的也原样）
+// 带 data-i18n 的静态文案元素一旦被 JS 写上动态内容（目录名、按当时语言拼好的句子），
+// 必须先摘掉标记：否则切语言时 apply() 会把它们覆盖回占位文案。
+function setDynamicText(element, text) {
+  if (!element) return;
+  element.removeAttribute("data-i18n");
+  element.textContent = text;
+}
+
+// 数字单位是**语言相关**的：中文用 万 / 亿，英文用 K / M / B。
+// 不能拿 t("{value} 万") 当模板硬拼——中文先除以 1 万得到 7.4，
+// 英文那边再补成 "{value}0K" 就成了 7.40K，比真实值小十倍。
+// 所以按语言各自换算。
 function formatCount(value) {
   const text = String(value ?? "").trim();
   const number = Number(text.replace(/[,\s]/g, ""));
   if (!text || !Number.isFinite(number)) return text;
-  if (number >= 100000000) return `${(number / 100000000).toFixed(1)} 亿`;
-  if (number >= 10000) return `${(number / 10000).toFixed(1)} 万`;
+  if (BcaI18n.locale() === "en") {
+    // 阈值取「四舍五入后会进位到 1000.0」的位置，否则 999999999 会显示成 1000.0M
+    if (number >= 999950000) return `${(number / 1e9).toFixed(1)}B`;
+    if (number >= 999950) return `${(number / 1e6).toFixed(1)}M`;
+    if (number >= 1000) return `${(number / 1e3).toFixed(1)}K`;
+    return text;
+  }
+  const wan = BcaI18n.locale() === "zh-TW" ? "萬" : "万";
+  const yi = BcaI18n.locale() === "zh-TW" ? "億" : "亿";
+  if (number >= 99995000) return `${(number / 100000000).toFixed(1)} ${yi}`;
+  if (number >= 10000) return `${(number / 10000).toFixed(1)} ${wan}`;
   return text;
 }
 
 // 互动数据卡片行：一个值都没有（老档案还没写【互动数据】）时整块不渲染，避免一排“未知”
 function detailStatsHtml(stats) {
-  const cards = Object.entries(STAT_LABELS)
-    .map(([key, label]) => ({ label, value: formatCount(stats?.[key]) }))
+  // 每次渲染现翻一次，切语言后重画详情就会跟着变
+  const labels = {
+    view: BcaI18n.t("播放量"),
+    danmaku: BcaI18n.t("弹幕"),
+    like: BcaI18n.t("点赞"),
+    coin: BcaI18n.t("投币"),
+    favorite: BcaI18n.t("收藏"),
+    share: BcaI18n.t("转发")
+  };
+  const cards = STAT_LABEL_KEYS
+    .map((key) => ({ label: labels[key], value: formatCount(stats?.[key]) }))
     .filter((item) => item.value)
-    .map((item) => `<div class="detail-stat"><span class="detail-stat-value tnum">${escapeHtml(item.value)}</span><span class="detail-stat-label">${item.label}</span></div>`);
+    .map((item) => `<div class="detail-stat"><span class="detail-stat-value tnum">${escapeHtml(item.value)}</span><span class="detail-stat-label">${escapeHtml(item.label)}</span></div>`);
   return cards.length ? `<div class="detail-stats">${cards.join("")}</div>` : "";
 }
 
@@ -954,9 +996,9 @@ function selectAllVisible() {
 async function copyToClipboard(text, successMessage) {
   try {
     await navigator.clipboard.writeText(text);
-    showToast(successMessage || "已复制。");
+    showToast(successMessage || BcaI18n.t("已复制。"));
   } catch (error) {
-    showToast(`复制失败：${error?.message || "浏览器拒绝了剪贴板访问"}`);
+    showToast(BcaI18n.t("复制失败：{message}", { message: error?.message || BcaI18n.t("浏览器拒绝了剪贴板访问") }));
   }
 }
 
@@ -965,9 +1007,9 @@ function copyFieldButton(value, label) {
   button.type = "button";
   button.className = "detail-copy-field";
   button.title = label;
-  button.setAttribute("aria-label", `${label}：${value}`);
+  button.setAttribute("aria-label", BcaI18n.t("{label}：{value}", { label, value }));
   button.innerHTML = `${BcaIcons.svg("copy")}${escapeHtml(label)}`;
-  button.addEventListener("click", () => copyToClipboard(value, `${label}成功`));
+  button.addEventListener("click", () => copyToClipboard(value, BcaI18n.t("{label}成功", { label })));
   return button;
 }
 
@@ -999,12 +1041,12 @@ async function updateStorageUsage(handle) {
   if (!handle) { storageUsage.textContent = "—"; return; }
   if (storageUsageRunning) { storageUsageQueuedRoot = handle; return; }
   storageUsageRunning = true;
-  storageUsage.textContent = "正在计算…";
+  storageUsage.textContent = BcaI18n.t("正在计算…");
   try {
     const total = await directorySize(handle);
     if (rootHandle === handle) storageUsage.textContent = formatBytes(total);
   } catch (_) {
-    if (rootHandle === handle) storageUsage.textContent = "统计失败";
+    if (rootHandle === handle) storageUsage.textContent = BcaI18n.t("统计失败");
   } finally {
     storageUsageRunning = false;
     const queued = storageUsageQueuedRoot;
@@ -1018,11 +1060,11 @@ async function showDownloadSize(video) {
   const target = detailContent.querySelector(".detail-size");
   if (!target || !video.hasDownloadFiles || !video.downloadDirectoryHandle) return;
   target.hidden = false;
-  target.textContent = "正在统计本地文件…";
+  target.textContent = BcaI18n.t("正在统计本地文件…");
   try {
     const total = await directorySize(video.downloadDirectoryHandle);
     if (detailContent.dataset.videoId !== video.id) return;
-    target.innerHTML = `${BcaIcons.svg("drive")}本地已下载 <span class="tnum">${formatBytes(total)}</span>`;
+    target.innerHTML = `${BcaIcons.svg("drive")}${escapeHtml(BcaI18n.t("本地已下载"))} <span class="tnum">${formatBytes(total)}</span>`;
   } catch (_) {
     target.hidden = true;
   }
@@ -1035,7 +1077,7 @@ function openDownloadInterface(videos) {
     url: video.url || "", collection: video.collection || ""
   }));
   const tab = window.open("about:blank", "_blank");
-  if (!tab) { showToast("浏览器拦截了下载页面，请允许本地收藏库打开新标签页。"); return; }
+  if (!tab) { showToast(BcaI18n.t("浏览器拦截了下载页面，请允许本地收藏库打开新标签页。")); return; }
   const queueId = crypto.randomUUID();
   const storageKey = `bcaDownloadQueue:${queueId}`;
   chrome.storage.session.set({ [storageKey]: items }).then(() => {
@@ -1045,33 +1087,33 @@ function openDownloadInterface(videos) {
     tab.location.href = target.href;
   }).catch((error) => {
     try { tab.close(); } catch (_) {}
-    showToast(`无法传递下载队列：${error?.message || "插件临时存储不可用"}`);
+    showToast(BcaI18n.t("无法传递下载队列：{message}", { message: error?.message || BcaI18n.t("插件临时存储不可用") }));
   });
 }
 
 function openDetail(video) {
   detailPanel.classList.toggle("invalid-video", video.isInvalid);
   const rows = [];
-  addField(rows, "收藏时间", video.favoriteAt);
-  addField(rows, "信息保存于", video.savedAt);
+  addField(rows, BcaI18n.t("收藏时间"), video.favoriteAt);
+  addField(rows, BcaI18n.t("信息保存于"), video.savedAt);
   // 粉丝数按原值显示（例如“粉丝 12345”），不套用统计卡片的万/亿缩写
-  addField(rows, "UP 主", video.upName, video.upFans ? `<span class="detail-up-fans">粉丝 <span class="tnum">${escapeHtml(video.upFans)}</span></span>` : "");
-  addField(rows, "UP 主 UID", video.upMid);
-  if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>UP 主主页</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">打开 UP 主主页 ${BcaIcons.svg("external")}</a></dd>`);
-  addField(rows, "分区", video.category);
-  addField(rows, "视频时长", video.duration);
-  addField(rows, "发布时间", video.publishDate);
-  addField(rows, "BV 号", video.bvid);
-  addField(rows, "av 号", video.aid);
-  addField(rows, "归档目录", video.directory);
+  addField(rows, BcaI18n.t("UP 主"), video.upName, video.upFans ? `<span class="detail-up-fans">${escapeHtml(BcaI18n.t("粉丝"))} <span class="tnum">${escapeHtml(video.upFans)}</span></span>` : "");
+  addField(rows, BcaI18n.t("UP 主 UID"), video.upMid);
+  if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>${escapeHtml(BcaI18n.t("UP 主主页"))}</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">${escapeHtml(BcaI18n.t("打开 UP 主主页"))} ${BcaIcons.svg("external")}</a></dd>`);
+  addField(rows, BcaI18n.t("分区"), video.category);
+  addField(rows, BcaI18n.t("视频时长"), video.duration);
+  addField(rows, BcaI18n.t("发布时间"), video.publishDate);
+  addField(rows, BcaI18n.t("BV 号"), video.bvid);
+  addField(rows, BcaI18n.t("av 号"), video.aid);
+  addField(rows, BcaI18n.t("归档目录"), video.directory);
   // 注意：空标签占位符不能再用 .detail-description —— 它和真正的简介元素同名时，
   // 下面的 querySelector(".detail-description") 会取到占位符，把简介写进“标签”里。
   const tags = video.tags.length
     ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>`
-    : `<p class="detail-empty">${BcaIcons.svg("tag")}这个归档没有记录标签</p>`;
+    : `<p class="detail-empty">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("这个归档没有记录标签"))}</p>`;
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}在 B 站打开视频</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}本地视频</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}打开目录</button></div><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}复制视频目录路径</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}本地收藏管理</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}移动或复制</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section>${detailStatsHtml(video.stats)}<h3 class="detail-section-title">${BcaIcons.svg("file")}视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}标签</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}视频简介</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>展开全部简介</button>`;
-  detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}${escapeHtml(BcaI18n.t("下载视频"))}</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频状态"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span><p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
+  detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · ${BcaI18n.t("已失效")}` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
 
@@ -1080,17 +1122,17 @@ function openDetail(video) {
   bvidField.replaceChildren();
   const bvidLabel = document.createElement("span");
   bvidLabel.className = "tnum";
-  bvidLabel.textContent = video.bvid ? `BV号 ${video.bvid}` : "本地归档";
+  bvidLabel.textContent = video.bvid ? BcaI18n.t("BV号 {bvid}", { bvid: video.bvid }) : BcaI18n.t("本地归档");
   bvidField.append(bvidLabel);
-  if (video.bvid) bvidField.append(copyFieldButton(video.bvid, "复制 BV 号"));
-  if (video.url) bvidField.append(copyFieldButton(video.url, "复制视频链接"));
+  if (video.bvid) bvidField.append(copyFieldButton(video.bvid, BcaI18n.t("复制 BV 号")));
+  if (video.url) bvidField.append(copyFieldButton(video.url, BcaI18n.t("复制视频链接")));
 
   const description = detailContent.querySelector(".detail-description");
   if (video.description) {
     description.textContent = video.description;
   } else {
     description.className = "detail-empty";
-    description.innerHTML = `${BcaIcons.svg("info")}这个归档没有记录简介`;
+    description.innerHTML = `${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("这个归档没有记录简介"))}`;
   }
   const descriptionToggle = detailContent.querySelector(".detail-description-toggle");
   if ((video.description || "").length > 160) {
@@ -1098,7 +1140,7 @@ function openDetail(video) {
     descriptionToggle.hidden = false;
     descriptionToggle.addEventListener("click", () => {
       const clamped = description.classList.toggle("clamped");
-      descriptionToggle.textContent = clamped ? "展开全部简介" : "收起简介";
+      descriptionToggle.textContent = clamped ? BcaI18n.t("展开全部简介") : BcaI18n.t("收起简介");
     });
   }
 
@@ -1106,6 +1148,7 @@ function openDetail(video) {
   if (link) link.href = video.url;
   const moveButton = detailContent.querySelector(".move-local");
   moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
+  detailContent.querySelector(".refresh-status").addEventListener("click", () => refreshOneVideoStatus(video));
   detailContent.querySelector(".download-local").addEventListener("click", () => openDownloadInterface([video]));
   detailContent.querySelector(".open-download-directory").addEventListener("click", () => openDownloadDirectory(video));
   detailContent.querySelector(".copy-download-path").addEventListener("click", () => copyDownloadPath(video));
@@ -1131,11 +1174,11 @@ function nativeHostRequest(message) {
       chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, (response) => {
         const runtimeError = chrome.runtime.lastError;
         if (runtimeError) {
-          finish(() => reject(new Error(runtimeError.message || "Chrome 无法启动 Windows 原生目录助手。")));
+          finish(() => reject(new Error(runtimeError.message ? BcaI18n.t(runtimeError.message) : BcaI18n.t("Chrome 无法启动 Windows 原生目录助手。"))));
           return;
         }
-        if (!response) { finish(() => reject(new Error("Windows 原生目录助手没有返回结果。"))); return; }
-        if (!response.ok) { finish(() => reject(new Error(response.message || "Windows 原生目录助手未能完成请求。"))); return; }
+        if (!response) { finish(() => reject(new Error(BcaI18n.t("Windows 原生目录助手没有返回结果。")))); return; }
+        if (!response.ok) { finish(() => reject(new Error(response.message ? BcaI18n.t(response.message) : BcaI18n.t("Windows 原生目录助手未能完成请求。")))); return; }
         finish(() => resolve(response));
       });
     } catch (error) {
@@ -1178,39 +1221,39 @@ async function resolveDownloadPath(video) {
 async function openDownloadDirectory(video) {
   if (!video.hasDownloadFiles || !video.downloadDirectoryName) return;
   const { collection, directory } = downloadPathParts(video);
-  setDownloadPathNote("正在连接 Windows 原生目录助手…");
+  setDownloadPathNote(BcaI18n.t("正在连接 Windows 原生目录助手…"));
   try {
     const response = await nativeHostRequest({ action: "open-directory", collectionName: collection, directoryName: directory });
-    setDownloadPathNote(response.targetPath ? `已打开：${response.targetPath}` : "");
-    showToast("已在文件资源管理器中打开视频目录。");
+    setDownloadPathNote(response.targetPath ? BcaI18n.t("已打开：{path}", { path: response.targetPath }) : "");
+    showToast(BcaI18n.t("已在文件资源管理器中打开视频目录。"));
   } catch (error) {
     const fallback = await resolveDownloadPath(video).catch(() => ({ path: "", source: "none" }));
-    const lines = [`无法打开本地视频目录：${error.message}`];
+    const lines = [BcaI18n.t("无法打开本地视频目录：{message}", { message: error.message })];
     if (fallback.path) {
       lines.push(fallback.source === "host"
-        ? `视频目录：${fallback.path}`
-        : `视频目录（相对下载根目录）：${BcaArchiveCore.joinDownloadPath("下载根目录", collection, directory)}`);
+        ? BcaI18n.t("视频目录：{path}", { path: fallback.path })
+        : BcaI18n.t("视频目录（相对下载根目录）：{path}", { path: BcaArchiveCore.joinDownloadPath(BcaI18n.t("下载根目录"), collection, directory) }));
     }
-    lines.push("若尚未安装原生助手：运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。");
-    lines.push("可以点击上面的“复制视频目录路径”手动在资源管理器地址栏粘贴打开。");
+    lines.push(BcaI18n.t("若尚未安装原生助手：运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。"));
+    lines.push(BcaI18n.t("可以点击上面的“复制视频目录路径”手动在资源管理器地址栏粘贴打开。"));
     setDownloadPathNote(lines.join("\n"), true);
-    showToast("无法打开本地视频目录，详情见视频详情页。");
+    showToast(BcaI18n.t("无法打开本地视频目录，详情见视频详情页。"));
   }
 }
 
 async function copyDownloadPath(video) {
-  if (!video.downloadDirectoryName) { showToast("这条记录没有可用的下载目录信息。"); return; }
+  if (!video.downloadDirectoryName) { showToast(BcaI18n.t("这条记录没有可用的下载目录信息。")); return; }
   const resolved = await resolveDownloadPath(video);
-  if (!resolved.path) { showToast("这条记录没有可用的下载目录信息。"); return; }
+  if (!resolved.path) { showToast(BcaI18n.t("这条记录没有可用的下载目录信息。")); return; }
   try {
     await navigator.clipboard.writeText(resolved.path);
     setDownloadPathNote(resolved.source === "host"
-      ? `已复制完整路径：${resolved.path}`
-      : `已复制相对路径：${resolved.path}（完整路径 = 下载根目录\\${resolved.path}）`);
-    showToast("已复制视频目录路径。");
+      ? BcaI18n.t("已复制完整路径：{path}", { path: resolved.path })
+      : BcaI18n.t("已复制相对路径：{path}（完整路径 = 下载根目录\\{path}）", { path: resolved.path }));
+    showToast(BcaI18n.t("已复制视频目录路径。"));
   } catch (error) {
-    setDownloadPathNote(`复制失败，请手动记录：${resolved.path}`, true);
-    showToast(`复制路径失败：${error?.message || "浏览器拒绝了剪贴板访问"}`);
+    setDownloadPathNote(BcaI18n.t("复制失败，请手动记录：{path}", { path: resolved.path }), true);
+    showToast(BcaI18n.t("复制路径失败：{message}", { message: error?.message || BcaI18n.t("浏览器拒绝了剪贴板访问") }));
   }
 }
 
@@ -1226,9 +1269,9 @@ function closeDetail() {
 
 function askToDeleteVideo(video) {
   pendingDeleteAction = { type: "video", video };
-  confirmTitle.textContent = "删除本地归档？";
-  confirmMessage.textContent = `将删除本地目录“${video.collection}/${video.directory}”及其中的封面和视频信息。B 站账户里的收藏不会改变。`;
-  confirmDeleteButton.textContent = "删除本地文件";
+  confirmTitle.textContent = BcaI18n.t("删除本地归档？");
+  confirmMessage.textContent = BcaI18n.t("将删除本地目录“{path}”及其中的封面和视频信息。B 站账户里的收藏不会改变。", { path: `${video.collection}/${video.directory}` });
+  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件");
   deleteDownloadsOption.hidden = !video.hasDownloadFiles;
   deleteAssociatedDownloads.checked = false;
   confirmBackdrop.hidden = false;
@@ -1238,9 +1281,9 @@ function askToDeleteVideo(video) {
 function askToDeleteCollection(collection) {
   if (!collection) return;
   pendingDeleteAction = { type: "collection", collection };
-  confirmTitle.textContent = "删除整个本地收藏夹？";
-  confirmMessage.textContent = `将永久删除本地收藏夹“${collection.name}”及其全部文件（当前识别到 ${collection.videos.length} 个视频）。此操作只影响本地归档，不会更改 B 站账户中的收藏。`;
-  confirmDeleteButton.textContent = "删除收藏夹";
+  confirmTitle.textContent = BcaI18n.t("删除整个本地收藏夹？");
+  confirmMessage.textContent = BcaI18n.t("将永久删除本地收藏夹“{name}”及其全部文件（当前识别到 {count} 个视频）。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { name: collection.name, count: collection.videos.length });
+  confirmDeleteButton.textContent = BcaI18n.t("删除收藏夹");
   deleteDownloadsOption.hidden = !collection.videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
   confirmBackdrop.hidden = false;
@@ -1250,9 +1293,9 @@ function askToDeleteCollection(collection) {
 function askToDeleteBatch(videos) {
   if (!videos.length) return;
   pendingDeleteAction = { type: "batch", videos };
-  confirmTitle.textContent = "删除选中的本地归档？";
-  confirmMessage.textContent = `将永久删除选中的 ${videos.length} 个视频目录及其中的封面和视频信息。此操作只影响本地文件，不会更改 B 站账户中的收藏。`;
-  confirmDeleteButton.textContent = `删除 ${videos.length} 个视频`;
+  confirmTitle.textContent = BcaI18n.t("删除选中的本地归档？");
+  confirmMessage.textContent = BcaI18n.t("将永久删除选中的 {count} 个视频目录及其中的封面和视频信息。此操作只影响本地文件，不会更改 B 站账户中的收藏。", { count: videos.length });
+  confirmDeleteButton.textContent = BcaI18n.t("删除 {count} 个视频", { count: videos.length });
   deleteDownloadsOption.hidden = !videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
   confirmBackdrop.hidden = false;
@@ -1265,8 +1308,8 @@ function closeDeleteConfirmation() {
   deleteDownloadsOption.hidden = true;
   deleteAssociatedDownloads.checked = false;
   pendingDeleteAction = null;
-  confirmTitle.textContent = "删除本地归档？";
-  confirmDeleteButton.textContent = "删除本地文件";
+  confirmTitle.textContent = BcaI18n.t("删除本地归档？");
+  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件");
 }
 
 async function copyDirectoryContents(source, target) {
@@ -1351,7 +1394,7 @@ async function getWritableDownloadParent() {
   const isCustom = mode === "custom" || (!mode && Boolean(savedCustom));
   let parent;
   if (isCustom) {
-    if (!savedCustom) throw new Error("自选下载目录设置已丢失，请先在下载页重新选择目录。");
+    if (!savedCustom) throw new Error(BcaI18n.t("自选下载目录设置已丢失，请先在下载页重新选择目录。"));
     parent = savedCustom;
   } else {
     try { parent = await rootHandle.getDirectoryHandle("000视频下载"); }
@@ -1359,7 +1402,7 @@ async function getWritableDownloadParent() {
   }
   let permission = await parent.queryPermission({ mode: "readwrite" });
   if (permission !== "granted") permission = await parent.requestPermission({ mode: "readwrite" });
-  if (permission !== "granted") throw new Error("没有获得下载目录写入权限；收藏视频已保留，下载文件未整理。");
+  if (permission !== "granted") throw new Error(BcaI18n.t("没有获得下载目录写入权限；收藏视频已保留，下载文件未整理。"));
   return parent;
 }
 
@@ -1494,23 +1537,23 @@ function selectedActionTargetNames() {
 
 function updateCollectionActionSelection() {
   const names = selectedActionTargetNames();
-  collectionActionCount.textContent = `已选 ${names.length} 个收藏夹`;
+  collectionActionCount.textContent = BcaI18n.t("已选 {count} 个收藏夹", { count: names.length });
   confirmCollectionActionButton.disabled = names.length === 0 || confirmCollectionActionButton.dataset.busy === "true";
 }
 
 function openCollectionActionDialog(videos, source) {
   if (!rootHandle || !videos.length) return;
   pendingCollectionAction = { videos, source };
-  collectionActionTitle.textContent = videos.length === 1 ? "移动或复制视频" : `移动或复制 ${videos.length} 个视频`;
+  collectionActionTitle.textContent = videos.length === 1 ? BcaI18n.t("移动或复制视频") : BcaI18n.t("移动或复制 {count} 个视频", { count: videos.length });
   collectionActionSummary.textContent = videos.length === 1
-    ? `“${videos[0].title}”当前位于“${videos[0].collection}”。`
-    : `为所选的 ${videos.length} 个视频选择目标收藏夹。每个视频都会按其原收藏夹分别判断移动或复制。`;
+    ? BcaI18n.t("“{title}”当前位于“{collection}”。", { title: videos[0].title, collection: videos[0].collection })
+    : BcaI18n.t("为所选的 {count} 个视频选择目标收藏夹。每个视频都会按其原收藏夹分别判断移动或复制。", { count: videos.length });
   collectionActionList.replaceChildren();
   const sourceCollections = new Set(videos.map((video) => video.collection));
   if (!collections.length) {
     const empty = document.createElement("p");
     empty.className = "collection-action-empty";
-    empty.textContent = "本地收藏库中还没有收藏夹。";
+    empty.textContent = BcaI18n.t("本地收藏库中还没有收藏夹。");
     collectionActionList.append(empty);
   }
   for (const collection of collections) {
@@ -1530,17 +1573,17 @@ function openCollectionActionDialog(videos, source) {
     if (sourceCollections.has(collection.name)) {
       const sourceBadge = document.createElement("small");
       sourceBadge.className = "collection-source-badge";
-      sourceBadge.textContent = "原收藏夹";
+      sourceBadge.textContent = BcaI18n.t("原收藏夹");
       name.append(sourceBadge);
     }
     const count = document.createElement("small");
     count.className = "collection-action-video-count";
-    count.textContent = `${collection.videos.length} 个视频`;
+    count.textContent = BcaI18n.t("{count} 个视频", { count: collection.videos.length });
     row.append(checkbox, icon, name, count);
     collectionActionList.append(row);
   }
   confirmCollectionActionButton.dataset.busy = "false";
-  confirmCollectionActionButton.textContent = "确认";
+  confirmCollectionActionButton.textContent = BcaI18n.t("确认");
   cancelCollectionActionButton.disabled = false;
   updateCollectionActionSelection();
   collectionActionDialog.showModal();
@@ -1550,17 +1593,17 @@ async function confirmCollectionAction() {
   const action = pendingCollectionAction;
   if (!action || confirmCollectionActionButton.dataset.busy === "true") return;
   const targetNames = selectedActionTargetNames();
-  if (!targetNames.length) { showToast("请选择一个或多个收藏夹。"); return; }
+  if (!targetNames.length) { showToast(BcaI18n.t("请选择一个或多个收藏夹。")); return; }
   confirmCollectionActionButton.dataset.busy = "true";
   confirmCollectionActionButton.disabled = true;
-  confirmCollectionActionButton.textContent = "正在整理…";
+  confirmCollectionActionButton.textContent = BcaI18n.t("正在整理…");
   cancelCollectionActionButton.disabled = true;
   selectAllActionTargetsButton.disabled = true;
   clearActionTargetsButton.disabled = true;
   collectionActionList.querySelectorAll("input").forEach((input) => { input.disabled = true; });
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
     const downloadParent = action.videos.some((video) => video.hasDownloadFiles) ? await getWritableDownloadParent() : null;
     const duplicateSets = new Map(targetNames.map((name) => [
       name,
@@ -1584,7 +1627,7 @@ async function confirmCollectionAction() {
         else if (result.copied) copied += 1;
         else remainingIds.add(video.id);
       } catch (error) {
-        failures.push(`${video.title}：${error?.message || "本地文件操作失败"}`);
+        failures.push(BcaI18n.t("{name}：{message}", { name: video.title, message: error?.message || BcaI18n.t("本地文件操作失败") }));
         remainingIds.add(video.id);
       }
     }
@@ -1599,18 +1642,18 @@ async function confirmCollectionAction() {
       else if (action.source === "batch") updateBatchControls();
     }
     const messages = [];
-    if (moved) messages.push(`已移动 ${moved} 个视频`);
-    if (copied) messages.push(`已复制 ${copied} 个视频`);
-    if (duplicates) messages.push(`重复项 ${duplicates} 个，已跳过`);
-    if (alreadyThere) messages.push(`${alreadyThere} 个视频已在所选收藏夹中`);
-    if (downloadCleanupWarnings.length) messages.push(`下载文件已复制，但有 ${downloadCleanupWarnings.length} 个旧目录未能清理`);
-    if (failures.length) messages.push(`${failures.length} 个失败，仍保留选中：${failures[0]}`);
-    showToast(messages.join("；") || "没有需要整理的视频。原视频已保留。");
+    if (moved) messages.push(BcaI18n.t("已移动 {count} 个视频", { count: moved }));
+    if (copied) messages.push(BcaI18n.t("已复制 {count} 个视频", { count: copied }));
+    if (duplicates) messages.push(BcaI18n.t("重复项 {count} 个，已跳过", { count: duplicates }));
+    if (alreadyThere) messages.push(BcaI18n.t("{count} 个视频已在所选收藏夹中", { count: alreadyThere }));
+    if (downloadCleanupWarnings.length) messages.push(BcaI18n.t("下载文件已复制，但有 {count} 个旧目录未能清理", { count: downloadCleanupWarnings.length }));
+    if (failures.length) messages.push(BcaI18n.t("{count} 个失败，仍保留选中：{first}", { count: failures.length, first: failures[0] }));
+    showToast(messages.join("；") || BcaI18n.t("没有需要整理的视频。原视频已保留。"));
   } catch (error) {
-    showToast(`整理失败：${error?.message || "本地文件操作失败。"}`);
+    showToast(BcaI18n.t("整理失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }));
   } finally {
     confirmCollectionActionButton.dataset.busy = "false";
-    confirmCollectionActionButton.textContent = "确认";
+    confirmCollectionActionButton.textContent = BcaI18n.t("确认");
     cancelCollectionActionButton.disabled = false;
     selectAllActionTargetsButton.disabled = false;
     clearActionTargetsButton.disabled = false;
@@ -1619,16 +1662,21 @@ async function confirmCollectionAction() {
   }
 }
 
+// “；N 个下载目录未能删除”这半句在几个 toast 里都出现，抽出来保证词条只有一条
+function downloadCleanupSuffix(count) {
+  return count ? BcaI18n.t("；{count} 个下载目录未能删除", { count }) : "";
+}
+
 async function confirmPendingDelete() {
   const action = pendingDeleteAction;
   if (!action) return;
   deleteInProgress = true;
   cancelDeleteButton.disabled = true;
   confirmDeleteButton.disabled = true;
-  confirmDeleteButton.textContent = action.type === "collection" ? "正在删除收藏夹…" : action.type === "batch" ? "正在批量删除…" : "正在删除…";
+  confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("正在删除收藏夹…") : action.type === "batch" ? BcaI18n.t("正在批量删除…") : BcaI18n.t("正在删除…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
     const deleteDownloads = deleteAssociatedDownloads.checked;
     const downloadParent = deleteDownloads ? await getWritableDownloadParent() : null;
     const downloadCleanupFailures = [];
@@ -1651,7 +1699,7 @@ async function confirmPendingDelete() {
           selectedVideoIds.delete(video.id);
           deleted += 1;
         } catch (error) {
-          failures.push(`${video.title}：${error?.message || "删除失败"}`);
+          failures.push(BcaI18n.t("{name}：{message}", { name: video.title, message: error?.message || BcaI18n.t("删除失败") }));
         }
       }
       batchResult = { deleted, failures };
@@ -1666,22 +1714,22 @@ async function confirmPendingDelete() {
     closeDetail();
     await displayRoot(rootHandle, selectedCollection);
     if (action.type === "collection") {
-      showToast(`已删除本地收藏夹“${action.collection.name}”${downloadCleanupFailures.length ? `；${downloadCleanupFailures.length} 个下载目录未能删除` : ""}`);
+      showToast(BcaI18n.t("已删除本地收藏夹“{name}”", { name: action.collection.name }) + downloadCleanupSuffix(downloadCleanupFailures.length));
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       showToast(batchResult.failures.length
-        ? `已删除 ${batchResult.deleted} 个，${batchResult.failures.length} 个失败并保留选中。${batchResult.failures[0]}`
-        : `已删除 ${batchResult.deleted} 个本地视频${downloadCleanupFailures.length ? `；${downloadCleanupFailures.length} 个下载目录未能删除` : ""}`);
+        ? BcaI18n.t("已删除 {deleted} 个，{failed} 个失败并保留选中。{first}", { deleted: batchResult.deleted, failed: batchResult.failures.length, first: batchResult.failures[0] })
+        : BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }) + downloadCleanupSuffix(downloadCleanupFailures.length));
     } else {
-      showToast(downloadCleanupFailures.length ? `已删除本地归档；${downloadCleanupFailures.length} 个下载目录未能删除` : "已删除本地归档");
+      showToast(BcaI18n.t("已删除本地归档") + downloadCleanupSuffix(downloadCleanupFailures.length));
     }
   } catch (error) {
-    showToast(`删除失败：${error?.message || "本地文件操作失败。"}`);
+    showToast(BcaI18n.t("删除失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }));
   } finally {
     deleteInProgress = false;
     cancelDeleteButton.disabled = false;
     confirmDeleteButton.disabled = false;
-    confirmDeleteButton.textContent = action.type === "collection" ? "删除收藏夹" : action.type === "batch" ? `删除 ${action.videos.length} 个视频` : "删除本地文件";
+    confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : BcaI18n.t("删除本地文件");
   }
 }
 
@@ -1694,27 +1742,27 @@ function showToast(message) {
 
 function validateCollectionName(rawName) {
   const name = String(rawName || "").trim();
-  if (!name) throw new Error("请输入收藏夹名称。");
-  if (name.length > 120) throw new Error("收藏夹名称不能超过 120 个字符。");
+  if (!name) throw new Error(BcaI18n.t("请输入收藏夹名称。"));
+  if (name.length > 120) throw new Error(BcaI18n.t("收藏夹名称不能超过 120 个字符。"));
   if (/[<>:"/\\|?*\u0000-\u001f]/.test(name) || /[. ]$/.test(name)) {
-    throw new Error("名称包含本地文件夹不支持的字符，或以点号、空格结尾。");
+    throw new Error(BcaI18n.t("名称包含本地文件夹不支持的字符，或以点号、空格结尾。"));
   }
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
-    throw new Error("这个名称是 Windows 保留名称，请换一个名称。");
+    throw new Error(BcaI18n.t("这个名称是 Windows 保留名称，请换一个名称。"));
   }
-  if (["错误报告", "001错误报告", "000视频下载", "视频下载"].includes(name)) throw new Error("这是插件保留目录，请换一个名称。");
+  if (["错误报告", "001错误报告", "000视频下载", "视频下载"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
   return name;
 }
 
 function openCreateCollectionDialog() {
-  if (!rootHandle || library.hidden) { showToast("请先打开本地收藏根目录。"); return; }
+  if (!rootHandle || library.hidden) { showToast(BcaI18n.t("请先打开本地收藏根目录。")); return; }
   collectionNameInput.value = "";
   collectionDialog.showModal();
   collectionNameInput.focus();
 }
 
 function openAddVideoDialog() {
-  if (!rootHandle || selectedCollection === "*") { showToast("请先选择一个收藏夹。"); return; }
+  if (!rootHandle || selectedCollection === "*") { showToast(BcaI18n.t("请先选择一个收藏夹。")); return; }
   renderTargetChoices(videoTargetOptions, [selectedCollection]);
   videoIdentifierInput.value = "";
   videoDialog.showModal();
@@ -1730,13 +1778,13 @@ collectionForm.addEventListener("submit", async (event) => {
   collectionCreateInProgress = true;
   submitCreateCollectionButton.disabled = true;
   cancelCreateCollectionButton.disabled = true;
-  submitCreateCollectionButton.textContent = "正在创建…";
+  submitCreateCollectionButton.textContent = BcaI18n.t("正在创建…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
     try {
       await rootHandle.getDirectoryHandle(name);
-      throw new Error(`收藏夹“${name}”已存在。`);
+      throw new Error(BcaI18n.t("收藏夹“{name}”已存在。", { name }));
     } catch (error) {
       if (error?.name !== "NotFoundError") throw error;
     }
@@ -1744,14 +1792,14 @@ collectionForm.addEventListener("submit", async (event) => {
     collectionDialog.close();
     collectionForm.reset();
     await displayRoot(rootHandle, name);
-    showToast(`已新建收藏夹“${name}”`);
+    showToast(BcaI18n.t("已新建收藏夹“{name}”", { name }));
   } catch (error) {
-    showToast(`创建失败：${error?.message || "本地文件夹操作失败。"}`);
+    showToast(BcaI18n.t("创建失败：{message}", { message: error?.message || BcaI18n.t("本地文件夹操作失败。") }));
   } finally {
     collectionCreateInProgress = false;
     submitCreateCollectionButton.disabled = false;
     cancelCreateCollectionButton.disabled = false;
-    submitCreateCollectionButton.textContent = "创建收藏夹";
+    submitCreateCollectionButton.textContent = BcaI18n.t("创建收藏夹");
   }
 });
 
@@ -1760,38 +1808,38 @@ videoForm.addEventListener("submit", async (event) => {
   if (videoAddInProgress || !rootHandle || selectedCollection === "*") return;
   const identifier = videoIdentifierInput.value.trim();
   const collectionNames = selectedTargetNames(videoTargetOptions);
-  if (!collectionNames.length) { showToast("请选择一个或多个目标收藏夹。"); return; }
+  if (!collectionNames.length) { showToast(BcaI18n.t("请选择一个或多个目标收藏夹。")); return; }
   videoAddInProgress = true;
   submitAddVideoButton.disabled = true;
   cancelAddVideoButton.disabled = true;
-  submitAddVideoButton.textContent = "正在解析并保存…";
+  submitAddVideoButton.textContent = BcaI18n.t("正在解析并保存…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录写入权限。");
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
     const result = await chrome.runtime.sendMessage({
       type: "add-manual-video",
       data: { identifier, collections: collectionNames }
     });
-    if (!result?.ok) throw new Error(result?.message || "B 站视频解析或本地保存失败。");
+    if (!result?.ok) throw new Error(result?.message || BcaI18n.t("B 站视频解析或本地保存失败。"));
     videoDialog.close();
     videoForm.reset();
     const collectionToSelect = collectionNames.includes(selectedCollection) ? selectedCollection : collectionNames[0];
     await displayRoot(rootHandle, collectionToSelect);
-    showToast(result.message || "视频已添加到本地收藏夹");
+    showToast(result.message ? BcaI18n.t(result.message) : BcaI18n.t("视频已添加到本地收藏夹"));
   } catch (error) {
-    showToast(`添加失败：${error?.message || "无法解析或保存视频。"}`);
+    showToast(BcaI18n.t("添加失败：{message}", { message: error?.message || BcaI18n.t("无法解析或保存视频。") }));
   } finally {
     videoAddInProgress = false;
     submitAddVideoButton.disabled = false;
     cancelAddVideoButton.disabled = false;
-    submitAddVideoButton.textContent = "解析并保存";
+    submitAddVideoButton.textContent = BcaI18n.t("解析并保存");
   }
 });
 
 collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInProgress) event.preventDefault(); });
 videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
 
-async function displayRoot(handle, collectionToSelect = "*", toastVerb = "已读取") {
+async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n.t("已读取")) {
   for (const url of coverUrls) URL.revokeObjectURL(url);
   coverUrls = [];
   const preserveDownloadStatuses = rootHandle === handle;
@@ -1801,17 +1849,17 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = "已读
   const existingVideoIds = new Set(allVideos().map((video) => video.id));
   for (const id of selectedVideoIds) if (!existingVideoIds.has(id)) selectedVideoIds.delete(id);
   selectedCollection = collectionToSelect === "*" || result.collections.some((collection) => collection.name === collectionToSelect) ? collectionToSelect : "*";
-  rootLabel.textContent = handle.name;
+  setDynamicText(rootLabel, handle.name);
   statusDot.classList.add("ready");
   refreshLibraryButton.disabled = false;
   scanNotice.hidden = result.issues.length === 0;
-  scanNotice.textContent = result.issues.length ? `有 ${result.issues.length} 个目录未能读取：${result.issues.slice(0, 4).join("；")}${result.issues.length > 4 ? "；…" : ""}` : "";
+  scanNotice.textContent = result.issues.length ? BcaI18n.t("有 {count} 个目录未能读取：{list}", { count: result.issues.length, list: `${result.issues.slice(0, 4).join("；")}${result.issues.length > 4 ? "；…" : ""}` }) : "";
   welcome.hidden = true;
   library.hidden = false;
   renderCollections();
   renderVideos();
   syncDetailDownloadAction();
-  showToast(`${toastVerb} ${allVideos().length} 个视频`);
+  showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: allVideos().length }));
   // 大目录的递归体积统计很慢，放在渲染之后异步跑，不阻塞界面
   updateStorageUsage(handle);
 }
@@ -1851,64 +1899,71 @@ async function refreshDownloadStatuses() {
   } finally { downloadStatusCheckRunning = false; }
 }
 
-function setBusy(isBusy, buttonText = "正在读取…") {
+// chooseRoot 的文案（选择根目录 + 四种扫描中的提示）全部写在 HTML 里，
+// 每段各自带 data-i18n，这里只切换显示哪一段；busyKey 传的是 HTML 里的 ASCII 键名。
+function showChooseRootLabel(busyKey = "idle") {
+  chooseRoot.querySelectorAll("[data-busy-label]").forEach((label) => {
+    label.hidden = label.dataset.busyLabel !== busyKey;
+  });
+  const icon = chooseRoot.querySelector(".choose-root-icon");
+  if (icon) icon.hidden = busyKey !== "idle";
+}
+
+function setBusy(isBusy, busyKey = "reading") {
   chooseRoot.disabled = isBusy;
   refreshLibraryButton.disabled = isBusy || !rootHandle;
   refreshLibraryButton.classList.toggle("is-loading", isBusy);
   welcomeChoose.disabled = isBusy;
   // 大目录扫描时给一条进度提示，而不是只有按钮文字变化
   scanProgress.hidden = !isBusy;
-  if (isBusy) setButtonContent(chooseRoot, "", buttonText);
-  else setButtonContent(chooseRoot, "plus", "选择收藏根目录");
-}
-
-// 按钮里带图标后，改文案不能再用 textContent（会把图标一起清掉）
-function setButtonContent(button, iconName, text) {
-  button.replaceChildren();
-  if (iconName) button.insertAdjacentHTML("afterbegin", BcaIcons.svg(iconName));
-  const label = document.createElement("span");
-  label.textContent = text;
-  button.append(label);
+  showChooseRootLabel(isBusy ? busyKey : "idle");
 }
 
 async function refreshCurrentRoot() {
-  if (!rootHandle) { showToast("请先选择本地收藏根目录。"); return; }
+  if (!rootHandle) { showToast(BcaI18n.t("请先选择本地收藏根目录。")); return; }
   const collectionToKeep = selectedCollection;
-  setBusy(true, "正在刷新…");
+  setBusy(true, "refreshing");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "read" });
-    if (await permissionRequest !== "granted") throw new Error("没有获得本地目录读取权限。");
-    await displayRoot(rootHandle, collectionToKeep, "已刷新");
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录读取权限。"));
+    await displayRoot(rootHandle, collectionToKeep, BcaI18n.t("已刷新"));
   } catch (error) {
-    if (error?.name !== "AbortError") showToast(`刷新失败：${error?.message || "无法读取本地目录。"}`);
+    if (error?.name !== "AbortError") showToast(BcaI18n.t("刷新失败：{message}", { message: error?.message || BcaI18n.t("无法读取本地目录。") }));
   } finally { setBusy(false); }
 }
 
 async function chooseAndScan() {
-  if (!window.showDirectoryPicker) { showToast("当前 Chrome 暂不支持本地目录访问，请更新浏览器后重试。"); return; }
+  if (!window.showDirectoryPicker) { showToast(BcaI18n.t("当前 Chrome 暂不支持本地目录访问，请更新浏览器后重试。")); return; }
   setBusy(true);
   try {
     const handle = await window.showDirectoryPicker({ mode: "read" });
     const permission = await handle.requestPermission({ mode: "read" });
-    if (permission !== "granted") throw new Error("未获得读取目录的权限。");
+    if (permission !== "granted") throw new Error(BcaI18n.t("未获得读取目录的权限。"));
     await saveHandle(handle);
     await displayRoot(handle);
   } catch (error) {
-    if (error?.name !== "AbortError") showToast(error?.message || "读取目录失败。");
+    if (error?.name !== "AbortError") showToast(error?.message || BcaI18n.t("读取目录失败。"));
   } finally { setBusy(false); }
 }
 
 async function continueWithLastRoot() {
   if (!rootHandle) { await chooseAndScan(); return; }
-  setBusy(true, "正在连接上次目录…");
+  setBusy(true, "connecting");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "read" });
     const permission = await permissionRequest;
-    if (permission !== "granted") throw new Error("没有获得上次目录的读取权限。可使用右上角按钮重新选择目录。");
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得上次目录的读取权限。可使用右上角按钮重新选择目录。"));
     await displayRoot(rootHandle);
   } catch (error) {
-    if (error?.name !== "AbortError") showToast(error?.message || "连接上次目录失败。");
+    if (error?.name !== "AbortError") showToast(error?.message || BcaI18n.t("连接上次目录失败。"));
   } finally { setBusy(false); }
+}
+
+// welcomeChoose 的两段文案都写在 HTML 里，这里只切换显示哪一段（箭头图标固定在右边）
+function showWelcomeChooseLabel(mode) {
+  welcomeChoose.querySelectorAll("[data-label]").forEach((label) => {
+    label.hidden = label.dataset.label !== mode;
+  });
 }
 
 async function restoreLastRoot() {
@@ -1916,26 +1971,26 @@ async function restoreLastRoot() {
     const handle = await loadSavedHandle();
     if (!handle) return;
     rootHandle = handle;
-    rootLabel.textContent = handle.name;
-    welcomeCopy.textContent = `已找到上次选择的目录“${handle.name}”。正在检查访问权限。`;
+    setDynamicText(rootLabel, handle.name);
+    setDynamicText(welcomeCopy, BcaI18n.t("已找到上次选择的目录“{name}”。正在检查访问权限。", { name: handle.name }));
     const permission = await handle.queryPermission({ mode: "read" });
     if (permission === "granted") {
-      setBusy(true, "正在读取上次目录…");
+      setBusy(true, "loading-last");
       try { await displayRoot(handle); }
       finally { setBusy(false); }
       return;
     }
-    welcomeChoose.innerHTML = `授权并继续使用上次目录 ${BcaIcons.svg("chevron-right")}`;
-    welcomeCopy.textContent = `上次选择的目录是“${handle.name}”。点击继续并按提示授权，无需重新选择路径。`;
-    welcomeFootnote.textContent = "如果目录已移动或删除，再使用右上角按钮选择新位置。";
+    showWelcomeChooseLabel("authorize");
+    setDynamicText(welcomeCopy, BcaI18n.t("上次选择的目录是“{name}”。点击继续并按提示授权，无需重新选择路径。", { name: handle.name }));
+    setDynamicText(welcomeFootnote, BcaI18n.t("如果目录已移动或删除，再使用右上角按钮选择新位置。"));
   } catch (error) {
     rootHandle = null;
-    rootLabel.textContent = "上次目录无法访问";
+    setDynamicText(rootLabel, BcaI18n.t("上次目录无法访问"));
     updateStorageUsage(null);
     statusDot.classList.remove("ready");
-    welcomeCopy.textContent = "上次选择的目录暂时无法访问，请重新选择收藏根目录。";
-    welcomeChoose.innerHTML = `选择本地收藏目录 ${BcaIcons.svg("chevron-right")}`;
-    showToast(error?.message || "无法连接上次选择的目录。");
+    setDynamicText(welcomeCopy, BcaI18n.t("上次选择的目录暂时无法访问，请重新选择收藏根目录。"));
+    showWelcomeChooseLabel("choose");
+    showToast(error?.message || BcaI18n.t("无法连接上次选择的目录。"));
   }
 }
 
@@ -1952,19 +2007,61 @@ downloadSelectedButton.addEventListener("click", () => openDownloadInterface(sel
 deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRecords()));
 searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
 sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
+
+/* ---------------- 4.5：主题与语言切换 ---------------- */
+
+// 主题标签必须写成字面量：词条工具靠扫描 t("...") 取词，
+// 从 theme.js 的对象里取 label 会扫不到，那三个词就永远不会被翻译。
+function themeLabel(id) {
+  if (id === "light") return BcaI18n.t("白天");
+  if (id === "dark") return BcaI18n.t("夜晚");
+  return BcaI18n.t("跟随系统");
+}
+function renderThemeOptions() {
+  themeSelect.replaceChildren(...BcaTheme.modes().map((item) => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = themeLabel(item.id);
+    return option;
+  }));
+  themeSelect.value = BcaTheme.current();
+}
+renderThemeOptions();
+themeSelect.addEventListener("change", () => BcaTheme.use(themeSelect.value));
+
+localeSelect.replaceChildren(...BcaI18n.locales().map((item) => {
+  const option = document.createElement("option");
+  option.value = item.id;
+  // 语言名用各自的写法，不翻译
+  option.textContent = item.label;
+  return option;
+}));
+localeSelect.value = BcaI18n.locale();
+localeSelect.addEventListener("change", async () => {
+  await BcaI18n.use(localeSelect.value);
+});
+
+// 切语言后要重画所有由 JS 生成的文字
+function relabelAfterLocaleChange() {
+  localeSelect.value = BcaI18n.locale();
+  renderThemeOptions();
+  renderCollections();
+  renderVideos();
+  const current = detailVideo();
+  if (current) openDetail(current);
+}
+BcaI18n.onChange(() => relabelAfterLocaleChange());
 videoFilterSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
 clearSearch.addEventListener("click", () => { searchInput.value = ""; resetPaging(); renderVideos(); searchInput.focus(); });
 viewGridButton?.addEventListener("click", () => setViewMode("grid"));
 viewListButton?.addEventListener("click", () => setViewMode("list"));
-refreshVideoStatusButton?.addEventListener("click", openStatusDialog);
-confirmStatusButton?.addEventListener("click", runStatusRefresh);
-cancelStatusButton?.addEventListener("click", () => { if (!statusRefreshInProgress) statusDialog.close(); });
-statusDialog?.addEventListener("cancel", (event) => { if (statusRefreshInProgress) event.preventDefault(); });
+
 
 // 4.4：更新状态时的进度回报
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "bca-status-progress") return;
-  if (statusProgress && statusRefreshInProgress) statusProgress.textContent = message.text || "正在更新…";
+  const status = detailContent.querySelector(".detail-refresh-status");
+  if (status && statusRefreshInProgress) { status.hidden = false; status.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在更新…"); }
 });
 dismissImportHintButton?.addEventListener("click", dismissImportHint);
 closeDetailButton.addEventListener("click", closeDetail);
@@ -2015,7 +2112,11 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("beforeunload", () => coverUrls.forEach(URL.revokeObjectURL));
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes.downloadRevision && rootHandle) refreshDownloadStatuses();
+  if (areaName !== "local") return;
+  if (changes.downloadRevision && rootHandle) refreshDownloadStatuses();
+  // 4.5：在弹窗或下载页改了语言时，已经打开的收藏库也要跟上
+  const next = changes[BcaI18n.STORAGE_KEY]?.newValue;
+  if (BcaI18n.isSupported(next) && next !== BcaI18n.locale()) BcaI18n.use(next, { silent: true });
 });
 window.addEventListener("focus", refreshDownloadStatuses);
 document.addEventListener("visibilitychange", () => {
@@ -2024,12 +2125,12 @@ document.addEventListener("visibilitychange", () => {
 window.setInterval(() => {
   if (!library.hidden && document.visibilityState === "visible") refreshDownloadStatuses();
 }, 60000);
-Promise.all([
+BcaI18n.init().catch(() => {}).then(() => Promise.all([
   restoreCollectionOrder().catch(() => { collectionOrder = []; }),
   restoreViewSettings(),
   restoreImportHint(),
   clearLegacySafetyDismissed()
-]).finally(() => {
+])).finally(() => {
   applyViewMode();
   restoreLastRoot();
 });

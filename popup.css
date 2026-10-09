@@ -16,6 +16,7 @@ body {
 main { padding: var(--sp-4); }
 
 .brand-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+/* 纯白字母压在品牌蓝渐变上，属于“彩色底上的文字”，不随主题变 */
 .brand-icon {
   display: grid;
   place-items: center;
@@ -38,7 +39,8 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .feature-hint { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
 
 .toggle-switch { position: relative; width: 46px; min-width: 46px; height: 26px; min-height: 26px; padding: 0; border: 0; border-radius: var(--r-pill); background: var(--brand); transition: background var(--dur) var(--ease); }
-.toggle-switch span { position: absolute; top: 3px; left: 23px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #10182833; transition: left var(--dur) var(--ease); }
+/* 滑块固定用纯白：它压在 --brand / --ghost 的彩色轨道上，和主题无关 */
+.toggle-switch span { position: absolute; top: 3px; left: 23px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm); transition: left var(--dur) var(--ease); }
 .toggle-switch.off { background: var(--ghost); }
 .toggle-switch.off span { left: 3px; }
 
@@ -53,14 +55,15 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
   border: 1px solid var(--success-line);
   border-radius: var(--r-md);
   color: var(--success-strong);
-  background: linear-gradient(135deg, #eaf7f0, #d9efe3);
-  box-shadow: 0 4px 12px #2f906818;
+  /* 绿色渐变与阴影全部走令牌，深色下由 --success-soft / --success-line 换成墨绿 */
+  background: linear-gradient(135deg, var(--success-soft), var(--success-line));
+  box-shadow: var(--shadow-md);
   font-size: var(--fs-md);
   font-weight: 700;
   text-decoration: none;
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
-.library-link:hover { border-color: var(--success); color: #1b5f41; background: #cfe9dc; transform: translateY(-1px); }
+.library-link:hover { border-color: var(--success); color: var(--success-strong); background: var(--success-line); transform: translateY(-1px); }
 .library-link .icon { font-size: var(--fs-lg); }
 
 .folder-card, .status-card { padding: var(--sp-4); }
@@ -71,6 +74,7 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 
 button { width: 100%; min-height: 38px; border: 0; border-radius: var(--r-sm); cursor: pointer; font: inherit; font-size: var(--fs-base); font-weight: 650; }
 button:disabled { cursor: wait; opacity: .6; }
+/* 纯白文字压在 --brand 蓝底上，属于“彩色底上的文字”，不随主题变 */
 .primary { color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
 .primary:hover:not(:disabled) { background: var(--brand-strong); }
 .secondary { margin-top: var(--sp-2); border: 1px solid var(--line); color: var(--text); background: var(--surface); }
@@ -99,7 +103,8 @@ button:disabled { cursor: wait; opacity: .6; }
 .import-control { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-2); }
 .import-control .secondary { margin-top: 0; }
 .import-control .danger { border-color: var(--danger-line); color: var(--danger-strong); background: var(--danger-soft); }
-.import-control .danger:hover:not(:disabled) { border-color: var(--danger); background: #fbe6e3; }
+/* 悬停加深一档：--danger-soft 是常态底色，这里用同色系的 --danger-line */
+.import-control .danger:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-line); }
 .import-control-hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
 .import-card > summary .chevron { color: var(--faint); font-size: var(--fs-md); transition: transform var(--dur) var(--ease); }
 .import-card[open] > summary .chevron { transform: rotate(180deg); }
@@ -173,4 +178,8 @@ button:disabled { cursor: wait; opacity: .6; }
 .popup-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-3); }
 .support-link { display: inline-flex; align-items: center; gap: 5px; color: var(--brand-deep); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
 .support-link:hover { text-decoration: underline; }
+.foot-right { display: flex; align-items: center; gap: var(--sp-2); }
+/* 4.5：语言切换。紧凑到只占页脚一行，选项文案是语言名本身，不翻译 */
+.locale-select { width: auto; min-height: 24px; padding: 1px var(--sp-1); border: 1px solid var(--line); border-radius: var(--r-xs); color: var(--muted); background: var(--surface); font-size: var(--fs-sm); }
+.locale-select:hover { border-color: var(--brand-line); color: var(--brand-deep); }
 .popup-version { color: var(--faint); font-size: var(--fs-sm); }

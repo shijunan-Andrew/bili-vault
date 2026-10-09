@@ -8,7 +8,8 @@ body {
   min-height: 100vh;
   margin: 0;
   color: var(--text);
-  background: radial-gradient(ellipse at 92% 0%, #e4f3f9 0, transparent 32%), var(--bg);
+  /* 顶部那层淡蓝光晕改用品牌浅色令牌，深色下自动变成墨蓝 */
+  background: radial-gradient(ellipse at 92% 0%, var(--brand-soft) 0, transparent 32%), var(--bg);
 }
 
 .download-topbar {
@@ -21,7 +22,8 @@ body {
   height: 60px;
   padding: 0 max(24px, calc((100vw - 1240px) / 2));
   border-bottom: 1px solid var(--line);
-  background: #f8fbfded;
+  /* 顶栏要半透明才能透出 backdrop-filter 的模糊，用 color-mix 从 --surface 取 93% 不透明度 */
+  background: color-mix(in srgb, var(--surface) 93%, transparent);
   backdrop-filter: blur(14px);
 }
 .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-base); text-decoration: none; }
@@ -81,6 +83,7 @@ body {
 }
 .button:hover:not(:disabled) { transform: translateY(-1px); }
 .button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+/* 纯白文字压在 --brand / --success 彩色底上，属于“彩色底上的文字”，不随主题变 */
 .button-primary { color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
 .button-primary:hover:not(:disabled) { background: var(--brand-strong); }
 .button-secondary { color: var(--text); border-color: var(--line); background: var(--surface); }
@@ -166,8 +169,9 @@ body {
 .progress-badge.paused { color: var(--warning); background: var(--warning-soft); }
 
 .progress-track { height: 8px; overflow: hidden; border-radius: var(--r-pill); background: var(--surface-sunken); }
-/* 3.x 这里是橄榄绿渐变，与品牌蓝无关；改为品牌蓝 */
-.progress-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), #4cc4ea); transition: width var(--dur) var(--ease); }
+/* 3.x 这里是橄榄绿渐变，与品牌蓝无关；改为品牌蓝。末端用 --brand-strong：
+   令牌里没有“更浅的品牌蓝”，深色下这个渐变会自动变成亮蓝→更亮蓝。 */
+.progress-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), var(--brand-tint)); transition: width var(--dur) var(--ease); }
 .progress-meta { display: flex; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font-size: var(--fs-sm); }
 
 .download-log { display: grid; align-content: start; max-height: 360px; gap: 6px; overflow: auto; margin-top: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); }

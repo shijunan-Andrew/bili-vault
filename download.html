@@ -3,102 +3,107 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- theme-color 是浏览器工具栏取色，只能用字面量，无法引用 CSS 变量 -->
   <meta name="theme-color" content="#00a1d6">
-  <title>下载 B 站视频 · 本地收藏库</title>
+  <title data-i18n="下载 B 站视频 · 本地收藏库">下载 B 站视频 · 本地收藏库</title>
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="download.css">
+  <!-- 4.5：theme.js 必须在 head 里同步跑完，先挂好 data-theme，避免先渲染成浅色再跳深色 -->
+  <script src="theme.js"></script>
+  <!-- 4.5：i18n.js 要排在页面自己的脚本之前；中文原文就是 key，简体中文不需要词典 -->
+  <script src="i18n.js"></script>
 </head>
 <body>
   <header class="download-topbar">
-    <a class="back-link" href="library.html"><span data-icon="arrow-left"></span>返回本地收藏库</a>
-    <span class="topbar-label">B站视频下载</span>
+    <a class="back-link" href="library.html"><span data-icon="arrow-left"></span><span data-i18n="返回本地收藏库">返回本地收藏库</span></a>
+    <span class="topbar-label" data-i18n="B站视频下载">B站视频下载</span>
   </header>
 
   <main class="download-main">
     <section class="download-intro">
       <p class="eyebrow">LOCAL VIDEO DOWNLOADER</p>
-      <h1>下载 B 站视频</h1>
-      <p>解析视频与分 P，选择画质和要保存的资料。下载内容直接写入你选择的本地目录。</p>
+      <h1 data-i18n="下载 B 站视频">下载 B 站视频</h1>
+      <p data-i18n="解析视频与分 P，选择画质和要保存的资料。下载内容直接写入你选择的本地目录。">解析视频与分 P，选择画质和要保存的资料。下载内容直接写入你选择的本地目录。</p>
     </section>
 
     <section class="safety-notice" aria-labelledby="safetyNoticeTitle">
-      <h2 class="safety-notice-heading" id="safetyNoticeTitle"><span data-icon="alert"></span>使用须知</h2>
+      <h2 class="safety-notice-heading" id="safetyNoticeTitle"><span data-icon="alert"></span><span data-i18n="使用须知">使用须知</span></h2>
       <ul class="safety-notice-list">
-        <li>本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href="https://github.com/leiurayer/downkyi" target="_blank" rel="noopener noreferrer">DownKyi</a>。</li>
-        <li>下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。</li>
-        <li>请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
-        <li>本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。</li>
-        <li>插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。</li>
-        <li>所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。</li>
+        <li data-i18n="请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。">请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
+        <li data-i18n-html="本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 &lt;a href=&quot;https://github.com/leiurayer/downkyi&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;DownKyi&lt;/a&gt;。">本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href="https://github.com/leiurayer/downkyi" target="_blank" rel="noopener noreferrer">DownKyi</a>。</li>
+        <li data-i18n="下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。">下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。</li>
+        <li data-i18n="本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。">本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。</li>
+        <li data-i18n="插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。">插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。</li>
+        <li data-i18n="所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。">所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。</li>
       </ul>
     </section>
 
     <section class="panel queue-panel">
       <div class="panel-heading">
-        <div><h2>视频队列</h2><p>从收藏库打开的视频会自动加入；也可以粘贴 BV 号、av 号或视频网址。</p></div>
-        <span id="queueCount" class="count-pill">0 个视频</span>
+        <div><h2 data-i18n="视频队列">视频队列</h2><p data-i18n="从收藏库打开的视频会自动加入；也可以粘贴 BV 号、av 号或视频网址。">从收藏库打开的视频会自动加入；也可以粘贴 BV 号、av 号或视频网址。</p></div>
+        <span id="queueCount" class="count-pill" data-i18n="0 个视频">0 个视频</span>
       </div>
       <form id="addVideoForm" class="add-video-row">
-        <input id="videoInput" type="text" autocomplete="off" placeholder="粘贴 B 站视频网址、BV 号或 av 号">
-        <button id="parseVideoButton" class="button button-secondary" type="submit">解析并添加</button>
+        <input id="videoInput" type="text" autocomplete="off" placeholder="粘贴 B 站视频网址、BV 号或 av 号" data-i18n-placeholder="粘贴 B 站视频网址、BV 号或 av 号">
+        <button id="parseVideoButton" class="button button-secondary" type="submit" data-i18n="解析并添加">解析并添加</button>
       </form>
       <div id="queueList" class="queue-list"></div>
       <div id="queueEmpty" class="queue-empty" hidden>
         <span class="icon-slot" data-icon="plus"></span>
-        <strong>添加要下载的视频</strong>
-        <small>从收藏库打开，或在上方粘贴一个视频链接。</small>
+        <strong data-i18n="添加要下载的视频">添加要下载的视频</strong>
+        <small data-i18n="从收藏库打开，或在上方粘贴一个视频链接。">从收藏库打开，或在上方粘贴一个视频链接。</small>
       </div>
     </section>
 
     <div class="download-columns">
       <section class="panel settings-panel">
-        <div class="panel-heading compact-heading"><div><h2>下载设置</h2><p>这些选项应用于当前队列。</p></div></div>
+        <div class="panel-heading compact-heading"><div><h2 data-i18n="下载设置">下载设置</h2><p data-i18n="这些选项应用于当前队列。">这些选项应用于当前队列。</p></div></div>
         <div class="folder-picker-row">
           <div class="folder-symbol" data-icon="collection"></div>
           <div class="folder-copy">
-            <span class="setting-label">保存到</span>
-            <strong id="downloadFolderName">本地收藏根目录 / 000视频下载（默认）</strong>
-            <small id="downloadFolderHelp">默认位置会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。</small>
+            <span class="setting-label" data-i18n="保存到">保存到</span>
+            <strong id="downloadFolderName" data-i18n="本地收藏根目录 / 000视频下载（默认）">本地收藏根目录 / 000视频下载（默认）</strong>
+            <small id="downloadFolderHelp" data-i18n="默认位置会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。">默认位置会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。</small>
           </div>
-          <button id="chooseDownloadFolder" class="button button-secondary" type="button">选择目录</button>
+          <button id="chooseDownloadFolder" class="button button-secondary" type="button" data-i18n="选择目录">选择目录</button>
         </div>
         <div class="folder-actions-row">
-          <button id="useDefaultDownloadFolder" class="text-button" type="button">使用默认下载位置</button>
+          <button id="useDefaultDownloadFolder" class="text-button" type="button" data-i18n="使用默认下载位置">使用默认下载位置</button>
         </div>
-        <div id="folderPermissionHint" class="inline-hint" hidden>请重新授权此目录，或选择其他目录。</div>
+        <div id="folderPermissionHint" class="inline-hint" data-i18n="请重新授权此目录，或选择其他目录。" hidden>请重新授权此目录，或选择其他目录。</div>
 
         <div class="settings-grid">
-          <label class="select-setting"><span>视频清晰度</span><select id="qualitySelect"><option value="0">自动（最高可用）</option></select></label>
-          <label class="select-setting"><span>文件格式</span><select id="formatSelect"><option value="mp4">MP4 单文件</option><option value="dash">DASH 音视频分轨</option></select></label>
-          <label class="select-setting"><span>视频编码偏好</span><select id="codecSelect"><option value="auto">自动（优先 AVC）</option><option value="avc">AVC / H.264</option><option value="hevc">HEVC / H.265</option><option value="av1">AV1</option></select></label>
-          <label class="select-setting" id="audioQualitySetting"><span>音频音质</span><select id="audioQualitySelect"><option value="0">自动（最高可用）</option><option value="30280">192K</option><option value="30232">132K</option><option value="30216">64K</option><option value="30251">Hi-Res</option><option value="30250">杜比全景声</option></select></label>
+          <label class="select-setting"><span data-i18n="视频清晰度">视频清晰度</span><select id="qualitySelect"><option value="0" data-i18n="自动（最高可用）">自动（最高可用）</option></select></label>
+          <label class="select-setting"><span data-i18n="文件格式">文件格式</span><select id="formatSelect"><option value="mp4" data-i18n="MP4 单文件">MP4 单文件</option><option value="dash" data-i18n="DASH 音视频分轨">DASH 音视频分轨</option></select></label>
+          <label class="select-setting"><span data-i18n="视频编码偏好">视频编码偏好</span><select id="codecSelect"><option value="auto" data-i18n="自动（优先 AVC）">自动（优先 AVC）</option><option value="avc">AVC / H.264</option><option value="hevc">HEVC / H.265</option><option value="av1">AV1</option></select></label>
+          <label class="select-setting" id="audioQualitySetting"><span data-i18n="音频音质">音频音质</span><select id="audioQualitySelect"><option value="0" data-i18n="自动（最高可用）">自动（最高可用）</option><option value="30280">192K</option><option value="30232">132K</option><option value="30216">64K</option><option value="30251">Hi-Res</option><option value="30250" data-i18n="杜比全景声">杜比全景声</option></select></label>
         </div>
 
-        <div class="content-heading"><span>下载内容</span><small>可多选</small></div>
+        <div class="content-heading"><span data-i18n="下载内容">下载内容</span><small data-i18n="可多选">可多选</small></div>
         <div class="content-options">
-          <label class="content-option"><input id="includeVideo" type="checkbox" checked><span class="option-icon" data-icon="play"></span><span><strong>视频</strong><small>按所选格式保存</small></span></label>
-          <label class="content-option" id="audioOption"><input id="includeAudio" type="checkbox" checked><span class="option-icon" data-icon="music"></span><span><strong>音频</strong><small>DASH 音轨</small></span></label>
-          <label class="content-option"><input id="includeDanmaku" type="checkbox"><span class="option-icon" data-icon="danmaku"></span><span><strong>弹幕</strong><small>XML 格式</small></span></label>
-          <label class="content-option"><input id="includeSubtitle" type="checkbox"><span class="option-icon" data-icon="subtitle"></span><span><strong>字幕</strong><small>SRT 格式</small></span></label>
-          <label class="content-option"><input id="includeCover" type="checkbox" checked><span class="option-icon" data-icon="image"></span><span><strong>封面</strong><small>JPG 图片</small></span></label>
-          <label class="content-option"><input id="includeInfo" type="checkbox" checked><span class="option-icon" data-icon="info"></span><span><strong>视频信息</strong><small>TXT 文本</small></span></label>
+          <label class="content-option"><input id="includeVideo" type="checkbox" checked><span class="option-icon" data-icon="play"></span><span><strong data-i18n="视频">视频</strong><small data-i18n="按所选格式保存">按所选格式保存</small></span></label>
+          <label class="content-option" id="audioOption"><input id="includeAudio" type="checkbox" checked><span class="option-icon" data-icon="music"></span><span><strong data-i18n="音频">音频</strong><small data-i18n="DASH 音轨">DASH 音轨</small></span></label>
+          <label class="content-option"><input id="includeDanmaku" type="checkbox"><span class="option-icon" data-icon="danmaku"></span><span><strong data-i18n="弹幕">弹幕</strong><small data-i18n="XML 格式">XML 格式</small></span></label>
+          <label class="content-option"><input id="includeSubtitle" type="checkbox"><span class="option-icon" data-icon="subtitle"></span><span><strong data-i18n="字幕">字幕</strong><small data-i18n="SRT 格式">SRT 格式</small></span></label>
+          <label class="content-option"><input id="includeCover" type="checkbox" checked><span class="option-icon" data-icon="image"></span><span><strong data-i18n="封面">封面</strong><small data-i18n="JPG 图片">JPG 图片</small></span></label>
+          <label class="content-option"><input id="includeInfo" type="checkbox" checked><span class="option-icon" data-icon="info"></span><span><strong data-i18n="视频信息">视频信息</strong><small data-i18n="TXT 文本">TXT 文本</small></span></label>
         </div>
-        <p class="format-note" id="formatNote">MP4 为单文件模式，受 B 站接口提供的清晰度限制；DASH 会分别保存视频和音频流，可获得更高画质。</p>
-        <button id="startDownload" class="button button-primary start-download" type="button" disabled><span data-icon="download"></span>开始下载</button>
+        <p class="format-note" id="formatNote" data-i18n="MP4 为单文件模式，受 B 站接口提供的清晰度限制；DASH 会分别保存视频和音频流，可获得更高画质。">MP4 为单文件模式，受 B 站接口提供的清晰度限制；DASH 会分别保存视频和音频流，可获得更高画质。</p>
+        <button id="startDownload" class="button button-primary start-download" type="button" disabled><span data-icon="download"></span><span data-i18n="开始下载">开始下载</span></button>
       </section>
 
       <section class="panel progress-panel">
-        <div class="panel-heading compact-heading"><div><h2>下载进度</h2><p id="progressSummary">等待解析视频</p></div><span id="progressBadge" class="progress-badge idle">待开始</span></div>
+        <div class="panel-heading compact-heading"><div><h2 data-i18n="下载进度">下载进度</h2><p id="progressSummary"></p></div><span id="progressBadge" class="progress-badge idle" data-i18n="待开始">待开始</span></div>
         <div class="progress-track"><div id="overallProgress" class="progress-fill"></div></div>
-        <div class="progress-meta"><span id="progressCurrent">准备就绪</span><span id="progressFiles" class="tnum">已保存 0 个文件</span></div>
-        <div id="downloadLog" class="download-log" role="status" aria-live="polite"><div class="log-placeholder">解析完成后，下载过程和结果会显示在这里。</div></div>
+        <div class="progress-meta"><span id="progressCurrent"></span><span id="progressFiles" class="tnum" data-i18n="已保存 0 个文件">已保存 0 个文件</span></div>
+        <div id="downloadLog" class="download-log" role="status" aria-live="polite"><div class="log-placeholder" data-i18n="解析完成后，下载过程和结果会显示在这里。">解析完成后，下载过程和结果会显示在这里。</div></div>
         <div class="download-actions" hidden>
-          <button id="pauseDownload" class="button button-quiet pause-download" type="button"><span data-icon="pause"></span>暂停下载</button>
-          <button id="cancelDownload" class="button button-quiet cancel-download" type="button"><span data-icon="stop"></span>取消下载</button>
+          <button id="pauseDownload" class="button button-quiet pause-download" type="button"><span data-icon="pause"></span><span data-i18n="暂停下载">暂停下载</span></button>
+          <button id="cancelDownload" class="button button-quiet cancel-download" type="button"><span data-icon="stop"></span><span data-i18n="取消下载">取消下载</span></button>
         </div>
       </section>
     </div>
-    <p class="page-footnote">仅保存当前账号有权播放的内容。部分清晰度、字幕或失效视频可能无法从 B 站接口获取。</p>
+    <p class="page-footnote" data-i18n="仅保存当前账号有权播放的内容。部分清晰度、字幕或失效视频可能无法从 B 站接口获取。">仅保存当前账号有权播放的内容。部分清晰度、字幕或失效视频可能无法从 B 站接口获取。</p>
   </main>
 
   <script src="icons.js"></script>

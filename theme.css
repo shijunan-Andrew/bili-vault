@@ -11,6 +11,7 @@
   /* —— 品牌 —— */
   --brand: #00a1d6;
   --brand-strong: #0089b8;
+  --brand-tint: #4cc4ea;
   --brand-deep: #026f95;
   --brand-soft: #e9f7fc;
   --brand-soft-strong: #d5eefa;
@@ -22,10 +23,10 @@
   --success-strong: #21734f;
   --success-soft: #ecf7f1;
   --success-line: #c6e5d4;
-  --warning: #a9741d;
+  --warning: #8a5c12;
   --warning-soft: #fdf5e5;
   --warning-line: #edd9ac;
-  --danger: #c9483f;
+  --danger: #b2382e;
   --danger-strong: #a83a33;
   --danger-soft: #fdf1ef;
   --danger-line: #f0cdc8;
@@ -88,6 +89,111 @@
 
   /* —— 布局 —— */
   --focus-ring: 0 0 0 3px var(--brand-ring);
+
+  /* —— 滚动条 —— */
+  --scroll-thumb: #c7d0da;
+  --scroll-thumb-hover: #aab4c0;
+
+  /* —— 主题 —— */
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   深色主题（4.5）
+   所有颜色都走令牌，所以深色只是一组变量的替换，页面 CSS 一行都不用改。
+   两种触发方式必须保持完全一致：
+     1. 用户手动选深色 → <html data-theme="dark">
+     2. 跟随系统且系统是深色 → 没有 data-theme="light" 时由媒体查询接管
+   （测试会比对两处的令牌集合必须相同，改一处必须改另一处。）
+   ========================================================================== */
+:root[data-theme="dark"] {
+  --brand: #2bb8e0;
+  --brand-strong: #56c9ea;
+  --brand-tint: #8fe0f5;
+  --brand-deep: #8ddaf2;
+  --brand-soft: #10303c;
+  --brand-soft-strong: #163d4c;
+  --brand-line: #1e4c5c;
+  --brand-ring: #2bb8e03d;
+  --success: #4cc38a;
+  --success-strong: #7ad6a8;
+  --success-soft: #11291f;
+  --success-line: #1e4736;
+  --warning: #e0b45f;
+  --warning-soft: #2c2517;
+  --warning-soft-strong: #382e1c;
+  --warning-line: #4a3d22;
+  --danger: #ef7169;
+  --danger-strong: #f79b94;
+  --danger-soft: #2f1a18;
+  --danger-line: #522a26;
+  --accent: #d6a463;
+  --accent-soft: #2a2317;
+  --accent-line: #463823;
+  --ink: #eef2f7;
+  --text: #c6cfda;
+  --muted: #99a3b1;
+  --faint: #7b8592;
+  --ghost: #5c6672;
+  --line: #2a323d;
+  --line-soft: #222932;
+  --surface: #171b22;
+  --surface-soft: #1c212a;
+  --surface-sunken: #12161c;
+  --bg: #0f1216;
+  --shadow-sm: 0 1px 2px #00000059, 0 1px 3px #00000040;
+  --shadow-md: 0 6px 18px #00000073, 0 1px 3px #0000004d;
+  --shadow-lg: 0 22px 58px #000000b3;
+  --shadow-brand: 0 6px 16px #00000066;
+  --scroll-thumb: #3a434f;
+  --scroll-thumb-hover: #4b5563;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --brand: #2bb8e0;
+    --brand-strong: #56c9ea;
+  --brand-tint: #8fe0f5;
+    --brand-deep: #8ddaf2;
+    --brand-soft: #10303c;
+    --brand-soft-strong: #163d4c;
+    --brand-line: #1e4c5c;
+    --brand-ring: #2bb8e03d;
+    --success: #4cc38a;
+    --success-strong: #7ad6a8;
+    --success-soft: #11291f;
+    --success-line: #1e4736;
+    --warning: #e0b45f;
+    --warning-soft: #2c2517;
+    --warning-soft-strong: #382e1c;
+    --warning-line: #4a3d22;
+    --danger: #ef7169;
+    --danger-strong: #f79b94;
+    --danger-soft: #2f1a18;
+    --danger-line: #522a26;
+    --accent: #d6a463;
+    --accent-soft: #2a2317;
+    --accent-line: #463823;
+    --ink: #eef2f7;
+    --text: #c6cfda;
+    --muted: #99a3b1;
+    --faint: #7b8592;
+    --ghost: #5c6672;
+    --line: #2a323d;
+    --line-soft: #222932;
+    --surface: #171b22;
+    --surface-soft: #1c212a;
+    --surface-sunken: #12161c;
+    --bg: #0f1216;
+    --shadow-sm: 0 1px 2px #00000059, 0 1px 3px #00000040;
+    --shadow-md: 0 6px 18px #00000073, 0 1px 3px #0000004d;
+    --shadow-lg: 0 22px 58px #000000b3;
+    --shadow-brand: 0 6px 16px #00000066;
+    --scroll-thumb: #3a434f;
+    --scroll-thumb-hover: #4b5563;
+    color-scheme: dark;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -144,11 +250,11 @@ button { cursor: pointer; }
 }
 
 /* 细滚动条：Windows 默认滚动条在侧栏、日志、简介框里视觉过重 */
-* { scrollbar-width: thin; scrollbar-color: #c7d0da transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--r-pill); background: #c7d0da; background-clip: content-box; }
-*::-webkit-scrollbar-thumb:hover { background: #aab4c0; background-clip: content-box; }
+*::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--r-pill); background: var(--scroll-thumb); background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 *::-webkit-scrollbar-corner { background: transparent; }
 
 /* 通用工具类 */

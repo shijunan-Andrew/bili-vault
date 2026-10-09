@@ -36,6 +36,7 @@ const resultDetails = document.getElementById("resultDetails");
 const resultDetailsSummary = document.getElementById("resultDetailsSummary");
 const resultPath = document.getElementById("resultPath");
 const popupVersion = document.getElementById("popupVersion");
+const localeSelect = document.getElementById("localeSelect");
 let errorReport = "";
 let rootHandle = null;
 let permissionNotice = "";
@@ -51,10 +52,10 @@ function renderImportControl() {
   importControl.hidden = !importBusy;
   importControlHint.hidden = !importBusy || cancelArmed;
   importProgressView.classList.toggle("paused", importPaused);
-  importProgressTitle.textContent = importPaused ? "导入已暂停" : "正在导入收藏夹";
-  pauseImportButton.textContent = importPaused ? "继续导入" : "暂停导入";
+  importProgressTitle.textContent = importPaused ? BcaI18n.t("导入已暂停") : BcaI18n.t("正在导入收藏夹");
+  pauseImportButton.textContent = importPaused ? BcaI18n.t("继续导入") : BcaI18n.t("暂停导入");
   if (!cancelArmed) {
-    cancelImportButton.textContent = "取消导入";
+    cancelImportButton.textContent = BcaI18n.t("取消导入");
     cancelImportButton.classList.remove("danger");
   }
   pauseImportButton.disabled = false;
@@ -70,7 +71,8 @@ function disarmCancel() {
 
 async function sendImportControl(action) {
   const result = await chrome.runtime.sendMessage({ type: "bca-import-control", action });
-  if (!result?.ok) throw new Error(result?.message || "操作失败。");
+  // result.message 来自后台，显示时才翻译（查不到就原样显示中文）
+  if (!result?.ok) throw new Error(result?.message ? BcaI18n.t(result.message) : BcaI18n.t("操作失败。"));
   return result;
 }
 
@@ -93,7 +95,7 @@ function queryCurrentTab() {
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) return reject(new Error(runtimeError.message));
-      if (!tabs?.[0]?.id) return reject(new Error("无法读取当前标签页。"));
+      if (!tabs?.[0]?.id) return reject(new Error(BcaI18n.t("无法读取当前标签页。")));
       resolve(tabs[0]);
     });
   });
@@ -103,16 +105,17 @@ function sendTabMessage(tabId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
       const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) return reject(new Error("请先打开并刷新 B 站个人空间的收藏夹页面，再试一次。"));
-      resolve(response || { ok: false, message: "页面没有返回结果。" });
+      if (runtimeError) return reject(new Error(BcaI18n.t("请先打开并刷新 B 站个人空间的收藏夹页面，再试一次。")));
+      resolve(response || { ok: false, message: BcaI18n.t("页面没有返回结果。") });
     });
   });
 }
 
-function renderImportFolders(emptyMessage = "没有找到可导入的收藏夹。") {
+function renderImportFolders(emptyMessage) {
   importFolderList.replaceChildren();
   if (!importFolders.length) {
-    importFolderList.textContent = emptyMessage;
+    // 传进来的可能是 background / Chrome 的运行时文案，原样显示；本地兜底才过 t()
+    importFolderList.textContent = emptyMessage || BcaI18n.t("没有找到可导入的收藏夹。");
     startImportButton.disabled = true;
     return;
   }
@@ -125,10 +128,10 @@ function renderImportFolders(emptyMessage = "没有找到可导入的收藏夹�
     checkbox.checked = false;
     checkbox.addEventListener("change", updateImportSelection);
     const name = document.createElement("span");
-    name.textContent = folder.title || "未命名收藏夹";
+    name.textContent = folder.title || BcaI18n.t("未命名收藏夹");
     const count = document.createElement("small");
     count.className = "import-folder-count";
-    count.textContent = folder.count ? `${folder.count} 个` : "";
+    count.textContent = folder.count ? BcaI18n.t("{count} 个", { count: folder.count }) : "";
     label.append(checkbox, name, count);
     importFolderList.append(label);
   }
@@ -147,29 +150,29 @@ function updateImportSelection() {
   selectAllImportFoldersButton.disabled = importBusy;
   clearImportFoldersButton.disabled = importBusy;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
-  importSelectedCount.textContent = `已选 ${selected} 个`;
+  importSelectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: selected });
   startImportButton.disabled = importBusy || selected === 0;
-  startImportButton.textContent = selected ? `开始导入（${selected} 个收藏夹）` : "开始导入";
+  startImportButton.textContent = selected ? BcaI18n.t("开始导入（{count} 个收藏夹）", { count: selected }) : BcaI18n.t("开始导入");
   renderImportControl();
 }
 
 async function loadImportFolders() {
   importStatus.classList.remove("error");
-  importStatus.textContent = "正在读取 B 站收藏夹…";
+  importStatus.textContent = BcaI18n.t("正在读取 B 站收藏夹…");
   refreshImportFoldersButton.disabled = true;
   try {
     const tab = await queryCurrentTab();
     const response = await sendTabMessage(tab.id, { type: "bca-list-import-folders" });
-    if (!response?.ok) throw new Error(response?.message || "读取收藏夹失败。");
+    if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("读取收藏夹失败。"));
     importFolders = Array.isArray(response.folders) ? response.folders : [];
     renderImportFolders();
     // 只有在确实读到收藏夹（即当前是 B 站收藏夹页）时才自动展开导入面板
     if (importFolders.length && importCard) importCard.open = true;
-    importStatus.textContent = importFolders.length ? `已读取 ${importFolders.length} 个收藏夹。` : "当前账号没有可导入的收藏夹。";
+    importStatus.textContent = importFolders.length ? BcaI18n.t("已读取 {count} 个收藏夹。", { count: importFolders.length }) : BcaI18n.t("当前账号没有可导入的收藏夹。");
   } catch (error) {
     importFolders = [];
-    renderImportFolders(error?.message || "请在 B 站个人空间的收藏夹页面打开插件。");
-    importStatus.textContent = error?.message || "读取收藏夹失败。";
+    renderImportFolders(error?.message || BcaI18n.t("请在 B 站个人空间的收藏夹页面打开插件。"));
+    importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("读取收藏夹失败。");
     importStatus.classList.add("error");
   } finally {
     refreshImportFoldersButton.disabled = false;
@@ -182,7 +185,7 @@ async function startImport() {
   const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   if (!folderIds.length) return;
   if (!rootHandle) {
-    importStatus.textContent = "请先选择本地保存文件夹。";
+    importStatus.textContent = BcaI18n.t("请先选择本地保存文件夹。");
     importStatus.classList.add("error");
     return;
   }
@@ -192,23 +195,23 @@ async function startImport() {
   importStatus.textContent = "";
   updateImportSelection();
   importStatus.classList.remove("error");
-  importProgressText.textContent = "正在请求本地目录权限…";
+  importProgressText.textContent = BcaI18n.t("正在请求本地目录权限…");
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("未获得本地保存文件夹的写入权限，请重新选择保存文件夹后重试。");
+    if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地保存文件夹的写入权限，请重新选择保存文件夹后重试。"));
     const tab = await queryCurrentTab();
     const response = await sendTabMessage(tab.id, { type: "bca-import-selected-folders", folderIds });
     if (response?.cancelled) {
       importStatus.classList.add("error");
-      importStatus.textContent = response.message || "导入已取消，本次改动已回滚。";
+      importStatus.textContent = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入已取消，本次改动已回滚。");
       return;
     }
-    if (!response?.ok) throw new Error(response?.message || "导入失败。");
+    if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("导入失败。"));
     importStatus.classList.remove("error");
-    importStatus.textContent = response.message || `导入/更新完成：新导入 ${response.imported || 0} 个，更新 ${response.refreshed || 0} 个。`;
-    if (response.reportPath) importStatus.textContent += ` 错误报告：${response.reportPath}`;
+    importStatus.textContent = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入/更新完成：新导入 {imported} 个，更新 {refreshed} 个。", { imported: response.imported || 0, refreshed: response.refreshed || 0 });
+    if (response.reportPath) importStatus.textContent += ` ${BcaI18n.t("错误报告：{path}", { path: response.reportPath })}`;
   } catch (error) {
-    importStatus.textContent = error?.message || "导入失败。";
+    importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("导入失败。");
     importStatus.classList.add("error");
   } finally {
     importBusy = false;
@@ -222,11 +225,11 @@ function renderEnabledState(enabled) {
   brandIcon.classList.toggle("disabled", !enabled);
   toggleButton.classList.toggle("off", !enabled);
   toggleButton.setAttribute("aria-pressed", String(enabled));
-  toggleButton.setAttribute("aria-label", enabled ? "关闭自动归档" : "开启自动归档");
-  enabledLabel.textContent = enabled ? "自动归档已开启" : "自动归档已关闭";
+  toggleButton.setAttribute("aria-label", enabled ? BcaI18n.t("关闭自动归档") : BcaI18n.t("开启自动归档"));
+  enabledLabel.textContent = enabled ? BcaI18n.t("自动归档已开启") : BcaI18n.t("自动归档已关闭");
   enabledHint.textContent = enabled
-    ? "收藏成功后自动保存视频资料"
-    : "新收藏不会自动归档，本地收藏库仍可使用";
+    ? BcaI18n.t("收藏成功后自动保存视频资料")
+    : BcaI18n.t("新收藏不会自动归档，本地收藏库仍可使用");
 }
 
 async function refreshEnabledState() {
@@ -239,7 +242,7 @@ function openDb() {
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("无法保存目录设置。"));
+    request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法保存目录设置。")));
   });
 }
 
@@ -250,7 +253,7 @@ async function saveRootHandle(handle) {
       const transaction = db.transaction(DB_STORE, "readwrite");
       transaction.objectStore(DB_STORE).put(handle, "rootHandle");
       transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error || new Error("保存目录授权失败。"));
+      transaction.onerror = () => reject(transaction.error || new Error(BcaI18n.t("保存目录授权失败。")));
     });
   } finally {
     db.close();
@@ -263,7 +266,7 @@ async function loadRootHandle() {
     return await new Promise((resolve, reject) => {
       const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get("rootHandle");
       request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error || new Error("无法读取已选保存目录。"));
+      request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取已选保存目录。")));
     });
   } finally {
     db.close();
@@ -279,52 +282,59 @@ async function refreshStatus() {
     importPaused = Boolean(state.paused);
     importBusy = true;
     updateImportSelection();
+    // importState.text 由 background 写，不是 .message 透传口，按原文显示
     if (state.text) importProgressText.textContent = state.text;
   }
-  folderName.textContent = status.baseFolderName || "尚未选择文件夹";
+  folderName.textContent = status.baseFolderName || BcaI18n.t("尚未选择文件夹");
   folderName.classList.toggle("unselected", !status.baseFolderName);
   if (status.lastResult) {
-    const messageLines = String(status.lastResult.message || "已完成").split(/\r?\n/).filter(Boolean);
-    lastResult.textContent = messageLines.shift() || "已完成";
+    // status.lastResult.message 来自 background：首行当摘要，其余行当路径
+    const messageLines = String(status.lastResult.message || "").split(/\r?\n/).filter(Boolean);
+    const firstLine = messageLines.shift();
+    lastResult.textContent = firstLine || BcaI18n.t("已完成");
     const paths = [...String(status.lastResult.path || "").split(/\r?\n/), ...messageLines].filter(Boolean);
     resultPath.textContent = paths.join("\n");
-    resultDetailsSummary.textContent = paths.length > 1 ? `查看保存位置（${paths.length} 条）` : "查看保存位置";
+    resultDetailsSummary.textContent = paths.length > 1 ? BcaI18n.t("查看保存位置（{count} 条）", { count: paths.length }) : BcaI18n.t("查看保存位置");
     resultDetails.hidden = paths.length === 0;
   } else {
-    lastResult.textContent = "暂无保存记录";
+    lastResult.textContent = BcaI18n.t("暂无保存记录");
     resultDetails.hidden = true;
     resultPath.textContent = "";
   }
   if (status.lastError?.report) {
     errorReport = status.lastError.report;
     errorText.textContent = errorReport;
-    reportPath.textContent = status.lastError.reportPath ? `本地报告：${status.lastError.reportPath}` : "报告暂存在插件中，可下载到本地。";
+    reportPath.textContent = status.lastError.reportPath
+      ? BcaI18n.t("本地报告：{path}", { path: status.lastError.reportPath })
+      : BcaI18n.t("报告暂存在插件中，可下载到本地。");
     lastError.hidden = false;
   } else {
     lastError.hidden = true;
     errorReport = "";
   }
+  // 注意：这两个 includes 匹配的是 background 写的中文原文，不能翻译
   const authorizationExpired = Boolean(status.lastError?.report?.includes("写入授权已失效"));
   const alreadyReauthorized = status.authorizedErrorAt === status.lastError?.createdAt;
   const canRecover = authorizationExpired && rootHandle && !alreadyReauthorized;
   reauthorizeButton.hidden = !canRecover;
   permissionHint.hidden = !canRecover;
   if (canRecover) {
-    reauthorizeButton.textContent = status.pendingFavorite ? "重新授权并补存刚才的视频" : "重新授权保存位置";
+    reauthorizeButton.textContent = status.pendingFavorite ? BcaI18n.t("重新授权并补存刚才的视频") : BcaI18n.t("重新授权保存位置");
+    // permissionNotice 里已经是可直接显示的文案
     permissionHint.textContent = permissionNotice || (status.pendingFavorite
-      ? "点击后按 Chrome 提示允许访问，插件会接着保存这条视频。"
-      : "点击后按 Chrome 提示允许访问；然后需要重新收藏刚才的视频。");
+      ? BcaI18n.t("点击后按 Chrome 提示允许访问，插件会接着保存这条视频。")
+      : BcaI18n.t("点击后按 Chrome 提示允许访问；然后需要重新收藏刚才的视频。"));
   }
 }
 
 chooseButton.addEventListener("click", async () => {
   chooseButton.disabled = true;
-  chooseButton.textContent = "正在选择…";
+  chooseButton.textContent = BcaI18n.t("正在选择…");
   try {
-    if (!window.showDirectoryPicker) throw new Error("当前 Chrome 不支持选择本地文件夹，请更新 Chrome 后重试。");
+    if (!window.showDirectoryPicker) throw new Error(BcaI18n.t("当前 Chrome 不支持选择本地文件夹，请更新 Chrome 后重试。"));
     const handle = await window.showDirectoryPicker({ mode: "readwrite" });
     const permission = await handle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error("没有获得此文件夹的写入权限。");
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得此文件夹的写入权限。"));
     await saveRootHandle(handle);
     rootHandle = handle;
     const currentStatus = await chrome.runtime.sendMessage({ type: "get-status" });
@@ -333,41 +343,42 @@ chooseButton.addEventListener("click", async () => {
     await refreshStatus();
   } catch (error) {
     if (error?.name !== "AbortError") {
-      folderName.textContent = error?.message || "选择文件夹失败。";
+      folderName.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("选择文件夹失败。");
     }
   } finally {
     chooseButton.disabled = false;
-    chooseButton.textContent = "选择保存文件夹";
+    chooseButton.textContent = BcaI18n.t("选择保存文件夹");
   }
 });
 
 reauthorizeButton.addEventListener("click", async () => {
   if (!rootHandle) return;
   reauthorizeButton.disabled = true;
-  reauthorizeButton.textContent = "正在请求授权…";
+  reauthorizeButton.textContent = BcaI18n.t("正在请求授权…");
   try {
     // Invoke permission prompting directly from the click handler.
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     const permission = await permissionRequest;
-    if (permission !== "granted") throw new Error("没有获得保存目录的写入权限。请允许访问，或重新选择保存文件夹。");
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得保存目录的写入权限。请允许访问，或重新选择保存文件夹。"));
     permissionNotice = "";
 
     const status = await chrome.runtime.sendMessage({ type: "get-status" });
     if (status.pendingFavorite) {
-      reauthorizeButton.textContent = "正在补存视频…";
+      reauthorizeButton.textContent = BcaI18n.t("正在补存视频…");
       const result = await chrome.runtime.sendMessage({ type: "retry-pending-favorite" });
-      if (!result?.ok) throw new Error(result?.message || "授权已恢复，但视频补存失败。请查看最近错误信息。");
+      if (!result?.ok) throw new Error(result?.message ? BcaI18n.t(result.message) : BcaI18n.t("授权已恢复，但视频补存失败。请查看最近错误信息。"));
     } else {
       await chrome.storage.local.set({
-        lastResult: { message: "保存目录授权已恢复，请重新收藏刚才的视频。", createdAt: Date.now() },
+        lastResult: { message: BcaI18n.t("保存目录授权已恢复，请重新收藏刚才的视频。"), createdAt: Date.now() },
         authorizedErrorAt: status.lastError?.createdAt || null
       });
     }
     await refreshStatus();
   } catch (error) {
     if (error?.name !== "AbortError") {
-      lastResult.textContent = error?.message || "重新授权失败。";
-      permissionNotice = error?.message || "重新授权失败。";
+      // 存的就是可直接显示的文案（本地兜底已经过 t()）
+      permissionNotice = error?.message || BcaI18n.t("重新授权失败。");
+      lastResult.textContent = permissionNotice;
       permissionHint.hidden = false;
       permissionHint.textContent = permissionNotice;
     }
@@ -385,7 +396,7 @@ toggleButton.addEventListener("click", async () => {
     await chrome.storage.local.set({ enabled: nextEnabled });
   } catch (error) {
     renderEnabledState(!nextEnabled);
-    lastResult.textContent = error?.message || "无法更新插件状态。";
+    lastResult.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法更新插件状态。");
   } finally {
     toggleButton.disabled = false;
   }
@@ -411,7 +422,7 @@ pauseImportButton.addEventListener("click", async () => {
     importPaused = Boolean(result.paused);
     renderImportControl();
   } catch (error) {
-    importStatus.textContent = error?.message || "操作失败。";
+    importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("操作失败。");
     importStatus.classList.add("error");
     pauseImportButton.disabled = false;
   }
@@ -419,7 +430,7 @@ pauseImportButton.addEventListener("click", async () => {
 cancelImportButton.addEventListener("click", async () => {
   if (!cancelArmed) {
     cancelArmed = true;
-    cancelImportButton.textContent = "确认取消并回滚";
+    cancelImportButton.textContent = BcaI18n.t("确认取消并回滚");
     cancelImportButton.classList.add("danger");
     importControlHint.hidden = true;
     window.clearTimeout(cancelArmTimer);
@@ -429,12 +440,12 @@ cancelImportButton.addEventListener("click", async () => {
   window.clearTimeout(cancelArmTimer);
   cancelImportButton.disabled = true;
   pauseImportButton.disabled = true;
-  cancelImportButton.textContent = "正在取消…";
-  importProgressText.textContent = "正在删除本次新建的目录并还原被更新的记录…";
+  cancelImportButton.textContent = BcaI18n.t("正在取消…");
+  importProgressText.textContent = BcaI18n.t("正在删除本次新建的目录并还原被更新的记录…");
   try {
     await sendImportControl("cancel");
   } catch (error) {
-    importStatus.textContent = error?.message || "取消失败。";
+    importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("取消失败。");
     importStatus.classList.add("error");
     disarmCancel();
   }
@@ -450,7 +461,7 @@ clearImportFoldersButton.addEventListener("click", () => {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "bca-import-progress") return;
-  importProgressText.textContent = message.text || "正在导入…";
+  importProgressText.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在导入…");
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -461,6 +472,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (state.running) {
       importBusy = true;
       updateImportSelection();
+      // importState.text / summary 由 background 写，按原文显示
       if (state.text) importProgressText.textContent = state.text;
     } else if (importBusy) {
       // 导入结束（完成或取消）：回到收藏夹选择视图，并把结果显示出来
@@ -468,16 +480,49 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       disarmCancel();
       updateImportSelection();
       importStatus.classList.remove("error");
-      importStatus.textContent = state.summary || "导入已结束。";
+      importStatus.textContent = state.summary || BcaI18n.t("导入已结束。");
       if (state.summary?.includes("取消")) importStatus.classList.add("error");
     }
   }
   refreshStatus().catch(() => {});
 });
-refreshEnabledState().catch(() => renderEnabledState(true));
-restoreRecoverInvalid().catch(() => {});
-loadImportFolders();
-refreshStatus().catch((error) => {
-  lastResult.textContent = error?.message || "无法读取插件状态。";
-});
-if (popupVersion) popupVersion.textContent = `版本 ${chrome.runtime.getManifest().version}`;
+
+/* ---------------- 4.5：语言切换 ---------------- */
+
+// 选项文案就是语言名本身，不翻译
+function renderLocaleOptions() {
+  localeSelect.replaceChildren(...BcaI18n.locales().map((item) => new Option(item.label, item.id)));
+  localeSelect.value = BcaI18n.locale();
+}
+
+// 切换语言：静态节点由 BcaI18n.use() 自己 apply，动态内容在这里重画
+async function applyLocale(locale) {
+  const checkedIds = new Set([...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value));
+  await BcaI18n.use(locale);
+  renderLocaleOptions();
+  renderEnabledState(extensionEnabled);
+  renderImportControl();
+  if (!importBusy && importFolders.length) {
+    // 重画列表会重建复选框，先记下勾选状态再还原
+    renderImportFolders();
+    importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = checkedIds.has(input.value); });
+  }
+  updateImportSelection();
+  await refreshStatus().catch(() => {});
+}
+
+async function boot() {
+  // 第一次渲染之前初始化，避免先闪一下中文
+  await BcaI18n.init();
+  renderLocaleOptions();
+  localeSelect.addEventListener("change", () => { applyLocale(localeSelect.value).catch(() => {}); });
+  refreshEnabledState().catch(() => renderEnabledState(true));
+  restoreRecoverInvalid().catch(() => {});
+  loadImportFolders();
+  refreshStatus().catch((error) => {
+    lastResult.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法读取插件状态。");
+  });
+  if (popupVersion) popupVersion.textContent = BcaI18n.t("版本 {version}", { version: chrome.runtime.getManifest().version });
+}
+
+boot().catch(() => {});

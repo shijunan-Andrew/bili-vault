@@ -16,6 +16,13 @@
     if (!archiveEnabled) for (const stop of [...pendingStops]) stop();
   });
 
+  // 4.5：多语言。这段脚本跑在 B 站页面里，所以只能翻译自己插入的提示卡：
+  // 给 init 传 root（提示卡那一块）之后，i18n.js 既不会翻宿主页面，也不会动 <html lang>。
+  // 提示卡要等用户点收藏后才创建，这里先传一个不挂到页面上的占位容器，
+  // 卡片建好后再对它单独调用 BcaI18n.apply(卡片根节点)。
+  const noticeRootSlot = document.createElement("div");
+  const i18nReady = BcaI18n.init({ root: noticeRootSlot });
+
   function visible(element) {
     if (!element?.isConnected) return false;
     const style = getComputedStyle(element);
@@ -137,39 +144,48 @@
   };
 
   const NOTICE_STYLE = `
+    /* 提示卡挂在 B 站页面的 shadow root 里，拿不到 theme.css（4.3 起扩展页不再对
+       网页暴露），所以这里放一份与 theme.css 同名的本地令牌副本，取值保持一致；
+       改配色请以 theme.css 为准并同步这里。深色值取自原来那段媒体查询覆写。 */
     :host {
       --surface: #ffffff; --surface-soft: #f7f9fc; --line: #e2e8f0;
       --text: #3c4552; --muted: #5f6875; --faint: #858d9a;
-      --tone: #2f9068; --tone-soft: #ecf7f1; --ring: #00a1d62e;
+      --brand: #00a1d6; --brand-strong: #0089b8; --brand-deep: #026f95;
+      --brand-soft: #e9f7fc; --brand-line: #bfe5f2;
+      --success: #2f9068; --success-soft: #ecf7f1; --ring: #00a1d62e;
+      --shadow: 0 18px 48px #1018282e;
     }
     .notice {
       position: fixed; z-index: 2147483647; right: 24px; bottom: 24px;
       width: min(392px, calc(100vw - 32px)); box-sizing: border-box;
       padding: 15px 17px; border: 1px solid var(--line); border-radius: 14px;
       background: var(--surface); color: var(--text);
-      box-shadow: 0 18px 48px #1018282e;
+      box-shadow: var(--shadow);
       font: 13px/1.65 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
       animation: bca-slide-in .22s cubic-bezier(.2, .8, .2, 1) both;
       text-align: left;
     }
-    .notice.error { --tone: #c9483f; --tone-soft: #fdf1ef; }
+    .notice.error { --success: #c9483f; --success-soft: #fdf1ef; }
     @keyframes bca-slide-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-    .head { display: flex; align-items: center; gap: 8px; margin: 0 26px 5px 0; color: var(--tone); font-size: 15px; font-weight: 700; }
-    .mark { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 7px; background: var(--tone-soft); }
+    .head { display: flex; align-items: center; gap: 8px; margin: 0 26px 5px 0; color: var(--success); font-size: 15px; font-weight: 700; }
+    .mark { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 7px; background: var(--success-soft); }
     .body { color: var(--text); }
     .details { margin: 9px 0 0; padding: 8px 10px; max-height: 118px; overflow: auto; border-radius: 8px; background: var(--surface-soft); color: var(--muted); font: 12px/1.6 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     .actions { display: flex; gap: 8px; margin-top: 12px; }
     .action { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; cursor: pointer; }
-    .action:hover { border-color: #bfe5f2; color: #026f95; background: #e9f7fc; }
-    .action.primary { border-color: transparent; background: #00a1d6; color: #fff; }
-    .action.primary:hover { background: #0089b8; color: #fff; }
+    .action:hover { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
+    /* 纯白文字压在 --brand 蓝底上，属于“彩色底上的文字”，不随主题变 */
+    .action.primary { border-color: transparent; background: var(--brand); color: #fff; }
+    .action.primary:hover { background: var(--brand-strong); color: #fff; }
     .close { position: absolute; right: 9px; top: 9px; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); font-size: 17px; line-height: 1; cursor: pointer; }
-    .close:hover { background: var(--tone-soft); color: var(--tone); }
+    .close:hover { background: var(--success-soft); color: var(--success); }
     @media (prefers-color-scheme: dark) {
-      :host { --surface: #1b2027; --surface-soft: #232a33; --line: #2f3843; --text: #dde3ea; --muted: #a3adba; --faint: #7d8794; --tone: #4fbf8d; --tone-soft: #1d2c26; }
-      .notice { box-shadow: 0 18px 48px #00000080; }
-      .notice.error { --tone: #ef7f76; --tone-soft: #35211f; }
-      .action:hover { border-color: #2f4a57; background: #22303a; color: #7fd8f5; }
+      :host {
+        --surface: #1b2027; --surface-soft: #232a33; --line: #2f3843; --text: #dde3ea; --muted: #a3adba; --faint: #7d8794;
+        --brand-deep: #7fd8f5; --brand-soft: #22303a; --brand-line: #2f4a57;
+        --success: #4fbf8d; --success-soft: #1d2c26; --shadow: 0 18px 48px #00000080;
+      }
+      .notice.error { --success: #ef7f76; --success-soft: #35211f; }
     }
     @media (prefers-reduced-motion: reduce) { .notice { animation: none; } }
   `;
@@ -200,22 +216,27 @@
     mark.className = "mark";
     mark.innerHTML = isError ? NOTICE_ICONS.error : NOTICE_ICONS.ok;
     const titleText = document.createElement("span");
+    // 文案在调用处已经过 t()；这里同样打上 data-i18n 标记，
+    // apply(box) 的作用域因此严格限制在这张卡片内，绝不会碰到 B 站页面。
+    titleText.dataset.i18n = title;
     titleText.textContent = title;
     heading.append(mark, titleText);
 
     const body = document.createElement("div");
     body.className = "body";
+    body.dataset.i18n = message;
     body.textContent = message;
 
     const close = document.createElement("button");
     close.type = "button";
     close.className = "close";
     close.textContent = "×";
-    close.setAttribute("aria-label", "关闭");
+    close.setAttribute("aria-label", BcaI18n.t("关闭"));
     close.addEventListener("click", () => host.remove());
 
     box.append(heading, body);
     if (details) {
+      // details 是路径 / 原始错误，属于技术信息，不做翻译
       const detail = document.createElement("pre");
       detail.className = "details";
       detail.textContent = details;
@@ -227,6 +248,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "action primary";
+      button.dataset.i18n = primaryAction.label;
       button.textContent = primaryAction.label;
       button.addEventListener("click", () => { primaryAction.run(); host.remove(); });
       actions.append(button);
@@ -235,6 +257,10 @@
     box.append(close);
     shadow.append(style, box);
     (document.documentElement || document.body).append(host);
+
+    // 只翻译这张提示卡自己（root 限定），不会碰宿主页面；init 还没跑完时补一次
+    BcaI18n.apply(box);
+    i18nReady.then(() => { if (box.isConnected) BcaI18n.apply(box); }).catch(() => {});
 
     // 悬停时暂停自动关闭，鼠标移开后再继续倒数
     let remaining = 9000;
@@ -247,15 +273,16 @@
   }
 
   function sendFavorite(data) {
-    showNotice("正在归档视频…", "B站已完成收藏，正在保存视频信息和封面。", "", false);
+    showNotice(BcaI18n.t("正在归档视频…"), BcaI18n.t("B站已完成收藏，正在保存视频信息和封面。"), "", false);
     chrome.runtime.sendMessage({ type: "save-favorite", data }, (result) => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
-        showNotice("归档失败", "插件后台暂时无法处理这次收藏。", runtimeError.message, true);
+        showNotice(BcaI18n.t("归档失败"), BcaI18n.t("插件后台暂时无法处理这次收藏。"), runtimeError.message, true);
       } else if (!result?.ok) {
-        showNotice("归档失败", result?.message || "未能保存视频信息。", result?.details || "", true);
+        // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
+        showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);
       } else {
-        showNotice("归档成功", result.message || "已保存视频信息和封面。", result.path || "", false, { label: "打开本地收藏库", run: openLocalLibrary });
+        showNotice(BcaI18n.t("归档成功"), result?.message || BcaI18n.t("已保存视频信息和封面。"), result?.path || "", false, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
       }
     });
   }
