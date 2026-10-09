@@ -1,15 +1,16 @@
-# AI 项目交接说明：B站收藏信息归档 3.8
+# AI 项目交接说明：B站收藏信息归档 4.0
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_3.8`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`；`cdx1\b_catch_3.8` 是早期草稿，与本目录内容不同）。
-- 扩展版本：`3.8.0`，Chrome Manifest V3，最低 Chrome 版本 111。
-- `b_catch_3.7` 是 3.8 的来源稳定基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.0`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
+- 扩展版本：`4.0.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- `b_catch_3.8` 是 4.0 的来源稳定基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **4.0 是纯表现层改版**：`background.js`、`favorites-import.js`、`archive-core.js`、原生助手协议与磁盘格式一行未动；`content.js` 只重写了注入提示卡的样式；`library.js`/`download.js`/`popup.js` 只改了渲染与交互，没有改任何数据操作。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
-- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.7 → 3.8）ID 就会变，安装原生助手时必须填入新 ID。
+- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.8 → 4.0）ID 就会变，安装原生助手时必须填入新 ID。
 
 ## 功能概览
 
@@ -22,28 +23,42 @@
 ## 目录结构
 
 ```text
-b_catch_3.8/
-├── manifest.json                 # MV3 权限、后台 worker、页面脚本注册
-├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由
-├── content.js                    # B 站视频页：监听收藏操作、采集视频数据
+b_catch_4.0/
+├── manifest.json                 # MV3 权限、后台 worker、页面脚本注册、library.html 的 web_accessible_resources
+├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由（4.0 未改动）
+├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 4.0 重写的提示卡
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
+├── theme.css                     # 4.0 新增：唯一的设计令牌与通用基元（所有页面共用）
+├── icons.js                      # 4.0 新增：30 个线性 SVG 图标，替代字符图标
 ├── popup.html/js/css              # 插件弹窗、自动归档开关、根目录和导入界面
 ├── library.html/js/css            # 本地收藏库页面
 ├── archive-core.js                # 可复用的安全名称、下载目录匹配、下载路径与状态逻辑
 ├── download.html/js/css           # 视频解析和下载界面
-├── download-folder.html/js/css    # 兼容的本地下载目录浏览页面（当前无引用）
 ├── native/
-│   ├── folder-opener-launcher.cs  # 3.8 新增：原生消息宿主启动器源码（编译成 exe）
+│   ├── folder-opener-launcher.cs  # 原生消息宿主启动器源码（编译成 exe）
 │   └── folder-opener-host.ps1     # 原生消息主机工作脚本
 ├── install-native-folder-opener.bat / .ps1
 ├── uninstall-native-folder-opener.ps1
-├── test-native-folder-opener.ps1   # 3.8 新增：不依赖 Chrome 的安装自检脚本
+├── test-native-folder-opener.ps1   # 不依赖 Chrome 的安装自检脚本
 ├── test/stability.test.cjs         # Node 内置测试，无第三方依赖
 ├── README.md                       # 面向使用者的安装与功能说明
 └── AI_HANDOFF.md                   # 本文件
 ```
 
-3.8 修复了原生目录助手无法启动的问题，详见下文“Native Messaging 原生目录助手”一节。
+4.0 删除了 `download-folder.html/js/css`（3.2 之后就被原生助手取代，全项目零引用）。
+
+## 界面与设计系统（4.0 起必须遵守）
+
+4.0 之前，四份 CSS 是不断追加的覆写补丁：`library.css` 里依次有“2.3 柔和配色 → 3.1 恢复蓝色 → 3.4 放大字号 → 3.8”四个区块，`popup.css` 里 `.library-link` 被定义了 4 次、`.primary` 和 `.toggle-switch` 各 3 次，谁生效只能靠读到最后一行。改动因此极易被下游区块盖掉。4.0 换成如下约定，**后续任何界面改动都必须遵守**：
+
+1. **颜色、圆角、阴影、间距、字号、动效只在 `theme.css` 定义。** 页面 CSS 只引用 `var(--…)`，不再写死色值。灰阶只用 `--ink / --text / --muted / --faint / --ghost` 五级。
+2. **页面 CSS 单层直写，禁止再追加“覆写区块”。** 需要改样式就改对应规则本身。`test/stability.test.cjs` 有静态断言兜底（字号下限、令牌存在性、每页都引入 theme.css/icons.js）。
+3. **字号只能用 `--fs-micro`(11) / `--fs-sm`(12) / `--fs-base`(13) / `--fs-md`(15) / `--fs-lg`(18) / `--fs-xl`(22) / `--fs-2xl`(27)。** 11px 只允许用于纯装饰文案；中文正文不低于 13px。测试会拒绝任何小于 11px 的 `font-size`。
+4. **图标只用 `icons.js`。** 静态 HTML 写 `<span data-icon="folder"></span>`（DOMContentLoaded 自动填充），JS 模板串用 `BcaIcons.svg("folder")`。不要再引入 `▦ ▶ ＋ ↻` 这类字符图标——测试会拦截。
+5. **按钮里带图标后，改文案不能用 `textContent`**（会把图标一起清掉）。用 `library.js` 的 `setButtonContent(button, icon, text)` 或 `download.js` 的 `setButtonLabel(...)`。
+6. 键盘焦点样式与 `prefers-reduced-motion` 已经统一在 `theme.css`，页面不要重复定义。
+
+**页面布局的关键约束**：Chrome 弹窗上限是 800×600，`popup.html` 默认视图必须控制在 600px 内，所以“导入或更新”是折叠区块（读到收藏夹或导入进行中会自动展开）；本地收藏库的卡片网格用 `repeat(auto-fill, minmax(260px, 1fr))`，不要改回固定列数。
 
 ## 主要数据流
 
@@ -167,7 +182,7 @@ b_catch_3.8/
 node test/stability.test.cjs
 ```
 
-当前包含 9 项纯逻辑回归检查：收藏夹传递、BV/av 下载目录识别、同收藏夹优先与 3.5 旧目录回退、媒体文件判定、扫描权限不明时保留状态、收藏夹目录名安全处理、下载相对路径拼接、原生消息清单不得含 `args`、工作脚本必须以 UTF-8 读取设置。无第三方包。
+当前包含 17 项检查：9 项纯逻辑回归（收藏夹传递、BV/av 下载目录识别、同收藏夹优先与 3.5 旧目录回退、媒体文件判定、扫描权限不明时保留状态、收藏夹目录名安全处理、下载相对路径拼接、原生消息清单不得含 `args`、工作脚本必须以 UTF-8 读取设置），8 项表现层静态回归（每页引入 theme.css/icons.js 且顺序正确、设计令牌齐全且含 reduced-motion 与 focus-visible、字号不低于 11px、不再使用字符图标、所有引用到的图标名都存在、孤儿页保持删除、注入提示卡支持深色与悬停暂停、manifest 版本与 web_accessible_resources 范围）。无第三方包。
 
 每次改动还应执行：
 
@@ -195,5 +210,6 @@ node test/stability.test.cjs
 2. 先读本文件、`README.md`、相关页面和消息两端，不要只改单侧响应协议。
 3. 保持用户本地文件格式向后兼容，尤其是时间目录、`视频信息.txt` 字段名、`000视频下载`/`001错误报告` 和历史 `未分类收藏` 下载。
 4. 目录删除、移动、覆盖属于数据操作；保持显式确认，复制失败时回滚新建目录，不删除未被明确选中的下载文件。
-5. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
-6. 完成后报告改动内容、检查方式和未验证的真实环境行为。
+5. 界面改动遵守上文“界面与设计系统”的六条约定；改完跑 `node test/stability.test.cjs`，它会拦住字号回退、字符图标复活和页面漏引 theme.css/icons.js。
+6. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
+7. 完成后报告改动内容、检查方式和未验证的真实环境行为。

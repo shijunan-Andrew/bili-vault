@@ -87,3 +87,100 @@ test("native host reads its UTF-8 settings with an explicit encoding", () => {
   const worker = readProjectFile(path.join("native", "folder-opener-host.ps1"));
   assert.match(worker, /Get-Content[^\r\n]*-Raw[^\r\n]*-Encoding UTF8/);
 });
+
+/* ------------------------- 4.0 表现层回归检查 ------------------------- */
+
+const PAGE_STYLES = ["library.css", "download.css", "popup.css"];
+const PAGE_SCRIPTS = ["library.js", "download.js", "popup.js", "content.js"];
+
+// 去掉注释后再扫，避免把说明文字里的示例字符当成真实用法
+const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\r\n]*/g, "$1");
+
+test("every page loads the shared design tokens and the icon set", () => {
+  for (const page of ["library.html", "download.html", "popup.html"]) {
+    const html = readProjectFile(page);
+    assert.match(html, /<link rel="stylesheet" href="theme\.css">/, `${page} 未引入 theme.css`);
+    assert.match(html, /<script src="icons\.js"><\/script>/, `${page} 未引入 icons.js`);
+    assert.ok(html.indexOf("theme.css") < html.indexOf(page.replace(".html", ".css")), `${page} 的 theme.css 必须在页面样式之前`);
+    assert.ok(html.indexOf("icons.js") < html.indexOf(page.replace(".html", ".js")), `${page} 的 icons.js 必须在业务脚本之前`);
+  }
+});
+
+test("theme.css owns the design tokens and the reduced-motion fallback", () => {
+  const theme = readProjectFile("theme.css");
+  for (const token of ["--brand", "--ink", "--text", "--muted", "--line", "--surface", "--bg", "--fs-base", "--r-md", "--shadow-md", "--sp-3"]) {
+    assert.ok(theme.includes(`${token}:`), `theme.css 缺少令牌 ${token}`);
+  }
+  assert.match(theme, /prefers-reduced-motion/);
+  assert.match(theme, /focus-visible/);
+  assert.match(theme, /font-variant-numeric/);
+});
+
+// 很多组件显式写了 display（.downloaded-badge 是 inline-flex、.batch-toolbar 是 flex、
+// .video-grid 是 grid），会盖掉浏览器默认的 [hidden] { display: none }，
+// 少了这条全局兜底就会出现“该隐藏的元素仍然显示”。
+test("theme.css keeps the global [hidden] override", () => {
+  assert.match(readProjectFile("theme.css"), /\[hidden\]\s*\{\s*display:\s*none\s*!important/);
+  for (const file of PAGE_STYLES) {
+    assert.equal(/\[hidden\]\s*\{/.test(readProjectFile(file)), false, `${file} 不应再重复定义 [hidden]`);
+  }
+});
+
+// 3.x 里下载页日志是 9px、“视频/音频”副标题是 8px，中文基本不可读。
+test("no page stylesheet drops below the 11px type floor", () => {
+  for (const file of PAGE_STYLES) {
+    const css = stripComments(readProjectFile(file));
+    for (const match of css.matchAll(/font(?:-size)?:\s*(\d+(?:\.\d+)?)px/g)) {
+      assert.ok(Number(match[1]) >= 11, `${file} 出现小于 11px 的字号：${match[0]}`);
+    }
+  }
+});
+
+test("pages no longer use character glyphs as icons", () => {
+  const glyphs = /[▦▤▣▧▥⠿⌕▰↗＋↻✦]/;
+  for (const file of ["library.html", "download.html", "popup.html", ...PAGE_SCRIPTS]) {
+    const text = stripComments(readProjectFile(file));
+    const found = text.match(glyphs);
+    assert.equal(found, null, `${file} 仍在用字符当图标：${found?.[0]}`);
+  }
+});
+
+test("every referenced icon name exists in icons.js", () => {
+  const icons = readProjectFile("icons.js");
+  const available = new Set([...icons.matchAll(/^\s{4}"?([a-z-]+)"?:\s*'/gm)].map((match) => match[1]));
+  assert.ok(available.has("library") && available.has("check") && available.has("close"));
+
+  const wanted = new Set();
+  for (const file of ["library.html", "download.html", "popup.html"]) {
+    for (const match of readProjectFile(file).matchAll(/data-icon="([a-z-]+)"/g)) wanted.add(match[1]);
+  }
+  for (const file of PAGE_SCRIPTS) {
+    const text = stripComments(readProjectFile(file));
+    for (const match of text.matchAll(/svg\(\s*"([a-z-]+)"/g)) wanted.add(match[1]);
+  }
+  assert.ok(wanted.size > 10);
+  for (const name of wanted) assert.ok(available.has(name), `icons.js 里没有图标 ${name}`);
+});
+
+test("the removed compatibility page stays removed", () => {
+  for (const file of ["download-folder.html", "download-folder.js", "download-folder.css"]) {
+    assert.equal(fs.existsSync(path.join(projectRoot, file)), false, `${file} 应该已经删除`);
+  }
+  assert.equal(/download-folder/.test(readProjectFile("manifest.json")), false);
+});
+
+test("the injected Bilibili notice follows the system colour scheme", () => {
+  const content = readProjectFile("content.js");
+  assert.match(content, /prefers-color-scheme: dark/);
+  assert.match(content, /prefers-reduced-motion/);
+  assert.match(content, /mouseenter/);
+});
+
+test("manifest opens the library page to Bilibili pages only", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  assert.equal(manifest.version, "4.0.0");
+  const entry = (manifest.web_accessible_resources || []).find((item) => item.resources.includes("library.html"));
+  assert.ok(entry, "缺少 library.html 的 web_accessible_resources");
+  assert.ok(entry.matches.every((pattern) => pattern.includes("bilibili.com")), "library.html 只应对 B 站页面开放");
+  assert.ok(manifest.permissions.includes("clipboardWrite"));
+});

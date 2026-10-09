@@ -129,38 +129,117 @@
     };
   }
 
-  function showNotice(title, message, details, isError) {
+  // 注入到 B 站页面的提示卡。4.0：跟随系统深浅色、滑入动画、悬停暂停倒计时、
+  // 成功后可以直接跳进本地收藏库。采集与发送逻辑没有任何改动。
+  const NOTICE_ICONS = {
+    ok: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5.2 12.6 4.4 4.4L18.8 7.6"/></svg>',
+    error: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.6 20.8 19.4H3.2z"/><path d="M12 10v4.1M12 16.8v.2"/></svg>'
+  };
+
+  const NOTICE_STYLE = `
+    :host {
+      --surface: #ffffff; --surface-soft: #f7f9fc; --line: #e2e8f0;
+      --text: #3c4552; --muted: #5f6875; --faint: #858d9a;
+      --tone: #2f9068; --tone-soft: #ecf7f1; --ring: #00a1d62e;
+    }
+    .notice {
+      position: fixed; z-index: 2147483647; right: 24px; bottom: 24px;
+      width: min(392px, calc(100vw - 32px)); box-sizing: border-box;
+      padding: 15px 17px; border: 1px solid var(--line); border-radius: 14px;
+      background: var(--surface); color: var(--text);
+      box-shadow: 0 18px 48px #1018282e;
+      font: 13px/1.65 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      animation: bca-slide-in .22s cubic-bezier(.2, .8, .2, 1) both;
+      text-align: left;
+    }
+    .notice.error { --tone: #c9483f; --tone-soft: #fdf1ef; }
+    @keyframes bca-slide-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    .head { display: flex; align-items: center; gap: 8px; margin: 0 26px 5px 0; color: var(--tone); font-size: 15px; font-weight: 700; }
+    .mark { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 7px; background: var(--tone-soft); }
+    .body { color: var(--text); }
+    .details { margin: 9px 0 0; padding: 8px 10px; max-height: 118px; overflow: auto; border-radius: 8px; background: var(--surface-soft); color: var(--muted); font: 12px/1.6 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; }
+    .action { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; cursor: pointer; }
+    .action:hover { border-color: #bfe5f2; color: #026f95; background: #e9f7fc; }
+    .action.primary { border-color: transparent; background: #00a1d6; color: #fff; }
+    .action.primary:hover { background: #0089b8; color: #fff; }
+    .close { position: absolute; right: 9px; top: 9px; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); font-size: 17px; line-height: 1; cursor: pointer; }
+    .close:hover { background: var(--tone-soft); color: var(--tone); }
+    @media (prefers-color-scheme: dark) {
+      :host { --surface: #1b2027; --surface-soft: #232a33; --line: #2f3843; --text: #dde3ea; --muted: #a3adba; --faint: #7d8794; --tone: #4fbf8d; --tone-soft: #1d2c26; }
+      .notice { box-shadow: 0 18px 48px #00000080; }
+      .notice.error { --tone: #ef7f76; --tone-soft: #35211f; }
+      .action:hover { border-color: #2f4a57; background: #22303a; color: #7fd8f5; }
+    }
+    @media (prefers-reduced-motion: reduce) { .notice { animation: none; } }
+  `;
+
+  function openLocalLibrary() {
+    try { window.open(chrome.runtime.getURL("library.html"), "_blank", "noopener"); } catch (_) {}
+  }
+
+  function showNotice(title, message, details, isError, primaryAction) {
     document.getElementById("bili-fav-archiver-host")?.remove();
     const host = document.createElement("div");
     host.id = "bili-fav-archiver-host";
     const shadow = host.attachShadow({ mode: "closed" });
+
+    const style = document.createElement("style");
+    style.textContent = NOTICE_STYLE;
     const box = document.createElement("section");
+    box.className = `notice${isError ? " error" : ""}`;
     box.setAttribute("role", "status");
-    box.style.cssText = [
-      "position:fixed", "z-index:2147483647", "right:24px", "bottom:24px", "width:min(390px,calc(100vw - 32px))",
-      "box-sizing:border-box", "padding:18px 20px", "border-radius:12px", "background:#fff", "color:#202124",
-      "box-shadow:0 8px 32px rgba(0,0,0,.24)", "font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
-    ].join(";");
+
     const heading = document.createElement("div");
-    heading.textContent = title;
-    heading.style.cssText = `font-size:16px;font-weight:700;margin:0 28px 8px 0;color:${isError ? "#b3261e" : "#16794b"}`;
+    heading.className = "head";
+    const mark = document.createElement("span");
+    mark.className = "mark";
+    mark.innerHTML = isError ? NOTICE_ICONS.error : NOTICE_ICONS.ok;
+    const titleText = document.createElement("span");
+    titleText.textContent = title;
+    heading.append(mark, titleText);
+
     const body = document.createElement("div");
+    body.className = "body";
     body.textContent = message;
-    const detail = document.createElement("pre");
-    detail.textContent = details || "";
-    detail.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 inherit;color:#5f6368;margin:8px 0 0;max-height:110px;overflow:auto";
+
     const close = document.createElement("button");
     close.type = "button";
+    close.className = "close";
     close.textContent = "×";
     close.setAttribute("aria-label", "关闭");
-    close.style.cssText = "position:absolute;right:12px;top:8px;border:0;background:transparent;font-size:24px;line-height:1;color:#666;cursor:pointer";
     close.addEventListener("click", () => host.remove());
+
     box.append(heading, body);
-    if (details) box.append(detail);
+    if (details) {
+      const detail = document.createElement("pre");
+      detail.className = "details";
+      detail.textContent = details;
+      box.append(detail);
+    }
+    if (primaryAction?.run) {
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "action primary";
+      button.textContent = primaryAction.label;
+      button.addEventListener("click", () => { primaryAction.run(); host.remove(); });
+      actions.append(button);
+      box.append(actions);
+    }
     box.append(close);
-    shadow.append(box);
+    shadow.append(style, box);
     (document.documentElement || document.body).append(host);
-    window.setTimeout(() => host.remove(), 9000);
+
+    // 悬停时暂停自动关闭，鼠标移开后再继续倒数
+    let remaining = 9000;
+    let startedAt = Date.now();
+    let timer = 0;
+    const schedule = () => { startedAt = Date.now(); timer = window.setTimeout(() => host.remove(), remaining); };
+    box.addEventListener("mouseenter", () => { window.clearTimeout(timer); remaining -= Date.now() - startedAt; });
+    box.addEventListener("mouseleave", () => { if (remaining > 0) schedule(); });
+    schedule();
   }
 
   function sendFavorite(data) {
@@ -172,7 +251,7 @@
       } else if (!result?.ok) {
         showNotice("归档失败", result?.message || "未能保存视频信息。", result?.details || "", true);
       } else {
-        showNotice("归档成功", result.message || "已保存视频信息和封面。", result.path || "", false);
+        showNotice("归档成功", result.message || "已保存视频信息和封面。", result.path || "", false, { label: "打开本地收藏库", run: openLocalLibrary });
       }
     });
   }

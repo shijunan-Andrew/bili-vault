@@ -5,13 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#00a1d6">
   <title>下载 B 站视频 · 本地收藏库</title>
+  <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="download.css">
 </head>
 <body>
   <header class="download-topbar">
-    <a class="back-link" href="library.html">← 返回本地收藏库</a>
+    <a class="back-link" href="library.html"><span data-icon="arrow-left"></span>返回本地收藏库</a>
     <span class="topbar-label">B站视频下载</span>
   </header>
+
   <main class="download-main">
     <section class="download-intro">
       <p class="eyebrow">LOCAL VIDEO DOWNLOADER</p>
@@ -30,7 +32,9 @@
       </form>
       <div id="queueList" class="queue-list"></div>
       <div id="queueEmpty" class="queue-empty" hidden>
-        <span aria-hidden="true">＋</span><strong>添加要下载的视频</strong><small>从收藏库打开，或在上方粘贴一个视频链接。</small>
+        <span class="icon-slot" data-icon="plus"></span>
+        <strong>添加要下载的视频</strong>
+        <small>从收藏库打开，或在上方粘贴一个视频链接。</small>
       </div>
     </section>
 
@@ -38,11 +42,17 @@
       <section class="panel settings-panel">
         <div class="panel-heading compact-heading"><div><h2>下载设置</h2><p>这些选项应用于当前队列。</p></div></div>
         <div class="folder-picker-row">
-          <div class="folder-symbol" aria-hidden="true">▰</div>
-          <div class="folder-copy"><span class="setting-label">保存到</span><strong id="downloadFolderName">本地收藏根目录 / 000视频下载（默认）</strong><small id="downloadFolderHelp">默认位置会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。</small></div>
+          <div class="folder-symbol" data-icon="collection"></div>
+          <div class="folder-copy">
+            <span class="setting-label">保存到</span>
+            <strong id="downloadFolderName">本地收藏根目录 / 000视频下载（默认）</strong>
+            <small id="downloadFolderHelp">默认位置会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。</small>
+          </div>
           <button id="chooseDownloadFolder" class="button button-secondary" type="button">选择目录</button>
         </div>
-        <button id="useDefaultDownloadFolder" class="text-button" type="button">使用默认下载位置</button>
+        <div class="folder-actions-row">
+          <button id="useDefaultDownloadFolder" class="text-button" type="button">使用默认下载位置</button>
+        </div>
         <div id="folderPermissionHint" class="inline-hint" hidden>请重新授权此目录，或选择其他目录。</div>
 
         <div class="settings-grid">
@@ -54,30 +64,32 @@
 
         <div class="content-heading"><span>下载内容</span><small>可多选</small></div>
         <div class="content-options">
-          <label class="content-option"><input id="includeVideo" type="checkbox" checked><span class="option-icon">▶</span><span><strong>视频</strong><small>按所选格式保存</small></span></label>
-          <label class="content-option" id="audioOption"><input id="includeAudio" type="checkbox" checked><span class="option-icon">♫</span><span><strong>音频</strong><small>DASH 音轨</small></span></label>
-          <label class="content-option"><input id="includeDanmaku" type="checkbox"><span class="option-icon">▤</span><span><strong>弹幕</strong><small>XML 格式</small></span></label>
-          <label class="content-option"><input id="includeSubtitle" type="checkbox"><span class="option-icon">CC</span><span><strong>字幕</strong><small>SRT 格式</small></span></label>
-          <label class="content-option"><input id="includeCover" type="checkbox" checked><span class="option-icon">▧</span><span><strong>封面</strong><small>JPG 图片</small></span></label>
-          <label class="content-option"><input id="includeInfo" type="checkbox" checked><span class="option-icon">ℹ</span><span><strong>视频信息</strong><small>TXT 文本</small></span></label>
+          <label class="content-option"><input id="includeVideo" type="checkbox" checked><span class="option-icon" data-icon="play"></span><span><strong>视频</strong><small>按所选格式保存</small></span></label>
+          <label class="content-option" id="audioOption"><input id="includeAudio" type="checkbox" checked><span class="option-icon" data-icon="music"></span><span><strong>音频</strong><small>DASH 音轨</small></span></label>
+          <label class="content-option"><input id="includeDanmaku" type="checkbox"><span class="option-icon" data-icon="danmaku"></span><span><strong>弹幕</strong><small>XML 格式</small></span></label>
+          <label class="content-option"><input id="includeSubtitle" type="checkbox"><span class="option-icon" data-icon="subtitle"></span><span><strong>字幕</strong><small>SRT 格式</small></span></label>
+          <label class="content-option"><input id="includeCover" type="checkbox" checked><span class="option-icon" data-icon="image"></span><span><strong>封面</strong><small>JPG 图片</small></span></label>
+          <label class="content-option"><input id="includeInfo" type="checkbox" checked><span class="option-icon" data-icon="info"></span><span><strong>视频信息</strong><small>TXT 文本</small></span></label>
         </div>
         <p class="format-note" id="formatNote">MP4 为单文件模式，受 B 站接口提供的清晰度限制；DASH 会分别保存视频和音频流，可获得更高画质。</p>
-        <button id="startDownload" class="button button-primary start-download" type="button" disabled>开始下载</button>
+        <button id="startDownload" class="button button-primary start-download" type="button" disabled><span data-icon="download"></span>开始下载</button>
       </section>
 
       <section class="panel progress-panel">
         <div class="panel-heading compact-heading"><div><h2>下载进度</h2><p id="progressSummary">等待解析视频</p></div><span id="progressBadge" class="progress-badge idle">待开始</span></div>
         <div class="progress-track"><div id="overallProgress" class="progress-fill"></div></div>
-        <div class="progress-meta"><span id="progressCurrent">准备就绪</span><span id="progressFiles">已保存 0 个文件</span></div>
+        <div class="progress-meta"><span id="progressCurrent">准备就绪</span><span id="progressFiles" class="tnum">已保存 0 个文件</span></div>
         <div id="downloadLog" class="download-log" role="status" aria-live="polite"><div class="log-placeholder">解析完成后，下载过程和结果会显示在这里。</div></div>
         <div class="download-actions" hidden>
-          <button id="pauseDownload" class="button button-quiet pause-download" type="button">暂停下载</button>
-          <button id="cancelDownload" class="button button-quiet cancel-download" type="button">取消下载</button>
+          <button id="pauseDownload" class="button button-quiet pause-download" type="button"><span data-icon="pause"></span>暂停下载</button>
+          <button id="cancelDownload" class="button button-quiet cancel-download" type="button"><span data-icon="stop"></span>取消下载</button>
         </div>
       </section>
     </div>
     <p class="page-footnote">仅保存当前账号有权播放的内容。部分清晰度、字幕或失效视频可能无法从 B 站接口获取。</p>
   </main>
+
+  <script src="icons.js"></script>
   <script src="archive-core.js"></script>
   <script src="download.js"></script>
 </body>

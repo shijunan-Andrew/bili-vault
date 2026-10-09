@@ -107,13 +107,22 @@ function setBadge(text, state = "idle") {
   progressBadge.className = `progress-badge ${state}`;
 }
 
+const LOG_ICONS = { info: "chevron-right", success: "check", error: "alert" };
+
 function addLog(message, type = "info") {
   if (downloadLog.querySelector(".log-placeholder")) downloadLog.replaceChildren();
   const entry = document.createElement("div");
   entry.className = `log-entry ${type}`;
-  entry.textContent = message;
+  entry.innerHTML = `${BcaIcons.svg(LOG_ICONS[type] || "chevron-right")}<span></span>`;
+  entry.lastElementChild.textContent = message;
   downloadLog.append(entry);
   downloadLog.scrollTop = downloadLog.scrollHeight;
+}
+
+// 按钮里带图标后，改文案不能再用 textContent（会把图标一起清掉）
+function setButtonLabel(button, iconName, text) {
+  button.innerHTML = `${BcaIcons.svg(iconName)}<span></span>`;
+  button.lastElementChild.textContent = text;
 }
 
 function updateProgress() {
@@ -154,7 +163,7 @@ async function waitWhilePaused() {
 
 function setPaused(value) {
   paused = value;
-  pauseDownload.textContent = paused ? "继续下载" : "暂停下载";
+  setButtonLabel(pauseDownload, paused ? "play" : "pause", paused ? "继续下载" : "暂停下载");
   setBadge(paused ? "已暂停" : "下载中", paused ? "paused" : "active");
   progressSummary.textContent = paused ? "下载已暂停，可继续或取消" : "下载继续进行中";
   if (!paused) releasePauseWaiter();
@@ -199,7 +208,7 @@ function renderQueue() {
     remove.className = "queue-remove";
     remove.title = "移出队列";
     remove.setAttribute("aria-label", "移出队列");
-    remove.textContent = "×";
+    remove.innerHTML = BcaIcons.svg("close");
     remove.addEventListener("click", () => {
       queue = queue.filter((entry) => entry.id !== item.id);
       renderQueue();
@@ -737,7 +746,7 @@ async function start() {
   downloadActions.hidden = false;
   cancelDownload.disabled = false;
   pauseDownload.disabled = false;
-  pauseDownload.textContent = "暂停下载";
+  setButtonLabel(pauseDownload, "pause", "暂停下载");
   setQueueBusy(true);
   addLog(`开始下载：${validItems.length} 个视频 / ${pagesToDownload.length} 个分 P`, "info");
   try {

@@ -16,6 +16,7 @@ const currentCollection = document.getElementById("currentCollection");
 const pageTitle = document.getElementById("pageTitle");
 const resultSummary = document.getElementById("resultSummary");
 const scanNotice = document.getElementById("scanNotice");
+const scanProgress = document.getElementById("scanProgress");
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
@@ -82,6 +83,7 @@ let pendingCollectionAction = null;
 let collectionOrder = [];
 let draggedCollectionName = "";
 let downloadStatusCheckRunning = false;
+let lastSelectedVideoId = "";
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -437,7 +439,7 @@ async function restoreCollectionOrder() {
 function renderCollections() {
   const total = allVideos().length;
   collectionTotal.textContent = String(collections.length);
-  const rows = [{ name: "全部收藏", key: "*", count: total, glyph: "▦" }, ...collections.map((item, index) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: ["▤", "▣", "▧", "▥"][index % 4] }))];
+  const rows = [{ name: "全部收藏", key: "*", count: total, glyph: "library" }, ...collections.map((item) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: "collection" }))];
   collectionList.replaceChildren(...rows.map((row) => {
     const wrapper = document.createElement("div");
     wrapper.className = "collection-row";
@@ -445,7 +447,7 @@ function renderCollections() {
     button.className = `collection-button${selectedCollection === row.key ? " active" : ""}`;
     button.type = "button";
     button.setAttribute("aria-current", selectedCollection === row.key ? "page" : "false");
-    button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${row.glyph}</span><span class="collection-name"></span>${row.key === "*" ? "" : '<span class="collection-drag-handle" title="按住拖动调整顺序" aria-hidden="true">⠿</span>'}<span class="collection-count">${row.count}</span>`;
+    button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${BcaIcons.svg(row.glyph)}</span><span class="collection-name"></span>${row.key === "*" ? "" : `<span class="collection-drag-handle" title="按住拖动调整顺序" aria-hidden="true">${BcaIcons.svg("grip")}</span>`}<span class="collection-count tnum">${row.count}</span>`;
     button.querySelector(".collection-name").textContent = row.name;
     button.addEventListener("click", () => {
       if (selectedCollection !== row.key) selectedVideoIds.clear();
@@ -461,7 +463,7 @@ function renderCollections() {
       const deleteButton = document.createElement("button");
       deleteButton.className = "collection-delete";
       deleteButton.type = "button";
-      deleteButton.textContent = "×";
+      deleteButton.innerHTML = BcaIcons.svg("close");
       deleteButton.title = `删除收藏夹“${row.name}”`;
       deleteButton.setAttribute("aria-label", `删除收藏夹 ${row.name}`);
       deleteButton.addEventListener("click", (event) => {
@@ -497,7 +499,7 @@ function setSelectionMode(enabled) {
   batchManageButton.classList.toggle("button-quiet", !selectionMode);
   batchManageButton.textContent = selectionMode ? "完成" : "批量管理";
   batchManageButton.setAttribute("aria-pressed", String(selectionMode));
-  if (!selectionMode) selectedVideoIds.clear();
+  if (!selectionMode) { selectedVideoIds.clear(); lastSelectedVideoId = ""; }
   renderVideos();
 }
 
@@ -561,16 +563,21 @@ function renderVideos() {
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", selectionMode ? `选择视频：${video.title}` : `查看视频：${video.title}`);
-    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">已失效</span><span class="downloaded-badge"${video.downloaded ? "" : " hidden"}>已下载</span><span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="选择视频"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date"></span></div></div>`;
+    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">已失效</span><span class="downloaded-badge"${video.downloaded ? "" : " hidden"}>${BcaIcons.svg("check")}已下载</span><span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="选择视频"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date tnum"></span></div></div>`;
     const checkbox = card.querySelector(".card-select");
     checkbox.checked = selectedVideoIds.has(video.id);
     checkbox.addEventListener("click", (event) => event.stopPropagation());
     checkbox.addEventListener("change", () => setVideoSelected(video.id, checkbox.checked));
     card.querySelector(".cover-badge").textContent = video.collection;
-    card.querySelector(".card-title").textContent = video.title;
+    card.querySelector(".card-title").innerHTML = highlightMatches(video.title, query);
     card.querySelector(".card-up").textContent = video.upName || video.bvid || "本地收藏视频";
     card.querySelector(".card-date").textContent = compactDate(video.favoriteAt);
-    card.addEventListener("click", () => selectionMode ? setVideoSelected(video.id, !selectedVideoIds.has(video.id)) : openDetail(video));
+    card.addEventListener("click", (event) => {
+      if (!selectionMode) { openDetail(video); return; }
+      if (event.shiftKey) { selectVideoRange(video.id); return; }
+      lastSelectedVideoId = video.id;
+      setVideoSelected(video.id, !selectedVideoIds.has(video.id));
+    });
     card.addEventListener("keydown", (event) => {
       if (event.target !== card || (event.key !== "Enter" && event.key !== " ")) return;
       event.preventDefault();
@@ -592,7 +599,7 @@ function renderVideos() {
     videoGrid.hidden = false;
     const emptyTitle = selectedCollection === "*" ? "本地收藏库里还没有视频" : "这个收藏夹里还没有视频";
     const emptyCopy = selectedCollection === "*" ? "选择一个收藏夹，或新建收藏夹并添加视频。" : "点击右上角“添加视频”，输入 B 站网址、BV 号或 av 号。";
-    videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">▤</div><h2>${emptyTitle}</h2><p>${emptyCopy}</p></div>`;
+    videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">${BcaIcons.svg("collection")}</div><h2>${emptyTitle}</h2><p>${emptyCopy}</p></div>`;
   }
   updateBatchControls();
 }
@@ -604,6 +611,94 @@ function compactDate(value) {
 
 function addField(rows, label, value) { if (value && value !== "未知") rows.push(`<dt>${label}</dt><dd>${escapeHtml(value)}</dd>`); }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
+
+// 搜索命中时高亮卡片标题里的关键词（先转义再插入 <mark>，避免标题里的尖括号被当成标签）
+function highlightMatches(text, query) {
+  const source = String(text ?? "");
+  if (!query) return escapeHtml(source);
+  const lower = source.toLocaleLowerCase();
+  let cursor = 0;
+  let html = "";
+  while (cursor < source.length) {
+    const found = lower.indexOf(query, cursor);
+    if (found < 0) break;
+    html += `${escapeHtml(source.slice(cursor, found))}<mark>${escapeHtml(source.slice(found, found + query.length))}</mark>`;
+    cursor = found + query.length;
+  }
+  return html + escapeHtml(source.slice(cursor));
+}
+
+function selectVideoRange(videoId) {
+  const anchor = visibleVideoIds.indexOf(lastSelectedVideoId);
+  const target = visibleVideoIds.indexOf(videoId);
+  if (anchor < 0 || target < 0) { lastSelectedVideoId = videoId; setVideoSelected(videoId, true); return; }
+  const [from, to] = anchor <= target ? [anchor, target] : [target, anchor];
+  for (let index = from; index <= to; index += 1) setVideoSelected(visibleVideoIds[index], true);
+  lastSelectedVideoId = videoId;
+}
+
+function selectAllVisible() {
+  for (const id of visibleVideoIds) selectedVideoIds.add(id);
+  for (const card of videoGrid.querySelectorAll(".video-card")) {
+    const isSelected = selectedVideoIds.has(card.dataset.videoId);
+    card.classList.toggle("selected", isSelected);
+    const checkbox = card.querySelector(".card-select");
+    if (checkbox) checkbox.checked = isSelected;
+  }
+  updateBatchControls();
+}
+
+async function copyToClipboard(text, successMessage) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(successMessage || "已复制。");
+  } catch (error) {
+    showToast(`复制失败：${error?.message || "浏览器拒绝了剪贴板访问"}`);
+  }
+}
+
+function copyFieldButton(value, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "detail-copy-field";
+  button.title = label;
+  button.setAttribute("aria-label", `${label}：${value}`);
+  button.innerHTML = `${BcaIcons.svg("copy")}${escapeHtml(label)}`;
+  button.addEventListener("click", () => copyToClipboard(value, `${label}成功`));
+  return button;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+async function directorySize(directory) {
+  let total = 0;
+  for await (const entry of directory.values()) {
+    if (entry.kind === "directory") total += await directorySize(entry);
+    else total += (await entry.getFile()).size;
+  }
+  return total;
+}
+
+// 详情页顺带统计本地下载体积；只读，失败就安静隐藏。
+async function showDownloadSize(video) {
+  const target = detailContent.querySelector(".detail-size");
+  if (!target || !video.hasDownloadFiles || !video.downloadDirectoryHandle) return;
+  target.hidden = false;
+  target.textContent = "正在统计本地文件…";
+  try {
+    const total = await directorySize(video.downloadDirectoryHandle);
+    if (detailContent.dataset.videoId !== video.id) return;
+    target.innerHTML = `${BcaIcons.svg("drive")}本地已下载 <span class="tnum">${formatBytes(total)}</span>`;
+  } catch (_) {
+    target.hidden = true;
+  }
+}
 
 function openDownloadInterface(videos) {
   if (!videos.length) return;
@@ -633,7 +728,7 @@ function openDetail(video) {
   addField(rows, "信息保存于", video.savedAt);
   addField(rows, "UP 主", video.upName);
   addField(rows, "UP 主 UID", video.upMid);
-  if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>UP 主主页</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">打开 UP 主主页 ↗</a></dd>`);
+  if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>UP 主主页</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">打开 UP 主主页 ${BcaIcons.svg("external")}</a></dd>`);
   addField(rows, "分区", video.category);
   addField(rows, "视频时长", video.duration);
   addField(rows, "发布时间", video.publishDate);
@@ -642,12 +737,33 @@ function openDetail(video) {
   addField(rows, "归档目录", video.directory);
   const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? '<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">在 B 站打开视频 <span>↗</span></a>' : ""}<section class="detail-management"><h3>本地视频</h3><button class="button button-download download-local" type="button">下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>打开本地视频目录</button><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>复制视频目录路径</button><p class="download-path-note" role="status" hidden></p><h3>本地收藏管理</h3><button class="button button-primary move-local" type="button">移动或复制</button><button class="button button-danger delete-local" type="button">删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">标签</h3>${tags}<h3 class="detail-section-title">视频简介</h3><p class="detail-description"></p>`;
+  detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}在 B 站打开视频</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}本地视频</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}打开目录</button></div><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}复制视频目录路径</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}本地收藏管理</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}移动或复制</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">${BcaIcons.svg("file")}视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}标签</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}视频简介</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>展开全部简介</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   detailContent.querySelector(".detail-title").textContent = video.title;
-  detailContent.querySelector(".detail-bvid").textContent = video.bvid ? `BV号 ${video.bvid}` : "本地归档";
-  detailContent.querySelector(".detail-description").textContent = video.description || "暂无简介";
+
+  // 头部改成可一键复制的字段，避免手动选中 BV 号
+  const bvidField = detailContent.querySelector(".detail-bvid");
+  bvidField.replaceChildren();
+  const bvidLabel = document.createElement("span");
+  bvidLabel.className = "tnum";
+  bvidLabel.textContent = video.bvid ? `BV号 ${video.bvid}` : "本地归档";
+  bvidField.append(bvidLabel);
+  if (video.bvid) bvidField.append(copyFieldButton(video.bvid, "复制 BV 号"));
+  if (video.url) bvidField.append(copyFieldButton(video.url, "复制视频链接"));
+
+  const description = detailContent.querySelector(".detail-description");
+  description.textContent = video.description || "暂无简介";
+  const descriptionToggle = detailContent.querySelector(".detail-description-toggle");
+  if ((video.description || "").length > 160) {
+    description.classList.add("clamped");
+    descriptionToggle.hidden = false;
+    descriptionToggle.addEventListener("click", () => {
+      const clamped = description.classList.toggle("clamped");
+      descriptionToggle.textContent = clamped ? "展开全部简介" : "收起简介";
+    });
+  }
+
   const link = detailContent.querySelector(".open-video");
   if (link) link.href = video.url;
   const moveButton = detailContent.querySelector(".move-local");
@@ -656,6 +772,7 @@ function openDetail(video) {
   detailContent.querySelector(".open-download-directory").addEventListener("click", () => openDownloadDirectory(video));
   detailContent.querySelector(".copy-download-path").addEventListener("click", () => copyDownloadPath(video));
   detailContent.querySelector(".delete-local").addEventListener("click", () => askToDeleteVideo(video));
+  showDownloadSize(video).catch(() => {});
   detailPanel.classList.add("open");
   detailPanel.setAttribute("aria-hidden", "false");
   detailBackdrop.hidden = false;
@@ -1068,7 +1185,7 @@ function openCollectionActionDialog(videos, source) {
     const icon = document.createElement("span");
     icon.className = "collection-action-icon";
     icon.setAttribute("aria-hidden", "true");
-    icon.textContent = "▰";
+    icon.innerHTML = BcaIcons.svg("collection");
     const name = document.createElement("span");
     name.className = "collection-action-name";
     name.textContent = collection.name;
@@ -1399,8 +1516,19 @@ function setBusy(isBusy, buttonText = "正在读取…") {
   refreshLibraryButton.disabled = isBusy || !rootHandle;
   refreshLibraryButton.classList.toggle("is-loading", isBusy);
   welcomeChoose.disabled = isBusy;
-  if (isBusy) chooseRoot.textContent = buttonText;
-  else chooseRoot.innerHTML = '<span aria-hidden="true">＋</span> 选择收藏根目录';
+  // 大目录扫描时给一条进度提示，而不是只有按钮文字变化
+  scanProgress.hidden = !isBusy;
+  if (isBusy) setButtonContent(chooseRoot, "", buttonText);
+  else setButtonContent(chooseRoot, "plus", "选择收藏根目录");
+}
+
+// 按钮里带图标后，改文案不能再用 textContent（会把图标一起清掉）
+function setButtonContent(button, iconName, text) {
+  button.replaceChildren();
+  if (iconName) button.insertAdjacentHTML("afterbegin", BcaIcons.svg(iconName));
+  const label = document.createElement("span");
+  label.textContent = text;
+  button.append(label);
 }
 
 async function refreshCurrentRoot() {
@@ -1457,7 +1585,7 @@ async function restoreLastRoot() {
       finally { setBusy(false); }
       return;
     }
-    welcomeChoose.innerHTML = '授权并继续使用上次目录 <span>→</span>';
+    welcomeChoose.innerHTML = `授权并继续使用上次目录 ${BcaIcons.svg("chevron-right")}`;
     welcomeCopy.textContent = `上次选择的目录是“${handle.name}”。点击继续并按提示授权，无需重新选择路径。`;
     welcomeFootnote.textContent = "如果目录已移动或删除，再使用右上角按钮选择新位置。";
   } catch (error) {
@@ -1465,7 +1593,7 @@ async function restoreLastRoot() {
     rootLabel.textContent = "上次目录无法访问";
     statusDot.classList.remove("ready");
     welcomeCopy.textContent = "上次选择的目录暂时无法访问，请重新选择收藏根目录。";
-    welcomeChoose.innerHTML = '选择本地收藏目录 <span>→</span>';
+    welcomeChoose.innerHTML = `选择本地收藏目录 ${BcaIcons.svg("chevron-right")}`;
     showToast(error?.message || "无法连接上次选择的目录。");
   }
 }
@@ -1525,6 +1653,11 @@ document.addEventListener("keydown", (event) => {
     closeDetail();
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !library.hidden) { event.preventDefault(); searchInput.focus(); }
+  // 批量模式下支持 Ctrl/⌘ + A 全选当前结果（非批量模式不拦截浏览器默认行为）
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a" && selectionMode) {
+    const typing = event.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
+    if (!typing) { event.preventDefault(); selectAllVisible(); }
+  }
 });
 window.addEventListener("beforeunload", () => coverUrls.forEach(URL.revokeObjectURL));
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -1538,3 +1671,9 @@ window.setInterval(() => {
   if (!library.hidden && document.visibilityState === "visible") refreshDownloadStatuses();
 }, 60000);
 restoreCollectionOrder().catch(() => { collectionOrder = []; }).finally(() => restoreLastRoot());
+
+// 侧栏版本号从 manifest 读取，避免再次出现“界面写着 3.6、实际是 3.7”的错位
+try {
+  const sideVersion = document.getElementById("sideVersion");
+  if (sideVersion) sideVersion.textContent = chrome.runtime.getManifest().version;
+} catch (_) {}

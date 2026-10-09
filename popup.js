@@ -18,6 +18,7 @@ const importSelectionView = document.getElementById("importSelectionView");
 const importProgressView = document.getElementById("importProgressView");
 const importProgressText = document.getElementById("importProgressText");
 const importFolderList = document.getElementById("importFolderList");
+const importCard = document.getElementById("importCard");
 const importStatus = document.getElementById("importStatus");
 const startImportButton = document.getElementById("startImport");
 const refreshImportFoldersButton = document.getElementById("refreshImportFolders");
@@ -87,6 +88,8 @@ function updateImportSelection() {
   importPanelHeading.hidden = importBusy;
   importSelectionView.hidden = importBusy;
   importProgressView.hidden = !importBusy;
+  // 导入进行中时把折叠面板强制展开，避免进度被收起后看不到
+  if (importBusy && importCard) importCard.open = true;
   importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = importBusy; });
   refreshImportFoldersButton.disabled = importBusy;
   selectAllImportFoldersButton.disabled = importBusy;
@@ -107,6 +110,8 @@ async function loadImportFolders() {
     if (!response?.ok) throw new Error(response?.message || "读取收藏夹失败。");
     importFolders = Array.isArray(response.folders) ? response.folders : [];
     renderImportFolders();
+    // 只有在确实读到收藏夹（即当前是 B 站收藏夹页）时才自动展开导入面板
+    if (importFolders.length && importCard) importCard.open = true;
     importStatus.textContent = importFolders.length ? `已读取 ${importFolders.length} 个收藏夹。` : "当前账号没有可导入的收藏夹。";
   } catch (error) {
     importFolders = [];

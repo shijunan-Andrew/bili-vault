@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#00a1d6">
   <title>本地收藏库 · B站收藏信息归档</title>
+  <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="library.css">
 </head>
 <body>
@@ -15,13 +16,13 @@
         <span><strong>本地收藏库</strong><small>LOCAL VIDEO LIBRARY</small></span>
       </a>
       <div class="collection-heading">
-        <div class="side-label">我的收藏夹 <span id="collectionTotal">—</span><span class="collection-sort-hint">· 拖动 ⠿ 排序</span></div>
-        <button id="createCollection" class="collection-create" type="button"><span aria-hidden="true">＋</span> 新建收藏夹</button>
+        <div class="side-label"><span data-icon="collection"></span>我的收藏夹 <span id="collectionTotal">—</span><span class="collection-sort-hint">拖动排序</span></div>
+        <button id="createCollection" class="collection-create" type="button"><span data-icon="plus"></span>新建</button>
       </div>
       <nav id="collectionList" class="collection-list" aria-label="收藏夹"></nav>
       <div class="sidebar-bottom">
-        <div class="privacy-note"><span class="lock-icon">▣</span><span>归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
-        <div class="side-version">B站收藏信息归档 · 3.8</div>
+        <div class="privacy-note"><span class="lock-icon" data-icon="shield"></span><span>归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
+        <div class="side-version">B站收藏信息归档 · <span id="sideVersion">4.0</span></div>
       </div>
     </aside>
 
@@ -30,18 +31,39 @@
         <div class="breadcrumb"><span>本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection">全部收藏</strong></div>
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel">尚未选择目录</span></div>
-          <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录"><span aria-hidden="true">↻</span> 刷新</button>
-          <button id="chooseRoot" class="button button-primary"><span aria-hidden="true">＋</span> 选择收藏根目录</button>
+          <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录"><span data-icon="refresh"></span>刷新</button>
+          <button id="chooseRoot" class="button button-primary"><span data-icon="plus"></span>选择收藏根目录</button>
         </div>
       </header>
 
       <section id="welcome" class="welcome-state">
-        <div class="welcome-art" aria-hidden="true"><div class="art-folder"></div><span class="art-star">✦</span><span class="art-play">▶</span></div>
+        <div class="welcome-art" aria-hidden="true">
+          <div class="art-folder"></div>
+          <span class="art-star" data-icon="sparkle"></span>
+          <span class="art-play" data-icon="play"></span>
+        </div>
         <p class="eyebrow">YOUR PERSONAL ARCHIVE</p>
         <h1>让收藏的视频，<span>一目了然</span></h1>
-        <p class="welcome-copy">首次选择归档根目录后会记住路径；下次打开时自动读取。</p>
-        <button id="welcomeChoose" class="button button-primary button-large">选择本地收藏目录 <span>→</span></button>
-        <p class="welcome-footnote">支持“收藏夹 / 时间文件夹 / 视频信息.txt + 封面.png”结构</p>
+        <p class="welcome-copy">首次选择归档根目录后会自动记住路径，下次打开直接读取，浏览器只在本机读写。</p>
+        <button id="welcomeChoose" class="button button-primary button-large">选择本地收藏目录 <span data-icon="chevron-right"></span></button>
+        <ol class="welcome-steps">
+          <li class="welcome-step">
+            <span class="welcome-step-index">1</span>
+            <strong>选择一个归档根目录</strong>
+            <p>视频信息和封面都保存在这个文件夹里，结构是「收藏夹 / 时间目录」。</p>
+          </li>
+          <li class="welcome-step">
+            <span class="welcome-step-index">2</span>
+            <strong>保持自动归档开启</strong>
+            <p>在 B 站收藏视频后，插件会等收藏确认成功再把资料写进本地。</p>
+          </li>
+          <li class="welcome-step">
+            <span class="welcome-step-index">3</span>
+            <strong>也可以批量导入</strong>
+            <p>在 B 站收藏夹页面打开插件，一次把已有收藏夹同步到本地。</p>
+          </li>
+        </ol>
+        <p class="welcome-footnote">只解析符合“根目录 / 收藏夹 / 时间戳目录 / 视频信息.txt + 封面.png”结构的记录</p>
       </section>
 
       <section id="library" class="library-view" hidden>
@@ -53,6 +75,7 @@
           </div>
           <button id="batchManage" class="button button-quiet" type="button" aria-pressed="false">批量管理</button>
         </div>
+
         <div class="library-toolbar">
           <section id="batchToolbar" class="batch-toolbar" aria-label="批量管理工具" hidden>
             <div class="batch-selection-tools">
@@ -61,30 +84,42 @@
               <button id="exitBatch" class="text-button" type="button">完成</button>
             </div>
             <div class="batch-actions">
-              <button id="downloadSelected" class="button button-download" type="button" disabled>下载</button>
-              <button id="moveSelected" class="button button-primary" type="button" disabled>移动或复制</button>
-              <button id="deleteSelected" class="button button-danger" type="button" disabled>删除</button>
+              <button id="downloadSelected" class="button button-download" type="button" disabled><span data-icon="download"></span>下载</button>
+              <button id="moveSelected" class="button button-primary" type="button" disabled><span data-icon="move"></span>移动或复制</button>
+              <button id="deleteSelected" class="button button-danger" type="button" disabled><span data-icon="trash"></span>删除</button>
             </div>
           </section>
           <div class="view-controls">
-            <label class="search-box"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索标题、UP 主或 BV 号" autocomplete="off"><kbd>Ctrl K</kbd></label>
-            <label class="video-filter"><span>筛选</span><select id="videoFilter" aria-label="筛选视频"><option value="all">全部视频</option><option value="invalid">已失效视频</option><option value="downloaded">已下载视频</option></select></label>
-            <button id="addVideo" class="button button-primary" type="button" disabled>添加视频</button>
-            <label class="sort-select"><span>排序</span><select id="sortSelect" aria-label="排序方式"><option value="newest">最近收藏</option><option value="oldest">最早收藏</option><option value="title">标题 A–Z</option></select></label>
+            <label class="search-box">
+              <span class="icon-slot" data-icon="search"></span>
+              <input id="searchInput" type="search" placeholder="搜索标题、UP 主或 BV 号" autocomplete="off">
+              <kbd>Ctrl K</kbd>
+            </label>
+            <label class="video-filter"><span data-icon="filter"></span><select id="videoFilter" aria-label="筛选视频"><option value="all">全部视频</option><option value="invalid">已失效视频</option><option value="downloaded">已下载视频</option></select></label>
+            <button id="addVideo" class="button button-primary" type="button" disabled><span data-icon="plus"></span>添加视频</button>
+            <label class="sort-select"><span data-icon="sort"></span><select id="sortSelect" aria-label="排序方式"><option value="newest">最近收藏</option><option value="oldest">最早收藏</option><option value="title">标题 A–Z</option></select></label>
           </div>
         </div>
+
+        <div id="scanProgress" class="scan-progress" hidden></div>
         <div id="scanNotice" class="scan-notice" hidden></div>
         <div id="videoGrid" class="video-grid"></div>
-        <div id="emptySearch" class="empty-search" hidden><div class="empty-search-icon">⌕</div><h2>没有找到相关视频</h2><p>试试其他标题、UP 主名称或 BV 号。</p><button id="clearSearch" class="button button-quiet">清除搜索</button></div>
+        <div id="emptySearch" class="empty-search" hidden>
+          <div class="empty-search-icon" data-icon="search"></div>
+          <h2>没有找到相关视频</h2>
+          <p>试试其他标题、UP 主名称或 BV 号。</p>
+          <button id="clearSearch" class="button button-quiet">清除搜索</button>
+        </div>
       </section>
     </main>
   </div>
 
   <div id="detailBackdrop" class="detail-backdrop" hidden></div>
   <aside id="detailPanel" class="detail-panel" aria-label="视频详情" aria-hidden="true">
-    <button id="closeDetail" class="close-detail" aria-label="关闭详情">×</button>
+    <button id="closeDetail" class="close-detail" aria-label="关闭详情" data-icon="close"></button>
     <div id="detailContent"></div>
   </aside>
+
   <dialog id="collectionDialog" class="editor-dialog" aria-labelledby="collectionDialogTitle">
     <form id="collectionForm">
       <h2 id="collectionDialogTitle">新建收藏夹</h2>
@@ -97,6 +132,7 @@
       </div>
     </form>
   </dialog>
+
   <dialog id="videoDialog" class="editor-dialog" aria-labelledby="videoDialogTitle">
     <form id="videoForm">
       <h2 id="videoDialogTitle">添加本地收藏视频</h2>
@@ -111,6 +147,7 @@
       </div>
     </form>
   </dialog>
+
   <dialog id="collectionActionDialog" class="editor-dialog collection-action-dialog" aria-labelledby="collectionActionTitle">
     <h2 id="collectionActionTitle">移动或复制视频</h2>
     <p id="collectionActionSummary" class="editor-hint"></p>
@@ -125,9 +162,10 @@
       <button id="confirmCollectionAction" class="button button-primary" type="button" disabled>确认</button>
     </div>
   </dialog>
+
   <div id="confirmBackdrop" class="confirm-backdrop" hidden>
     <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
-      <div class="confirm-icon" aria-hidden="true">!</div>
+      <div class="confirm-icon" data-icon="alert"></div>
       <h2 id="confirmTitle">删除本地归档？</h2>
       <p id="confirmMessage"></p>
       <label id="deleteDownloadsOption" class="delete-downloads-option" hidden><input id="deleteAssociatedDownloads" type="checkbox"><span>同时删除关联的本地下载文件</span></label>
@@ -137,7 +175,10 @@
       </div>
     </section>
   </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="icons.js"></script>
   <script src="archive-core.js"></script>
   <script src="library.js"></script>
 </body>
