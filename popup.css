@@ -145,6 +145,29 @@ button:disabled { cursor: wait; opacity: .6; }
 .error-block pre { max-height: 112px; margin: 6px 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: var(--fs-sm)/1.6 var(--font-sans); }
 .report-path { color: var(--faint); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
+/* ---------- 使用须知（默认折叠，展开后限高滚动） ---------- */
+.safety-notice { margin-top: var(--sp-3); padding: 0; overflow: hidden; }
+.safety-notice > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  list-style: none;
+  /* 单行紧凑条：折叠后整条约 36px，远低于弹窗 600px 上限 */
+  line-height: 1.2;
+}
+.safety-notice > summary::-webkit-details-marker { display: none; }
+.safety-notice > summary:hover { background: var(--surface-soft); }
+.safety-summary-icon { color: var(--brand-deep); font-size: var(--fs-md); }
+.safety-notice > summary strong { flex: 1; min-width: 0; color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
+.safety-notice > summary .chevron { color: var(--faint); font-size: var(--fs-md); transition: transform var(--dur) var(--ease); }
+.safety-notice[open] > summary .chevron { transform: rotate(180deg); }
+.safety-notice-list { max-height: 160px; overflow-y: auto; display: grid; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--line-soft); list-style: none; }
+.safety-notice-list li { color: var(--muted); font-size: var(--fs-base); line-height: 1.7; overflow-wrap: anywhere; }
+.safety-notice-list a { color: var(--brand-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.safety-notice-list a:hover { color: var(--brand-strong); }
+
 /* ---------- 页脚 ---------- */
 .popup-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-3); }
 .support-link { display: inline-flex; align-items: center; gap: 5px; color: var(--brand-deep); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }

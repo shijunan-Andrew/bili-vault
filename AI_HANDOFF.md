@@ -1,13 +1,13 @@
-# AI 项目交接说明：B站收藏信息归档 4.3
+# AI 项目交接说明：B站收藏信息归档 4.4
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.3`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
-- 扩展版本：`4.3.0`，Chrome Manifest V3，最低 Chrome 版本 111。
-- `b_catch_4.2` 是 4.3 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
-- **4.3 是安全与合规加固版，没有新增功能**：降低了导入请求密度、把失效视频恢复改为默认关闭、消除了扩展页对网页的暴露、收紧了封面 URL、给错误报告加了提示。改动的依据见下文「合规与安全红线」。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.4`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
+- 扩展版本：`4.4.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- `b_catch_4.3` 是 4.4 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **4.4 新增两件事**：三个界面统一加入「使用须知」安全声明；本地收藏库新增「更新视频状态」，用 patchVolatileFields() 只覆盖会变化的数值，并在检测到视频失效时保留原数据、只写失效标记。window.top !== window.self 防嵌套检查必须保留，且早于任何目录读取。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
 - 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.8 → 4.0）ID 就会变，安装原生助手时必须填入新 ID。
@@ -91,6 +91,21 @@ b_catch_4.1/
 **暂停 / 取消 / 回滚**：`bca-import-control` 消息设置 `importRun.paused/cancelled`；暂停时 `importWaitIfPaused()` 用 Promise 挂起，继续或取消时 `importReleaseWaiters()` 唤醒。取消会抛 `ImportCancelled`（`error.name`），在最外层捕获后调用 `rollbackImport(journal)`：先删 `createdRecords`、再按 `modifiedFiles` 还原原文、最后清掉本次新建且为空的收藏夹。进度通过 `chrome.storage.local.importState` 持久化，所以弹窗关掉再打开也能恢复按钮状态；`get-status` 会带上 `importState`。
 
 **接口抓不到数据的处理**：`/x/web-interface/view` 的 `desc` 对不少视频就是空的或 `-`（实测 `BV1LKGm6ZErR` 返回 `-`），这时简介会退回收藏夹接口 `intro` 清理后的文本；`stat` 通常都有。
+
+### 更新视频状态（4.4 新增）
+
+收藏库的「更新视频状态」按钮经 `bca-refresh-video-stats` 触发 `refreshVideoStatus()`，逐条调用 `refreshOneArchiveStatus()`：
+
+- **有效视频**：调用 `/x/web-interface/view` 拿 `stat`，按 UP 缓存调用 `/x/relation/stat` 拿粉丝数，然后用 `patchVolatileFields()` **只替换** UP主粉丝数、`【互动数据】` 整块，以及原值为「未知」时的发布时间。标题、简介、标签、收藏时间、保存文件夹、目录结构全部逐字不动（测试会核对行数与逐行差异）。
+- **失效视频**：`biliImportApiGet()` 把接口错误码挂在 `error.apiCode` 上；只有 `typeof error.apiCode === "number"` 才判定为失效（网络/超时错误保持原样、记为失败），此时**只写一行** `视频状态：已失效视频（更新状态时检测到）`，其余内容一个字都不改。网页端 `isInvalid` 的依据是 `/失效/.test(视频状态)`，因此标记后立即表现为「已失效」徽标 + 红色标题 + 灰色封面，与导入时识别的失效视频一致。若该记录又能正常访问，更新时会把标记改回「正常」。
+
+**关键约束**：`patchVolatileFields()` 在 `archive-core.js` 与 `background.js` 各有一份（service worker 无法 require 经典脚本），**两份必须保持一致**——`test/stability.test.cjs` 会从 background.js 抽出真实函数、用多组输入与共享实现逐个比对。改其中一份必须同步改另一份。
+
+**请求密度**：复用 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，与导入同级限速，同样分批（10/20/40）并由用户点击推进。**不要为了提高刷新速度而调高频率**。
+
+### 使用须知（4.4 新增）
+
+同一份六条安全声明必须同时出现在 `library.html`、`download.html`、`popup.html`，**逐字一致**（测试会逐条比对）。收藏库里可以点「知道了，不再显示」永久收起（`safetyNoticeDismissed`）；下载页常驻；弹窗里默认折叠（`<details>` 不带 `open`），避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要。**
 
 ### 本地收藏库
 
@@ -203,7 +218,9 @@ UP主主页：https://space.bilibili.com/……
 | `get-status` | `popup.js` → `background.js` | 读取最近状态和错误（4.2 起附带 `importState`） |
 | `bca-import-control` | `popup.js` → `background.js` | 4.2：暂停 / 继续 / 取消正在进行的导入 |
 | `bca-import-state` | 任意页面 → `background.js` | 4.2：单独查询导入运行状态 |
-| `bca-open-library` | `content.js` → `background.js` | 4.3：由后台 `chrome.tabs.create` 打开本地收藏库，扩展页因此不必暴露给网页 |
+| ca-open-library | content.js → ackground.js | 4.3：由后台 chrome.tabs.create 打开本地收藏库，扩展页因此不必暴露给网页 |
+| ca-refresh-video-stats | library.js → ackground.js | 4.4：分批重新解析并更新互动数据与粉丝数；失效只打标记 |
+| ca-status-progress | ackground.js → library.js | 4.4：更新视频状态的进度回报 |
 | `add-manual-video` | `library.js` → `background.js` | 解析手动添加视频并写入一个或多个收藏夹 |
 | `import-bili-favorites` | `favorites-import.js` → `background.js` | 导入所选线上收藏夹 |
 | `bca-list-import-folders` | `popup.js` → `favorites-import.js` | 在收藏夹页请求线上收藏夹列表 |
@@ -237,7 +254,8 @@ UP主主页：https://space.bilibili.com/……
 - `importState`：4.2 起导入的运行状态 `{ running, paused, text, startedAt, finishedAt, summary }`。弹窗靠它恢复按钮；`publishImportState()` 对进度更新做了 500ms 节流，关键状态变化传 `force=true` 立即落盘。导入结束后不会清空，只把 `running` 置 false。
 - `libraryViewMode` / `libraryPageSize`：4.1 起收藏库的网格/竖列与每页数量。
 - `importHintDismissed`：4.2 起收藏库顶部导入提示条是否已被关闭。
-- `recoverInvalidVideos`：4.3 起「尝试恢复失效视频」开关，**默认关闭**。关闭时导入不会调用 APP 接口恢复流程。
+- `recoverInvalidVideos`：4.3 引入的「尝试恢复失效视频」开关。**4.4 起默认开启**（判定为 `!== false`，只有明确存成 false 才关闭）。关闭时导入不会调用 APP 接口恢复流程。
+- safetyNoticeDismissed：4.4 起收藏库「使用须知」是否已被永久收起。
 - 还可能包含导入任务进度及其他 UI 状态；改动前搜索全项目读写点。
 
 **`chrome.storage.session`**：临时批量下载队列，键名 `bcaDownloadQueue:<UUID>`。下载页读取后删除。
@@ -250,7 +268,7 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 42 项检查：9 项纯逻辑回归、9 项表现层静态回归、7 项 4.1 回归、11 项 4.2 回归（分享文案拆分两边实现必须一致、真实档案拆分正确、`recordNeedsRefresh` 只挑真正不完整的记录、新格式含粉丝数与独立互动数据区块、暂停/取消/回滚与三个接口的接线、登记先于写入、弹窗暂停取消与状态恢复、网页端占用统计与提示条、补全功能彻底移除），以及 6 项 4.3 安全回归（扩展页不对任何网页暴露且改走 `tabs.create`、收藏库拒绝被 iframe 嵌套且检查早于目录读取、封面协议白名单与转义、错误报告含提示行、导入串行且每秒请求数 ≤2、失效视频恢复默认关闭且被开关包住）。无第三方包。
+当前包含 49 项检查：9 项纯逻辑回归、9 项表现层静态回归、7 项 4.1 回归、11 项 4.2 回归（分享文案拆分两边实现必须一致、真实档案拆分正确、`recordNeedsRefresh` 只挑真正不完整的记录、新格式含粉丝数与独立互动数据区块、暂停/取消/回滚与三个接口的接线、登记先于写入、弹窗暂停取消与状态恢复、网页端占用统计与提示条、补全功能彻底移除）、6 项 4.3 安全回归（扩展页不对任何网页暴露且改走 `tabs.create`、收藏库拒绝被 iframe 嵌套且检查早于目录读取、封面协议白名单与转义、错误报告含提示行、导入串行且每秒请求数 ≤2、失效视频恢复默认关闭且被开关包住），以及 7 项 4.4 回归（两份 `patchVolatileFields` 输出必须一致、更新只动易变字段且行数不变、失效时逐行核对只有状态行变化、老档案能正确补出互动数据块与粉丝数行、失效判定只认接口错误码、网页端分批刷新接线、三处使用须知逐字一致且弹窗默认折叠）。无第三方包。
 
 其中 4.1beta 的两项会**从 `background.js` 里把函数源码抽出来执行**（`loadBackgroundFunctions`），因为 background.js 是模块化 service worker、无法 `require`；这样测到的就是生产代码本身，而不是复制品。
 

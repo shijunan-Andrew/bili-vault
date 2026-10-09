@@ -68,6 +68,25 @@
       </section>
 
       <section id="library" class="library-view" hidden>
+        <details id="safetyNotice" class="safety-notice" open>
+          <summary>
+            <span class="safety-notice-icon" data-icon="alert"></span>
+            <strong>使用须知</strong>
+            <span class="chevron" data-icon="chevron-down"></span>
+          </summary>
+          <ul class="safety-list">
+            <li>本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href="https://github.com/leiurayer/downkyi" target="_blank" rel="noopener noreferrer">DownKyi</a>。</li>
+            <li>下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。</li>
+            <li>请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
+            <li>本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。</li>
+            <li>插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。</li>
+            <li>所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。</li>
+          </ul>
+          <div class="safety-actions">
+            <button id="dismissSafety" class="text-button" type="button">知道了，不再显示</button>
+          </div>
+        </details>
+
         <div class="page-heading">
           <div>
             <p class="eyebrow">YOUR COLLECTIONS</p>
@@ -75,6 +94,7 @@
             <p id="resultSummary" class="heading-subtitle"></p>
           </div>
           <div class="page-heading-actions">
+            <button id="refreshVideoStatus" class="button button-quiet" type="button" disabled title="重新解析并更新播放量、点赞、UP 主粉丝数等会变化的数值">更新视频状态</button>
             <button id="batchManage" class="button button-quiet" type="button" aria-pressed="false">批量管理</button>
           </div>
         </div>
@@ -173,6 +193,25 @@
       <span id="collectionActionCount" class="collection-action-count">已选 0 个收藏夹</span>
       <button id="cancelCollectionAction" class="button button-quiet" type="button">取消</button>
       <button id="confirmCollectionAction" class="button button-primary" type="button" disabled>确认</button>
+    </div>
+  </dialog>
+
+  <dialog id="statusDialog" class="editor-dialog" aria-labelledby="statusDialogTitle">
+    <h2 id="statusDialogTitle">更新视频状态</h2>
+    <p id="statusSummary" class="editor-hint"></p>
+    <label for="statusBatchSize">本次处理数量</label>
+    <select id="statusBatchSize">
+      <option value="10">10 条（约 10–20 次接口请求）</option>
+      <option value="20" selected>20 条（约 20–40 次接口请求）</option>
+      <option value="40">40 条（约 40–80 次接口请求）</option>
+    </select>
+    <p class="editor-hint">这里更新的是播放量、弹幕量、点赞数、投硬币枚数、收藏人数、转发人数和 UP 主粉丝数这类会变化的数值，其它内容和本地文件结构都不动。</p>
+    <p class="editor-hint">如果解析时发现视频已失效，<strong>不会覆盖原有资料</strong>，只会标记为已失效，让它显示成和失效视频一样的红色标题与灰色封面。</p>
+    <p class="editor-hint">请勿滥用：B 站接口有风控，建议分批处理，处理完可以再点一次继续。</p>
+    <p id="statusProgress" class="dialog-progress" role="status"></p>
+    <div class="editor-actions">
+      <button id="cancelStatus" class="button button-quiet" type="button">关闭</button>
+      <button id="confirmStatus" class="button button-primary" type="button">开始更新</button>
     </div>
   </dialog>
 

@@ -194,6 +194,69 @@
     return { description: cut, stats: parseShareStats(source), isShareText: true };
   }
 
+  /* ---------- 更新易变字段（4.4） ----------
+     「更新视频状态」只覆盖会变化的数值（UP主粉丝数、互动数据、缺失的发布时间）
+     与失效标记，其余内容逐字不动。做成长度可控的纯函数便于单元测试。 */
+
+  const STAT_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
+  const STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" };
+  const SECTION_HEADING_PATTERN = /^【.+?】\s*$/;
+
+  function statsSectionLines(stats) {
+    return ["【互动数据】", ...STAT_KEYS.map((key) => `${STAT_LABELS[key]}：${isPlaceholderValue(stats?.[key]) ? "未知" : String(stats[key])}`)];
+  }
+
+  function patchVolatileFields(text, options = {}) {
+    const source = String(text ?? "");
+    const newline = source.includes("\r\n") ? "\r\n" : "\n";
+    const lines = source.split(/\r?\n/);
+
+    const fieldIndex = (key) => lines.findIndex((line) => line.startsWith(`${key}：`));
+    const setField = (key, value) => {
+      const index = fieldIndex(key);
+      if (index < 0) return false;
+      lines[index] = `${key}：${value}`;
+      return true;
+    };
+
+    if (!isPlaceholderValue(options.upFans)) {
+      // 老档案没有「UP主粉丝数」这一行，要补在 UID 后面
+      if (!setField("UP主粉丝数", String(options.upFans))) {
+        const anchor = fieldIndex("UP主UID") >= 0 ? fieldIndex("UP主UID") : fieldIndex("UP主昵称");
+        if (anchor >= 0) lines.splice(anchor + 1, 0, `UP主粉丝数：${options.upFans}`);
+      }
+    }
+
+    // 发布时间只补空缺，已经有值的不动
+    if (options.pubdateText) {
+      const current = (lines[fieldIndex("视频发布时间")] || "").replace(/^视频发布时间：/, "");
+      if (isPlaceholderValue(current)) setField("视频发布时间", String(options.pubdateText));
+    }
+
+    if (options.stats && Object.keys(options.stats).length) {
+      const block = statsSectionLines(options.stats);
+      const headingIndex = lines.findIndex((line) => line.trim() === "【互动数据】");
+      if (headingIndex >= 0) {
+        let end = headingIndex + 1;
+        while (end < lines.length && !SECTION_HEADING_PATTERN.test(lines[end].trim())) end += 1;
+        // 连同块尾空行一起替换，保持与下一区块之间的空行
+        lines.splice(headingIndex, end - headingIndex, ...block, "");
+      } else {
+        const tagIndex = lines.findIndex((line) => line.trim() === "【标签】");
+        lines.splice(tagIndex >= 0 ? tagIndex : lines.length, 0, ...block, "");
+      }
+    }
+
+    if (options.videoStatus) {
+      if (!setField("视频状态", String(options.videoStatus))) {
+        const linkIndex = fieldIndex("视频链接");
+        if (linkIndex >= 0) lines.splice(linkIndex + 1, 0, `视频状态：${options.videoStatus}`);
+      }
+    }
+
+    return lines.join(newline);
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     withSourceCollection,
@@ -210,7 +273,8 @@
     tagsFromInfo,
     pageSequence,
     splitShareText,
-    parseShareStats
+    parseShareStats,
+    patchVolatileFields
   });
   global.BcaArchiveCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

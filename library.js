@@ -31,6 +31,15 @@ const scanProgress = document.getElementById("scanProgress");
 const videoPager = document.getElementById("videoPager");
 const viewGridButton = document.getElementById("viewGrid");
 const viewListButton = document.getElementById("viewList");
+const refreshVideoStatusButton = document.getElementById("refreshVideoStatus");
+const statusDialog = document.getElementById("statusDialog");
+const statusSummary = document.getElementById("statusSummary");
+const statusBatchSize = document.getElementById("statusBatchSize");
+const statusProgress = document.getElementById("statusProgress");
+const cancelStatusButton = document.getElementById("cancelStatus");
+const confirmStatusButton = document.getElementById("confirmStatus");
+const safetyNotice = document.getElementById("safetyNotice");
+const dismissSafetyButton = document.getElementById("dismissSafety");
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
@@ -104,6 +113,7 @@ let pageSize = PAGE_SIZES[0];
 let currentPage = 1;
 let pageCount = 1;
 let viewMode = "grid";
+let statusRefreshInProgress = false;
 // 顶部“本地收藏夹占用”的递归统计状态：防止重复并发扫描，只保留最后一次请求的根目录
 let storageUsageRunning = false;
 let storageUsageQueuedRoot = null;
@@ -657,6 +667,7 @@ function renderVideos() {
   }
   renderPager(matching.length);
   updateBatchControls();
+  updateStatusButton();
 }
 
 /* ---------------- 4.1：分页与视图切换 ---------------- */
@@ -792,7 +803,77 @@ async function restoreViewSettings() {
   } catch (_) {}
 }
 
-/* ---------------- 4.2：导入提示条 ---------------- */
+/* ---------------- 4.4：更新视频状态 ---------------- */
+
+// 只有拿到本地目录、且当前范围里有带 BV/av 号的记录时才可用
+function updateStatusButton() {
+  if (!refreshVideoStatusButton) return;
+  const count = rootHandle ? statusCandidates().length : 0;
+  refreshVideoStatusButton.disabled = count === 0 || statusRefreshInProgress;
+  refreshVideoStatusButton.title = count
+    ? `重新解析并更新 ${count} 条记录的播放量、点赞、UP 主粉丝数等数值`
+    : "当前范围没有可更新的记录";
+}
+
+function statusCandidates() {
+  return selectedVideos().filter((video) => video.bvid || video.aid);
+}
+
+function openStatusDialog() {
+  if (!rootHandle) { showToast("请先打开本地收藏根目录。"); return; }
+  const candidates = statusCandidates();
+  if (!candidates.length) { showToast("当前范围没有可更新的记录。"); return; }
+  const scope = selectedCollection === "*" ? "全部收藏" : selectedCollection;
+  statusSummary.textContent = `「${scope}」里有 ${candidates.length} 条记录可以更新状态。`;
+  statusProgress.textContent = "";
+  confirmStatusButton.disabled = false;
+  cancelStatusButton.disabled = false;
+  confirmStatusButton.textContent = "开始更新";
+  statusDialog.showModal();
+}
+
+async function runStatusRefresh() {
+  if (statusRefreshInProgress) return;
+  const candidates = statusCandidates();
+  if (!candidates.length) { showToast("当前范围没有可更新的记录。"); return; }
+  const limit = Number(statusBatchSize.value) || 20;
+  const targets = candidates.map((video) => ({ collection: video.collection, directory: video.directory }));
+  statusRefreshInProgress = true;
+  updateStatusButton();
+  confirmStatusButton.disabled = true;
+  cancelStatusButton.disabled = true;
+  confirmStatusButton.textContent = "正在更新…";
+  statusProgress.textContent = "正在请求 B 站接口，请勿关闭页面…";
+  try {
+    const permission = await rootHandle.requestPermission({ mode: "readwrite" });
+    if (permission !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const result = await chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets, limit } });
+    if (!result?.ok) throw new Error(result?.message || "更新失败。");
+    const remaining = Number(result.remaining) || 0;
+    statusProgress.textContent = `${result.message}${remaining ? `还有 ${remaining} 条没处理，可以再点一次继续。` : "当前范围已处理完。"}${result.reportPath ? ` 失败明细：${result.reportPath}` : ""}`;
+    await displayRoot(rootHandle, selectedCollection, "已刷新");
+  } catch (error) {
+    statusProgress.textContent = `更新失败：${error?.message || "未知错误"}`;
+  } finally {
+    statusRefreshInProgress = false;
+    confirmStatusButton.disabled = false;
+    cancelStatusButton.disabled = false;
+    confirmStatusButton.textContent = "再更新一批";
+    updateStatusButton();
+  }
+}
+
+/* ---------------- 4.4：使用须知 ---------------- */
+
+async function restoreSafetyNotice() {
+  if (!safetyNotice) return;
+  try {
+    const saved = await chrome.storage.local.get("safetyNoticeDismissed");
+    if (saved?.safetyNoticeDismissed === true) safetyNotice.hidden = true;
+  } catch (_) {}
+}
+
+
 
 // 提示条默认 hidden（避免存储读取前闪一下），只有没被关过才显示
 async function restoreImportHint() {
@@ -1879,6 +1960,20 @@ videoFilterSelect.addEventListener("change", () => { resetPaging(); renderVideos
 clearSearch.addEventListener("click", () => { searchInput.value = ""; resetPaging(); renderVideos(); searchInput.focus(); });
 viewGridButton?.addEventListener("click", () => setViewMode("grid"));
 viewListButton?.addEventListener("click", () => setViewMode("list"));
+refreshVideoStatusButton?.addEventListener("click", openStatusDialog);
+confirmStatusButton?.addEventListener("click", runStatusRefresh);
+cancelStatusButton?.addEventListener("click", () => { if (!statusRefreshInProgress) statusDialog.close(); });
+statusDialog?.addEventListener("cancel", (event) => { if (statusRefreshInProgress) event.preventDefault(); });
+dismissSafetyButton?.addEventListener("click", () => {
+  if (safetyNotice) safetyNotice.hidden = true;
+  chrome.storage.local.set({ safetyNoticeDismissed: true }).catch(() => {});
+});
+
+// 4.4：更新状态时的进度回报
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "bca-status-progress") return;
+  if (statusProgress && statusRefreshInProgress) statusProgress.textContent = message.text || "正在更新…";
+});
 dismissImportHintButton?.addEventListener("click", dismissImportHint);
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
@@ -1940,7 +2035,8 @@ window.setInterval(() => {
 Promise.all([
   restoreCollectionOrder().catch(() => { collectionOrder = []; }),
   restoreViewSettings(),
-  restoreImportHint()
+  restoreImportHint(),
+  restoreSafetyNotice()
 ]).finally(() => {
   applyViewMode();
   restoreLastRoot();

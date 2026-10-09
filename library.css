@@ -281,6 +281,44 @@ body {
 .page-heading > .button { flex: 0 0 auto; }
 .page-heading-actions { display: flex; flex: 0 0 auto; gap: var(--sp-2); }
 
+/* ---------- 4.4 使用须知 ---------- */
+.safety-notice {
+  margin: 0 0 var(--sp-5);
+  overflow: hidden;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-md);
+  background: var(--brand-soft);
+}
+.safety-notice > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--brand-deep);
+  cursor: pointer;
+  list-style: none;
+}
+.safety-notice > summary::-webkit-details-marker { display: none; }
+.safety-notice > summary:hover { background: var(--brand-soft-strong); }
+.safety-notice-icon { display: inline-flex; color: var(--brand); font-size: var(--fs-lg); }
+.safety-notice > summary strong { font-size: var(--fs-base); font-weight: 700; }
+.safety-notice > summary .chevron { margin-left: auto; color: var(--brand-deep); font-size: var(--fs-md); transition: transform var(--dur) var(--ease); }
+.safety-notice[open] > summary .chevron { transform: rotate(180deg); }
+.safety-list {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-2) calc(var(--sp-4) + 26px);
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: 1.8;
+}
+.safety-list li { margin-bottom: 5px; }
+.safety-list a { color: var(--brand-deep); font-weight: 600; }
+.safety-actions { display: flex; justify-content: flex-end; padding: 0 var(--sp-4) var(--sp-3); }
+
+/* 4.4：更新视频状态的进度提示 */
+.dialog-progress { margin: var(--sp-3) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; overflow-wrap: anywhere; }
+.dialog-progress:not(:empty) { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--brand-line); border-radius: var(--r-sm); background: var(--brand-soft); color: var(--brand-deep); }
+
 .library-toolbar { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-3); margin: 0 0 var(--sp-5); }
 .view-controls { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); }
 

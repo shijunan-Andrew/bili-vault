@@ -567,7 +567,13 @@ async function biliImportApiGet(path, params = {}, timeoutMs = 15000, tabId = nu
       catch (_) { throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`); }
     }
     if (status < 200 || status >= 300) throw new Error(`B站接口请求失败：HTTP ${status}`);
-    if (payload.code !== 0) throw new Error(payload.message || `B站接口返回错误码 ${payload.code ?? "未知"}`);
+    if (payload.code !== 0) {
+      // 4.4：带上接口错误码，调用方才能区分“视频已失效”（明确错误码）
+      // 与“网络不通”（应保持原样、不能误判成失效）
+      const apiError = new Error(payload.message || `B站接口返回错误码 ${payload.code ?? "未知"}`);
+      apiError.apiCode = payload.code;
+      throw apiError;
+    }
     return payload.data || {};
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("B站接口请求超时。");
@@ -961,6 +967,182 @@ function splitShareText(text) {
   return { description: cut, stats: parseShareStats(source), isShareText: true };
 }
 
+/* ---------- 更新易变字段（4.4） ----------
+   与 archive-core.js 的 patchVolatileFields 等价：service worker 无法 require 经典脚本，
+   所以这里保留一份实现，测试会逐个输入比对两边输出必须一致。
+   只覆盖 UP主粉丝数、互动数据、缺失的发布时间与失效标记，其余内容逐字不动。 */
+
+const SECTION_HEADING_PATTERN = /^【.+?】\s*$/;
+
+function statsSectionLines(stats) {
+  return ["【互动数据】", ...IMPORT_STAT_KEYS.map((key) => `${IMPORT_STAT_LABELS[key]}：${importIsPlaceholder(stats?.[key]) ? "未知" : String(stats[key])}`)];
+}
+
+function patchVolatileFields(text, options = {}) {
+  const source = String(text ?? "");
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(/\r?\n/);
+
+  const fieldIndex = (key) => lines.findIndex((line) => line.startsWith(`${key}：`));
+  const setField = (key, value) => {
+    const index = fieldIndex(key);
+    if (index < 0) return false;
+    lines[index] = `${key}：${value}`;
+    return true;
+  };
+
+  if (!importIsPlaceholder(options.upFans)) {
+    // 老档案没有「UP主粉丝数」这一行，要补在 UID 后面
+    if (!setField("UP主粉丝数", String(options.upFans))) {
+      const anchor = fieldIndex("UP主UID") >= 0 ? fieldIndex("UP主UID") : fieldIndex("UP主昵称");
+      if (anchor >= 0) lines.splice(anchor + 1, 0, `UP主粉丝数：${options.upFans}`);
+    }
+  }
+
+  // 发布时间只补空缺
+  if (options.pubdateText) {
+    const current = (lines[fieldIndex("视频发布时间")] || "").replace(/^视频发布时间：/, "");
+    if (importIsPlaceholder(current)) setField("视频发布时间", String(options.pubdateText));
+  }
+
+  if (options.stats && Object.keys(options.stats).length) {
+    const block = statsSectionLines(options.stats);
+    const headingIndex = lines.findIndex((line) => line.trim() === "【互动数据】");
+    if (headingIndex >= 0) {
+      let end = headingIndex + 1;
+      while (end < lines.length && !SECTION_HEADING_PATTERN.test(lines[end].trim())) end += 1;
+      lines.splice(headingIndex, end - headingIndex, ...block, "");
+    } else {
+      const tagIndex = lines.findIndex((line) => line.trim() === "【标签】");
+      lines.splice(tagIndex >= 0 ? tagIndex : lines.length, 0, ...block, "");
+    }
+  }
+
+  if (options.videoStatus) {
+    if (!setField("视频状态", String(options.videoStatus))) {
+      const linkIndex = fieldIndex("视频链接");
+      if (linkIndex >= 0) lines.splice(linkIndex + 1, 0, `视频状态：${options.videoStatus}`);
+    }
+  }
+
+  return lines.join(newline);
+}
+
+/* ---------- 4.4：更新视频状态 ---------- */
+
+const STATUS_INVALID_MARKER = "已失效视频（更新状态时检测到）";
+
+function sendStatusProgress(text) {
+  chrome.runtime.sendMessage({ type: "bca-status-progress", text }, () => { void chrome.runtime.lastError; });
+}
+
+// 重新解析一条归档：刷新易变数值；如果视频已失效，则不改动原数据，只写入失效标记
+async function refreshOneArchiveStatus(root, target, tabId) {
+  const collection = await root.getDirectoryHandle(safeSegment(target.collection));
+  const directory = await collection.getDirectoryHandle(String(target.directory || ""));
+  const fileHandle = await directory.getFileHandle("视频信息.txt");
+  const text = await (await fileHandle.getFile()).text();
+
+  const bvid = text.match(/^BV号：(.+)$/m)?.[1]?.trim() || "";
+  const aid = text.match(/^av号：(.+)$/m)?.[1]?.trim().replace(/^av/i, "") || "";
+  if (!/^BV[0-9A-Za-z]{10}$/.test(bvid) && !/^\d+$/.test(aid)) throw new Error("这条归档没有可用的 BV/av 号。");
+
+  let view = null;
+  let invalid = false;
+  try {
+    view = await biliImportApiGet("/x/web-interface/view", bvid ? { bvid } : { aid }, 12000, tabId);
+  } catch (error) {
+    // 接口明确返回错误码（如 -404 / 62002）说明视频已失效；
+    // 网络或超时错误则保持原样，不误判成失效。
+    if (typeof error?.apiCode === "number") invalid = true;
+    else throw error;
+  }
+
+  if (invalid) {
+    // 已经标记过失效的就不再改写：导入时写的「已失效视频（已尝试恢复）」比
+    // 「更新状态时检测到」更具体，重复改写只会丢信息、还多做一次无谓的写入
+    if (/^视频状态：.*失效/m.test(text)) return "unchanged";
+    const patched = patchVolatileFields(text, { videoStatus: STATUS_INVALID_MARKER });
+    if (patched === text) return "unchanged";
+    await writeFile(directory, "视频信息.txt", patched);
+    return "invalid";
+  }
+
+  const stats = {};
+  const stat = view?.stat || {};
+  for (const key of IMPORT_STAT_KEYS) {
+    if (stat[key] !== undefined && stat[key] !== null) stats[key] = stat[key];
+  }
+  const mid = String(view?.owner?.mid || "");
+  const upFans = mid ? await fetchUpFans(mid, tabId) : "";
+
+  // 之前被本功能标记过失效、现在又能正常访问的，把标记清掉
+  const currentStatus = (text.match(/^视频状态：(.+)$/m)?.[1] || "").trim();
+  const patched = patchVolatileFields(text, {
+    upFans,
+    stats,
+    pubdateText: Number(view?.pubdate) > 0 ? formatPublishDate(view.pubdate) : "",
+    videoStatus: currentStatus === STATUS_INVALID_MARKER ? "正常" : undefined
+  });
+  if (patched === text) return "unchanged";
+  await writeFile(directory, "视频信息.txt", patched);
+  return "updated";
+}
+
+async function refreshVideoStatus(data, tabId = null) {
+  const root = await getRootHandle();
+  if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
+  await ensureWritePermission(root);
+  const targets = (Array.isArray(data?.targets) ? data.targets : []).filter((target) => target?.collection && target?.directory);
+  if (!targets.length) throw new Error("没有需要更新的记录。");
+  const limit = Math.max(1, Math.min(Number(data?.limit) || 20, 80));
+  const queue = targets.slice(0, limit);
+  upFansCache = new Map();
+  const failures = [];
+  let updated = 0, markedInvalid = 0, unchanged = 0, failed = 0, cursor = 0;
+  const runners = Array.from({ length: Math.min(IMPORT_DETAIL_CONCURRENCY, queue.length) }, async () => {
+    while (cursor < queue.length) {
+      const index = cursor;
+      const target = queue[cursor];
+      cursor += 1;
+      sendStatusProgress(`正在更新视频状态 ${index + 1}/${queue.length}：${target.directory}`);
+      try {
+        const result = await refreshOneArchiveStatus(root, target, tabId);
+        if (result === "updated") updated += 1;
+        else if (result === "invalid") markedInvalid += 1;
+        else unchanged += 1;
+      } catch (error) {
+        failed += 1;
+        failures.push(`${target.collection}/${target.directory}：${error?.message || "更新失败"}`);
+      }
+      await importDelay(IMPORT_DETAIL_DELAY_MS);
+    }
+  });
+  await Promise.all(runners);
+
+  let reportPath = "";
+  if (failures.length) {
+    reportPath = await persistErrorReport([
+      "B站收藏归档状态更新报告",
+      `时间：${formatChineseDateTime(new Date(), true)}`,
+      `处理 ${queue.length} 条：更新 ${updated}，新标记失效 ${markedInvalid}，无变化 ${unchanged}，失败 ${failed}`,
+      "",
+      ...failures.slice(0, 200)
+    ].join("\n"));
+  }
+  return {
+    ok: true,
+    processed: queue.length,
+    updated,
+    markedInvalid,
+    unchanged,
+    failed,
+    remaining: Math.max(0, targets.length - queue.length),
+    reportPath,
+    message: `本次处理 ${queue.length} 条：更新 ${updated} 条，新标记失效 ${markedInvalid} 条，无变化 ${unchanged} 条，失败 ${failed} 条。`
+  };
+}
+
 /* ---------- 运行控制：暂停 / 继续 / 取消 ---------- */
 
 let importRun = { active: false, paused: false, cancelled: false, waiters: [] };
@@ -1126,7 +1308,10 @@ async function fetchUpFans(mid, tabId = null) {
 async function fetchVideoDetail(item, tabId = null) {
   const detail = { stats: {}, errors: [] };
   const query = item.bvid ? { bvid: item.bvid } : (item.aid ? { aid: String(item.aid).replace(/^av/i, "") } : null);
-  if (query) {
+  // 已知失效的条目不再请求视频资料接口（必定返回“稿件不可见”），
+  // 标签接口仍试一次：稿件不可见时标签有时还能取到。
+  const knownInvalid = item.isInvalid === true;
+  if (query && !knownInvalid) {
     try {
       const data = await biliImportApiGet("/x/web-interface/view", query, 12000, tabId);
       if (data) {
@@ -1146,7 +1331,8 @@ async function fetchVideoDetail(item, tabId = null) {
         }
       }
     } catch (error) {
-      detail.errors.push(`视频资料接口：${error.message}`);
+      // 失效视频的“稿件不可见/啥都木有”属于预期结果，不该当成导入错误写进报告
+      if (!knownInvalid) detail.errors.push(`视频资料接口：${error.message}`);
     }
   }
   if (detail.upMid) {
@@ -1159,7 +1345,7 @@ async function fetchVideoDetail(item, tabId = null) {
       const tags = importTagNames(await biliImportApiGet("/x/tag/archive/tags", { bvid: tagKey }, 9000, tabId));
       if (tags.length) detail.tags = tags;
     } catch (error) {
-      detail.errors.push(`标签接口：${error.message}`);
+      if (!knownInvalid) detail.errors.push(`标签接口：${error.message}`);
     }
   }
   return detail;
@@ -1727,6 +1913,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, message: error?.message || "无法打开本地收藏库。" }));
+    return true;
+  }
+  if (message?.type === "bca-refresh-video-stats") {
+    // 与保存/导入共用串行队列，避免同时改写同一批归档文件
+    const task = saveQueue.then(() => refreshVideoStatus(message.data, sender?.tab?.id ?? null));
+    saveQueue = task.catch(() => undefined);
+    task.then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "更新视频状态失败。" }));
     return true;
   }
   if (message?.type === "bca-import-control") {

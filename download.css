@@ -34,6 +34,15 @@ body {
 .download-intro h1 { margin: 0; color: var(--ink); font-size: var(--fs-2xl); letter-spacing: -.8px; }
 .download-intro > p:last-child { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-base); line-height: 1.85; }
 
+/* 使用须知：中性浅色卡片，不抢队列面板的视觉重心 */
+.safety-notice { margin: 0 0 var(--sp-4); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-soft); }
+.safety-notice-heading { display: flex; align-items: center; gap: 6px; margin: 0 0 var(--sp-3); color: var(--brand-deep); font-size: var(--fs-base); }
+.safety-notice-heading .icon { font-size: var(--fs-md); color: var(--brand); }
+.safety-notice-list { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.safety-notice-list li { color: var(--text); font-size: var(--fs-base); line-height: 1.7; overflow-wrap: anywhere; }
+.safety-notice-list a { color: var(--brand-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.safety-notice-list a:hover { color: var(--brand-strong); }
+
 .panel { min-width: 0; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); }
 .queue-panel { padding: var(--sp-5) var(--sp-5) var(--sp-4); }
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-4); }
@@ -188,6 +197,7 @@ body {
   .download-topbar { height: 54px; padding: 0 var(--sp-4); }
   .download-main { width: calc(100% - 22px); margin: var(--sp-5) auto 40px; }
   .queue-panel, .settings-panel, .progress-panel { padding: var(--sp-4); }
+  .safety-notice { padding: var(--sp-3) var(--sp-4); }
   .add-video-row { flex-direction: column; align-items: stretch; }
   .queue-item { grid-template-columns: 38px minmax(0, 1fr) 30px; gap: var(--sp-2); }
   .queue-page { grid-column: 2 / -1; grid-row: 2; width: 100%; max-width: none; }

@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.3.0");
+  assert.equal(manifest.version, "4.4.0");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -587,5 +587,212 @@ test("the web side shows storage usage and no longer offers the backfill button"
   assert.equal(/id="enrichLibrary"/.test(html), false, "补全缺失资料按钮应已删除");
   assert.equal(/id="enrichDialog"/.test(html), false, "补全对话框应已删除");
   assert.equal(/bca-enrich-records/.test(readProjectFile("background.js")), false, "后台不应再保留补全消息");
+});
+
+/* ------------------------- 4.4 更新视频状态与使用须知 ------------------------- */
+
+// 归档里已有【互动数据】和视频状态行的完整样本
+const FULL_INFO = [
+  "【基本信息】",
+  "视频收藏时间：2026年10月09日 01时19分50秒.000",
+  "信息保存于：2026-10-09 01:19:50",
+  "保存文件夹：2026年10月09日01时19分50秒",
+  "视频标题：【蜡笔小新】冷天煮超大锅浓汤牛肠火锅",
+  "视频链接：https://www.bilibili.com/video/BV1pMgp6aEbu/",
+  "视频状态：正常",
+  "恢复情况：收藏夹资料",
+  "BV号：BV1pMgp6aEbu",
+  "av号：av116645959959066",
+  "分区：美食 / 美食制作",
+  "视频时长：17:37",
+  "视频发布时间：未知",
+  "",
+  "【UP主】",
+  "UP主昵称：蜡笔小新美食频道",
+  "UP主UID：87795103",
+  "UP主粉丝数：123456",
+  "UP主主页：https://space.bilibili.com/87795103",
+  "",
+  "【互动数据】",
+  "播放量：1",
+  "弹幕量：2",
+  "点赞数：3",
+  "投硬币枚数：4",
+  "收藏人数：5",
+  "转发人数：6",
+  "",
+  "【标签】",
+  "拉面、治愈",
+  "",
+  "【视频简介】",
+  "真正的简介",
+  ""
+].join("\n");
+
+// 更老的档案：没有【互动数据】也没有视频状态行
+const LEGACY_INFO = [
+  "【基本信息】",
+  "视频收藏时间：2022年02月05日18时27分54秒.000",
+  "视频标题：平价宝藏男香",
+  "视频链接：https://www.bilibili.com/video/BV14b4y1i7gN/",
+  "BV号：BV14b4y1i7gN",
+  "av号：未知",
+  "分区：未知",
+  "视频时长：未知",
+  "视频发布时间：未知",
+  "",
+  "【UP主】",
+  "UP主昵称：特务卷卷",
+  "UP主UID：2065615514",
+  "UP主主页：https://space.bilibili.com/2065615514",
+  "",
+  "【标签】",
+  "未知",
+  "",
+  "【视频简介】",
+  "-",
+  ""
+].join("\n");
+
+test("the volatile-field patcher in background.js matches the shared implementation", () => {
+  // background.js 是模块化 service worker，不能 require archive-core.js，所以有两份等价实现
+  const local = loadBackgroundFunctions(
+    ["importClean", "importIsPlaceholder", "statsSectionLines", "patchVolatileFields"],
+    ["IMPORT_PLACEHOLDER_VALUES", "IMPORT_STAT_KEYS", "IMPORT_STAT_LABELS", "SECTION_HEADING_PATTERN"]
+  );
+  const optionsList = [
+    { upFans: "999", stats: { view: 10, danmaku: 20, like: 30, coin: 40, favorite: 50, share: 60 }, pubdateText: "2026-08-14 06:00:00 星期五" },
+    { videoStatus: "已失效视频（更新状态时检测到）" },
+    { stats: { view: 1 } },
+    { upFans: "", stats: {}, videoStatus: "正常" },
+    {}
+  ];
+  for (const text of [FULL_INFO, LEGACY_INFO, "", "【视频简介】\n-\n"]) {
+    for (const options of optionsList) {
+      assert.equal(
+        local.patchVolatileFields(text, options),
+        core.patchVolatileFields(text, options),
+        `patchVolatileFields 不一致：options=${JSON.stringify(options)}`
+      );
+    }
+  }
+});
+
+test("updating the volatile numbers leaves everything else untouched", () => {
+  const patched = core.patchVolatileFields(FULL_INFO, {
+    upFans: "777",
+    stats: { view: 80000, danmaku: 90, like: 700, coin: 190, favorite: 300, share: 12 },
+    pubdateText: "2026-08-14 06:00:00 星期五"
+  });
+  const before = core.parseInfoFile(FULL_INFO);
+  const after = core.parseInfoFile(patched);
+  // 目标字段更新了
+  assert.equal(after.fields["UP主粉丝数"], "777");
+  assert.equal(after.fields["播放量"], "80000");
+  assert.equal(after.fields["转发人数"], "12");
+  assert.equal(after.fields["视频发布时间"], "2026-08-14 06:00:00 星期五");
+  // 其它一律不动
+  for (const key of ["视频标题", "视频链接", "视频收藏时间", "保存文件夹", "BV号", "av号", "分区", "视频时长", "UP主昵称", "UP主UID", "UP主主页", "视频状态", "恢复情况"]) {
+    assert.equal(after.fields[key], before.fields[key], `${key} 不该被改动`);
+  }
+  assert.deepEqual(core.tagsFromInfo(after), core.tagsFromInfo(before));
+  assert.equal(core.descriptionFromInfo(after), core.descriptionFromInfo(before));
+  // 行数不变（互动数据是整块替换，不是追加）
+  assert.equal(patched.split("\n").length, FULL_INFO.split("\n").length);
+});
+
+test("an invalid video only gets its status line changed, never its data", () => {
+  const marker = "已失效视频（更新状态时检测到）";
+  const patched = core.patchVolatileFields(FULL_INFO, { videoStatus: marker });
+  assert.equal(core.parseInfoFile(patched).fields["视频状态"], marker);
+  // 逐行核对：只有原来那行「视频状态：正常」变了，其余逐字相同
+  const beforeLines = FULL_INFO.split("\n");
+  const afterLines = patched.split("\n");
+  assert.equal(afterLines.length, beforeLines.length, "不应新增或删除行");
+  const diff = beforeLines.map((line, index) => (line === afterLines[index] ? null : index)).filter((index) => index !== null);
+  assert.deepEqual(diff, [beforeLines.indexOf("视频状态：正常")], "除视频状态行外不应有任何差异");
+
+  // 老档案没有视频状态行时，新增一行且不影响其它内容
+  const legacyPatched = core.patchVolatileFields(LEGACY_INFO, { videoStatus: marker });
+  const legacyLines = legacyPatched.split("\n");
+  assert.equal(legacyLines.length, LEGACY_INFO.split("\n").length + 1);
+  assert.equal(core.parseInfoFile(legacyPatched).fields["视频状态"], marker);
+  assert.equal(core.parseInfoFile(legacyPatched).fields["视频标题"], "平价宝藏男香");
+  assert.deepEqual(core.tagsFromInfo(core.parseInfoFile(legacyPatched)), []);
+});
+
+test("a legacy archive gains an interactive-stats block in the right place", () => {
+  const patched = core.patchVolatileFields(LEGACY_INFO, {
+    upFans: "702814",
+    stats: { view: 29044453, danmaku: 502, like: 303835, coin: 67336, favorite: 265976, share: 22887 }
+  });
+  const info = core.parseInfoFile(patched);
+  assert.equal(info.fields["播放量"], "29044453");
+  assert.equal(info.fields["UP主粉丝数"], "702814");
+  // 【互动数据】必须排在【标签】之前，且前后各留空行
+  const lines = patched.split("\n");
+  assert.ok(lines.indexOf("【互动数据】") < lines.indexOf("【标签】"));
+  assert.ok(lines.indexOf("【互动数据】") > 0 && lines[lines.indexOf("【互动数据】") - 1] === "");
+  assert.ok(lines[lines.indexOf("【互动数据】") + 7] === "", "互动数据块后应有空行");
+  // 标签与简介没有被动过
+  assert.deepEqual(core.tagsFromInfo(info), []);
+  assert.equal(core.descriptionFromInfo(info), "");
+});
+
+test("invalid detection relies on API error codes, not on network failures", () => {
+  const source = readProjectFile("background.js");
+  // 接口错误码要挂在 error 上，调用方才能区分
+  assert.match(source, /apiError\.apiCode = payload\.code/);
+  assert.match(source, /if \(typeof error\?\.apiCode === "number"\) invalid = true;/);
+  assert.match(source, /else throw error;/);
+  // 失效只写标记，不碰其它字段
+  assert.match(source, /const STATUS_INVALID_MARKER = "已失效视频（更新状态时检测到）"/);
+  assert.match(source, /patchVolatileFields\(text, \{ videoStatus: STATUS_INVALID_MARKER \}\)/);
+  // 已经标过失效的不要重复改写，避免覆盖更具体的「已尝试恢复」说明
+  assert.match(source, /if \(\/\^视频状态：\.\*失效\/m\.test\(text\)\) return "unchanged";/);
+  // 刷新成功时顺便把之前误标的失效清掉
+  assert.match(source, /currentStatus === STATUS_INVALID_MARKER \? "正常" : undefined/);
+});
+
+test("the library exposes a batched status refresh", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  for (const id of ["refreshVideoStatus", "statusDialog", "statusBatchSize", "statusProgress"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
+  }
+  assert.match(library, /function openStatusDialog\(/);
+  assert.match(library, /function runStatusRefresh\(/);
+  assert.match(library, /type: "bca-refresh-video-stats"/);
+  assert.match(library, /bca-status-progress/);
+  assert.match(readProjectFile("background.js"), /"bca-refresh-video-stats"/);
+  // 和保存/导入共用串行队列
+  assert.match(readProjectFile("background.js"), /saveQueue\.then\(\(\) => refreshVideoStatus/);
+});
+
+// 使用须知必须在三个界面逐字一致，否则用户在不同入口看到的说法会不一样
+const SAFETY_ITEMS = [
+  '本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href="https://github.com/leiurayer/downkyi" target="_blank" rel="noopener noreferrer">DownKyi</a>。',
+  "下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。",
+  "请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。",
+  "本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。",
+  "插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。",
+  "所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。"
+];
+
+test("the same safety notice appears verbatim on all three surfaces", () => {
+  for (const file of ["library.html", "download.html", "popup.html"]) {
+    const html = readProjectFile(file);
+    for (const item of SAFETY_ITEMS) {
+      assert.ok(html.includes(item), `${file} 缺少或改动了须知条目：${item.slice(0, 24)}…`);
+    }
+    const anchor = (html.match(/<a [^>]*downkyi[^>]*>/i) || [""])[0];
+    assert.ok(anchor.includes('target="_blank"'), `${file} 的 DownKyi 链接应新窗口打开`);
+    assert.ok(anchor.includes('rel="noopener noreferrer"'), `${file} 的 DownKyi 链接缺少 rel 保护`);
+  }
+  // 弹窗里必须默认折叠，不能把弹窗撑高
+  assert.equal(/<details id="safetyNotice"[^>]*\sopen\b/.test(readProjectFile("popup.html")), false, "弹窗的须知应默认折叠");
+  // 收藏库里可以永久收起，状态记在本地
+  assert.match(readProjectFile("library.html"), /<details id="safetyNotice" class="safety-notice" open>/);
+  assert.match(readProjectFile("library.js"), /safetyNoticeDismissed/);
 });
 
