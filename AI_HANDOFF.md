@@ -5,7 +5,7 @@
 ## 项目基线
 
 - 项目目录：`<项目目录>`（历史版本另存于 `<历史版本目录>`）。
-- 扩展版本：`4.8.2`（界面显示 `beta4.8.2`），Chrome Manifest V3，最低 Chrome 版本 111。
+- 扩展版本：`4.8.3`（界面显示 `beta4.8.3`），Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -138,6 +138,19 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 ```
 
 后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+### CSS 覆盖顺序（4.8.3 的教训）
+
+**同一组件的规则必须写在它的基础规则之后。** 4.7 给 `.import-card` 加橘黄时把新规则写在了 `.import-card > summary { … }` 前面，结果：
+
+- `.import-card > summary:hover`（新，橘黄）与原有的 `.import-card > summary:hover { background: var(--surface-soft) }` **同优先级 (0,2,1)**，后者在文件里更靠后 → **橘黄悬停从来没生效过**
+- 图标和标题之所以生效，是因为新选择器优先级更高（`.import-card > summary .import-summary-icon` 是 (0,2,1)，`.import-summary-icon` 只有 (0,1,0)）
+
+**判断方法**：改完 CSS 后，用脚本检查新规则的下标是否大于对应基础规则的下标（测试里已经加了这样一条断言）。**只靠"看起来生效了"会漏**——图标生效了，悬停没生效，肉眼很难分辨。
+
+### 次要按钮的对比度（4.8.3）
+
+`.button-quiet` 现在是 `--brand-deep` on `--brand-soft`（5.17 / 8.90）。**悬停不要改成 `--brand-line` 底色**：那上面文字只有 4.23，不达标。当前方案是保持底色、加深描边并加 `--brand-ring` 光环。
+
 ### 测试套件的盲区：它看不见语法错误
 
 `test/stability.test.cjs` 是**按文本读文件 + 正则断言**的，它不执行任何被测代码。后果是：**一个文件就算完全跑不起来，测试照样全过。**

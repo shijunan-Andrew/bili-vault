@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.8.2");
+  assert.equal(manifest.version, "4.8.3");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -895,6 +895,40 @@ test("every shipped script actually parses", () => {
   }
 });
 
+/* ------------------------- 4.8.3 美化 ------------------------- */
+
+test("secondary buttons stand out from the card background", () => {
+  const css = readProjectFile("library.css");
+  const theme = readProjectFile("theme.css");
+  const light = Object.fromEntries([...theme.match(/:root \{([\s\S]*?)\n\}/)[1].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+  const dark = Object.assign({}, light, Object.fromEntries([...theme.match(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/)[1].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()])));
+  // 原来是白底 + 深色字，压在白卡片上几乎看不出是按钮
+  assert.equal(/\.button-quiet \{ color: var\(--text\)/.test(css), false, "不该再是白底深字");
+  assert.match(css, /\.button-quiet \{ color: var\(--brand-deep\); border-color: var\(--brand-line\); background: var\(--brand-soft\); \}/);
+  // 悬停不能靠加深底色：--brand-line 上的文字对比度只有 4.23，不达标
+  assert.match(css, /\.button-quiet:hover:not\(:disabled\) \{ border-color: var\(--brand\); background: var\(--brand-soft\); box-shadow: 0 0 0 3px var\(--brand-ring\); \}/);
+  for (const [mode, table] of [["浅色", light], ["深色", dark]]) {
+    const ratio = contrastRatio(table["--brand-deep"], table["--brand-soft"]);
+    assert.ok(ratio >= 4.5, `${mode}下次要按钮文字对比度只有 ${ratio.toFixed(2)}`);
+  }
+});
+
+test("the scan notice can be closed and stays closed for the same result", () => {
+  const html = readProjectFile("library.html");
+  const js = readProjectFile("library.js");
+  const css = readProjectFile("library.css");
+  assert.match(html, /id="scanNotice" class="scan-notice"/);
+  assert.match(html, /id="scanNoticeText"/);
+  assert.match(html, /id="dismissScanNotice"/);
+  assert.match(css, /\.scan-notice \{ display: flex/);
+  assert.match(css, /\.scan-notice-close \{/);
+  // 关掉之后，扫描结果没变就不该再冒出来（否则每次重扫都烦一次）
+  assert.match(js, /let dismissedScanNotice = "";/);
+  assert.match(js, /scanNotice\.hidden = !value \|\| value === dismissedScanNotice;/);
+  assert.match(js, /dismissScanNoticeButton\?\.addEventListener\("click"/);
+  assert.match(js, /dismissedScanNotice = scanNoticeText\?\.textContent \|\| "";/);
+});
+
 /* ------------------------- 4.8.1 入口与分页 ------------------------- */
 
 test("page sizes are multiples of the five-per-row grid", () => {
@@ -1124,7 +1158,15 @@ test("the import card is highlighted in orange", () => {
   }
   assert.match(css, /\.import-card \{ border-color: var\(--feature-line\); \}/);
   assert.match(css, /\.import-card > summary strong \{ color: var\(--feature\); \}/);
-  assert.match(css, /\.import-card > summary \.import-summary-icon \{ color: var\(--feature\); background: var\(--feature-soft\); \}/);
+  // 4.8.3：图标做成实心（橘黄底 + 浅橘图形），深浅主题都达标
+  assert.match(css, /\.import-card > summary \.import-summary-icon \{ color: var\(--feature-soft\); background: var\(--feature\); \}/);
+  // 折叠态与展开态统一底色，视觉上不再有断层
+  assert.match(css, /\.import-card > summary \{ background: var\(--feature-soft\); \}/);
+  // 这一组必须排在 .import-card > summary 那几条之后。4.7 时写在前面，
+  // 同为 (0,2,1) 的 :hover 被后面的规则盖掉，橘黄悬停从来没生效过。
+  const baseAt = css.indexOf(".import-card > summary {");
+  const iconAt = css.indexOf(".import-card > summary .import-summary-icon");
+  assert.ok(baseAt >= 0 && iconAt > baseAt, "橘黄规则必须排在基础规则之后，否则会被覆盖");
 });
 
 test("the folder-move warning is part of the shared notice", () => {

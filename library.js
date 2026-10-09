@@ -25,6 +25,8 @@ const currentCollection = document.getElementById("currentCollection");
 const pageTitle = document.getElementById("pageTitle");
 const resultSummary = document.getElementById("resultSummary");
 const scanNotice = document.getElementById("scanNotice");
+const scanNoticeText = document.getElementById("scanNoticeText");
+const dismissScanNoticeButton = document.getElementById("dismissScanNotice");
 const importHint = document.getElementById("importHint");
 const dismissImportHintButton = document.getElementById("dismissImportHint");
 const scanProgress = document.getElementById("scanProgress");
@@ -477,10 +479,15 @@ function progressNotifier(element, render) {
   };
 }
 
+// 4.8.3：通知可关闭。关掉后记住当时那段文字，下次扫描结果一样就保持隐藏，
+// 结果变了（比如这次命中了缓存、上次没有）才重新出现——既不烦人，也不丢掉新信息。
+let dismissedScanNotice = "";
+
 function setScanNotice(text) {
   if (!scanNotice) return;
-  scanNotice.hidden = !text;
-  scanNotice.textContent = text || "";
+  const value = text || "";
+  scanNoticeText.textContent = value;
+  scanNotice.hidden = !value || value === dismissedScanNotice;
 }
 
 // displayRoot() 收尾时把「读取进度 + 缓存命中 + 读取失败」拼成一条提示
@@ -2900,6 +2907,10 @@ deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRe
 searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
 sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
 dismissGithubBannerButton?.addEventListener("click", dismissGithubBanner);
+dismissScanNoticeButton?.addEventListener("click", () => {
+  dismissedScanNotice = scanNoticeText?.textContent || "";
+  if (scanNotice) scanNotice.hidden = true;
+});
 markDownloadedGo?.addEventListener("click", runMarkDownloaded);
 markDownloadedCancel?.addEventListener("click", () => markDownloadedDialog?.close());
 let bannerResizeTimer = 0;

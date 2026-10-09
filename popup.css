@@ -152,14 +152,6 @@ button:disabled { cursor: wait; opacity: .6; }
 .popup-banner-close:hover { background: #ffffff2e; opacity: 1; }
 
 .import-card { margin-top: var(--sp-3); padding: 0; overflow: hidden; }
-/* 4.7：「导入或更新」是弹窗里最主要的入口，用橘黄把它突出来。
-   颜色全部走 --feature 系列令牌，深浅主题各一套。 */
-.import-card { border-color: var(--feature-line); }
-.import-card > summary .import-summary-icon { color: var(--feature); background: var(--feature-soft); }
-.import-card > summary strong { color: var(--feature); }
-.import-card > summary:hover { background: var(--feature-soft); }
-.import-card[open] > summary { background: var(--feature-soft); }
-
 .import-card > summary {
   display: flex;
   align-items: center;
@@ -169,7 +161,7 @@ button:disabled { cursor: wait; opacity: .6; }
   list-style: none;
 }
 .import-card > summary::-webkit-details-marker { display: none; }
-.import-card > summary:hover { background: var(--surface-soft); }
+/* 悬停底色由下面 4.8.3 那一组统一接管（必须排在 .import-card > summary 之后） */
 .import-summary-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: var(--r-xs); color: var(--brand-deep); background: var(--brand-soft); font-size: var(--fs-md); }
 .import-summary-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .import-summary-copy strong { color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
@@ -184,6 +176,19 @@ button:disabled { cursor: wait; opacity: .6; }
 .import-control-hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
 .import-card > summary .chevron { color: var(--faint); font-size: var(--fs-md); transition: transform var(--dur) var(--ease); }
 .import-card[open] > summary .chevron { transform: rotate(180deg); }
+/* 4.8.3：「导入或更新」是弹窗里最主要的入口，用橘黄突出。
+   —— 这一组必须排在 .import-card > summary 那几条**之后**。
+   4.7 时它们写在前面，同为 (0,2,1) 优先级的 :hover 被后面的规则盖掉，
+   橘黄悬停从来没生效过。
+   折叠态与展开态统一用 --feature-soft 底色，视觉上不再有断层。
+   图标做成实心：橘黄底 + 浅橘色的图形。
+   浅色下 #fdf0e0 on #a5560a = 4.76，深色下 #2e2318 on #efa45a = 7.39，两套主题都达标。 */
+.import-card { border-color: var(--feature-line); }
+.import-card > summary { background: var(--feature-soft); }
+.import-card > summary strong { color: var(--feature); }
+.import-card > summary:hover { background: var(--feature-line); }
+.import-card > summary .import-summary-icon { color: var(--feature-soft); background: var(--feature); }
+.import-card > summary .chevron { color: var(--feature); }
 .import-body { padding: 0 var(--sp-4) var(--sp-4); border-top: 1px solid var(--line-soft); }
 
 .import-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: var(--sp-3) 0 var(--sp-2); }
