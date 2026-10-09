@@ -2153,3 +2153,23 @@ test("every design token referenced by a page actually exists", () => {
   assert.deepEqual([...new Set(problems)], [], `发现未定义的设计令牌：\n${[...new Set(problems)].join("\n")}`);
 });
 
+/* ------------------------- archive-core 的真执行单元测试 -------------------------
+
+   上面这一整个文件都是「读文件 + 正则断言」——它证明的是「源码里有没有这行字」，
+   证明不了「函数真的能跑」。这里把 test/archive-core.test.cjs 并进来补那一半：
+   那个文件 require 了 archive-core.js 并真的调用它的 20 个纯函数。
+
+   这样 `node test/stability.test.cjs` 一条命令就能跑全部。
+   也可以单独跑：`node test/archive-core.test.cjs`（会打印自己的进度条）。 */
+
+test("archive-core 的纯函数在真执行下全部通过", () => {
+  const { results } = require("./archive-core.test.cjs");
+  assert.ok(results.passed > 0, "单元测试一项都没跑起来，检查 require 路径");
+  assert.equal(
+    results.failed,
+    0,
+    `${results.failed} 项失败：\n` +
+      results.failures.map((f) => `  - ${f.name}\n      ${f.error.message.split("\n")[0]}`).join("\n")
+  );
+});
+

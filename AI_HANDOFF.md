@@ -73,7 +73,8 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── uninstall-native-folder-opener.ps1
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
-│   ├── stability.test.cjs        # Node 内置测试（125 项），无第三方依赖
+│   ├── stability.test.cjs        # Node 内置测试（127 项）：静态回归断言 + 并进来的单元测试
+│   ├── archive-core.test.cjs     # 59 项真执行单元测试：require archive-core.js 真的调用它
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
 │   ├── archive-audit.cjs         # 本地归档的标签/简介覆盖情况体检
@@ -271,7 +272,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 一次覆盖 约 8800 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**
 
-- **测试套件是文本级断言，不执行被测代码**。125 项里只有约 12 处真的运行逻辑，其余是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
+- **主测试套件是文本级断言，不执行被测代码**（这一条在 V1.0.0 之后有所缓解：`test/archive-core.test.cjs` 的 59 项是真执行的，见「常用验证」）。`stability.test.cjs` 的其余断言是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
 - **配置没有版本迁移**。`CONFIG_VERSION = 1`，导入配置时只校验结构不做迁移。将来升版本必须补。
 - **没有多标签页互斥**。两个标签页同时打开同一归档、同时做写操作（标记已下载 / 删除 / 移动）没有锁。日常使用很难触发，但理论上存在竞态。
 - **没有归档完整性校验与备份机制**。`视频信息.txt` 损坏就是永久丢失，插件没有校验和、没有导出元数据的功能。
@@ -502,7 +503,7 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 **125 项检查**，按功能代次分组；分组标题里的版本号就是它们守护的那一轮改动，
+当前包含 **127 项检查**（126 项静态回归 + 1 项把 `test/archive-core.test.cjs` 的 59 项真执行单元测试并进来）。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
 可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。
 
 - **归档与下载匹配**（开头，9 项）：下载队列的收藏夹传递、BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。

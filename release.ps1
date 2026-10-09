@@ -141,9 +141,13 @@ foreach ($f in $jsFiles) {
 }
 if (-not $failed) { Say "    [$([char]0x2713)] $($jsFiles.Count) 个 JS 文件全部通过" $C_GREEN }
 
-Say "  回归测试…" $C_DIM
+Say "  回归测试（静态断言）…" $C_DIM
 & $Node test/stability.test.cjs 2>&1 | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
 if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 测试未全过" $C_RED; $failed = $true }
+
+Say "  纯函数单元测试（真执行 archive-core.js）…" $C_DIM
+& $Node test/archive-core.test.cjs 2>&1 | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
+if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 单元测试未全过" $C_RED; $failed = $true }
 
 Say "  词典覆盖…" $C_DIM
 $i18nOut = & $Node test/i18n-extract.cjs --check 2>&1
