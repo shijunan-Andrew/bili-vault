@@ -155,7 +155,11 @@ html.banner-visible { --banner-h: 42px; }
 }
 .collection-create-tail:hover { color: var(--accent); }
 
-.collection-list { display: grid; gap: 3px; }
+/* 4.8.2：收藏夹多起来会把下面的版本号、一键三连挤出屏幕。
+   侧栏是固定高度的 flex 列，所以让列表自己滚：flex:1 吃掉剩余空间，
+   min-height:0 才允许它收缩到内容高度以下（flex 项的默认 min-height 是 auto）。
+   新建收藏夹按钮与底部信息是它的兄弟节点，所以始终留在可视区。 */
+.collection-list { display: grid; gap: 3px; align-content: start; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .collection-row { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
 .collection-button {
   display: flex;

@@ -1997,6 +1997,13 @@ async function resolveDownloadPath(video) {
     const response = await nativeHostRequest({ action: "resolve-directory", collectionName: collection, directoryName: directory });
     if (response.targetPath) return { path: response.targetPath, source: "host" };
   } catch (_) {}
+  // 4.8.2：没装原生助手时，用用户手填的下载根目录拼出绝对路径。
+  // File System Access API 出于隐私考虑不暴露绝对路径，manifest 里也没有 downloads 权限，
+  // 所以没有这个设置就只能给相对路径。
+  const manualRoot = await readDownloadRootPath();
+  if (manualRoot) {
+    return { path: BcaArchiveCore.joinDownloadPath(manualRoot, collection, directory), source: "manual" };
+  }
   return { path: BcaArchiveCore.downloadPathLabel(collection, directory), source: "relative" };
 }
 
@@ -2030,9 +2037,9 @@ async function copyDownloadPath(video) {
   if (!resolved.path) { showToast(BcaI18n.t("这条记录没有可用的下载目录信息。")); return; }
   try {
     await navigator.clipboard.writeText(resolved.path);
-    setDownloadPathNote(resolved.source === "host"
-      ? BcaI18n.t("已复制完整路径：{path}", { path: resolved.path })
-      : BcaI18n.t("已复制相对路径：{path}（完整路径 = 下载根目录\\{path}）", { path: resolved.path }));
+    setDownloadPathNote(resolved.source === "relative"
+      ? BcaI18n.t("已复制相对路径：{path}。要复制可直接粘贴的完整路径，请在下载页填写下载根目录的绝对路径，或安装 Windows 原生目录助手。", { path: resolved.path })
+      : BcaI18n.t("已复制完整路径：{path}", { path: resolved.path }));
     showToast(BcaI18n.t("已复制视频目录路径。"));
   } catch (error) {
     setDownloadPathNote(BcaI18n.t("复制失败，请手动记录：{path}", { path: resolved.path }), true);
@@ -2238,6 +2245,18 @@ async function runMarkDownloaded() {
     markDownloadedBusy = false;
     markDownloadedGo.disabled = false;
   }
+}
+
+/* ---------------- 4.8.2：手填的下载根目录绝对路径 ----------------
+
+   没装原生助手时，绝对路径没有别的来源。用户在下载页填一次，
+   这里读出来拼路径，复制到的就是能直接粘进资源管理器的完整路径。 */
+
+async function readDownloadRootPath() {
+  try {
+    const saved = await chrome.storage.local.get("downloadRootPath");
+    return String(saved?.downloadRootPath || "").trim().replace(/[\\/]+$/, "");
+  } catch (_) { return ""; }
 }
 
 async function getWritableDownloadParent() {
@@ -2749,7 +2768,7 @@ async function refreshDownloadStatuses() {
     let changed = false;
     for (const video of allVideos()) {
       const match = matchDownloadedDirectory(video, index);
-      const downloaded = Boolean(match?.hasMedia);
+      const downloaded = BcaArchiveCore.downloadMatchIsDownloaded(match);
       const hasDownloadFiles = Boolean(match?.hasFiles);
       if (video.downloaded !== downloaded || video.hasDownloadFiles !== hasDownloadFiles || video.downloadDirectoryName !== (match?.name || "") || video.downloadCollectionName !== (match?.collectionName || "")) changed = true;
       video.downloaded = downloaded;

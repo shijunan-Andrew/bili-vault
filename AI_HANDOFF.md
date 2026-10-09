@@ -5,7 +5,7 @@
 ## 项目基线
 
 - 项目目录：`<项目目录>`（历史版本另存于 `<历史版本目录>`）。
-- 扩展版本：`4.8.1`（界面显示 `beta4.8.1`），Chrome Manifest V3，最低 Chrome 版本 111。
+- 扩展版本：`4.8.2`（界面显示 `beta4.8.2`），Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -138,6 +138,37 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 ```
 
 后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+### 测试套件的盲区：它看不见语法错误
+
+`test/stability.test.cjs` 是**按文本读文件 + 正则断言**的，它不执行任何被测代码。后果是：**一个文件就算完全跑不起来，测试照样全过。**
+
+4.8.2 真的踩了一次：我用脚本替换 `copyDownloadPath` 里的三元表达式时少删了一行，留下一句孤立的 `: BcaI18n.t(...)`，`library.js` 直接 `SyntaxError`，而 **104 项测试依然全绿**。发现它靠的是最后单独跑的 `node --check`。
+
+现在补了一条断言（"every shipped script actually parses"），用 `new vm.Script(source)` 在进程内解析每个脚本，不需要起子进程。**验证过它有效**：故意注入一个语法错误，它会报 `library.js 解析失败：Unexpected token ':'`。
+
+**推论**：用脚本改代码之后，必须真的跑一次语法检查；测试通过不等于代码能跑。改完 `library.js` / `download.js` / `popup.js` 这类大文件尤其要跑。
+
+### 「已下载」判据只能有一处（4.8.2）
+
+`BcaArchiveCore.downloadMatchIsDownloaded(match)` 是**唯一**的判据：有真实媒体文件、或有「手动标记」留下的说明文件，都算已下载。
+
+**这里踩过一次坑，别再踩**：这条规则原本在 `downloadStateFromIndex()`（archive-core.js）和 `refreshDownloadStatuses()`（library.js）各写了一份。4.8 加「手动标记」时只改了前者，而 `refreshDownloadStatuses()` 挂在 `window` 的 `focus` 事件和 `visibilitychange` 上——**用户切到别的界面再回来就会触发它，把手动标记冲掉**；刷新走的是 `scanRoot`（用的前者），所以刷新又恢复正常。现象很迷惑：同一个状态，刷新和切页面结果不一样。
+
+**推论**：任何"从磁盘状态推导出来的字段"都只允许有一个计算入口。如果发现第二处，把它改成调用同一个函数，而不是复制判断条件。
+
+### 绝对路径的来源（4.8.2）
+
+浏览器**不会**把文件夹的绝对路径给网页（File System Access API 有意如此），manifest 里也没有 `downloads` 权限。所以绝对路径只有两个来源：
+
+1. **Windows 原生目录助手**（`resolve-directory` action，返回 `targetPath`）——首选
+2. **用户在下载页手填的下载根目录**（`chrome.storage.local` 的 `downloadRootPath`）——助手不可用时的退路
+
+`resolveDownloadPath()` 按这个顺序取，拿不到才退回相对路径，并把提示分成「已复制完整路径」和「已复制相对路径（+ 怎么办）」两档。**别把第 3 档的提示删掉**——它是唯一告诉用户怎么才能拿到绝对路径的地方。
+
+### 侧栏滚动（4.8.2）
+
+`.collection-list` 是 `flex: 1 1 auto; min-height: 0; overflow-y: auto`。**`min-height: 0` 不能删**：flex 项的默认 `min-height` 是 `auto`，不写它列表不会收缩，收藏夹一多就会把 `margin-top: auto` 的底部信息挤出可视区。新建收藏夹按钮和底部信息都是列表的兄弟节点，所以始终可见。
+
 ### 图标与外链（4.8.1）
 
 - **`github` 图标是唯一一个实心图标**。`icons.js` 的 `svg()` 统一输出 `fill="none" stroke="currentColor"`，而 GitHub 猫标是实心品牌标识，所以在 path 上内联覆盖 `fill="currentColor" stroke="none"`，外面再套一层 `<g transform="translate(2.6 2.6) scale(0.783)">` 把它缩到和同排线性图标一样大（原路径占满 24×24，不缩会大一圈）。**再加实心品牌图标时照这个写法。**

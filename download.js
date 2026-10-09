@@ -392,6 +392,24 @@ async function restoreFolder() {
   }
 }
 
+/* 4.8.2：手填的下载根目录绝对路径。存 chrome.storage.local，收藏库那边也要读。 */
+const downloadRootPathInput = document.getElementById("downloadRootPath");
+
+async function loadDownloadRootPath() {
+  if (!downloadRootPathInput) return;
+  try {
+    const saved = await chrome.storage.local.get("downloadRootPath");
+    downloadRootPathInput.value = String(saved?.downloadRootPath || "");
+  } catch (_) {}
+}
+
+function saveDownloadRootPath() {
+  if (!downloadRootPathInput) return;
+  const value = downloadRootPathInput.value.trim().replace(/[\\/]+$/, "");
+  downloadRootPathInput.value = value;
+  chrome.storage.local.set({ downloadRootPath: value }).catch(() => {});
+}
+
 async function getWritableDirectory(parent, name) {
   const base = safeName(name);
   for (let suffix = 1; suffix < 1000; suffix += 1) {
@@ -954,5 +972,9 @@ async function initialize() {
   }
   updateStartButton();
 }
+
+downloadRootPathInput?.addEventListener("change", saveDownloadRootPath);
+downloadRootPathInput?.addEventListener("blur", saveDownloadRootPath);
+loadDownloadRootPath();
 
 initialize().catch((error) => addLog(BcaI18n.t("下载页初始化失败：{message}", { message: error.message }), "error"));

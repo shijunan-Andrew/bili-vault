@@ -64,6 +64,14 @@
     return null;
   }
 
+  // 4.8.2：「这条记录算不算已下载」只能有这一个判据。
+  // 之前 downloadStateFromIndex 和 library.js 的 refreshDownloadStatuses 各写了一份，
+  // 加了「手动标记」之后前者改了、后者没改 —— 页面重新获得焦点时重算就会把标记冲掉。
+  // 有真实媒体文件，或者有「手动标记」留下的说明文件，都算已下载。
+  function downloadMatchIsDownloaded(match) {
+    return Boolean(match?.hasMedia || match?.marked);
+  }
+
   function downloadStateFromIndex(collection, identifiers, index, previous = {}) {
     if (!(index instanceof Map)) {
       return {
@@ -76,8 +84,7 @@
     }
     const match = findDownloadMatch(collection, identifiers, index);
     return {
-      // 4.8：目录里有真实媒体文件，或者有「手动标记」留下的说明文件，都算已下载
-      downloaded: Boolean(match?.hasMedia || match?.marked),
+      downloaded: downloadMatchIsDownloaded(match),
       hasFiles: Boolean(match?.hasFiles),
       name: match?.name || "",
       collectionName: match?.collectionName || "",
@@ -283,6 +290,7 @@
     withSourceCollection,
     identifiersFromDirectoryName,
     downloadIndexKey,
+    downloadMatchIsDownloaded,
     safeName,
     videoDirectoryLabel,
     findDownloadMatch,

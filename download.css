@@ -128,6 +128,22 @@ body {
 .setting-label { color: var(--muted); font-size: var(--fs-sm); }
 .folder-copy strong { overflow: hidden; color: var(--ink); font-size: var(--fs-base); text-overflow: ellipsis; white-space: nowrap; }
 .folder-copy small { color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+/* 4.8.2：手填的下载根目录绝对路径 */
+.root-path-setting { display: flex; flex-direction: column; gap: 4px; margin: var(--sp-3) 0 0; }
+.root-path-setting input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+  color: var(--text);
+  background: var(--surface);
+  font-size: var(--fs-base);
+}
+.root-path-setting input:focus-visible { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.root-path-setting small { color: var(--faint); font-size: var(--fs-micro); line-height: 1.6; }
+
 .folder-actions-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-2); }
 .inline-hint { margin: var(--sp-2) 0 0; color: var(--danger); font-size: var(--fs-sm); line-height: 1.6; }
 

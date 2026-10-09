@@ -73,6 +73,13 @@
         </div>
         <div id="folderPermissionHint" class="inline-hint" data-i18n="请重新授权此目录，或选择其他目录。" hidden>请重新授权此目录，或选择其他目录。</div>
 
+        <!-- 4.8.2：没装原生助手时，绝对路径只能靠用户手填 -->
+        <label class="root-path-setting">
+          <span class="setting-label" data-i18n="下载根目录的绝对路径（可选）">下载根目录的绝对路径（可选）</span>
+          <input id="downloadRootPath" type="text" autocomplete="off" spellcheck="false" placeholder="例如 D:\B站下载" data-i18n-placeholder="例如 D:\B站下载">
+          <small data-i18n="填了它，「复制视频目录路径」给的就是可以直接粘贴到文件资源管理器的完整路径。装好 Windows 原生目录助手后会自动读取，不需要填。">填了它，「复制视频目录路径」给的就是可以直接粘贴到文件资源管理器的完整路径。装好 Windows 原生目录助手后会自动读取，不需要填。</small>
+        </label>
+
         <div class="settings-grid">
           <label class="select-setting"><span data-i18n="视频清晰度">视频清晰度</span><select id="qualitySelect"><option value="0" data-i18n="自动（最高可用）">自动（最高可用）</option></select></label>
           <label class="select-setting"><span data-i18n="文件格式">文件格式</span><select id="formatSelect"><option value="mp4" data-i18n="MP4 单文件">MP4 单文件</option><option value="dash" data-i18n="DASH 音视频分轨">DASH 音视频分轨</option></select></label>

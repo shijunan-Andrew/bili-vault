@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.8.1");
+  assert.equal(manifest.version, "4.8.2");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -833,6 +833,68 @@ test("the dark theme only redefines tokens, and both triggers agree", () => {
   assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
 });
 
+test("the downloaded rule is computed in exactly one place", () => {
+  const core = readProjectFile("archive-core.js");
+  const library = readProjectFile("library.js");
+  // 这条规则曾经漂移过：downloadStateFromIndex 认了「手动标记」，而 library.js 里
+  // 页面重新获得焦点时跑的 refreshDownloadStatuses 没认，导致标记被冲掉、要刷新才回来。
+  assert.match(core, /function downloadMatchIsDownloaded\(match\)/);
+  assert.match(library, /BcaArchiveCore\.downloadMatchIsDownloaded\(match\)/);
+  // 业务文件里不许再出现自己拼的判据
+  assert.equal(/match\?\.hasMedia \|\| match\?\.marked/.test(library), false, "收藏库不该自己拼「已下载」判据");
+  assert.equal(/Boolean\(match\?\.hasMedia\)/.test(library), false, "收藏库不该只看 hasMedia");
+});
+
+test("the collection list scrolls instead of pushing the footer out", () => {
+  const css = readProjectFile("library.css");
+  const block = css.match(/\.collection-list \{[^}]*\}/)[0];
+  // 侧栏是固定高度的 flex 列：列表必须能收缩（min-height:0）并自己滚
+  assert.match(block, /flex: 1 1 auto/);
+  assert.match(block, /min-height: 0/);
+  assert.match(block, /overflow-y: auto/);
+  // 顶部对齐，条目少时不要被 grid 拉伸
+  assert.match(block, /align-content: start/);
+  // 底部信息靠 margin-top:auto 定位，前提是列表能收缩
+  assert.match(css, /\.sidebar-bottom \{ margin-top: auto;/);
+});
+
+test("copying a download path prefers an absolute path", () => {
+  const library = readProjectFile("library.js");
+  const html = readProjectFile("download.html");
+  const js = readProjectFile("download.js");
+  // 三档来源：原生助手 > 手填根目录 > 相对路径
+  assert.match(library, /source: "manual"/);
+  assert.match(library, /BcaArchiveCore\.joinDownloadPath\(manualRoot, collection, directory\)/);
+  assert.match(library, /async function readDownloadRootPath\(\)/);
+  // 手填入口在下载页
+  assert.match(html, /id="downloadRootPath"/);
+  assert.match(js, /function saveDownloadRootPath\(\)/);
+  assert.match(js, /loadDownloadRootPath\(\);/);
+  // 只有真的拿不到绝对路径时才提示相对路径
+  assert.match(library, /resolved\.source === "relative"/);
+  assert.match(library, /已复制完整路径：\{path\}/);
+});
+
+test("every shipped script actually parses", () => {
+  // 这套测试是按文本读文件做正则断言的，所以它天生看不见语法错误——
+  // 4.8.2 就真的漏过一次：替换时少删了一行，留下一句孤立的 ": ..." 三元分支，
+  // 104 项测试全过，而 library.js 根本跑不起来。这条断言补上那个盲区。
+  const vm = require("node:vm");
+  const scripts = [
+    "archive-core.js", "background.js", "content.js", "download.js",
+    "favorites-import.js", "i18n.js", "icons.js", "library.js", "popup.js", "theme.js"
+  ];
+  for (const name of scripts) {
+    const source = readProjectFile(name);
+    try {
+      // 只解析不执行，所以 chrome.* 之类的宿主 API 不影响
+      new vm.Script(source, { filename: name });
+    } catch (error) {
+      assert.fail(`${name} 解析失败：${error.message}`);
+    }
+  }
+});
+
 /* ------------------------- 4.8.1 入口与分页 ------------------------- */
 
 test("page sizes are multiples of the five-per-row grid", () => {
@@ -923,7 +985,8 @@ test("a marked video directory is recognised as downloaded", () => {
   assert.match(library, /const DOWNLOAD_MARKER_TEXT = "请将别的地方下载的视频复制或移动到此处";/);
   assert.match(library, /result\.marked \|\|= entry\.name === DOWNLOAD_MARKER_FILE/);
   assert.match(library, /marked: contents\.marked/);
-  assert.match(core, /downloaded: Boolean\(match\?\.hasMedia \|\| match\?\.marked\)/);
+  assert.match(core, /downloaded: downloadMatchIsDownloaded\(match\)/);
+  assert.match(core, /function downloadMatchIsDownloaded\(match\) \{\s*return Boolean\(match\?\.hasMedia \|\| match\?\.marked\);/);
   // 说明文件让 hasFiles 成立，所以扫描的既有条件不用放宽
   assert.match(library, /if \(!identifiers\.size \|\| !contents\.hasFiles\) continue;/);
 });

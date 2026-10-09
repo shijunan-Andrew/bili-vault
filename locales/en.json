@@ -386,7 +386,6 @@
   "已复制。": "Copied.",
   "已复制视频目录路径。": "Video folder path copied.",
   "已复制完整路径：{path}": "Full path copied: {path}",
-  "已复制相对路径：{path}（完整路径 = 下载根目录\\{path}）": "Relative path copied: {path} (full path = download root\\{path})",
   "已更新播放量、点赞、粉丝数等数值。": "Updated view counts, likes, and follower counts.",
   "已解析：{title}{bvid}": "Parsed: {title}{bvid}",
   "已切换到本地收藏根目录下的默认下载位置。": "Switched to the default download location inside your Local Library root.",
@@ -585,5 +584,9 @@
   "标记失败：{message}": "Could not mark it: {message}",
   "已标记为已下载，文件夹：{name}": "Marked as downloaded. Folder: {name}",
   "此项目已在 Github 上开源，点击查看": "This project is open source on Github — click to see it",
-  "Github 仓库地址": "Github repository"
+  "Github 仓库地址": "Github repository",
+  "下载根目录的绝对路径（可选）": "Absolute path of the download root (optional)",
+  "填了它，「复制视频目录路径」给的就是可以直接粘贴到文件资源管理器的完整路径。装好 Windows 原生目录助手后会自动读取，不需要填。": "With this filled in, \"Copy video folder path\" gives a full path you can paste straight into File Explorer. Once the Windows native helper is installed it is read automatically, so you can leave it blank.",
+  "已复制相对路径：{path}。要复制可直接粘贴的完整路径，请在下载页填写下载根目录的绝对路径，或安装 Windows 原生目录助手。": "Copied the relative path: {path}. To copy a full path you can paste directly, fill in the download root's absolute path on the download page, or install the Windows native helper.",
+  "例如 D:\\B站下载": "for example D:\\Bilibili"
 }
