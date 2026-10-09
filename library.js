@@ -214,9 +214,46 @@ async function optionalFileHandle(directory, name) {
   }
 }
 
-// 封面 blob: URL 由扫描缓存持有（见 readArchiveRecord），页面卸载时统一 revoke
+/* ---------------- 4.9：封面 blob: URL 的引用计数 ----------------
+
+   一个封面 URL 会被两处引用：① 扫描缓存里的条目（record.cover）；
+   ② 由这条记录派生出来的 video 对象（卡片和详情面板的 <img> 直接用它）。
+   所以「淘汰缓存条目就 revoke」是不对的：条目被淘汰时，正在显示的卡片可能还在用同一个
+   URL（卡片封面带 loading="lazy"，没滚到的还没开始取），revoke 之后就会变成裂图。
+   这里改成引用计数：谁都不用了（计数归零）才 revoke。
+
+   同一个 URL 会不会被两条缓存记录引用？不会。每条记录的封面都只来自它自己那一次
+   readCover() → URL.createObjectURL()，一次调用产出一个唯一 URL；命中缓存时
+   readArchiveRecord 复用同一个 record 对象（Object.assign 出来的副本只是共享同一个
+   字符串，不会新建 URL）。因此这里不需要额外的「已 revoke」Set：URL 只可能在计数
+   归零的那一次被 revoke，随后立刻从表里删掉，重复调用会被 has() 直接挡下。 */
+const coverRefCounts = new Map();
+
+function addCoverRef(url) {
+  if (!url || !String(url).startsWith("blob:")) return;
+  coverRefCounts.set(url, (coverRefCounts.get(url) || 0) + 1);
+}
+
+function releaseCoverRef(url) {
+  if (!url || !coverRefCounts.has(url)) return;
+  const left = coverRefCounts.get(url) - 1;
+  if (left > 0) { coverRefCounts.set(url, left); return; }
+  coverRefCounts.delete(url);
+  URL.revokeObjectURL(url);
+}
+
+// 页面卸载兜底：表里剩下的就是全部还没 revoke 的 URL
+function revokeAllCoverRefs() {
+  for (const url of coverRefCounts.keys()) URL.revokeObjectURL(url);
+  coverRefCounts.clear();
+}
+
+// 封面 blob: URL 由扫描缓存持有（见 readArchiveRecord），引用计数归零时才 revoke
 async function readCover(fileHandle) {
-  return URL.createObjectURL(await fileHandle.getFile());
+  const url = URL.createObjectURL(await fileHandle.getFile());
+  // 缓存条目先持有一份；派生出的 video 对象在 videoFromArchiveRecord 里再加一份
+  addCoverRef(url);
+  return url;
 }
 
 function field(info, key) { return info.fields[key] || ""; }
@@ -304,7 +341,16 @@ async function scanDownloadedDirectories(archiveRoot) {
   let parent;
   try { parent = await getDownloadParentHandle(archiveRoot); }
   catch (_) { return null; }
-  if (!parent) return new Map();
+  // 4.9：**下载根目录不存在 ≠ 下载目录是空的**。原来这里返回空 Map，调用方会当成
+  // 「确实一个下载文件都没有」，于是把所有视频的「已下载」标记清掉、hasDownloadFiles
+  // 变假（「删除本地归档」里的「同时删除关联下载」会跟着一起永久隐藏）。
+  // 用户把 000视频下载 改名/移走、或自选下载目录的句柄丢了，都会走到这里；那只是
+  // 一次「状态未知」，和权限被拒一样返回 null，由调用方保留已知状态：
+  //   · refreshDownloadStatuses 拿到 null 直接 return，一个标记都不动；
+  //   · scanRoot 把 null 传给 downloadStateFromIndex，它退回 previous 里的旧状态。
+  // 首次使用（还没建 000视频下载）不受影响：那时 previous 本来就是空的，
+  // downloadStateFromIndex 返回 downloaded:false / hasFiles:false，界面和以前一模一样。
+  if (!parent) return null;
   try {
     const permission = await parent.queryPermission({ mode: "read" });
     if (permission !== "granted") return null;
@@ -362,25 +408,53 @@ function archiveCacheFor(rootKey) {
   return store;
 }
 
+// 丢弃一条缓存条目：把它持有的封面 URL 引用交还回去（计数归零才会真的 revoke）
+function dropCacheEntry(entry) {
+  releaseCoverRef(entry?.record?.cover);
+}
+
+// 「刷新」按钮的退路：逐条交还引用后再整表丢弃，不能直接 delete 掉整张表
 function clearArchiveCache(handle) {
-  archiveCache.delete(rootCacheKey(handle));
+  const key = rootCacheKey(handle);
+  const store = archiveCache.get(key);
+  if (store) for (const entry of store.values()) dropCacheEntry(entry);
+  archiveCache.delete(key);
 }
 
 function cacheEntryFor(store, name, size, lastModified) {
   const entry = store.get(name);
   if (!entry || entry.size !== size || entry.lastModified !== lastModified) return null;
+  // 命中就算「刚用过」：Map 保持插入序，把它挪到末尾，扫描到后面时不会被当成最旧的淘汰
+  store.delete(name);
+  store.set(name, entry);
   return entry.record;
 }
 
 function storeCacheEntry(store, name, size, lastModified, record) {
-  if (store.size >= ARCHIVE_CACHE_MAX_PER_ROOT) store.clear();
+  // 文件内容变了：旧条目作废，它持有的封面 URL 也一并交还（这条记录已被新纪录取代）
+  const existing = store.get(name);
+  if (existing) { store.delete(name); dropCacheEntry(existing); }
+  // 4.9：这里原来是 store.clear()，有两个问题：① 4000 条以上的库每轮扫描都会从零重读，
+  // 缓存等于没有；② 被清掉的条目再也没人 revoke 它们的封面 blob: URL —— 正是下面那句
+  // 注释想避免的泄漏。改成按 Map 的插入序淘汰**最旧的一条**（配合 cacheEntryFor 的
+  // 「命中即刷新位置」构成 LRU）。上限仍然是 ARCHIVE_CACHE_MAX_PER_ROOT。
+  if (store.size >= ARCHIVE_CACHE_MAX_PER_ROOT) {
+    const oldestKey = store.keys().next().value;
+    if (oldestKey !== undefined) {
+      const oldest = store.get(oldestKey);
+      store.delete(oldestKey);
+      dropCacheEntry(oldest);
+    }
+  }
   store.set(name, { size, lastModified, record });
 }
 
 // 命中缓存时必须复用同一个 blob: URL：重复 createObjectURL 会不断泄漏内存
 async function recordCover(recordEntry, cachedRecord) {
   if (cachedRecord) return cachedRecord.cover || "";
-  const coverHandle = await optionalFileHandle(recordEntry, "封面.png");
+  // 4.9：封面有两代文件名。优先读新的 WebP（小得多），退回老档案的真 PNG。
+  let coverHandle = await optionalFileHandle(recordEntry, "封面.webp");
+  if (!coverHandle) coverHandle = await optionalFileHandle(recordEntry, "封面.png");
   if (!coverHandle) return "";
   return readCover(coverHandle);
 }
@@ -413,6 +487,32 @@ async function readArchiveRecord(collectionName, recordEntry, cache, stats) {
   return record;
 }
 
+// collections 被整批替换时，上一批 video 对象持有的封面 URL 要交还引用计数。
+// 只在扫描成功、确定要换掉 collections 之前调用；扫描失败时旧对象还在显示，不能交还。
+function releaseVideoCoverRefs() {
+  for (const video of allVideos()) releaseCoverRef(video.cover);
+}
+
+// 详情面板是唯一能在 collections 被换掉之后还留在页面上的 DOM（刷新按钮、扫描完成后
+// 它不会自动关闭），所以它显示的那张封面要单独记一笔引用：换集合时不会被 revoke，
+// 关掉详情、或换成另一个视频时才交还。没有这一笔，「刷新时详情面板还开着」就可能
+// 把面板里那张（可能还没加载完的 loading="lazy"）封面 revoke 成裂图。
+let detailCoverUrl = "";
+
+function retainDetailCover(url) {
+  if (url === detailCoverUrl) return;
+  releaseDetailCover();
+  if (!url) return;
+  detailCoverUrl = url;
+  addCoverRef(url);
+}
+
+function releaseDetailCover() {
+  if (!detailCoverUrl) return;
+  releaseCoverRef(detailCoverUrl);
+  detailCoverUrl = "";
+}
+
 function videoFromArchiveRecord(collectionName, recordEntry, record, downloadIndex, previousVideos) {
   const info = record.info;
   const share = record.share;
@@ -421,9 +521,18 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
   const date = field(info, "视频收藏时间") || recordEntry.name;
   const bvid = field(info, "BV号");
   const aid = field(info, "av号");
+  const upName = field(info, "UP主昵称");
+  const category = field(info, "分区");
+  const tags = tagsFromInfo(info);
   const id = `${collectionName}/${recordEntry.name}`;
   const previous = previousVideos.get(id);
   const downloadState = BcaArchiveCore.downloadStateFromIndex(collectionName, videoIdentifierKeys({ bvid, aid }), downloadIndex, previous);
+  // 这条 video 也会持有封面 URL：缓存条目即使被淘汰，只要它还在显示就不能 revoke
+  addCoverRef(record.cover);
+  // 4.9：搜索比对串在扫描时拼一次就够，不必每敲一个键给每条记录重新 join + toLocaleLowerCase。
+  // 字段顺序与取值必须和原来 matchesBaseFilters 里那份完全一致（join 会把 undefined 写成 ""），
+  // 否则搜索命中范围会悄悄变。
+  const searchIndex = [title, upName, bvid, category, collectionName, share.description, ...tags].join(" ").toLocaleLowerCase();
   return {
     id,
     collection: collectionName,
@@ -438,19 +547,20 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
     downloadCollectionName: downloadState.collectionName,
     downloadDirectoryHandle: downloadState.handle,
     isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
-    upName: field(info, "UP主昵称"),
+    upName,
     upMid: field(info, "UP主UID"),
     upHome: field(info, "UP主主页"),
     upFans: realField(info, "UP主粉丝数"),
     favoriteAt: date,
     savedAt: record.savedAt,
     timestamp: parseDate(date, recordEntry.name),
-    category: field(info, "分区"),
+    category,
     duration: field(info, "视频时长"),
     publishDate: field(info, "视频发布时间"),
     description: share.description,
     stats: statsFromInfo(info, share.stats),
-    tags: tagsFromInfo(info),
+    tags,
+    searchIndex,
     info,
     cover: record.cover
   };
@@ -458,6 +568,9 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
 
 /* ---------------- 4.6：扫描进度提示（DOM 写入按帧合并，避免每条记录都触发重排） ---------------- */
 
+  // 4.9.3：**element 必须是只放文字的节点**（例如 <span>），不能用带子元素的容器 ——
+  // 这里是用 textContent 写的，会把容器的子节点整个抹掉。scanNotice 就踩过这个坑：
+  // 它自 4.8.3 起装了文字 span 和关闭按钮，被本函数清空过一次之后就再也显示不出文字了。
 function progressNotifier(element, render) {
   if (!element) return { update() {}, flush() {}, stop() {} };
   let frame = 0;
@@ -530,7 +643,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
     }
     stats.total += records.length;
   }
-  const progress = progressNotifier(scanNotice, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
+  const progress = progressNotifier(scanNoticeText, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
   try {
     for (const collectionEntry of collections) {
       const videos = [];
@@ -719,6 +832,8 @@ function renderCollections() {
       resetPaging();
       closeDetail();
       renderCollections();
+      // 切换收藏范围 = 换数据源，选项池要跟着换
+      refreshVideoFilterOptions();
       renderVideos();
     });
     wrapper.append(button);
@@ -848,13 +963,28 @@ function syncVideoFilterOptions(videosForOptions) {
   if (tagFilterSelect) tagFilter = populateSelectOptions(tagFilterSelect, countByFrequency(videosForOptions.flatMap((video) => video.tags)), BcaI18n.t("全部标签"), tagFilter);
 }
 
+// 4.9：选项池**只在数据源或筛选条件变化时**重算，不再挂在 renderVideos 上。
+// renderVideos 要为翻页、切视图、勾选、改每页数量等一堆操作服务，而选项池每次都要做
+// 词频统计 + 全排序 + 重建上千个 <option>；原来它跟着 renderVideos 跑，等于每敲一个
+// 字符都重建一次（10000 条时每次按键 0.5~3 秒）。语义没有变：池子仍然按
+// 「当前收藏范围 + #videoFilter + 搜索词」算，仍然**不受 upFilter / tagFilter 自身影响**。
+function refreshVideoFilterOptions() {
+  // 与 renderVideos 一致：筛选值以 <select> 当前值为准
+  videoFilter = videoFilterSelect.value;
+  syncVideoFilterOptions(selectedVideos().filter((video) => matchesBaseFilters(video, searchQuery())));
+}
+
+function legacySearchIndex(video) {
+  return [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase();
+}
+
 // 筛选值以外的条件（搜索 + #videoFilter），用来算下拉选项池
 function matchesBaseFilters(video, query) {
   if (videoFilter === "invalid" && !video.isInvalid) return false;
   if (videoFilter === "downloaded" && !video.downloaded) return false;
   if (!query) return true;
-  return [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags]
-    .join(" ").toLocaleLowerCase().includes(query);
+  // searchIndex 是扫描时预拼好的同一份串；万一没有（老对象）就现拼，宁可慢也不能搜不到
+  return (video.searchIndex ?? legacySearchIndex(video)).includes(query);
 }
 
 function matchesVideoFilters(video, query) {
@@ -865,6 +995,10 @@ function matchesVideoFilters(video, query) {
   return true;
 }
 
+// 搜索框当前的关键词（小写）。下拉选项池与 renderVideos 必须用同一份，
+// 否则「按搜索结果收窄选项」的语义就会和列表对不上。
+function searchQuery() { return searchInput.value.trim().toLocaleLowerCase(); }
+
 function renderVideos() {
   const collectionName = selectedCollection === "*" ? BcaI18n.t("全部收藏") : selectedCollection;
   currentCollection.textContent = collectionName;
@@ -874,8 +1008,8 @@ function renderVideos() {
   addVideoButton.disabled = selectedCollection === "*";
   addVideoButton.title = selectedCollection === "*" ? BcaI18n.t("请先选择一个收藏夹") : BcaI18n.t("添加视频到“{name}”", { name: selectedCollection });
   videoFilter = videoFilterSelect.value;
-  const query = searchInput.value.trim().toLocaleLowerCase();
-  syncVideoFilterOptions(videos.filter((video) => matchesBaseFilters(video, query)));
+  const query = searchQuery();
+  // 选项池已移到 refreshVideoFilterOptions()：只在数据源/筛选条件变化时重建（见那里的注释）
   const matching = videos.filter((video) => matchesVideoFilters(video, query));
   const sort = sortSelect.value;
   // 4.5：按播放量从高到低。没有播放量数据的排在最后（用 -1 而不是 0，
@@ -1256,7 +1390,8 @@ async function importConfigFromText(text) {
   // upFilter / tagFilter 指向的 UP 主或标签可能已经不在本地库里，扫描后统一落回「全部」
   await applyConfigPreferences(preferences, rawOrder);
   if (rootHandle) await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已导入配置"));
-  else { renderCollections(); renderVideos(); }
+  // 没有根目录时数据源是空的：选项池按空数据源重建一次（与 4.6 的行为一致，会落回「全部」）
+  else { renderCollections(); refreshVideoFilterOptions(); renderVideos(); }
 }
 
 
@@ -1864,6 +1999,8 @@ function openDownloadInterface(videos) {
 // restoreTo：关闭后焦点还给它（通常是触发它的那张卡片）；
 // options.trap = false 用于「重画后重新打开同一个详情」，避免叠加第二层焦点陷阱。
 function openDetail(video, restoreTo, options = {}) {
+  // 面板里那张封面由引用计数单独保一份，见 retainDetailCover 的注释
+  retainDetailCover(video.cover);
   detailPanel.classList.toggle("invalid-video", video.isInvalid);
   const rows = [];
   addField(rows, BcaI18n.t("收藏时间"), video.favoriteAt);
@@ -2058,6 +2195,7 @@ function closeDetail() {
   if (deleteInProgress) return;
   closeDeleteConfirmation();
   releaseFocusTrap(detailPanel);
+  releaseDetailCover();
   detailPanel.classList.remove("open");
   detailPanel.classList.remove("invalid-video");
   detailPanel.setAttribute("aria-hidden", "true");
@@ -2200,8 +2338,9 @@ async function removeMovedSource(video) {
    3. 用户把别处下载好的视频拖进去，它就成了一个完全正常的已下载视频。 */
 
 async function markVideoDownloaded(video) {
-  const parent = await getWritableDownloadParent();
-  if (!parent) throw new Error(BcaI18n.t("还没有下载目录：请先到下载页选择保存位置。"));
+  // 4.9.4：传 create —— 用户点的就是「新建文件夹并标记」，没有 000视频下载 就建出来
+  const parent = await getWritableDownloadParent({ create: true });
+  if (!parent) throw new Error(BcaI18n.t("无法创建默认下载文件夹 000视频下载，请检查保存文件夹的写入权限。"));
   const collectionName = BcaArchiveCore.safeName(video.collection || "未分类收藏", "未分类收藏", 120);
   const directoryName = BcaArchiveCore.videoDirectoryLabel(video, 0);
   const collectionHandle = await parent.getDirectoryHandle(collectionName, { create: true });
@@ -2244,6 +2383,8 @@ async function runMarkDownloaded() {
     const { directoryName } = await markVideoDownloaded(markDownloadedVideo);
     markDownloadedDialog.close();
     showToast(BcaI18n.t("已标记为已下载，文件夹：{name}", { name: directoryName }));
+    // 只有「已下载」这个筛选值会参与选项池的计算，其它筛选值下池子不受影响
+    if (videoFilter === "downloaded") refreshVideoFilterOptions();
     renderVideos();
     if (currentDetailVideo && currentDetailVideo.id === markDownloadedVideo.id) openDetail(markDownloadedVideo);
   } catch (error) {
@@ -2266,7 +2407,7 @@ async function readDownloadRootPath() {
   } catch (_) { return ""; }
 }
 
-async function getWritableDownloadParent() {
+async function getWritableDownloadParent({ create = false } = {}) {
   const mode = await readSavedSetting("downloadFolderMode");
   const savedCustom = await readSavedSetting("downloadFolder");
   const isCustom = mode === "custom" || (!mode && Boolean(savedCustom));
@@ -2275,7 +2416,14 @@ async function getWritableDownloadParent() {
     if (!savedCustom) throw new Error(BcaI18n.t("自选下载目录设置已丢失，请先在下载页重新选择目录。"));
     parent = savedCustom;
   } else {
-    try { parent = await rootHandle.getDirectoryHandle("000视频下载"); }
+    // 4.9.4：默认下载目录只在真正下载时才被创建，从没下载过的用户根本没有它 ——
+    // 「标记为已下载」会因此失败，而报错说的却是"请先到下载页选择保存位置"（指错方向）。
+    // 用户既然点了「新建文件夹并标记」，就是明确要一个下载目录，这里按需建出来。
+    if (create) {
+      const rootPermission = await rootHandle.requestPermission({ mode: "readwrite" });
+      if (rootPermission !== "granted") throw new Error(BcaI18n.t("没有获得保存文件夹的写入权限；请在插件弹窗里重新设置保存位置。"));
+    }
+    try { parent = await rootHandle.getDirectoryHandle("000视频下载", { create }); }
     catch (error) { if (error?.name === "NotFoundError") return null; throw error; }
   }
   let permission = await parent.queryPermission({ mode: "readwrite" });
@@ -2724,7 +2872,7 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   rootHandle = handle;
   // 先按上一次的记录数给一行「正在读取 0/43…」，别让界面在这次扫描期间完全没反应
   lastScanInfo = null;
-  scanNoticeRefresh = progressNotifier(scanNotice, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
+  scanNoticeRefresh = progressNotifier(scanNoticeText, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
   scanNoticeRefresh.update({ done: 0, total: lastScanRecordCount.get(rootCacheKey(handle)) || 0 });
   const result = await scanRoot(handle, preserveDownloadStatuses);
   forceFullScan = false;
@@ -2735,6 +2883,9 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
     issues: result.issues
   };
   if (result.stats?.total) lastScanRecordCount.set(rootCacheKey(handle), result.stats.total);
+  // 扫描成功、确定要换掉 collections 了：上一批 video 对象交还它们持有的封面 URL。
+  // 放在这里（而不是扫描开始时）是为了让扫描期间的旧卡片继续正常显示封面。
+  releaseVideoCoverRefs();
   collections = applyCollectionOrder(result.collections);
   const existingVideoIds = new Set(allVideos().map((video) => video.id));
   for (const id of selectedVideoIds) if (!existingVideoIds.has(id)) selectedVideoIds.delete(id);
@@ -2747,6 +2898,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   welcome.hidden = true;
   library.hidden = false;
   renderCollections();
+  // 数据源变了：先按新数据重建 UP 主/标签选项池，再渲染列表（顺序与原来 renderVideos 内部一致）
+  refreshVideoFilterOptions();
   renderVideos();
   syncDetailDownloadAction();
   showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: allVideos().length }));
@@ -2784,6 +2937,8 @@ async function refreshDownloadStatuses() {
       video.downloadCollectionName = match?.collectionName || "";
       video.downloadDirectoryHandle = match?.handle || null;
     }
+    // 只有「已下载」这个筛选值会参与选项池的计算，其它筛选值下池子不受影响
+    if (changed && videoFilter === "downloaded") refreshVideoFilterOptions();
     if (changed) renderVideos();
     syncDetailDownloadAction();
   } finally { downloadStatusCheckRunning = false; }
@@ -2904,7 +3059,24 @@ deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRe
   statusConfirmGo.addEventListener("click", () => { runStatusRefresh().catch(() => {}); });
   statusConfirmCancel.addEventListener("click", () => { if (!statusRefreshInProgress) statusConfirm.close(); });
   statusConfirm.addEventListener("cancel", (event) => { if (statusRefreshInProgress) event.preventDefault(); });
-searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
+// 4.9：搜索输入加 250ms 防抖。原来每敲一个字符就同步跑一整遍：全量筛选 + 排序 + 重画
+// 卡片 + 重建上千个 <option>，10000 条时每次按键要卡 0.5~3 秒。防抖后一次连续输入
+// 只在停下来之后跑一次。**语义不变**：停止输入 250ms 后必然渲染一次，最终结果与原来一致。
+const SEARCH_DEBOUNCE_MS = 250;
+let searchDebounceTimer = 0;
+
+function applySearchNow() {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = 0;
+  resetPaging();
+  refreshVideoFilterOptions();
+  renderVideos();
+}
+
+searchInput.addEventListener("input", () => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(applySearchNow, SEARCH_DEBOUNCE_MS);
+});
 sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
 dismissGithubBannerButton?.addEventListener("click", dismissGithubBanner);
 dismissScanNoticeButton?.addEventListener("click", () => {
@@ -3064,6 +3236,8 @@ BcaTheme.onChange(() => {
 function relabelAfterLocaleChange() {
   renderDockMenus();
   renderCollections();
+  // 选项池的第一项（全部 UP 主 / 全部标签）是翻译过的文案，切语言要重建一次
+  refreshVideoFilterOptions();
   renderVideos();
   renderFailures();
   const current = detailVideo();
@@ -3071,8 +3245,18 @@ function relabelAfterLocaleChange() {
   if (current) openDetail(current, null, { trap: false });
 }
 BcaI18n.onChange(() => relabelAfterLocaleChange());
-videoFilterSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
-clearSearch.addEventListener("click", () => { searchInput.value = ""; resetPaging(); renderVideos(); searchInput.focus(); });
+// #videoFilter 会参与选项池的计算（matchesBaseFilters），所以它变化时要重建选项池
+videoFilterSelect.addEventListener("change", () => { resetPaging(); refreshVideoFilterOptions(); renderVideos(); });
+clearSearch.addEventListener("click", () => {
+  // 清空搜索等于换了筛选条件：取消排队中的防抖，立即按空关键词重算一次
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = 0;
+  searchInput.value = "";
+  resetPaging();
+  refreshVideoFilterOptions();
+  renderVideos();
+  searchInput.focus();
+});
 viewGridButton?.addEventListener("click", () => setViewMode("grid"));
 viewListButton?.addEventListener("click", () => setViewMode("list"));
 
@@ -3164,9 +3348,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 window.addEventListener("beforeunload", () => {
-  for (const store of archiveCache.values()) {
-    for (const entry of store.values()) if (entry.record.cover) URL.revokeObjectURL(entry.record.cover);
-  }
+  // 引用计数表里剩下的就是全部还没 revoke 的封面 URL（含仍被 video 对象持用的）
+  revokeAllCoverRefs();
   archiveCache.clear();
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -3180,9 +3363,14 @@ window.addEventListener("focus", refreshDownloadStatuses);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") refreshDownloadStatuses();
 });
-window.setInterval(() => {
-  if (!library.hidden && document.visibilityState === "visible") refreshDownloadStatuses();
-}, 60000);
+// 4.9：这里原来有一个 60 秒的 window.setInterval，只要页面在前台就整树重扫一遍
+// 000视频下载。递归扫描是文件系统调用，10000 条记录时相当于每分钟上万次，页面
+// 一直开着就在持续打盘，收益却接近于零。**不要再把定时器加回来**：按需触发已经够用——
+//   1. 下载页写 chrome.storage.local.downloadRevision 时，上面的 onChanged 会触发；
+//   2. 窗口重新获得焦点（focus）触发一次；
+//   3. 标签页重新可见（visibilitychange → visible）触发一次。
+// 唯一的行为变化：页面在前台闲置时不会再自动刷新「已下载」状态，切回本页或
+// 下载完成后仍然会刷新（写在 AI_HANDOFF 里的「前台定时扫描间隔 60 秒」要一起改掉）。
 BcaI18n.init().catch(() => {}).then(() => Promise.all([
   restoreCollectionOrder().catch(() => { collectionOrder = []; }),
   restoreViewSettings(),

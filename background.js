@@ -2,6 +2,40 @@ const DB_NAME = "bili-fav-archiver";
 const DB_STORE = "settings";
 let saveQueue = Promise.resolve();
 
+// 4.9：background.js 是模块化 service worker，加载不了 i18n.js（红线第 5 条：不引远程代码，
+// 也没有 web_accessible_resources），所以后台进程里本来没有 BcaI18n。这里做一次存在性兜底：
+// 将来后台若真能拿到词典就自动生效，拿不到就原样返回中文（界面侧按原文显示，见 AI_HANDOFF
+// 的「已知限制」）。占位符替换与 i18n.js 的 t() 完全一致，否则形如「请在约 {minutes} 分钟后重试」
+// 的文案会把 {minutes} 原样显示给用户。新增的界面文案一律写成 BcaI18n.t("字面量")，
+// key 必须是字面量，方便词条工具以后把 background.js 纳入扫描。
+const BcaI18n = globalThis.BcaI18n || {
+  t(text, params) {
+    let out = String(text);
+    if (params) {
+      for (const name of Object.keys(params)) out = out.split(`{${name}}`).join(String(params[name]));
+    }
+    return out;
+  }
+};
+
+/* ---------- 封面体积（4.6） ----------
+   实测用户归档：137 张「封面.png」= 221.4 MB，均值 1.6 MB、最大 7 MB——根因是
+   这里以前按"原图尺寸 + PNG"输出。10000 条视频光封面就要读十几 GB，归档和收藏库
+   都会被拖垮。现在统一按 16:9 居中裁剪后缩到 320×180、输出 WebP（quality 0.8），
+   单张约 15 KB。两条约定：
+  1. 4.9 起文件名是「封面.webp」（老档案的 封面.png 原样保留、不迁移、不重下）；
+        新导入的一律按新规则写；
+     2. 函数名沿用 loadCoverPng（历史原因），它现在的输出是 WebP；三个调用点都只把
+        结果写进「封面.png」，没有别的用途（addManualVideo / saveFavorite / loadImportCover）。 */
+const COVER_FILE_NAME = "封面.webp";
+// 4.9：读取与存在性检查要同时认旧名字。老档案里的封面是真 PNG，不迁移、不重下，
+// 所以目录里可能只有 封面.png；两个都没有才算真的缺封面。
+const COVER_FILE_NAMES = ["封面.png", COVER_FILE_NAME];
+const COVER_WIDTH = 320;
+const COVER_HEIGHT = 180;
+const COVER_MIME_TYPE = "image/webp";
+const COVER_QUALITY = 0.8;
+
 // 4.5.1：工具栏图标的观感对齐网页/弹窗里的 logo——更大的圆角比例、
 // 竖直渐变、大尺寸下加一圈白色高光。关闭自动归档时整体转灰（保持原有行为）。
 async function updateActionIcon(enabled) {
@@ -58,8 +92,18 @@ async function initializeActionIcon() {
   await updateActionIcon(enabled);
 }
 
-chrome.runtime.onInstalled.addListener(() => initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error)));
-chrome.runtime.onStartup.addListener(() => initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error)));
+chrome.runtime.onInstalled.addListener(() => {
+  initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error));
+  // 4.9：安装 / 更新 / 重新加载扩展之后不可能还有导入在跑，
+  // 本地残留的 importState.running=true 要立刻复位，别让界面锁死
+  importReconcileState().catch((error) => console.warn("复位导入状态失败", error));
+});
+chrome.runtime.onStartup.addListener(() => {
+  initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error));
+  // 4.9：浏览器重新启动时 chrome.storage.session 已被清空，只剩 local 里的 running 残影，
+  // 这里立刻复位并写明"上次导入已中断"
+  importReconcileState().catch((error) => console.warn("复位导入状态失败", error));
+});
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.enabled) {
     updateActionIcon(changes.enabled.newValue !== false).catch((error) => console.warn("更新扩展图标失败", error));
@@ -174,6 +218,19 @@ async function writeFile(directory, name, content) {
   }
 }
 
+// 按 CSS object-fit: cover 的语义取源图中心最大的 16:9 区域，避免拉伸变形
+function coverSourceRect(width, height) {
+  const targetRatio = COVER_WIDTH / COVER_HEIGHT;
+  const sourceRatio = width / height;
+  if (!Number.isFinite(sourceRatio) || sourceRatio <= 0) return { x: 0, y: 0, width, height };
+  if (sourceRatio > targetRatio) {
+    const cropWidth = Math.max(1, Math.round(height * targetRatio));
+    return { x: Math.max(0, Math.round((width - cropWidth) / 2)), y: 0, width: cropWidth, height };
+  }
+  const cropHeight = Math.max(1, Math.round(width / targetRatio));
+  return { x: 0, y: Math.max(0, Math.round((height - cropHeight) / 2)), width, height: cropHeight };
+}
+
 async function loadCoverPng(url) {
   const normalized = normalizeUrl(url);
   if (!normalized) throw new Error("网页没有提供封面地址。");
@@ -182,11 +239,12 @@ async function loadCoverPng(url) {
   const source = await response.blob();
   const bitmap = await createImageBitmap(source);
   try {
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const canvas = new OffscreenCanvas(COVER_WIDTH, COVER_HEIGHT);
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("无法创建封面转换画布。");
-    context.drawImage(bitmap, 0, 0);
-    return await canvas.convertToBlob({ type: "image/png" });
+    const rect = coverSourceRect(bitmap.width, bitmap.height);
+    context.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, COVER_WIDTH, COVER_HEIGHT);
+    return await canvas.convertToBlob({ type: COVER_MIME_TYPE, quality: COVER_QUALITY });
   } finally {
     bitmap.close();
   }
@@ -354,8 +412,9 @@ async function addManualVideo(data) {
         const record = await uniqueTimeFolder(target.collection, timestampFolder(favoriteAt));
         try {
           const info = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, new Date());
+          // 4.9：和导入链路一致——先写封面、后写 视频信息.txt，让 txt 成为"这条记录写完了"的完成标记
+          await writeFile(record, COVER_FILE_NAME, cover);
           await writeFile(record, "视频信息.txt", info);
-          await writeFile(record, "封面.png", cover);
           savedCollections.push(target.name);
           savedPaths.push(`${root.name}/${target.name}/${record.name}`);
         } catch (error) {
@@ -409,7 +468,7 @@ function reportText(error, context = {}) {
   const now = new Date();
   const metadata = context.metadata || {};
   return [
-    "B站收藏信息归档错误报告",
+    "哔哩藏库错误报告",
     ERROR_REPORT_NOTICE,
     `发生时间：${formatChineseDateTime(now, true)}`,
     `错误：${error?.message || String(error)}`,
@@ -464,9 +523,15 @@ async function saveFavorite(data) {
       const collectionFolder = await root.getDirectoryHandle(safeSegment(folder.name), { create: true });
       const recordFolder = await uniqueTimeFolder(collectionFolder, dateFolderName);
       const info = buildInfo({ ...data, metadata }, recordFolder.name, savedAt);
-      await writeFile(recordFolder, "视频信息.txt", info);
-      const cover = await loadCoverPng(metadata.cover);
-      await writeFile(recordFolder, "封面.png", cover);
+      try {
+        // 4.9：先封面、后 txt（txt 即完成标记），失败时把整个目录清掉，不留半截记录
+        const cover = await loadCoverPng(metadata.cover);
+        await writeFile(recordFolder, COVER_FILE_NAME, cover);
+        await writeFile(recordFolder, "视频信息.txt", info);
+      } catch (error) {
+        await collectionFolder.removeEntry(recordFolder.name, { recursive: true }).catch(() => {});
+        throw error;
+      }
       savedFolders.push(`${root.name}/${safeSegment(folder.name)}/${recordFolder.name}`);
     }
 
@@ -553,6 +618,26 @@ function importLinkParam(value, names) {
   return "";
 }
 
+/* ---------- 4.6：风控（限流）识别 ----------
+   B 站在限流时返回 HTTP 412，或者带这些接口错误码。以前只有"更新视频状态"看 apiCode，
+   导入链路完全不看：若 B 站开始限流，每条视频的详情/标签都失败，导入仍然会把
+   "标签、简介、发布时间全是未知"的记录当成成功写下去（5000 条假成功）。
+   这里统一打上 rateLimited 标记，让整条导入链能识别并熔断。 */
+const IMPORT_RATE_LIMIT_CODES = new Set([-412, -352]);
+
+function importRateLimitError(message, status) {
+  const error = new Error(message);
+  error.rateLimited = true;
+  if (status !== undefined) error.httpStatus = status;
+  return error;
+}
+
+function importIsRateLimitedError(error) {
+  if (error?.rateLimited === true) return true;
+  // 「页面代取」那条路只能把消息当字符串传回来，HTTP 412 会以 "HTTP 412" 的形式出现
+  return /HTTP 412\b/.test(String(error?.message || ""));
+}
+
 function biliImportPageApiGet(tabId, url, timeoutMs) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, { type: "bca-page-api-get", url, timeoutMs }, (response) => {
@@ -578,23 +663,40 @@ async function biliImportApiGet(path, params = {}, timeoutMs = 15000, tabId = nu
     if (Number.isInteger(tabId)) {
       try {
         ({ status, payload } = await biliImportPageApiGet(tabId, url.toString(), timeoutMs));
-      } catch (_) {
+      } catch (pageError) {
+        // 4.9.1：页面代取失败一律退回后台直连 —— 不要因为消息里有 "HTTP 412" 就断定风控。
+        // B 站对「页面上下文」发出的请求本来就会返回 412（响应体不是 JSON，favorites-import.js
+        // 会把它转成「B站接口没有返回有效数据（HTTP 412）。」），而退回后台直连通常是成功的。
+        // 4.9 曾在这里直接抛风控、不再退回，把原本能成功的导入判成「连续命中风控」而中止整轮
+        // —— 实测：同一账号同一时刻，旧版本导入 128 条全部成功，4.9 却在 4 秒内中止。
+        // 风控判定只以「后台直连自己的响应」为准（见下面 response.status === 412 那处）。
         const response = await fetch(url.toString(), { credentials: "include", cache: "no-store", signal: controller.signal });
         status = response.status;
         try { payload = await response.json(); }
-        catch (_) { throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`); }
+        catch (_) {
+          if (response.status === 412) throw importRateLimitError("触发 B 站风控（HTTP 412），请稍后重试。", 412);
+          throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`);
+        }
       }
     } else {
       const response = await fetch(url.toString(), { credentials: "include", cache: "no-store", signal: controller.signal });
       status = response.status;
       try { payload = await response.json(); }
-      catch (_) { throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`); }
+      catch (_) {
+        if (response.status === 412) throw importRateLimitError("触发 B 站风控（HTTP 412），请稍后重试。", 412);
+        throw new Error(`B站接口没有返回有效数据（HTTP ${response.status}）。`);
+      }
     }
+    if (status === 412) throw importRateLimitError("触发 B 站风控（HTTP 412），请稍后重试。", status);
     if (status < 200 || status >= 300) throw new Error(`B站接口请求失败：HTTP ${status}`);
     if (payload.code !== 0) {
       // 4.4：带上接口错误码，调用方才能区分“视频已失效”（明确错误码）
       // 与“网络不通”（应保持原样、不能误判成失效）
-      const apiError = new Error(payload.message || `B站接口返回错误码 ${payload.code ?? "未知"}`);
+      const rateLimited = IMPORT_RATE_LIMIT_CODES.has(Number(payload.code));
+      const apiError = new Error(rateLimited
+        ? `触发 B 站风控（接口错误码 ${payload.code}），请稍后重试。`
+        : (payload.message || `B站接口返回错误码 ${payload.code ?? "未知"}`));
+      apiError.rateLimited = rateLimited;
       apiError.apiCode = payload.code;
       throw apiError;
     }
@@ -602,7 +704,13 @@ async function biliImportApiGet(path, params = {}, timeoutMs = 15000, tabId = nu
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("B站接口请求超时。");
     throw error;
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+    // 4.9：每次接口请求结束都顺手保活一次（内部按 20 秒节流）。
+    // MV3 的 service worker 在约 30 秒没有扩展 API 调用时会被回收，
+    // 而一次 biliImportApiGet 最坏情况要跑「页面代取 15 秒 + 后台直连 15 秒」。
+    void keepServiceWorkerAlive("api");
+  }
 }
 
 function importDelay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -762,13 +870,13 @@ function mergeRecoveredValue(item, candidate, source) {
 
 async function fetchImportFavoritePage(folder, page, tabId = null) {
   const data = await biliImportApiGet("/x/v3/fav/resource/list", {
-    media_id: folder.id, pn: page, ps: 40, keyword: "", order: "mtime", type: 0, tid: 0, platform: "web"
+    media_id: folder.id, pn: page, ps: IMPORT_FAVORITE_PAGE_SIZE, keyword: "", order: "mtime", type: 0, tid: 0, platform: "web"
   }, 15000, tabId);
   const medias = Array.isArray(data.medias) ? data.medias : [];
   return {
     items: medias.map((media) => normalizeImportMedia(media, folder)),
     total: Number(data.info?.media_count || data.media_count || data.total || 0),
-    hasMore: data.has_more === undefined ? (page * 40 < Number(data.info?.media_count || data.media_count || data.total || 0)) : !!data.has_more
+    hasMore: data.has_more === undefined ? (page * IMPORT_FAVORITE_PAGE_SIZE < Number(data.info?.media_count || data.media_count || data.total || 0)) : !!data.has_more
   };
 }
 
@@ -904,14 +1012,23 @@ async function enrichImportedInvalidVideos(items, folder, tabId = null) {
         title: data.title, cover: data.pic, author: data.owner?.name, authorMid: data.owner?.mid,
         category: data.tname, duration: data.duration, pubdate: data.pubdate, description: data.desc
       }, "视频资料接口");
-    } catch (error) { recoveryErrors.push(`${item.title || item.bvid}：视频资料接口：${error.message}`); }
+    } catch (error) {
+      if (importIsRateLimitedError(error)) item.rateLimited = true;
+      recoveryErrors.push(`${item.title || item.bvid}：视频资料接口：${error.message}`);
+    }
     try {
       if (!item.tags.length) {
         const tagData = await biliImportApiGet("/x/tag/archive/tags", { bvid: item.bvid }, 9000, tabId);
         if (Array.isArray(tagData)) item.tags = tagData.map((tag) => importClean(tag.tag_name)).filter(Boolean);
         if (item.tags.length) item.recoverySources.add("视频标签接口");
       }
-    } catch (error) { recoveryErrors.push(`${item.title || item.bvid}：标签接口：${error.message}`); }
+    } catch (error) {
+      if (importIsRateLimitedError(error)) item.rateLimited = true;
+      recoveryErrors.push(`${item.title || item.bvid}：标签接口：${error.message}`);
+    }
+    // 4.9：这段恢复流程是并发 3 的，计数只能算近似值，但足以在真正被限流时熔断
+    importRateLimitStreak = item.rateLimited ? importRateLimitStreak + 1 : 0;
+    importCheckRateLimitAbort();
   });
   for (const item of invalid) {
     if (!item.cover && item.coverCandidates.length) item.cover = item.coverCandidates[0].url;
@@ -924,7 +1041,8 @@ async function importRunLimited(items, limit, worker) {
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (index < items.length) {
       const current = items[index++];
-      try { await worker(current); } catch (_) {}
+      // 取消与风控中止必须穿透出去；其余错误按"这一条失败"处理
+      try { await worker(current); } catch (error) { importRethrowIfAbort(error); }
     }
   });
   await Promise.all(runners);
@@ -951,6 +1069,34 @@ const IMPORT_STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点
 // 现在并发 1、间隔 800ms（约 1.2 请求/秒）。嫌慢可以调这两个值，但不要调回 350ms。
 const IMPORT_DETAIL_CONCURRENCY = 1;
 const IMPORT_DETAIL_DELAY_MS = 800;
+
+// 收藏夹资源接口固定 40 条/页（见 fetchImportFavoritePage 的 ps 参数）
+const IMPORT_FAVORITE_PAGE_SIZE = 40;
+// 4.9：分页硬上限的来历——接口拿不到 total 时只能靠 has_more 兜底，
+// 万一 has_more 一直是 true 就会无限翻页，所以给一个上限：1000 页 × 40 条 = 40000 条。
+// 它不再是"静默截断"：翻页结束后会和接口自报的 total 对账，少掉的部分写进报告并计入失败。
+const IMPORT_MAX_PAGES = 1000;
+// 4.9：单页失败不再放弃剩余所有页（以前第 2 页起任一页失败就 break 整轮），
+// 只有连续这么多页都失败才终止读取该收藏夹
+const IMPORT_MAX_CONSECUTIVE_PAGE_FAILURES = 3;
+// 4.9：风控熔断。B 站限流返回 HTTP 412 / 接口错误码 -412 / -352。
+// 若每条视频的详情与标签请求都失败，旧逻辑仍会把"标签、简介、发布时间全是未知"的记录
+// 当成导入成功写下去——5000 条假成功比直接失败更糟。连续这么多条命中就中止整轮导入。
+const IMPORT_RATE_LIMIT_ABORT_THRESHOLD = 5;
+const IMPORT_RATE_LIMIT_COOLDOWN_MINUTES = 30;
+
+function importRateLimitAbortError() {
+  const error = new Error(BcaI18n.t("触发 B 站风控，已停止导入。请在约 {minutes} 分钟后重试；已写入本地的记录是完整的，重新导入会跳过它们。", { minutes: IMPORT_RATE_LIMIT_COOLDOWN_MINUTES }));
+  error.name = "ImportRateLimited";
+  error.rateLimitStreak = importRateLimitStreak;
+  return error;
+}
+
+// 连续限流达到阈值就中止；调用点覆盖详情抓取、分页读取与逐条保存
+function importCheckRateLimitAbort() {
+  if (importRateLimitStreak < IMPORT_RATE_LIMIT_ABORT_THRESHOLD) return;
+  throw importRateLimitAbortError();
+}
 
 function importIsPlaceholder(value) {
   return IMPORT_PLACEHOLDER_VALUES.has(importClean(value));
@@ -1076,6 +1222,9 @@ async function refreshOneArchiveStatus(root, target, tabId) {
   try {
     view = await biliImportApiGet("/x/web-interface/view", bvid ? { bvid } : { aid }, 12000, tabId);
   } catch (error) {
+    // 4.9：风控错误码（-412 / -352）也带 apiCode，但它说明"被限流"而不是"视频失效"，
+    // 必须先排掉，否则一次限流会把整批还能看的视频错标成「已失效视频」。
+    if (importIsRateLimitedError(error)) throw error;
     // 接口明确返回错误码（如 -404 / 62002）说明视频已失效；
     // 网络或超时错误则保持原样，不误判成失效。
     if (typeof error?.apiCode === "number") invalid = true;
@@ -1174,6 +1323,56 @@ let importState = { running: false, paused: false, text: "", startedAt: 0, finis
 let upFansCache = new Map();
 let importStatePublishAt = 0;
 
+/* ==========================================================================
+   4.6：保活 / 断点 / 恢复
+   --------------------------------------------------------------------------
+   MV3 的 service worker 在"没有任何扩展 API 调用或事件"约 30 秒后就会被回收。
+   导入是长任务（10000 条约 2.5~3 小时），中间有大量 await，暂停时更是完全静默：
+   一旦被回收，importRun 与整条 Promise 链一起消失，暂停中的等待者永远不会被唤醒，
+   而 chrome.storage.local 里的 importState.running 还留着 true —— 界面据此认为
+   "导入还在进行"，用户既不能继续也不能取消。所以这里做三件事：
+     1. keepServiceWorkerAlive()：显式保活（以前只有 publishImportState 写 storage
+        的副作用，暂停态与超长 await 段都失去保护）；
+     2. publishImportRun()：把 importRun 的关键字段（active/paused/cancelled/进度游标/
+        已处理数）与回滚日志写进 chrome.storage.session，服务重启后能重建"上次跑到哪"；
+     3. importReconcileState() / importRecoverInterruptedImport()：发现"storage 说在跑、
+        后台其实没有活动导入"时强制复位并落盘，同时明确告诉用户发生了什么。
+   ========================================================================== */
+
+const IMPORT_RUN_SESSION_KEY = "bcaImportRun";                  // 正在进行的导入（断点 + 回滚日志）
+const IMPORT_INTERRUPTED_SESSION_KEY = "bcaInterruptedImport";  // 被回收打断、仍可回滚的那一次
+// 必须明显小于 30 秒的回收阈值，留出一次请求的最长耗时（15 秒）的余量
+const IMPORT_KEEPALIVE_INTERVAL_MS = 20000;
+const IMPORT_RUN_PUBLISH_INTERVAL_MS = 5000;                    // 断点落盘节流
+// local 里的 importState 超过这么久没更新，才认定它是"被回收前的残影"。
+// 正常跑着的时候每 500ms 就会刷一次 updatedAt，所以 90 秒足够区分
+// "刚刚正常结束还没落盘" 与 "进程早就没了"。
+const IMPORT_STALE_STATE_MS = 90000;
+// chrome.storage.session 默认配额 10MB。被改写的 视频信息.txt 原文只保留这么多字节，
+// 超出后只记名字：回滚时这类文件无法还原内容，会在结果里如实报出来。
+const IMPORT_JOURNAL_TEXT_BUDGET_BYTES = 2 * 1024 * 1024;
+
+// 连续命中风控的条目数（连续 N 条都撞限流就中止整轮导入，阈值常量见导入区块）
+let importRateLimitStreak = 0;
+let importKeepAliveAt = 0;
+let importRunPublishAt = 0;
+let importRunPublishChain = Promise.resolve();
+let importRunSnapshot = null;
+
+// 调一次真实的扩展 API。MV3 只在"扩展 API 调用 / 事件"时才重置空闲回收计时器，
+// 纯 Promise、await、setTimeout 都不算——这是保活的唯一手段。
+async function keepServiceWorkerAlive(reason = "import") {
+  const now = Date.now();
+  if (now - importKeepAliveAt < IMPORT_KEEPALIVE_INTERVAL_MS) return;
+  importKeepAliveAt = now;
+  try {
+    await chrome.runtime.getPlatformInfo();
+  } catch (error) {
+    // 进程正在被回收时任何 API 都可能失败，这里不能抛——等待循环还要靠它继续
+    console.warn("导入保活调用失败（后台可能正被回收）", reason, error);
+  }
+}
+
 function importThrowIfCancelled() {
   if (!importRun.cancelled) return;
   const error = new Error("导入已取消。");
@@ -1181,11 +1380,29 @@ function importThrowIfCancelled() {
   throw error;
 }
 
-// 暂停时挂起；继续或取消都会唤醒
+// 取消与风控中止都要穿透到最外层，不能被当成"单条失败"吞掉
+function importRethrowIfAbort(error) {
+  if (error?.name === "ImportCancelled" || error?.name === "ImportRateLimited") throw error;
+}
+
+// 暂停时挂起；继续或取消都会唤醒。
+// 4.9：每轮先保活、再最多等 20 秒——这样暂停期间也一直有扩展 API 调用，
+// service worker 不会被回收（以前这里只 await 一个 Promise，暂停超过 30 秒就被回收）。
 async function importWaitIfPaused() {
   importThrowIfCancelled();
   while (importRun.paused && !importRun.cancelled) {
-    await new Promise((resolve) => importRun.waiters.push(resolve));
+    await keepServiceWorkerAlive("paused");
+    await new Promise((resolve) => {
+      // 没人唤醒时最多等 20 秒就回到循环顶部再保活一次；超时后要把自己从
+      // waiters 里摘掉，否则长时间暂停会一直往里堆已经失效的等待者
+      const wake = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(() => {
+        const index = importRun.waiters.indexOf(wake);
+        if (index >= 0) importRun.waiters.splice(index, 1);
+        resolve();
+      }, IMPORT_KEEPALIVE_INTERVAL_MS);
+      importRun.waiters.push(wake);
+    });
   }
   importThrowIfCancelled();
 }
@@ -1196,13 +1413,204 @@ function importReleaseWaiters() {
   waiters.forEach((resolve) => resolve());
 }
 
+/* ---------- 断点与回滚日志的跨进程持久化 ---------- */
+
+// 只保留能序列化的部分：FileSystemDirectoryHandle 不能进 storage，
+// 所以回滚日志里只存收藏夹名 / 目录名 / 文件名（handle.name 是稳定的），
+// 回滚时按名字重新取句柄。
+function importJournalSnapshot(journal) {
+  let textBudget = IMPORT_JOURNAL_TEXT_BUDGET_BYTES;
+  return {
+    createdCollections: [...(journal?.createdCollections || [])].map((entry) => entry.name),
+    createdRecords: [...(journal?.createdRecords || [])].map((entry) => ({
+      collection: entry.collectionHandle?.name || "",
+      name: entry.name
+    })),
+    addedFiles: [...(journal?.addedFiles || [])].map((entry) => ({
+      collection: entry.collectionHandle?.name || "",
+      directory: entry.directoryHandle?.name || "",
+      name: entry.name
+    })),
+    modifiedFiles: [...(journal?.modifiedFiles || [])].map((entry) => {
+      const text = String(entry.text ?? "");
+      const keepText = text.length <= textBudget;
+      if (keepText) textBudget -= text.length;
+      return {
+        collection: entry.collectionHandle?.name || "",
+        directory: entry.directoryHandle?.name || "",
+        name: entry.name,
+        text: keepText ? text : "",
+        textUnavailable: !keepText
+      };
+    })
+  };
+}
+
+function writeImportRunSnapshot() {
+  const snapshot = importRunSnapshot;
+  if (!snapshot) return Promise.resolve();
+  // 串行化写入，避免慢写覆盖快写
+  importRunPublishChain = importRunPublishChain
+    .then(() => chrome.storage.session.set({ [IMPORT_RUN_SESSION_KEY]: snapshot }))
+    .catch(() => {});
+  return importRunPublishChain;
+}
+
+function resetImportRunSnapshot(journal) {
+  importRunSnapshot = {
+    active: true, paused: false, cancelled: false,
+    startedAt: importState.startedAt || Date.now(), updatedAt: Date.now(),
+    rateLimitStreak: 0, text: importState.text || "",
+    cursor: { folder: "", page: 0, saved: 0, folderTotal: 0 },
+    counts: { imported: 0, refreshed: 0, skipped: 0, failed: 0, total: 0 },
+    journal: importJournalSnapshot(journal)
+  };
+  importRunPublishAt = 0;
+  return writeImportRunSnapshot();
+}
+
+// journal / cursor / counts 都是 importBiliFavorites 里的局部量，这里显式传入，
+// 避免再维护一份影子状态；不传的字段沿用上一次的快照（暂停、取消时只改 active/paused）。
+function publishImportRun({ journal = null, cursor = null, counts = null, force = false } = {}) {
+  if (!importRunSnapshot) return;
+  const now = Date.now();
+  const throttled = !force && now - importRunPublishAt < IMPORT_RUN_PUBLISH_INTERVAL_MS;
+  importRunSnapshot = {
+    ...importRunSnapshot,
+    active: importRun.active,
+    paused: importRun.paused,
+    cancelled: importRun.cancelled,
+    updatedAt: now,
+    rateLimitStreak: importRateLimitStreak,
+    ...(importState.text ? { text: importState.text } : {}),
+    // 节流窗口内不重新序列化回滚日志：那是 O(日志长度) 的操作，
+    // 每保存一条视频做一遍会让 10000 条的导入退化成 O(n²)
+    ...(throttled || !journal ? {} : { journal: importJournalSnapshot(journal) }),
+    ...(cursor ? { cursor: { ...importRunSnapshot.cursor, ...cursor } } : {}),
+    ...(counts ? { counts: { ...counts } } : {})
+  };
+  if (throttled) return;
+  importRunPublishAt = now;
+  void writeImportRunSnapshot();
+}
+
+async function readImportRunSnapshot() {
+  try {
+    const stored = await chrome.storage.session.get(IMPORT_RUN_SESSION_KEY);
+    return stored?.[IMPORT_RUN_SESSION_KEY] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function clearImportRunSnapshot() {
+  importRunSnapshot = null;
+  importRunPublishAt = 0;
+  // 排进同一条写入链：否则排队中的快照可能在 remove 之后落地，留下"幽灵活动记录"
+  importRunPublishChain = importRunPublishChain
+    .then(() => chrome.storage.session.remove(IMPORT_RUN_SESSION_KEY))
+    .catch(() => {});
+  await importRunPublishChain;
+}
+
+// 被回收打断的那次要挪到独立键：新导入只写活动键，于是这份可回滚日志
+// 不会被下一次导入覆盖，直到用户回滚或又一次被打断。
+async function markImportRunInterrupted(snapshot) {
+  try {
+    await chrome.storage.session.set({
+      [IMPORT_INTERRUPTED_SESSION_KEY]: { ...(snapshot || {}), active: false, interruptedAt: Date.now() }
+    });
+    await chrome.storage.session.remove(IMPORT_RUN_SESSION_KEY);
+  } catch (_) {}
+}
+
+function importInterruptedSummary(snapshot) {
+  const cursor = snapshot?.cursor || {};
+  const counts = snapshot?.counts || {};
+  const parts = [];
+  if (cursor.folder) parts.push(`停在「${cursor.folder}」第 ${Number(cursor.page) || 1} 页`);
+  if (Number(cursor.saved) > 0) parts.push(`该收藏夹已写入 ${Number(cursor.saved)} 条`);
+  const created = snapshot?.journal?.createdRecords?.length || 0;
+  if (created) parts.push(`本次共新建 ${created} 个视频目录（回滚日志已保存在本次浏览器会话中）`);
+  if (Number(counts.imported) > 0) parts.push(`累计新导入 ${Number(counts.imported)} 条`);
+  return parts.join("；");
+}
+
+// 统一的"中断说明"：复位状态 + 文案落盘（local.importState 与 lastResult 都写）
+async function importAnnounceInterruption(snapshot) {
+  const detail = importInterruptedSummary(snapshot);
+  const notice = BcaI18n.t("上次导入已中断（浏览器被关闭、扩展被重载或后台被回收，导入没有继续）。已写入本地的记录保持原样，重新导入会跳过它们。");
+  const text = detail ? `${notice}（${detail}）` : notice;
+  // 最后一次导入活动时间：比它更新的结果（例如中断之后又自动归档了一条视频）不能被盖掉
+  const activityAt = Number(snapshot?.updatedAt) || Number(snapshot?.startedAt) || 0;
+  importState = { ...importState, running: false, paused: false, finishedAt: Date.now(), updatedAt: Date.now(), text, summary: text, interrupted: true };
+  await chrome.storage.local.set({ importState }).catch(() => {});
+  const stored = await chrome.storage.local.get("lastResult").catch(() => ({}));
+  if ((Number(stored?.lastResult?.createdAt) || 0) <= activityAt) {
+    await chrome.storage.local.set({ lastResult: { message: text, createdAt: Date.now() } }).catch(() => {});
+  }
+  return { text, detail, activityAt };
+}
+
+// "后台现在真的有导入在跑"只认内存里的 importRun.active。
+// chrome.storage.local 里的 importState.running 可能是被回收前留下的残影：
+// 这时必须强制复位并落盘，否则界面会一直以为导入还在进行。
+// 判据有两条，避免把"刚刚正常结束"误判成中断：
+//   1. session 里还有 active 的断点 → 铁证，导入进程死在半路；
+//   2. 只有 local 的 running=true 时，看这份状态是不是已经很久没更新过
+//      （浏览器重开后 chrome.storage.session 会被清空，只剩 local 里的残影）。
+async function importReconcileState() {
+  if (importRun.active) return { active: true, reset: false };
+  const stored = await chrome.storage.local.get("importState").catch(() => ({}));
+  const storedState = stored?.importState || null;
+  const leftover = await readImportRunSnapshot();
+  const orphan = leftover?.active === true;
+  const staleRunning = storedState?.running === true
+    && (!Number(storedState?.updatedAt) || Date.now() - Number(storedState.updatedAt) > IMPORT_STALE_STATE_MS);
+  if (!orphan && !staleRunning) return { active: false, reset: false };
+  await importAnnounceInterruption(leftover);
+  await markImportRunInterrupted(leftover);
+  return { active: false, reset: true };
+}
+
+// service worker 每次启动都会重新求值这个模块：此刻内存里的 importRun 一定是空的，
+// 所以 session 里 active 的记录只可能来自"上一次被回收打断的导入"。
+async function importRecoverInterruptedImport() {
+  if (importRun.active) return false;
+  const snapshot = await readImportRunSnapshot();
+  if (!snapshot?.active) return false;
+  if (importRun.active) return false;                 // 期间已经启动了新导入，别动它
+  const current = await readImportRunSnapshot();      // 二次确认：快照没被新导入替换掉
+  if (current?.startedAt !== snapshot.startedAt) return false;
+  await markImportRunInterrupted(snapshot);
+  const { text, detail } = await importAnnounceInterruption(snapshot);
+  // 有断点才写报告文件：报告里能写清"停在哪个收藏夹第几页、已经写了多少"
+  const report = [
+    "B站收藏导入中断报告",
+    ERROR_REPORT_NOTICE,
+    `发生时间：${formatChineseDateTime(new Date(), true)}`,
+    "中断原因：service worker 被回收（浏览器被关闭、扩展被重载或后台空闲回收），导入没有继续。",
+    `断点：${detail || "未知"}`,
+    "已写入的目录都包含封面与视频信息.txt，是完整记录；重新导入会按 BV/av 号跳过它们。",
+    ""
+  ].join("\n");
+  const reportPath = await persistErrorReport(report);
+  await chrome.storage.local.set({
+    lastError: { report: report.slice(0, 16000), reportPath, createdAt: Date.now() }
+  }).catch(() => {});
+  return true;
+}
+
 // 进度更新很密集，写 storage 要节流；关键状态变化用 force 立即落盘
 function publishImportState(patch, force = false) {
-  importState = { ...importState, ...patch };
+  importState = { ...importState, ...patch, updatedAt: Date.now() };
   const now = Date.now();
   if (!force && now - importStatePublishAt < 500) return;
   importStatePublishAt = now;
-  chrome.storage.local.set({ importState }).catch(() => {});
+  // active 是"这一次是否真的有活动导入"的即时答案（由 get-status / bca-import-probe 填），
+  // 只在内存和响应里有效，不落盘——落盘就会变成下一个需要探活复位的"残影"。
+  const { active: _active, ...persisted } = importState;
+  chrome.storage.local.set({ importState: persisted }).catch(() => {});
 }
 
 function importProgress(text) {
@@ -1210,22 +1618,30 @@ function importProgress(text) {
   sendImportProgress(text);
 }
 
-/* ---------- 回滚日志：取消时把本次改动全部撤销 ---------- */
+/* ---------- 回滚日志：取消时把本次改动全部撤销 ----------
+   4.6：日志同时会按"只有名字"的形式写进 chrome.storage.session（见 importJournalSnapshot），
+   这样 service worker 被回收、浏览器被杀之后，仍能按名字重新取句柄回滚
+   （句柄本身不能序列化，所以进不了 storage）。addedFiles 记录的是"这次新补的封面"：
+   旧版本留下的半截目录被补上封面后，如果用户取消，这张封面也要跟着撤销。 */
 
 function createImportJournal() {
-  return { createdCollections: [], createdRecords: [], modifiedFiles: [] };
+  return { createdCollections: [], createdRecords: [], modifiedFiles: [], addedFiles: [] };
 }
 
 async function rollbackImport(journal) {
   let removedRecords = 0;
   let restoredFiles = 0;
   let removedCollections = 0;
+  let removedFiles = 0;
   // 先删本次新建的记录目录，再把被改写的文件还原，最后清掉本次新建的空收藏夹
   for (const entry of [...journal.createdRecords].reverse()) {
     try { await entry.collectionHandle.removeEntry(entry.name, { recursive: true }); removedRecords += 1; } catch (_) {}
   }
   for (const entry of [...journal.modifiedFiles].reverse()) {
     try { await writeFile(entry.directoryHandle, entry.name, entry.text); restoredFiles += 1; } catch (_) {}
+  }
+  for (const entry of [...journal.addedFiles].reverse()) {
+    try { await entry.directoryHandle.removeEntry(entry.name); removedFiles += 1; } catch (_) {}
   }
   for (const entry of [...journal.createdCollections].reverse()) {
     try {
@@ -1236,7 +1652,52 @@ async function rollbackImport(journal) {
       removedCollections += 1;
     } catch (_) {}
   }
-  return { removedRecords, restoredFiles, removedCollections };
+  return { removedRecords, restoredFiles, removedCollections, removedFiles };
+}
+
+// 回滚"被回收打断的那一次导入"：句柄进不了 storage，所以按存下来的名字重新取。
+async function rollbackInterruptedImport() {
+  const stored = await chrome.storage.session.get(IMPORT_INTERRUPTED_SESSION_KEY).catch(() => null);
+  const snapshot = stored?.[IMPORT_INTERRUPTED_SESSION_KEY];
+  if (!snapshot?.journal) return { ok: false, message: BcaI18n.t("没有找到可回滚的上次中断记录。") };
+  const root = await getRootHandle();
+  if (!root) return { ok: false, message: BcaI18n.t("尚未设置本地保存文件夹，无法回滚。") };
+  if (await root.queryPermission({ mode: "readwrite" }) !== "granted") {
+    return { ok: false, message: BcaI18n.t("保存位置的写入授权已失效，请先在插件里重新授权保存位置，然后重试回滚。") };
+  }
+  const journal = { createdCollections: [], createdRecords: [], modifiedFiles: [], addedFiles: [] };
+  for (const name of snapshot.journal.createdCollections || []) {
+    try { journal.createdCollections.push({ parentHandle: root, handle: await root.getDirectoryHandle(name), name }); }
+    catch (_) { /* 目录已经不在了：没什么可删的 */ }
+  }
+  for (const entry of snapshot.journal.createdRecords || []) {
+    try { journal.createdRecords.push({ collectionHandle: await root.getDirectoryHandle(entry.collection), name: entry.name }); }
+    catch (_) {}
+  }
+  for (const entry of snapshot.journal.addedFiles || []) {
+    try {
+      const collection = await root.getDirectoryHandle(entry.collection);
+      journal.addedFiles.push({ directoryHandle: await collection.getDirectoryHandle(entry.directory), name: entry.name });
+    } catch (_) {}
+  }
+  const unavailable = [];
+  for (const entry of snapshot.journal.modifiedFiles || []) {
+    if (entry.textUnavailable) { unavailable.push(`${entry.collection}/${entry.directory}`); continue; }
+    try {
+      const collection = await root.getDirectoryHandle(entry.collection);
+      journal.modifiedFiles.push({
+        directoryHandle: await collection.getDirectoryHandle(entry.directory), name: entry.name, text: String(entry.text ?? "")
+      });
+    } catch (_) {}
+  }
+  const result = await rollbackImport(journal);
+  await chrome.storage.session.remove(IMPORT_INTERRUPTED_SESSION_KEY).catch(() => {});
+  const message = `已回滚上次中断的导入：删除 ${result.removedRecords} 个新建的视频目录`
+    + `${result.removedCollections ? `、${result.removedCollections} 个新建收藏夹` : ""}`
+    + `${result.restoredFiles ? `，还原了 ${result.restoredFiles} 个被改写的视频信息.txt` : ""}`
+    + `${result.removedFiles ? `，移除了 ${result.removedFiles} 张新补的封面` : ""}。`
+    + `${unavailable.length ? `有 ${unavailable.length} 个文件的原文当时没能存下，未能还原。` : ""}`;
+  return { ok: true, message, ...result, unavailable: unavailable.length };
 }
 
 /* ---------- 已有记录的读取与“是否需要刷新”判断 ---------- */
@@ -1286,7 +1747,38 @@ function recordNeedsRefresh(record) {
     || importIsPlaceholder(description)
     || importIsPlaceholder(pubdate)
     || !/^UP主粉丝数：/m.test(text)
-    || !/【互动数据】/.test(text);
+    || !/【互动数据】/.test(text)
+    // 4.9：目录里没有封面同样算"不完整"。coverMissing 由 importRecordNeedsRefresh()
+    // 在本函数的文本判据都通过之后才去查一次盘并缓存在 record 上，正常记录不额外付 IO。
+    // 背景：旧版本是"先写 视频信息.txt、后写 封面.png"，中途被杀就会留下只有 txt 的半截目录，
+    // 以前它被判成"已存在、跳过"，这条视频就永远没有封面（收藏库还会把它当不完整记录隐藏）。
+    || record?.coverMissing === true;
+}
+
+// 查一次"这条记录的目录里到底有没有封面"，结果缓存在 record 上（同一次导入只查一次）
+async function recordMissingCover(collection, record) {
+  if (!record) return false;
+  if (typeof record.coverMissing === "boolean") return record.coverMissing;
+  try {
+    const directory = await collection.getDirectoryHandle(record.directory);
+    // 两个名字都认：老档案只有 封面.png，4.9 之后写的是 封面.webp
+    let found = false;
+    for (const name of COVER_FILE_NAMES) {
+      try { await directory.getFileHandle(name); found = true; break; } catch (_) {}
+    }
+    if (!found) throw new Error("缺少封面文件");
+    record.coverMissing = false;
+  } catch (_) {
+    record.coverMissing = true;
+  }
+  return record.coverMissing;
+}
+
+async function importRecordNeedsRefresh(collection, record) {
+  if (!record) return false;
+  if (recordNeedsRefresh(record)) return true;   // 文本判据已经说要刷新，不必再查封面
+  if (record.coverMissing === undefined) await recordMissingCover(collection, record);
+  return recordNeedsRefresh(record);             // 复判：coverMissing 也是判据之一
 }
 
 function parseChineseDateTime(text) {
@@ -1307,10 +1799,30 @@ async function refreshImportedRecord(collection, record, item, journal) {
   const metadata = importMetadata(item, null);
   metadata.favoriteTimeUnknown = favoriteTimeUnknown;
   const text = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.directory, new Date());
-  if (text === original) return false;
-  journal.modifiedFiles.push({ directoryHandle: directory, name: "视频信息.txt", text: original });
-  await writeFile(directory, "视频信息.txt", text);
-  return true;
+  // 4.9：封面缺失也要补齐（library.js 把"没有封面"的记录当成不完整记录直接跳过，
+  // 用户在收藏库里根本看不到它）。coverMissing 还没算过就在这里补算一次——
+  // 只有"需要刷新"的记录会走这条路径，正常记录不受影响。
+  if (record.coverMissing === undefined) await recordMissingCover(collection, record);
+  let touched = false;
+  if (record.coverMissing) {
+    // 抓不到真封面时会写入"封面暂不可恢复"占位图——和导入链路保持一致：
+    // library.js 把没有封面的记录当成不完整记录直接跳过，宁可先写占位图让记录可见。
+    const cover = await loadImportCover([
+      ...(item.coverCandidates || []),
+      ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
+    ], item.isInvalid);
+    // 先写封面、后写 txt：txt 始终是"这条记录写完了"的完成标记
+    journal?.addedFiles.push({ collectionHandle: collection, directoryHandle: directory, name: COVER_FILE_NAME });
+    await writeFile(directory, COVER_FILE_NAME, cover.blob);
+    record.coverMissing = false;
+    touched = true;
+  }
+  if (text !== original) {
+    journal.modifiedFiles.push({ collectionHandle: collection, directoryHandle: directory, name: "视频信息.txt", text: original });
+    await writeFile(directory, "视频信息.txt", text);
+    touched = true;
+  }
+  return touched;
 }
 
 /* ---------- 视频详情抓取 ---------- */
@@ -1355,6 +1867,8 @@ async function fetchVideoDetail(item, tabId = null) {
         }
       }
     } catch (error) {
+      // 4.9：限流要能被导入链路识别（见 importCheckRateLimitAbort / saveImportedItem）
+      if (importIsRateLimitedError(error)) detail.rateLimited = true;
       // 失效视频的“稿件不可见/啥都木有”属于预期结果，不该当成导入错误写进报告
       if (!knownInvalid) detail.errors.push(`视频资料接口：${error.message}`);
     }
@@ -1369,6 +1883,7 @@ async function fetchVideoDetail(item, tabId = null) {
       const tags = importTagNames(await biliImportApiGet("/x/tag/archive/tags", { bvid: tagKey }, 9000, tabId));
       if (tags.length) detail.tags = tags;
     } catch (error) {
+      if (importIsRateLimitedError(error)) detail.rateLimited = true;
       if (!knownInvalid) detail.errors.push(`标签接口：${error.message}`);
     }
   }
@@ -1377,6 +1892,7 @@ async function fetchVideoDetail(item, tabId = null) {
 
 function applyVideoDetail(item, detail) {
   if (!detail) return;
+  if (detail.rateLimited) item.rateLimited = true;
   if (detail.bvid) item.bvid = detail.bvid;
   if (detail.aid) item.aid = detail.aid;
   if (detail.title && importUsefulTitle(detail.title)) item.title = detail.title;
@@ -1404,9 +1920,13 @@ async function fetchImportDetails(items, folder, tabId) {
       try {
         applyVideoDetail(item, await fetchVideoDetail(item, tabId));
       } catch (error) {
-        if (error?.name === "ImportCancelled") throw error;
+        importRethrowIfAbort(error);
         item.enrichErrors = [...(item.enrichErrors || []), error.message];
       }
+      // 4.9：连续多少条撞上风控。IMPORT_DETAIL_CONCURRENCY 固定为 1，
+      // 所以这个计数就是"连续的条目数"；一旦到阈值立刻中止，不再白跑几小时。
+      importRateLimitStreak = item.rateLimited ? importRateLimitStreak + 1 : 0;
+      importCheckRateLimitAbort();
       await importDelay(IMPORT_DETAIL_DELAY_MS);
     }
   });
@@ -1415,23 +1935,24 @@ async function fetchImportDetails(items, folder, tabId) {
 
 
 function importedUnknownCover() {
-  const canvas = new OffscreenCanvas(640, 360);
+  // 与真实封面同一尺寸、同一格式（320×180 WebP），收藏库列表里不会大图小图混排
+  const canvas = new OffscreenCanvas(COVER_WIDTH, COVER_HEIGHT);
   const context = canvas.getContext("2d");
   context.fillStyle = "#e8edf2";
-  context.fillRect(0, 0, 640, 360);
+  context.fillRect(0, 0, COVER_WIDTH, COVER_HEIGHT);
   context.fillStyle = "#00a1d6";
   context.beginPath();
-  context.roundRect(250, 92, 140, 140, 26);
+  context.roundRect(125, 44, 70, 70, 13);
   context.fill();
   context.fillStyle = "#fff";
-  context.font = "bold 104px sans-serif";
+  context.font = "bold 52px sans-serif";
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillText("B", 320, 165);
+  context.fillText("B", 160, 80);
   context.fillStyle = "#69727c";
-  context.font = "24px sans-serif";
-  context.fillText("封面暂不可恢复", 320, 280);
-  return canvas.convertToBlob({ type: "image/png" });
+  context.font = "16px sans-serif";
+  context.fillText("封面暂不可恢复", 160, 138);
+  return canvas.convertToBlob({ type: COVER_MIME_TYPE, quality: COVER_QUALITY });
 }
 
 async function loadImportCover(candidates, invalid) {
@@ -1540,6 +2061,9 @@ function importIdentifierKeys(item) {
 }
 
 async function saveImportedItem(root, folder, item, journal = null) {
+  // 4.9：命中风控的条目直接拒绝落盘。写文件这里是唯一入口，再挡一道，
+  // 免得以后多出别的调用点，写出"标签/简介/发布时间全是未知"的残缺记录。
+  if (item?.rateLimited) throw importRateLimitAbortError();
   const collectionName = safeSegment(folder.title);
   const collection = await root.getDirectoryHandle(collectionName, { create: true });
 
@@ -1559,8 +2083,11 @@ async function saveImportedItem(root, folder, item, journal = null) {
   // 先登记再写，取消时才能把这个目录一起清掉
   journal?.createdRecords.push({ collectionHandle: collection, name: record.name });
   try {
+    // 4.9：先写封面、后写「视频信息.txt」——txt 就是"这条记录写完了"的完成标记。
+    // 以前是反过来的，进程在两步之间被杀（浏览器被杀 / SW 回收）就会留下只有 txt、
+    // 没有封面的半截目录，下次导入把它当成有效记录跳过，这条视频就永远没有封面。
+    await writeFile(record, COVER_FILE_NAME, cover.blob);
     await writeFile(record, "视频信息.txt", buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, new Date()));
-    await writeFile(record, "封面.png", cover.blob);
   } catch (error) {
     await collection.removeEntry(record.name, { recursive: true }).catch(() => {});
     throw error;
@@ -1575,6 +2102,11 @@ function sendImportProgress(text) {
 async function importBiliFavorites(data, tabId = null) {
   const selectedIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
   const reportLines = ["B站收藏夹本地导入报告", ERROR_REPORT_NOTICE, `开始时间：${formatChineseDateTime(new Date(), true)}`];
+  // 4.9.1：中止时要把"当前这一轮收藏夹"还没渲染的日志补进报告。
+  // folderLog 原本只在每轮循环末尾渲染，而风控是在保存阶段抛出的、抛在渲染之前，
+  // 用户于是只看到一个没有解释的「失败：N」。取消分支不写报告，所以只需在这里补。
+  let activeFolderTitle = "";
+  let activeFolderLog = [];
   const root = await getRootHandle();
   if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
   await ensureWritePermission(root);
@@ -1587,12 +2119,22 @@ async function importBiliFavorites(data, tabId = null) {
   const settings = await chrome.storage.local.get("recoverInvalidVideos").catch(() => ({}));
   const recoverInvalidVideos = settings?.recoverInvalidVideos !== false;
   const journal = createImportJournal();
-  publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "" }, true);
+  importRateLimitStreak = 0;
+  publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "", interrupted: false, rateLimited: false }, true);
+  // 断点落盘：ImportRun 的关键字段（active/paused/cancelled/游标/计数）与回滚日志
+  // 写进 chrome.storage.session，SW 被回收后还能知道"上次跑到哪、写了哪些目录"
+  resetImportRunSnapshot(journal);
 
   let imported = 0, refreshed = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
   let cancelled = false;
+  let rateLimited = null;
   const savedPaths = [];
   const folderNotes = [];
+  const missingNotes = [];
+  // 4.9.2：接口自报总数与实际返回数不一致时的说明。这不是失败（B 站的 media_count 会把
+  // 接口不返回的条目也算进去），但必须让用户看到 —— 4.9.1 为了避免误报改成完全静默，
+  // 结果用户看到「B 站 239、本地 230」时无从判断到底丢没丢，只能来问。
+  const coverageNotes = [];
 
   try {
     const allFolders = await listBiliFavoriteFolders(data?.uid, tabId);
@@ -1603,38 +2145,85 @@ async function importBiliFavorites(data, tabId = null) {
       await importWaitIfPaused();
       const folder = folders[folderIndex];
       const folderLog = [];
+    activeFolderTitle = folder.title;
+    activeFolderLog = folderLog;
       if (["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(safeSegment(folder.title))) {
         failed += 1;
         hasIssues = true;
         reportLines.push("", `收藏夹：${folder.title}`, "收藏夹名称与插件保留目录冲突，已跳过。请先在 B 站重命名该收藏夹后重试。");
         continue;
       }
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderTotal: 0 }, counts: { imported, refreshed, skipped, failed, total } });
 
       importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`);
       let first;
       try { first = await fetchImportFavoritePage(folder, 1, tabId); }
       catch (error) {
+        importRethrowIfAbort(error);
         failed += 1;
         hasIssues = true;
         reportLines.push("", `收藏夹：${folder.title}`, `读取第 1 页失败：${error.message}`);
         continue;
       }
       const allItems = [...first.items];
-      const pageLimit = first.total ? Math.ceil(first.total / 40) : (first.hasMore || first.items.length === 40 ? 1000 : 1);
-      for (let page = 2; page <= Math.min(pageLimit, 1000); page += 1) {
+      // 接口自报的总数；没有它时只能靠 has_more 兜底，也就无法对账
+      const expectedTotal = Number(first.total) || 0;
+      const pageLimit = expectedTotal
+        ? Math.ceil(expectedTotal / IMPORT_FAVORITE_PAGE_SIZE)
+        : (first.hasMore || first.items.length === IMPORT_FAVORITE_PAGE_SIZE ? IMPORT_MAX_PAGES : 1);
+      const maxPages = Math.min(Math.max(pageLimit, 1), IMPORT_MAX_PAGES);
+      let consecutivePageFailures = 0;
+      let pageLoopStoppedEarly = false;
+      // 4.9.1：是否读到了自然末尾（本页不满一页，或接口明说没有下一页）。
+      // 只有"没读到末尾"才可能是真缺口——见下面 missingCount 处的说明。
+      let sawLastPage = false;
+      for (let page = 2; page <= maxPages; page += 1) {
         await importWaitIfPaused();
+        await keepServiceWorkerAlive("page");
         try {
           const result = await fetchImportFavoritePage(folder, page, tabId);
           allItems.push(...result.items);
-          if (!result.items.length || (!first.total && !result.hasMore)) break;
+          consecutivePageFailures = 0;
+          if (result.hasMore === false || result.items.length < IMPORT_FAVORITE_PAGE_SIZE) sawLastPage = true;
+          publishImportRun({ journal, cursor: { folder: folder.title, page } });
+          if (!result.items.length || (!expectedTotal && !result.hasMore)) { pageLoopStoppedEarly = true; break; }
         } catch (error) {
+          importRethrowIfAbort(error);
+          // 4.9：单页失败不再直接放弃剩余所有页，累积失败、跳过去继续读；
+          // 只有连续若干页都失败才终止（以前第 2 页起任一页失败就 break 整轮）
+          consecutivePageFailures += 1;
           failed += 1;
-          folderLog.push(`读取第 ${page} 页失败：${error.message}`);
-          break;
+          folderLog.push(`读取第 ${page} 页失败（已跳过该页，继续读取）：${error.message}`);
+          if (consecutivePageFailures >= IMPORT_MAX_CONSECUTIVE_PAGE_FAILURES) {
+            pageLoopStoppedEarly = true;
+            folderLog.push(`连续 ${consecutivePageFailures} 页读取失败，已停止读取该收藏夹的剩余页面。`);
+            break;
+          }
+          continue;
         }
         if (page % 4 === 0) await importDelay(150);
       }
       total += allItems.length;
+      // 4.9：对账。分页上限（1000 页）或接口异常都可能漏掉尾部，以前没有这一步，
+      // 报告会写"读取 40000、新导入 40000、失败 0"，看起来完全成功。缺多少就说多少。
+      const missingCount = Math.max(0, expectedTotal - allItems.length);
+      // 4.9.1：B 站的 media_count 把"已失效视频"也算进总数，而列表接口不返回它们的内容，
+      // 所以"读完了却比总数少"是接口口径差异，不是分页失败。只有没读到自然末尾
+      // （撞上分页上限、或连续多页失败）才可能是真缺口。4.9 把前者也计入 failed，
+      // 会凭空报出「失败：25」这种数字，用户完全无从判断。
+      if (missingCount > 0 && !sawLastPage) {
+        failed += missingCount;
+        hasIssues = true;
+        // 报告与回给界面的消息里都要写明缺口，不能只写"失败 N 个"
+        missingNotes.push(`「${folder.title}」预期 ${expectedTotal} 条，实际拉取 ${allItems.length} 条，缺失 ${missingCount} 条`);
+        folderLog.push(`分页未取全：预期 ${expectedTotal} 条，实际拉取 ${allItems.length} 条，缺失 ${missingCount} 条（已计入失败）。`
+          + (maxPages === IMPORT_MAX_PAGES && !pageLoopStoppedEarly
+            ? `已达单次分页上限 ${IMPORT_MAX_PAGES} 页，请重新导入以继续补齐；已写入的记录会被跳过。`
+            : "请重新导入以补齐缺失的部分；已写入的记录会被跳过。"));
+      } else if (missingCount > 0) {
+        coverageNotes.push(`「${folder.title}」接口自报 ${expectedTotal} 条、实际返回 ${allItems.length} 条，差额 ${missingCount} 条`);
+      }
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
       allItems.forEach((item) => {
         item.coverCandidates = item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [];
         item.recoverySources = new Set();
@@ -1669,8 +2258,11 @@ async function importBiliFavorites(data, tabId = null) {
         }
         skipped += 1;
         const record = existing.records.get(matched);
-        if (record && recordNeedsRefresh(record)) refreshTargets.push({ item, record });
+        // 4.9：除了文本判据，还要看"目录里有没有封面"（半截目录）。这个查盘只在
+        // 文本判据说"完整"时才发生，正常路径不多付 IO。
+        if (record && await importRecordNeedsRefresh(collection, record)) refreshTargets.push({ item, record });
       }
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
 
       // 失效视频先走原有的恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）。
       // 4.4.1：这条路径会伪造成官方 iOS 客户端请求 APP 接口，默认开启，
@@ -1678,7 +2270,7 @@ async function importBiliFavorites(data, tabId = null) {
       if (recoverInvalidVideos) {
         try { await enrichImportedInvalidVideos(pendingItems, folder, tabId); }
         catch (error) {
-          if (error?.name === "ImportCancelled") throw error;
+          importRethrowIfAbort(error);
           folderLog.push(`失效视频恢复流程异常：${error.message}`);
         }
         for (const item of pendingItems) {
@@ -1697,10 +2289,20 @@ async function importBiliFavorites(data, tabId = null) {
       // 更新模式：按新格式重写数据不完整的旧记录（原文进回滚日志）
       for (const entry of refreshTargets) {
         await importWaitIfPaused();
+        if (entry.item.rateLimited) {
+          // 4.9：详情抓取撞上风控时绝不能重写旧记录——重写会用"未知"覆盖档案里
+          // 已经有的标签、简介和互动数据，属于不可逆的数据损失。
+          importRateLimitStreak += 1;
+          failed += 1;
+          folderLog.push(`${entry.item.title || entry.record.directory}：触发 B 站风控，已跳过刷新（避免用“未知”覆盖原记录）。`);
+          importCheckRateLimitAbort();
+          continue;
+        }
+        importRateLimitStreak = 0;
         try {
           if (await refreshImportedRecord(collection, entry.record, entry.item, journal)) refreshed += 1;
         } catch (error) {
-          if (error?.name === "ImportCancelled") throw error;
+          importRethrowIfAbort(error);
           failed += 1;
           folderLog.push(`${entry.item.title || entry.record.directory}：刷新失败：${error.message}`);
         }
@@ -1708,9 +2310,12 @@ async function importBiliFavorites(data, tabId = null) {
 
       for (let offset = 0; offset < pendingItems.length; offset += 12) {
         await importWaitIfPaused();
+        await keepServiceWorkerAlive("cover");
         const batch = pendingItems.slice(offset, offset + 12);
         importProgress(`正在准备「${folder.title}」的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`);
         await importRunLimited(batch, 4, async (item) => {
+          // 命中风控的条目不会再落盘，不必为它下载封面
+          if (item.rateLimited) return;
           item.coverCandidates = [
             ...item.coverCandidates,
             ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
@@ -1722,12 +2327,23 @@ async function importBiliFavorites(data, tabId = null) {
           await importWaitIfPaused();
           const item = batch[index];
           importProgress(`正在导入「${folder.title}」：${offset + index + 1}/${pendingItems.length}（已保存 ${imported} 个）`);
+          // 4.9：这条视频的详情请求撞上了风控 → 不落盘，否则会写出标签/简介/发布时间
+          // 全是"未知"的残缺记录，报告里还显示成功。连续多条就中止整轮导入。
+          if (item.rateLimited) {
+            importRateLimitStreak += 1;
+            failed += 1;
+            folderLog.push(`${item.title || "未知"} (${item.bvid || item.aid || "无编号"})：触发 B 站风控，本次未写入本地（避免残缺记录）。`);
+            importCheckRateLimitAbort();
+            continue;
+          }
+          importRateLimitStreak = 0;
           try {
             const result = await saveImportedItem(root, folder, item, journal);
             imported += 1;
             savedPaths.push(result.path);
+            publishImportRun({ journal, cursor: { folder: folder.title, saved: offset + index + 1, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
           } catch (error) {
-            if (error?.name === "ImportCancelled") throw error;
+            importRethrowIfAbort(error);
             failed += 1;
             folderLog.push(`${item.title || "未知"} (${item.bvid || item.aid || "无编号"})：${error.message}`);
           }
@@ -1739,21 +2355,29 @@ async function importBiliFavorites(data, tabId = null) {
           if (!folderLog.includes(message)) folderLog.push(message);
         }
       }
-      if (folderLog.length) reportLines.push("", `收藏夹：${folder.title}`, ...folderLog.slice(0, 500));
-      if (folderLog.length) hasIssues = true;
+      if (folderLog.length) {
+        reportLines.push("", `收藏夹：${folder.title}`, ...folderLog.slice(0, 500));
+        hasIssues = true;
+        folderLog.length = 0;   // 已渲染，别让中止路径再渲一遍
+      }
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
     }
   } catch (error) {
     if (error?.name === "ImportCancelled") {
       cancelled = true;
+    } else if (error?.name === "ImportRateLimited") {
+      // 4.9：触发风控 → 停下来，但不回滚：已经写好的目录都是完整记录，重跑会跳过它们
+      rateLimited = error;
     } else {
       importRun.active = false;
       importRun.paused = false;
       publishImportState({ running: false, paused: false, finishedAt: Date.now() }, true);
+      await clearImportRunSnapshot();
       throw error;
     }
   }
 
-  let rollback = { removedRecords: 0, restoredFiles: 0, removedCollections: 0 };
+  let rollback = { removedRecords: 0, restoredFiles: 0, removedCollections: 0, removedFiles: 0 };
   if (cancelled) {
     publishImportState({ text: "正在取消并回滚本次导入…" });
     rollback = await rollbackImport(journal);
@@ -1766,22 +2390,63 @@ async function importBiliFavorites(data, tabId = null) {
     const summary = `导入已取消：已回滚本次新建的 ${rollback.removedRecords} 个视频目录`
       + `${rollback.removedCollections ? `、${rollback.removedCollections} 个新建收藏夹` : ""}`
       + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。导入前的本地内容没有被改动。`;
+    await clearImportRunSnapshot();
     publishImportState({ running: false, paused: false, finishedAt, text: summary, summary }, true);
     await chrome.storage.local.set({ lastResult: { message: summary, createdAt: finishedAt } });
     return { ok: false, cancelled: true, message: summary, imported: 0, refreshed: 0, skipped, failed, total, reportPath: "" };
   }
 
+  // 4.9.1：中止时补渲当前收藏夹的日志
+  const flushActiveFolderLog = () => {
+    if (activeFolderLog.length) {
+      reportLines.push("", `收藏夹：${activeFolderTitle}`, ...activeFolderLog.slice(0, 500));
+      activeFolderLog.length = 0;
+    }
+  };
+
+  if (rateLimited) {
+    flushActiveFolderLog();
+    // 风控中止：把"停在哪、已经写了多少、等多久再试"讲清楚，并留一份报告
+    const message = `${rateLimited.message}（本次：读取 ${total} 条，新导入 ${imported} 条，更新 ${refreshed} 条，跳过 ${skipped} 条，失败 ${failed} 条）`
+      + (missingNotes.length ? `分页缺口：${missingNotes.join("；")}。` : "");
+    reportLines.push("", `中止时间：${formatChineseDateTime(new Date(), true)}`,
+      "中止原因：连续命中 B 站风控（HTTP 412 / 接口错误码 -412 / -352）。",
+      `重试建议：等待约 ${IMPORT_RATE_LIMIT_COOLDOWN_MINUTES} 分钟后再导入；重新导入会按 BV/av 号跳过已写入的记录。`,
+      "本次已写入的目录都包含封面与视频信息.txt，是完整记录，不需要删除。",
+      `读取视频：${total}`, `新导入：${imported}`, `更新记录：${refreshed}`, `已存在跳过：${skipped}`, `失败：${failed}`);
+    if (folderNotes.length) reportLines.push("", "备注：", ...folderNotes);
+    const reportPath = await persistErrorReport(reportLines.join("\n"));
+    await chrome.storage.local.set({
+      lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: finishedAt },
+      lastResult: { message, createdAt: finishedAt }
+    });
+    publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message, rateLimited: true }, true);
+    await clearImportRunSnapshot();
+    return { ok: false, rateLimited: true, message, imported, refreshed, skipped, failed, total, reportPath };
+  }
+
   reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`,
     `读取视频：${total}`, `新导入：${imported}`, `更新记录：${refreshed}`, `已存在跳过：${skipped}`, `失败：${failed}`);
+  if (missingNotes.length) reportLines.push("", "分页缺口：", ...missingNotes);
+  if (coverageNotes.length) {
+    reportLines.push("", "接口口径说明（不是失败）：", ...coverageNotes,
+      "说明：B 站收藏夹里的视频被删除后会留下占位空槽 —— 它计入收藏夹总数，但没有内容，接口也不会返回。",
+      "所以「接口自报数 − 实际返回数」通常等于这些空槽的数量，不表示导入有遗漏。");
+  }
   if (folderNotes.length) reportLines.push("", "备注：", ...folderNotes);
   let reportPath = "";
   if (failed || hasIssues || reportLines.some((line) => line.includes("失败"))) {
     reportPath = await persistErrorReport(reportLines.join("\n"));
     await chrome.storage.local.set({ lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: Date.now() } });
   }
-  const message = `导入/更新完成：新导入 ${imported} 个，更新 ${refreshed} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`;
+  // 分页缺口必须同时出现在回给界面的消息里，否则界面只会显示"失败 N 个"
+  const message = `导入/更新完成：新导入 ${imported} 个，更新 ${refreshed} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`
+    + (missingNotes.length ? `分页未取全：${missingNotes.join("；")}。` : "")
+    // 4.9.2：差额如实报出来，用户才能对照 B 站页面自行核对
+    + (coverageNotes.length ? `（${coverageNotes.join("；")}。差额是 B 站收藏夹里的占位空槽：视频被删除后会留下空位，它计入总数但没有内容、接口也不返回，不是导入遗漏。）` : "");
   const pathText = savedPaths.slice(0, 10).join("\n");
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
+  await clearImportRunSnapshot();
   publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);
   return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath };
 }
@@ -1960,18 +2625,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "bca-import-control") {
     const action = String(message.action || "");
-    if (!importRun.active) { sendResponse({ ok: false, message: "当前没有正在进行的导入。" }); return true; }
+    if (!importRun.active) {
+      // 4.9：后台没有活动导入时，storage 里的 running 可能还是被回收前的残影。
+      // 顺手复位并把"上次导入已中断"讲清楚，而不是只回一句"没有正在进行的导入"。
+      importReconcileState()
+        .then((result) => sendResponse({
+          ok: false,
+          reset: result.reset,
+          message: result.reset
+            ? BcaI18n.t("上次导入已中断，无法继续或取消。已写入本地的记录保持原样，请重新发起导入。")
+            : "当前没有正在进行的导入。"
+        }))
+        .catch(() => sendResponse({ ok: false, message: "当前没有正在进行的导入。" }));
+      return true;
+    }
     if (action === "pause") {
       importRun.paused = true;
       publishImportState({ paused: true, text: "导入已暂停，可继续或取消。" }, true);
+      publishImportRun({ force: true });
     } else if (action === "resume") {
       importRun.paused = false;
       publishImportState({ paused: false }, true);
+      publishImportRun({ force: true });
       importReleaseWaiters();
     } else if (action === "cancel") {
       importRun.cancelled = true;
       importRun.paused = false;
       publishImportState({ paused: false, text: "正在取消并回滚本次导入…" }, true);
+      // 取消本身也要落一次断点：万一回滚途中又被回收，日志还在
+      publishImportRun({ force: true });
       importReleaseWaiters();
     } else {
       sendResponse({ ok: false, message: "不支持的操作。" });
@@ -1980,8 +2662,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true, paused: importRun.paused, cancelled: importRun.cancelled });
     return true;
   }
+  if (message?.type === "bca-import-probe") {
+    // 4.9：界面按 importState 恢复进度之前先探活。只有后台真的有活动导入
+    // （内存里的 importRun.active）才算"在跑"；否则强制复位 importState.running
+    // 并落盘，同时把"上次导入已中断"写进文案，避免界面永久锁死在导入中。
+    importReconcileState()
+      .then((result) => sendResponse({ ok: true, active: importRun.active, reset: result.reset, importState }))
+      .catch(() => sendResponse({ ok: true, active: importRun.active, reset: false, importState }));
+    return true;
+  }
+  if (message?.type === "bca-import-rollback-recovered") {
+    // 4.9：回滚"被回收打断的那一次导入"。回滚日志只存了名字，这里按名字重新取句柄。
+    rollbackInterruptedImport()
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "回滚上次中断的导入失败。" }));
+    return true;
+  }
   if (message?.type === "bca-import-state") {
-    sendResponse({ ok: true, importState });
+    importReconcileState()
+      .then(() => { importState = { ...importState, active: importRun.active }; sendResponse({ ok: true, importState }); })
+      .catch(() => sendResponse({ ok: true, importState }));
     return true;
   }
   if (message?.type === "list-bili-favorite-folders") {
@@ -2018,9 +2718,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "get-status") {
-    chrome.storage.local.get(["baseFolderName", "lastResult", "lastError", "pendingFavorite", "authorizedErrorAt"]).then((status) => {
-      sendResponse({ ...status, importState });
-    });
+    // 4.9：弹窗每次打开都会走这里恢复进度，所以先探活/复位，再把状态回给界面。
+    // 注意：respond 的那一行是既有契约（测试会比对），保持原样。
+    importReconcileState()
+      .catch(() => {})
+      .then(() => { importState = { ...importState, active: importRun.active }; })
+      .then(() => chrome.storage.local.get(["baseFolderName", "lastResult", "lastError", "pendingFavorite", "authorizedErrorAt"]))
+      .then((status) => {
+        sendResponse({ ...status, importState });
+      })
+      // 兜底：storage 读取失败也要应答，否则弹窗的 sendMessage 会一直挂着
+      .catch(() => sendResponse({ importState }));
     return true;
   }
 });
+
+// 4.9：service worker 启动时检查"未完成的导入记录"。模块每次启动都会重新求值，
+// 所以此刻内存里的 importRun 必定是空的——session 里那份 active 快照只可能来自
+// 上一次被回收（浏览器被杀 / 扩展被重载 / 后台空闲回收）打断的导入。
+// 发现之后：复位 importState.running、留一份带提示行的中断报告、把回滚日志挪到独立键，
+// 并明确告知用户"发生了中断、断点在哪、已写入的内容仍然有效"。
+importRecoverInterruptedImport().catch((error) => console.warn("检查未完成的导入记录失败", error));

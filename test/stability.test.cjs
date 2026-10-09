@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.8.3");
+  assert.equal(manifest.version, "4.9.0");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -893,6 +893,300 @@ test("every shipped script actually parses", () => {
       assert.fail(`${name} 解析失败：${error.message}`);
     }
   }
+});
+
+/* ------------------------- 4.9 全面修复 ------------------------- */
+test("the archive cache evicts one entry instead of clearing itself", () => {
+  const library = readProjectFile("library.js");
+  // 4.9：原来是 store.clear()，两个后果：① 4000 条以上每轮扫描从零重读，缓存形同虚设；
+  // ② 被清掉的条目的封面 blob: URL 再也没人 revoke。改成 LRU 淘汰单条。
+  assert.equal(/store\.clear\(\)\s*;/.test(library), false, "不该再用 store.clear() 整表清空");
+  // 按 Map 的插入序取最旧的一条淘汰（配合命中即刷新位置构成 LRU）
+  assert.match(library, /const oldestKey = store\.keys\(\)\.next\(\)\.value;/);
+  assert.match(library, /store\.delete\(oldestKey\);/, "要真的删掉最旧那条");
+  assert.match(library, /dropCacheEntry\(oldest\);/, "淘汰时必须交还它持有的封面引用");
+  // 命中要把条目挪到末尾，否则不是 LRU
+  assert.match(library, /function cacheEntryFor\(/);
+});
+
+test("cover blob URLs are reference counted before being revoked", () => {
+  const library = readProjectFile("library.js");
+  // 淘汰即 revoke 会在最需要淘汰的 >4000 条场景造成裂图：被淘汰的那条可能正是
+  // 同一次扫描早先渲染成卡片的那个 URL，而卡片封面是 loading="lazy"。
+  for (const fn of ["addCoverRef", "releaseCoverRef", "revokeAllCoverRefs", "dropCacheEntry", "releaseVideoCoverRefs", "retainDetailCover", "releaseDetailCover"]) {
+    assert.match(library, new RegExp(`function ${fn}\\(`), `缺少 ${fn}`);
+  }
+  // 计数归零才 revoke
+  // 计数归零才 revoke；重复交还被 has() 挡下
+  assert.match(library, /coverRefCounts/);
+  // 详情面板要单独保一份引用：它是唯一能在 collections 被换掉后还留在页面上的 DOM
+  assert.match(library, /retainDetailCover\(video\.cover\)/);
+  // 卸载时兜底
+  assert.match(library, /revokeAllCoverRefs\(\)/);
+});
+
+test("the library no longer rescans the download tree on a timer", () => {
+  const library = readProjectFile("library.js");
+  // 4.9：删掉了 60 秒的 setInterval —— 10000 条时它每分钟打 12000 次文件系统调用。
+  // 只允许出现在注释里说明为什么删。
+  const code = library.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.equal(/setInterval/.test(code), false, "代码里不该再有 setInterval");
+  // 三条按需触发路径必须保留
+  assert.match(library, /addEventListener\("focus", refreshDownloadStatuses\)/);
+  assert.match(library, /addEventListener\("visibilitychange"/);
+  assert.match(library, /changes\.downloadRevision/);
+});
+
+test("filter options are rebuilt on demand, not on every keystroke", () => {
+  const library = readProjectFile("library.js");
+  // 选项池要移出 renderVideos：它对全量数据做词频统计 + 全排序 + replaceChildren
+  // 重建整个 select，10000 条时每次按键新建上千个 option。
+  const start = library.indexOf("function renderVideos");
+  assert.ok(start > 0, "找不到 renderVideos");
+  const nextFn = library.indexOf("\nfunction ", start + 10);
+  const body = library.slice(start, nextFn > 0 ? nextFn : library.length);
+  assert.equal(/syncVideoFilterOptions/.test(body), false, "选项池不该在 renderVideos 里重建");
+  assert.match(library, /function refreshVideoFilterOptions\(/);
+  // 搜索防抖
+  assert.match(library, /const SEARCH_DEBOUNCE_MS = \d+;/);
+  assert.match(library, /clearTimeout\(searchDebounceTimer\)/);
+  // 扫描时预拼搜索索引，避免每次按键 join 7 个字段
+  assert.match(library, /searchIndex,/);
+});
+
+test("a missing download root is unknown, not empty", () => {
+  const library = readProjectFile("library.js");
+  const start = library.indexOf("async function scanDownloadedDirectories");
+  assert.ok(start > 0, "找不到 scanDownloadedDirectories");
+  const body = library.slice(start, start + 2600);
+  // 4.9：原来返回空 Map，调用方当成"确实一个下载文件都没有"，于是清掉所有「已下载」标记，
+  // 还让「同时删除关联下载」永久隐藏。现在与权限被拒一样返回 null（状态未知）。
+  assert.match(body, /if \(!parent\) return null;/);
+  assert.equal(/if \(!parent\) return new Map\(\);/.test(body), false, "不该再返回空 Map");
+});
+
+test("covers are small WebP files, and both generations of the name are readable", () => {
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+  // 实测老规则：137 张封面 221.4 MB，均值 1.6 MB（原图尺寸 + PNG）。缩到 320×180 WebP 后约 15 KB。
+  assert.match(background, /const COVER_FILE_NAME = "封面\.webp";/);
+  assert.match(background, /const COVER_WIDTH = 320;/);
+  assert.match(background, /const COVER_HEIGHT = 180;/);
+  assert.match(background, /new OffscreenCanvas\(COVER_WIDTH, COVER_HEIGHT\)/, "输出尺寸要固定 320×180");
+  assert.match(background, /const COVER_MIME_TYPE = "image\/webp";/);
+  assert.match(background, /COVER_MIME_TYPE/, "要输出 WebP");
+  // 老档案里的 封面.png 不迁移、不重下 —— 读取与存在性检查都要认两个名字
+  assert.match(background, /const COVER_FILE_NAMES = \["封面\.png", COVER_FILE_NAME\];/);
+  assert.match(background, /for \(const name of COVER_FILE_NAMES\)/);
+  assert.match(library, /optionalFileHandle\(recordEntry, "封面\.webp"\)/);
+  assert.match(library, /coverHandle = await optionalFileHandle\(recordEntry, "封面\.png"\)/);
+  // 绝不能再把 WebP 字节写进 .png：MIME 会按扩展名推断成 image/png，
+  // 只能指望浏览器嗅探内容，那是审计点名的唯一跨文件语义风险。
+  assert.equal(/COVER_FILE_NAME = "封面\.png"/.test(background), false);
+});
+
+test("the import pipeline keeps the service worker alive explicitly", () => {
+  const background = readProjectFile("background.js");
+  // MV3 的 SW 只认"扩展 API 调用/事件"来重置空闲计时器，纯 await 不算。
+  // 导入要跑 2.5~14 小时，没有显式保活必然中途被回收。
+  assert.match(background, /function keepServiceWorkerAlive\(/);
+  assert.match(background, /chrome\.runtime\.getPlatformInfo\(\)/);
+  assert.match(background, /IMPORT_KEEPALIVE_INTERVAL_MS/);
+  // 内存态才算"真的在跑"；importState.running 只是残影，必须能复位
+  assert.match(background, /importRun\.active/);
+  assert.match(background, /bca-import-probe/);
+  // 中断状态要说清楚，而不是留个转不动的界面
+  assert.match(background, /上次导入已中断/);
+});
+
+test("the import pipeline notices rate limiting instead of faking success", () => {
+  const background = readProjectFile("background.js");
+  // HTTP 412 / -412 / -352 都要识别
+  assert.match(background, /rateLimited = true/);
+  assert.match(background, /-412/);
+  assert.match(background, /-352/);
+  // 连续限流要熔断整轮，而不是继续写一堆"标签未知"的残缺记录
+  assert.match(background, /触发 B 站风控，已停止导入/);
+  // 分页缺口要与 total 对账，不能静默丢尾部
+  assert.match(background, /IMPORT_MAX_PAGES = \d+/);
+  assert.match(background, /IMPORT_FAVORITE_PAGE_SIZE = \d+/);
+  assert.match(background, /分页未取全/);
+});
+
+test("imports write the cover before the info file", () => {
+  const background = readProjectFile("background.js");
+  // 让 视频信息.txt 充当"完成标记"：中途被杀只会留下没有 txt 的目录（下次重做），
+  // 而不是"有 txt 没封面"被当成完整记录永远跳过。
+  const start = background.indexOf("async function saveImportedItem");
+  assert.ok(start > 0, "找不到 saveImportedItem");
+  const body = background.slice(start, start + 2000);
+  const coverAt = body.search(/COVER_FILE_NAME|封面/);
+  const infoAt = body.indexOf("视频信息.txt");
+  assert.ok(coverAt >= 0 && infoAt > coverAt, "必须先写封面、后写 视频信息.txt");
+});
+
+
+test("a short page is not mistaken for a pagination gap", () => {
+  const background = readProjectFile("background.js");
+  // B 站的 media_count 把"已失效视频"也算进总数，而列表接口不返回它们的内容。
+  // 于是"读完了却比总数少"是接口口径差异 —— 4.9 曾把它计入 failed，
+  // 用户会在报告里看到一个没有解释的「失败：25」（真实案例：749 报 724）。
+  assert.match(background, /let sawLastPage = false;/);
+  assert.match(background, /if \(result\.hasMore === false \|\| result\.items\.length < IMPORT_FAVORITE_PAGE_SIZE\) sawLastPage = true;/);
+  // 只有"没读到自然末尾"才可能是真缺口
+  assert.match(background, /if \(missingCount > 0 && !sawLastPage\) \{/);
+});
+
+test("an aborted import still explains what the current folder logged", () => {
+  const background = readProjectFile("background.js");
+  // folderLog 原本只在每轮收藏夹循环的末尾渲染，而风控是在保存阶段抛出的、
+  // 抛在渲染之前 —— 报告于是只有一个裸的「失败：N」。
+  assert.match(background, /let activeFolderLog = \[\];/);
+  assert.match(background, /activeFolderLog = folderLog;/);
+  assert.match(background, /const flushActiveFolderLog = \(\) => \{/);
+  // 中止路径必须调用它，且在写报告之前
+  const abortAt = background.indexOf("if (rateLimited) {");
+  const flushCall = background.indexOf("flushActiveFolderLog();", abortAt);
+  const reportWrite = background.indexOf("persistErrorReport(reportLines.join", abortAt);
+  assert.ok(abortAt > 0 && flushCall > abortAt && reportWrite > flushCall, "中止路径要先补渲日志再写报告");
+  // 已渲染过的不要重复渲染
+  assert.match(background, /folderLog\.length = 0;/, "渲染后要清空，避免重复");
+});
+
+test("a 412 from the page-context fetch falls back instead of aborting the import", () => {
+  const background = readProjectFile("background.js");
+  // 实测事故（4.9 → 4.9.1）：B 站对「页面上下文」发出的请求本来就返回 HTTP 412，
+  // 且响应体不是 JSON —— favorites-import.js 会把它转成
+  // 「B站接口没有返回有效数据（HTTP 412）。」，这句话经 biliImportPageApiGet 回到后台。
+  // 4.8.3 的 catch 是「一律退回后台直连」，后台直连能拿到数据，所以旧版本一切正常。
+  // 4.9 加的 importIsRateLimitedError 只看到消息里有 "HTTP 412" 就抛风控、不再退回，
+  // 于是每个请求都被判成风控，连续 5 条即中止整轮（4 秒）。
+  // 对照实测：同一账号同一时刻，旧版本导入 128 条全部成功。
+  const start = background.indexOf("await biliImportPageApiGet(tabId");
+  assert.ok(start > 0, "找不到页面代取调用");
+  const catchAt = background.indexOf("} catch (pageError) {", start);
+  assert.ok(catchAt > start, "页面代取必须有自己的 catch 分支（失败要能退回）");
+  const branch = background.slice(catchAt, background.indexOf("\n      }", catchAt));
+  const fetchAt = branch.indexOf("const response = await fetch(url.toString()");
+  assert.ok(fetchAt >= 0, "页面代取失败后必须退回后台直连");
+  // 风控判定只允许出现在「后台直连已经拿到响应」之后，不能抢在退路前面
+  const limitAt = branch.indexOf("importRateLimitError");
+  if (limitAt >= 0) {
+    assert.ok(limitAt > fetchAt, "风控判定必须排在退回后台直连之后");
+    assert.ok(branch.slice(0, fetchAt).indexOf("importRateLimitError") < 0, "退路之前不许判定风控");
+  }
+});
+
+test("a count mismatch is reported as information, not as a failure", () => {
+  const background = readProjectFile("background.js");
+  // 实测案例：B 站页面显示「生存」有 239 项，本地导入 230 项。
+  // 查下来导入链路内部自洽（读取 240 = 6+3+231，导入 239 = 本地实际总数），
+  // 差在"接口自报 239 而实际只返回 231" —— 差额来自 B 站接口的口径。
+  //
+  // 这里踩过两次：
+  //   4.9   —— 把差额计入 failed，报告出现没有解释的「失败：25」；
+  //   4.9.1 —— 改成完全静默，用户看到 239 vs 230 时无从判断到底丢没丢。
+  // 正确做法：不当失败，但必须如实说出来。
+  assert.match(background, /const coverageNotes = \[\];/);
+  assert.match(background, /} else if \(missingCount > 0\) \{/);
+  assert.match(background, /coverageNotes\.push\(/);
+  // 完成消息与报告里都要带上
+  assert.match(background, /coverageNotes\.length \? `（\$\{coverageNotes\.join/);
+  assert.match(background, /if \(coverageNotes\.length\) \{/);
+  assert.match(background, /"接口口径说明（不是失败）：", \.\.\.coverageNotes/);
+  // 文案要把"差额来自 B 站收藏夹的占位空槽"讲清楚，否则用户还是会以为漏了
+  assert.match(background, /占位空槽/);
+  assert.match(background, /不是导入遗漏/);
+  // 说明分支绝不能计入失败或触发报告
+  const gap = background.indexOf("if (missingCount > 0 && !sawLastPage)");
+  const branch = background.slice(gap, gap + 1200);
+  const elseAt = branch.indexOf("} else if (missingCount > 0) {");
+  const noteBranch = branch.slice(elseAt, elseAt + 400);
+  assert.equal(/failed \+=/.test(noteBranch), false, "口径差额不该计入失败");
+  assert.equal(/hasIssues = true/.test(noteBranch), false, "口径差额不该触发错误报告");
+});
+
+test("the scan progress never writes into the notice container itself", () => {
+  const library = readProjectFile("library.js");
+  const html = readProjectFile("library.html");
+  // 实测事故：4.8.3 给 #scanNotice 加了文字 span 和关闭按钮之后，
+  // progressNotifier 仍然写 #scanNotice.textContent —— 那会把两个子节点整个抹掉。
+  // 之后 setScanNotice() 全写进了脱离 DOM 的孤立 span，屏幕上永远停在「正在读取 0/0…」。
+  assert.equal(/progressNotifier\(scanNotice,/.test(library), false, "不能把带子元素的容器交给 progressNotifier");
+  assert.match(library, /progressNotifier\(scanNoticeText,/);
+  assert.equal([...library.matchAll(/progressNotifier\(scanNoticeText,/g)].length, 2, "两处进度条都要写文字节点");
+  // 约束要写在函数旁边，避免以后又传错
+  assert.match(library, /element 必须是只放文字的节点/);
+  // 结构上的证据：#scanNotice 里确实有子元素，所以它不能被 textContent 写
+  const notice = html.match(/<div id="scanNotice"[\s\S]*?<\/div>/)[0];
+  assert.match(notice, /<span id="scanNoticeText"/);
+  assert.match(notice, /id="dismissScanNotice"/);
+  // 而且只有 setScanNotice 允许写那个 span
+  assert.equal([...library.matchAll(/scanNoticeText\.textContent\s*=/g)].length, 1);
+});
+
+test("the status-refresh dialog explains what happens to unavailable videos", () => {
+  const html = readProjectFile("library.html");
+  // 4.4 的原始约定：更新时若发现视频失效，不覆盖原文件，而是标记为「已失效」
+  // （标题变红、封面变灰）。确认框必须把这件事说清楚，否则用户不敢点。
+  assert.match(html, /如果更新时发现视频已经失效：不会用新数据覆盖原有资料/);
+  assert.match(html, /标记为「已失效」/);
+  assert.match(html, /标题变红、封面变灰/);
+  // 防風控提示仍在
+  assert.match(html, /请勿频繁更新/);
+});
+
+test("the default download folder is created when it is missing", () => {
+  const library = readProjectFile("library.js");
+  const popup = readProjectFile("popup.js");
+  // 实测问题：000视频下载 只在真正下载时才被创建。从没下载过的用户根本没有它，
+  // 「标记为已下载」直接失败，而报错说的却是"请先到下载页选择保存位置"——保存位置早就选好了。
+  // ① 弹窗里选保存位置时顺手建出来（那时一定是 readwrite 权限）
+  assert.match(popup, /const DOWNLOAD_FOLDER_NAME = "000视频下载";/);
+  assert.match(popup, /await handle\.getDirectoryHandle\(DOWNLOAD_FOLDER_NAME, \{ create: true \}\)/);
+  // ② 老用户（根目录已设好但没这个文件夹）也能立刻用上：标记时按需创建
+  assert.match(library, /async function getWritableDownloadParent\(\{ create = false \} = \{\}\)/);
+  assert.match(library, /const parent = await getWritableDownloadParent\(\{ create: true \}\);/);
+  assert.match(library, /await rootHandle\.getDirectoryHandle\("000视频下载", \{ create \}\)/);
+  // 创建前要先拿到根目录写权限，否则会抛出更难懂的错
+  assert.match(library, /const rootPermission = await rootHandle\.requestPermission\(\{ mode: "readwrite" \}\);/);
+  // 删除流程仍然用无参调用：那里不该顺手建目录
+  assert.equal([...library.matchAll(/getWritableDownloadParent\(\)/g)].length, 2, "只有两处调用不该创建");
+});
+
+test("the native host folder is pinned under LOCALAPPDATA", () => {
+  const install = readProjectFile("install-native-folder-opener.ps1");
+  const uninstall = readProjectFile("uninstall-native-folder-opener.ps1");
+  for (const [name, source] of [["install", install], ["uninstall", uninstall]]) {
+    assert.match(source, /function Assert-HostRootSafe\(\[string\]\$Path\)/, `${name} 缺少目录限位函数`);
+    // 必须真的调用它，否则函数只是摆设
+    assert.match(source, /\$HostRoot = Assert-HostRootSafe \$HostRoot/, `${name} 没有应用限位`);
+    // 前缀比较要带分隔符，否则 BcaFolderOpenerEvil 这种撞名会被放行
+    assert.match(source, /TrimEnd\(\[System\.IO\.Path\]::DirectorySeparatorChar, \[System\.IO\.Path\]::AltDirectorySeparatorChar\) \+ \[System\.IO\.Path\]::DirectorySeparatorChar/);
+    assert.match(source, /OrdinalIgnoreCase/);
+    // 用 GetFullPath 归一，才能挡住 "..\..\Windows" 这类
+    assert.match(source, /\[System\.IO\.Path\]::GetFullPath\(\$Path\)/);
+  }
+  // 卸载脚本会 Remove-Item -Recurse -Force 这个目录，校验必须排在它前面
+  const assertAt = uninstall.indexOf("Assert-HostRootSafe $HostRoot");
+  const removeAt = uninstall.indexOf("Remove-Item -LiteralPath $HostRoot");
+  assert.ok(assertAt >= 0 && removeAt > assertAt, "卸载脚本的目录限位必须排在删除之前");
+});
+
+test("the PowerShell sources keep their BOM", () => {
+  // PowerShell 5.1 的 Get-Content 默认按系统 ANSI 读，无 BOM 会把中文路径解坏。
+  // .ps1 / .cs 必须带 BOM，其余文件必须不带（带了会让 JSON.parse 直接失败）。
+  const withBom = ["install-native-folder-opener.ps1", "uninstall-native-folder-opener.ps1", "test-native-folder-opener.ps1", "native/folder-opener-host.ps1", "native/folder-opener-launcher.cs"];
+  const withoutBom = ["manifest.json", "library.js", "library.html", "library.css", "background.js", "popup.js", "theme.css", "locales/zh-TW.json"];
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const root = path.dirname(__dirname);
+  const hasBom = (file) => {
+    const buffer = fs.readFileSync(path.join(root, file));
+    return buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf;
+  };
+  for (const file of withBom) assert.equal(hasBom(file), true, `${file} 缺少 BOM`);
+  for (const file of withoutBom) assert.equal(hasBom(file), false, `${file} 不该有 BOM`);
 });
 
 /* ------------------------- 4.8.3 美化 ------------------------- */

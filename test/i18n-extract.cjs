@@ -21,12 +21,17 @@ const SOURCE_FILES = [
   "library.html", "library.js",
   "download.html", "download.js",
   "popup.html", "popup.js",
-  "content.js"
+  "content.js",
+  // 4.9：把后台纳入扫描。background.js 是模块化 service worker，加载不了 i18n.js，
+  // 所以自己做了个存在性兜底；新增的界面文案仍写成 BcaI18n.t("字面量")。
+  // 不纳入扫描的话，这些词条永远进不了词典（4.9 的 6 条就是这样漏掉的）。
+  "background.js"
 ];
-// 这些是品牌名与语言名，任何语言下都保持原样，不需要进词典
+// 这些是语言名与第三方工具名，任何语言下都保持原样，不需要进词典。
+// （品牌名「哔哩藏库」**要**翻译：繁中用「哔哩藏庫」、英文用 Bili Vault，所以不在此列。）
 const NEVER_TRANSLATE = new Set([
   "简体中文", "繁體中文", "English", "DownKyi",
-  "B站收藏信息归档", "本地收藏库", "LOCAL VIDEO LIBRARY"
+  "本地收藏库", "LOCAL VIDEO LIBRARY"
 ]);
 
 function decodeEntities(text) {

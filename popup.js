@@ -1,4 +1,6 @@
 const DB_NAME = "bili-fav-archiver";
+// 4.9.4：默认下载目录名（与下载页、归档布局保持一致）
+const DOWNLOAD_FOLDER_NAME = "000视频下载";
 const DB_STORE = "settings";
 
 const folderName = document.getElementById("folderName");
@@ -353,6 +355,10 @@ chooseButton.addEventListener("click", async () => {
     if (permission !== "granted") throw new Error(BcaI18n.t("没有获得此文件夹的写入权限。"));
     await saveRootHandle(handle);
     rootHandle = handle;
+    // 4.9.4：顺手把默认下载目录建出来。「标记为已下载」需要它，而从没下载过的用户
+    // 根本没有这个文件夹，会卡在一句指错方向的「还没有下载目录」上。
+    // 这里一定是 readwrite 权限（上面刚 requestPermission 过），失败也不影响主流程。
+    try { await handle.getDirectoryHandle(DOWNLOAD_FOLDER_NAME, { create: true }); } catch (_) {}
     const currentStatus = await chrome.runtime.sendMessage({ type: "get-status" });
     await chrome.storage.local.set({ baseFolderName: handle.name, authorizedErrorAt: currentStatus.lastError?.createdAt || null });
     folderName.textContent = handle.name;
