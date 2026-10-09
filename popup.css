@@ -256,6 +256,11 @@ button:disabled { cursor: wait; opacity: .6; }
 .popup-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-3); }
 .support-link { display: inline-flex; align-items: center; gap: 5px; color: var(--brand-deep); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
 .support-link:hover { text-decoration: underline; }
+/* 4.8.1：页脚左侧放「一键三连 + 仓库地址」两个入口 */
+.foot-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.repo-link { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--fs-micro); font-weight: 500; text-decoration: none; }
+.repo-link:hover { text-decoration: underline; }
+.support-link .icon, .repo-link .icon { flex: 0 0 auto; }
 .foot-right { display: flex; align-items: center; gap: var(--sp-2); }
 /* 4.5.1：语言切换已移出页脚（顶部 .segmented 承担），这里只留版本号 */
 .popup-version { color: var(--faint); font-size: var(--fs-sm); }

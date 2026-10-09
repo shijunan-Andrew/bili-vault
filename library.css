@@ -44,6 +44,8 @@ html.banner-visible { --banner-h: 42px; }
   .banner-scroll { animation-duration: 40s !important; animation-iteration-count: infinite !important; }
 }
 .banner-run { flex: 0 0 auto; padding-right: 120px; font-size: var(--fs-base); font-weight: 650; white-space: nowrap; }
+.banner-run { display: inline-flex; align-items: center; gap: 7px; }
+.banner-icon { display: inline-flex; font-size: var(--fs-lg); }
 .banner-close {
   display: grid;
   place-items: center;
@@ -568,6 +570,13 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .failure-note { margin: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; overflow-wrap: anywhere; }
 
 /* 配置导出 / 导入：只含界面偏好，不含任何目录句柄或 B 站数据 */
+/* 4.8.1：版本号下方的一键三连与仓库入口 */
+.side-support { display: flex; flex-direction: column; gap: 5px; margin-top: var(--sp-2); }
+.support-link, .repo-link { display: inline-flex; align-items: center; gap: 6px; color: var(--brand-deep); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
+.repo-link { color: var(--muted); font-weight: 500; }
+.support-link:hover, .repo-link:hover { text-decoration: underline; }
+.support-link .icon, .repo-link .icon { flex: 0 0 auto; font-size: var(--fs-md); }
+
 .config-tools { display: flex; gap: var(--sp-2); padding: var(--sp-2) 2px 0; }
 .config-button { flex: 1; min-height: 32px; padding: 0 var(--sp-2); font-size: var(--fs-sm); font-weight: 600; }
 

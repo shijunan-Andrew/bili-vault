@@ -5,7 +5,7 @@
 ## 项目基线
 
 - 项目目录：`<项目目录>`（历史版本另存于 `<历史版本目录>`）。
-- 扩展版本：`4.8.0`（界面显示 `beta4.8`），Chrome Manifest V3，最低 Chrome 版本 111。
+- 扩展版本：`4.8.1`（界面显示 `beta4.8.1`），Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -138,6 +138,14 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 ```
 
 后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+### 图标与外链（4.8.1）
+
+- **`github` 图标是唯一一个实心图标**。`icons.js` 的 `svg()` 统一输出 `fill="none" stroke="currentColor"`，而 GitHub 猫标是实心品牌标识，所以在 path 上内联覆盖 `fill="currentColor" stroke="none"`，外面再套一层 `<g transform="translate(2.6 2.6) scale(0.783)">` 把它缩到和同排线性图标一样大（原路径占满 24×24，不缩会大一圈）。**再加实心品牌图标时照这个写法。**
+- **`tv` 是 B 站小电视的意象，不是官方标识的复刻**：圆角机身 + 两根天线 + 两只眼睛，仍然是线框。用它是为了让人一眼认出"B 站"，同时不直接搬用商标图形。
+- **跑马灯里的图标必须重新水合**：`buildBannerMarquee()` 是克隆 `.banner-run` 节点，克隆出来的 `[data-icon]` 从没被 `hydrate()` 处理过，不补一次就是空白。改动跑马灯时别把 `BcaIcons.hydrate(githubBanner)` 删掉。
+- **`PAGE_SIZES` 必须是 5 的倍数**（一行 5 个）。改分页选项时留意这条，否则最后一行会缺一个。老配置里存着 24/48/96 的用户不会有问题：`sizeSelect.value` 匹配不到任何 option 会变成空串，`Number("") || PAGE_SIZES[0]` 会退回 25。
+- **外链地址有两份**：`popup.html` 与 `library.html` 各自写着 B 站主页与仓库地址，改的时候两边都要改（测试会分别断言）。
+
 ### 弹窗高度与顶部横幅（4.8）
 
 - **弹窗 600px 上限**是硬约束（Chrome 弹窗最大高度），4.5.1 时把默认视图压到了约 596.8px。4.8 加了顶部开源横幅后**净增高 18px**（`26 - 12 + 4`：高度 26px、抵消掉 main 的上内边距 `--sp-3`、自己的下外边距 `--sp-1`），所以**首次打开时默认视图会轻微滚动约 18px**。

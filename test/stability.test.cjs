@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.8.0");
+  assert.equal(manifest.version, "4.8.1");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -831,6 +831,73 @@ test("the dark theme only redefines tokens, and both triggers agree", () => {
   // 滚动条也要走令牌，否则深色下会留一条亮灰
   assert.match(css, /scrollbar-color: var\(--scroll-thumb\)/);
   assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
+});
+
+/* ------------------------- 4.8.1 入口与分页 ------------------------- */
+
+test("page sizes are multiples of the five-per-row grid", () => {
+  const library = readProjectFile("library.js");
+  const match = library.match(/const PAGE_SIZES = \[([^\]]+)\];/);
+  assert.ok(match, "找不到 PAGE_SIZES");
+  const sizes = match[1].split(",").map((value) => Number(value.trim()));
+  assert.deepEqual(sizes, [25, 50, 100]);
+  // 一行 5 个，所以每页条数必须是 5 的倍数，否则最后一行会缺一个
+  for (const size of sizes) assert.equal(size % 5, 0, `${size} 不是 5 的倍数`);
+  assert.equal(sizes.includes(24), false, "不该再留着 24");
+});
+
+test("the sidebar offers a support link and a repository link", () => {
+  const html = readProjectFile("library.html");
+  const css = readProjectFile("library.css");
+  // 放在版本号下方
+  assert.ok(html.indexOf("side-support") > html.indexOf("side-version"), "两个入口应在版本号下方");
+  assert.ok(html.indexOf("side-support") < html.indexOf("</aside>"), "两个入口应在侧栏里");
+  // 一键三连指向 B 站主页，用「小电视」图标
+  assert.match(html, /<a class="support-link" href="https:\/\/space\.bilibili\.com\/\d+" target="_blank" rel="noopener noreferrer"><span data-icon="tv"><\/span>/);
+  // 仓库地址带 Github 图标
+  assert.match(html, /<a class="repo-link" href="https:\/\/github\.com\/shijunan-Andrew\/bili-vault" target="_blank" rel="noopener noreferrer"><span data-icon="github"><\/span>/);
+  assert.match(css, /\.side-support \{/);
+  assert.match(css, /\.repo-link \{/);
+});
+
+test("the plugin footer shows the repository link next to the support link", () => {
+  const html = readProjectFile("popup.html");
+  const css = readProjectFile("popup.css");
+  assert.match(html, /<div class="foot-left">/);
+  const foot = html.slice(html.indexOf('<div class="foot-left">'), html.indexOf("</div>", html.indexOf('<div class="foot-left">')));
+  assert.match(foot, /class="support-link"/);
+  assert.match(foot, /class="repo-link"/);
+  // 仓库链接排在支持链接右边（同一个竖排容器里在下面，DOM 顺序在后）
+  assert.ok(foot.indexOf("repo-link") > foot.indexOf("support-link"), "仓库链接应在支持链接之后");
+  assert.match(foot, /data-icon="tv"/);
+  assert.match(foot, /data-icon="github"/);
+  assert.match(css, /\.foot-left \{/);
+  assert.match(css, /\.repo-link \{/);
+});
+
+test("both banners carry the Github mark", () => {
+  const library = readProjectFile("library.html");
+  const popup = readProjectFile("popup.html");
+  const icons = readProjectFile("icons.js");
+  // 两个图标都要真存在，否则水合后是空白
+  assert.match(icons, /github: '/);
+  assert.match(icons, /tv: '/);
+  // 收藏库横幅的两段都要带图标（跑马灯整段克隆，少一段就会出现没图标的重复）
+  assert.equal([...library.matchAll(/banner-icon" data-icon="github"/g)].length, 2);
+  assert.match(library, /class="banner-icon" data-icon="github"><\/span><span data-i18n="本项目已在 GitHub 上开源/);
+  assert.match(popup, /data-icon="github"><\/span>\s*<span data-i18n="此项目已在 Github 上开源/);
+  // 克隆出来的图标节点没被水合过，必须补一次
+  assert.match(readProjectFile("library.js"), /BcaIcons\.hydrate\(githubBanner\)/);
+});
+
+test("the Github mark is filled, unlike the line icon set", () => {
+  const icons = readProjectFile("icons.js");
+  // svg() 默认 fill:none / stroke:currentColor，猫标是实心品牌标识，必须单独覆盖
+  const github = icons.match(/github: '([^']+)'/)[1];
+  assert.match(github, /fill="currentColor"/);
+  assert.match(github, /stroke="none"/);
+  // 用 g transform 缩小，免得比同排的线性图标大一圈
+  assert.match(github, /transform="translate/);
 });
 
 /* ------------------------- 4.8 标记与站外搜索 ------------------------- */

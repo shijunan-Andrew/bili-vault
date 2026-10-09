@@ -584,5 +584,6 @@
   "还没有下载目录：请先到下载页选择保存位置。": "There is no download folder yet — choose a save location on the download page first.",
   "标记失败：{message}": "Could not mark it: {message}",
   "已标记为已下载，文件夹：{name}": "Marked as downloaded. Folder: {name}",
-  "此项目已在 Github 上开源，点击查看": "This project is open source on Github — click to see it"
+  "此项目已在 Github 上开源，点击查看": "This project is open source on Github — click to see it",
+  "Github 仓库地址": "Github repository"
 }

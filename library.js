@@ -135,7 +135,8 @@ let draggedCollectionName = "";
 let downloadStatusCheckRunning = false;
 let lastSelectedVideoId = "";
 // 分页与视图（4.1）：默认每页 24 个，网格显示；两项都会记住
-const PAGE_SIZES = [24, 48, 96];
+// 4.8.1：一行正好 5 个，24/48/96 会让最后一行缺一个，改成 5 的整数倍
+const PAGE_SIZES = [25, 50, 100];
 let pageSize = PAGE_SIZES[0];
 let currentPage = 1;
 let pageCount = 1;
@@ -1523,6 +1524,8 @@ function buildBannerMarquee() {
   track.replaceChildren(...half, ...second);
   // 速度恒定：大约每秒 60px，短则不少于 14 秒
   track.style.animationDuration = `${Math.max(14, Math.round((unitWidth * need) / 60))}s`;
+  // 克隆出来的图标节点还没被填充过，这里补一次
+  if (globalThis.BcaIcons?.hydrate) BcaIcons.hydrate(githubBanner);
 }
 
 // 正式开源后只改这一处
