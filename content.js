@@ -9,8 +9,51 @@
     if (!enabledStateUpdated) archiveEnabled = enabled !== false;
   }).catch(() => {});
 
+  // 4.6：提示卡的深浅跟随扩展里的主题设置。主题本身存在扩展页面的 localStorage 里
+  // （theme.js，为了在 <head> 里同步应用、不闪浅色），而这段脚本跑在 B 站页面里，
+  // 读到的是宿主的 localStorage，拿不到扩展那一份；theme.js 因此把它镜像到了
+  // chrome.storage.local，这里从那里读。键名要与 BcaTheme.STORAGE_KEY 一致
+  // （内容脚本不加载 theme.js，拿不到那个常量）。
+  const NOTICE_THEME_KEY = "interfaceTheme";
+  const NOTICE_THEME_MODES = ["system", "light", "dark"];
+  const preferDarkMedia = window.matchMedia?.("(prefers-color-scheme: dark)") || null;
+  let extensionTheme = "system";
+  let extensionThemeUpdated = false;
+
+  function normalizeTheme(value) {
+    return NOTICE_THEME_MODES.includes(value) ? value : "system";
+  }
+
+  // 扩展设置优先；只有选了「跟随系统」才交给 prefers-color-scheme
+  function noticeTheme() {
+    if (extensionTheme !== "system") return extensionTheme;
+    return preferDarkMedia?.matches ? "dark" : "light";
+  }
+
+  // 只改自己插进去的那个卡片根节点，宿主页面一个属性都不碰
+  function paintNoticeTheme() {
+    const host = document.getElementById("bili-fav-archiver-host");
+    if (host) host.dataset.bcaTheme = noticeTheme();
+  }
+
+  chrome.storage.local.get(NOTICE_THEME_KEY).then((items) => {
+    if (extensionThemeUpdated) return;
+    extensionTheme = normalizeTheme(items?.[NOTICE_THEME_KEY]);
+    paintNoticeTheme();
+  }).catch(() => {});
+
+  // 「跟随系统」时常住页面：系统深浅色变了，已经打开的提示卡也要跟着变
+  preferDarkMedia?.addEventListener?.("change", paintNoticeTheme);
+
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes.enabled) return;
+    if (areaName !== "local") return;
+    // 用户在收藏库 / 弹窗里改了主题，已经打开的 B 站页面要立刻跟上
+    if (changes[NOTICE_THEME_KEY]) {
+      extensionThemeUpdated = true;
+      extensionTheme = normalizeTheme(changes[NOTICE_THEME_KEY].newValue);
+      paintNoticeTheme();
+    }
+    if (!changes.enabled) return;
     enabledStateUpdated = true;
     archiveEnabled = changes.enabled.newValue !== false;
     if (!archiveEnabled) for (const stop of [...pendingStops]) stop();
@@ -146,7 +189,11 @@
   const NOTICE_STYLE = `
     /* 提示卡挂在 B 站页面的 shadow root 里，拿不到 theme.css（4.3 起扩展页不再对
        网页暴露），所以这里放一份与 theme.css 同名的本地令牌副本，取值保持一致；
-       改配色请以 theme.css 为准并同步这里。深色值取自原来那段媒体查询覆写。 */
+       改配色请以 theme.css 为准并同步这里。
+       4.6：两套调色板仍然都写成 :host 变量，只是「用哪一套」不再只看系统——
+       脚本把解析好的主题挂在卡片根节点的 data-bca-theme 上（扩展设置优先，选了
+       「跟随系统」才按系统解析）。因此深色只需一份，不必再写一遍媒体查询，
+       也就不会出现两处取值不一致。 */
     :host {
       --surface: #ffffff; --surface-soft: #f7f9fc; --line: #e2e8f0;
       --text: #3c4552; --muted: #5f6875; --faint: #858d9a;
@@ -179,14 +226,12 @@
     .action.primary:hover { background: var(--brand-strong); color: #fff; }
     .close { position: absolute; right: 9px; top: 9px; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: var(--faint); font-size: 17px; line-height: 1; cursor: pointer; }
     .close:hover { background: var(--success-soft); color: var(--success); }
-    @media (prefers-color-scheme: dark) {
-      :host {
-        --surface: #1b2027; --surface-soft: #232a33; --line: #2f3843; --text: #dde3ea; --muted: #a3adba; --faint: #7d8794;
-        --brand-deep: #7fd8f5; --brand-soft: #22303a; --brand-line: #2f4a57;
-        --success: #4fbf8d; --success-soft: #1d2c26; --shadow: 0 18px 48px #00000080;
-      }
-      .notice.error { --success: #ef7f76; --success-soft: #35211f; }
+    :host([data-bca-theme="dark"]) {
+      --surface: #1b2027; --surface-soft: #232a33; --line: #2f3843; --text: #dde3ea; --muted: #a3adba; --faint: #7d8794;
+      --brand-deep: #7fd8f5; --brand-soft: #22303a; --brand-line: #2f4a57;
+      --success: #4fbf8d; --success-soft: #1d2c26; --shadow: 0 18px 48px #00000080;
     }
+    :host([data-bca-theme="dark"]) .notice.error { --success: #ef7f76; --success-soft: #35211f; }
     @media (prefers-reduced-motion: reduce) { .notice { animation: none; } }
   `;
 
@@ -202,6 +247,9 @@
     document.getElementById("bili-fav-archiver-host")?.remove();
     const host = document.createElement("div");
     host.id = "bili-fav-archiver-host";
+    // 4.6：深浅色由扩展设置决定，解析结果挂在这里，CSS 用 :host([data-bca-theme=...]) 选调色板
+  // 属性名故意不叫 data-theme：卡片挂在 B 站页面上，避免和宿主页面的选择器撞车
+    host.dataset.bcaTheme = noticeTheme();
     const shadow = host.attachShadow({ mode: "closed" });
 
     const style = document.createElement("style");

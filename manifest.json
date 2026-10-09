@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "B站收藏信息归档",
-  "version": "4.5.2",
-  "description": "收藏、整理并下载 B 站视频，支持弹幕、字幕、封面和信息归档。",
+  "name": "哔哩藏库",
+  "version": "4.6.0",
+  "description": "把 B 站收藏夹完整搬到本地：可搜索、可筛选、可离线，视频被删了也还在。支持弹幕、字幕、封面的本地归档与失效视频恢复。",
   "minimum_chrome_version": "111",
   "permissions": ["storage", "nativeMessaging", "clipboardWrite"],
   "host_permissions": [

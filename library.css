@@ -92,6 +92,34 @@ html.banner-visible { --banner-h: 42px; }
 .side-label span { color: var(--ghost); font-weight: 500; }
 .collection-sort-hint { color: var(--ghost) !important; font-size: var(--fs-micro); font-weight: 400 !important; white-space: nowrap; }
 
+/* 收藏夹多了以后侧栏要滚很久，加一条纯本地的过滤框（不发任何请求） */
+.collection-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 var(--sp-2) var(--sp-2);
+  padding: 0 var(--sp-2);
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  background: var(--surface-soft);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.collection-filter > .icon-slot { font-size: var(--fs-md); }
+.collection-filter input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: var(--fs-base);
+}
+.collection-filter input::placeholder { color: var(--ghost); }
+.collection-filter:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.collection-filter-empty { margin: 0 var(--sp-2) var(--sp-2); color: var(--faint); font-size: var(--fs-sm); line-height: 1.6; }
+
 .collection-create {
   display: inline-flex;
   align-items: center;
@@ -503,6 +531,31 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .batch-selection-tools, .batch-actions { display: flex; align-items: center; gap: var(--sp-3); }
 .batch-selection-tools strong { color: var(--brand-deep); font-size: var(--fs-base); white-space: nowrap; }
 .batch-actions .button { min-height: 38px; padding: 0 var(--sp-3); }
+
+/* 更新视频状态失败时不再只靠 001错误报告 里的文件，界面上给一个可滚动的清单 */
+.failure-panel {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-3);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+}
+.failure-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.failure-title { display: inline-flex; align-items: center; gap: 6px; color: var(--danger-strong); font-size: var(--fs-base); font-weight: 700; }
+.failure-title .icon { color: var(--danger); font-size: var(--fs-md); }
+.failure-tools { display: flex; align-items: center; gap: var(--sp-3); }
+.failure-list { max-height: 220px; overflow: auto; display: grid; gap: 2px; padding: var(--sp-2); border: 1px solid var(--danger-line); border-radius: var(--r-sm); background: var(--surface); }
+.failure-row { display: flex; align-items: baseline; gap: 6px; padding: 6px var(--sp-2); border-radius: var(--r-xs); color: var(--text); font-size: var(--fs-sm); line-height: 1.7; }
+.failure-row:hover { background: var(--surface-soft); }
+.failure-row-path { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
+.failure-row-message { color: var(--danger-strong); overflow-wrap: anywhere; }
+.failure-note { margin: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; overflow-wrap: anywhere; }
+
+/* 配置导出 / 导入：只含界面偏好，不含任何目录句柄或 B 站数据 */
+.config-tools { display: flex; gap: var(--sp-2); padding: var(--sp-2) 2px 0; }
+.config-button { flex: 1; min-height: 32px; padding: 0 var(--sp-2); font-size: var(--fs-sm); font-weight: 600; }
 
 .scan-notice {
   margin: 0 0 var(--sp-4);
@@ -1022,6 +1075,8 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   .brand-mark { width: 36px; height: 36px; border-radius: var(--r-sm); font-size: var(--fs-lg); }
   .side-label, .sidebar-bottom { display: none; }
   .collection-heading { justify-content: space-between; margin: 0 0 var(--sp-3); padding: 0; }
+  .collection-filter { flex: 1 0 100%; margin: 0 0 var(--sp-3); }
+  .collection-filter-empty { margin: 0 0 var(--sp-3); }
   .collection-list { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
   .collection-row { flex: 0 0 auto; }
   .collection-button { width: auto; min-height: 36px; flex: 0 1 auto; gap: 6px; padding: 0 var(--sp-3); border: 1px solid var(--line); }

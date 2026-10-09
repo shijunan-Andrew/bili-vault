@@ -1,11 +1,11 @@
-# AI 项目交接说明：B站收藏信息归档 4.5.2
+# AI 项目交接说明：哔哩藏库 Bili Vault
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
 - 项目目录：`<项目目录>`（历史版本另存于 `<历史版本目录>`）。
-- 扩展版本：`4.5.2`，Chrome Manifest V3，最低 Chrome 版本 111。
+- 扩展版本：`4.6.0`，Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -138,6 +138,15 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 ```
 
 后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+### 收藏库的性能与可访问性（4.6）
+
+- **增量扫描**：`scanRoot()` 现在带缓存。键 = `收藏夹/目录名`，值 = `{size, lastModified, 解析结果}`；按根目录 handle 用 `WeakMap` 发自增 id 隔离。命中时**只调 `getFile()` 取元数据、不读正文**；`size` 或 `lastModified` 变一个字节就只重读那一条。目录列表**每轮重新枚举**，所以新增/删除目录一定反映。
+  **三个必须守住的点**：① 缓存键含 `lastModified`，但外部工具若保留原 mtime 改写文件会漏判 —— 所以「刷新」按钮走 `forceFullScan = true` + `clearArchiveCache()`，**这条退路不能删**；② 缓存里的记录对象被 `video.info` **共享引用**，将来任何代码都不许就地修改它，要改就赋新对象；③ 单根目录缓存上限 4000 条，超出整体清空一次（退化成一次性全量，不会出错）。
+- **封面 URL 生命周期**：blob URL 现在由缓存持有、页面卸载时统一 revoke（不再每轮扫描重建）。好处是不再泄漏 objectURL；代价是记录被删或换根目录后，旧 URL 要等到 unload 才释放，超大库长时间开着页面内存占用比以前高。
+- **焦点陷阱**是手写栈（`trapFocus()`），目前注册了 `#confirmBackdrop` 与 `#detailPanel`。**再加第三层浮层时必须把它也注册进去**，否则 Tab 会穿透。
+- **配置导出**绝不能带上目录句柄、B 站数据或错误报告内容（测试会扫导出代码块里有没有这些标识符）。导入只校验结构与枚举值，`CONFIG_VERSION` 升级时需要补迁移。
+- **主题到内容脚本的链路**：扩展页写 `localStorage`（首屏同步防闪色）+ 镜像到 `chrome.storage.local`；`content.js` 读 `chrome.storage` 并监听 `onChanged`。卡片根节点的属性是 `data-bca-theme`，**故意不叫 `data-theme`**——它挂在 B 站页面上，避免和宿主页面的选择器撞车。
+
 ### 交互外壳（4.5.1）
 
 - **主题与语言的悬浮球**：收藏库右下角两个固定球（`.floating-dock`，`position: fixed; z-index: 6`），点开是 `.dock-menu` 浮层。菜单由 `renderDockMenus()` 重建，球的图标跟着 `BcaTheme.current()` 走（`THEME_ICONS` 映射 monitor/sun/moon）。**主题名要翻译**（`跟随系统/白天/夜晚` 是界面文字），**语言名不翻译**（`简体中文/繁體中文/English` 是各语言自称）。

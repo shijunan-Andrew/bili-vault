@@ -1,0 +1,12 @@
+# 换行策略：仓库里统一存 LF，Windows 专用脚本在检出时还原成 CRLF。
+# .bat 是硬要求——CMD 对 LF-only 的批处理并不可靠。
+* text=auto
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.cs  text eol=crlf
+
+# 二进制文件不要做换行转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.mp4 binary

@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.5.2");
+  assert.equal(manifest.version, "4.6.0");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -833,6 +833,84 @@ test("the dark theme only redefines tokens, and both triggers agree", () => {
   assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
 });
 
+/* ------------------------- 4.6 收藏库改造 ------------------------- */
+
+test("the library scans incrementally but always keeps a full-scan escape", () => {
+  const library = readProjectFile("library.js");
+  // 缓存：按根目录隔离 + 以 size/mtime 为键
+  assert.match(library, /new WeakMap\(\)/, "缓存要按根目录 handle 隔离");
+  assert.match(library, /lastModified/, "缓存键必须包含修改时间");
+  assert.match(library, /function clearArchiveCache\(/);
+  assert.match(library, /forceFullScan = true;[\s\S]{0,80}clearArchiveCache\(rootHandle\)/, "刷新按钮必须走强制全量");
+  // 扫描进度
+  assert.match(library, /正在读取 \{done\}\/\{total\}…/);
+  assert.match(library, /本次扫描 \{count\} 条记录，其中 \{reused\} 条直接复用缓存。/);
+});
+
+test("the library filters by collection, uploader and tag", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  for (const id of ["collectionFilter", "collectionFilterEmpty", "upFilter", "tagFilter"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
+  }
+  assert.match(library, /collectionFilterInput\?\.addEventListener\("input"/);
+  assert.match(html, /data-i18n="没有匹配的收藏夹"/);
+  assert.match(html, /id="upFilter"[^>]*data-i18n-aria="按 UP 主筛选"/);
+  assert.match(html, /id="tagFilter"[^>]*data-i18n-aria="按标签筛选"/);
+  // 选项池不能受自身选择影响，否则选中后其它选项会消失
+  assert.match(library, /全部 UP 主/);
+  assert.match(library, /全部标签/);
+});
+
+test("the library is keyboard navigable and traps focus in overlays", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const ARROW_KEYS = new Set\(\["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"\]\)/);
+  assert.match(library, /function trapFocus\(/);
+  assert.match(library, /event\.key === "Escape"/);
+});
+
+test("cards show relative dates and keep the exact time in the tooltip", () => {
+  const library = readProjectFile("library.js");
+  for (const key of ["今天", "昨天", "{count} 天前", "{count} 个月前"]) {
+    assert.ok(library.includes(`BcaI18n.t("${key}"`), `缺少相对时间文案 ${key}`);
+  }
+  assert.match(library, /\.title = /, "完整时间要放进 title");
+});
+
+test("batch refresh reports progress and can list its failures", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /id="failurePanel"/);
+  assert.match(library, /正在更新视频状态 \{counter\}/);
+  assert.match(html, /data-i18n="复制全部"/);
+  // background.js 不许为了这个功能被改
+  assert.equal(/failurePanel/.test(readProjectFile("background.js")), false);
+});
+
+test("settings export never leaks directory handles or archive data", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /导出配置/);
+  assert.match(library, /导入配置/);
+  assert.match(library, /这个文件不是合法的 JSON，无法导入。/);
+  assert.match(library, /这不是哔哩藏库导出的配置文件。/);
+  // 导出内容里绝不能出现目录句柄或 B 站数据
+  const exportBlock = library.slice(library.indexOf("导出配置") - 200, library.indexOf("导出配置") + 2400);
+  for (const forbidden of ["rootHandle", "collectionHandle", "directoryHandle", "cover", "bvid", "upMid"]) {
+    assert.equal(exportBlock.includes(forbidden), false, `导出配置里不该出现 ${forbidden}`);
+  }
+});
+
+test("the theme reaches the content script through chrome.storage", () => {
+  const theme = readProjectFile("theme.js");
+  const content = readProjectFile("content.js");
+  // 内容脚本读不到扩展的 localStorage，必须靠 storage 镜像
+  assert.match(theme, /chrome\?\.storage\?\.local/);
+  assert.match(content, /chrome\.storage\.local/);
+  assert.match(content, /interfaceTheme/);
+  // 卡片根节点的属性名故意避开宿主页面可能用到的 data-theme
+  assert.match(content, /data-bca-theme/);
+  assert.equal(/:host\(\[data-theme=/.test(content), false, "不该再用裸 data-theme 选择器");
+});
 test("the open-source banner is green, scrolling and closable", () => {
   const html = readProjectFile("library.html");
   const css = readProjectFile("library.css");

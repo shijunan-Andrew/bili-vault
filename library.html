@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#00a1d6">
-  <title data-i18n="本地收藏库 · B站收藏信息归档">本地收藏库 · B站收藏信息归档</title>
+  <title>哔哩藏库 · Bili Vault</title>
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="library.css">
   <script src="theme.js"></script>
@@ -24,18 +24,28 @@
 
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="#" aria-label="本地收藏库首页" data-i18n-aria="本地收藏库首页">
+      <a class="brand" href="#" aria-label="哔哩藏库首页" data-i18n-aria="哔哩藏库首页">
         <span class="brand-mark">B</span>
-        <span><strong data-i18n="本地收藏库">本地收藏库</strong><small>LOCAL VIDEO LIBRARY</small></span>
+        <span><strong data-i18n="哔哩藏库">哔哩藏库</strong><small>BILI VAULT</small></span>
       </a>
       <div class="collection-heading">
         <div class="side-label"><span data-icon="collection"></span><span data-i18n="我的收藏夹" style="color: var(--faint); font-weight: 650">我的收藏夹</span> <span id="collectionTotal">—</span><span class="collection-sort-hint" data-i18n="拖动排序">拖动排序</span></div>
       </div>
+      <label class="collection-filter">
+        <span class="icon-slot" data-icon="search"></span>
+        <input id="collectionFilter" type="search" autocomplete="off" placeholder="过滤收藏夹" data-i18n-placeholder="过滤收藏夹">
+      </label>
       <nav id="collectionList" class="collection-list" aria-label="收藏夹" data-i18n-aria="收藏夹"></nav>
+      <p id="collectionFilterEmpty" class="collection-filter-empty" hidden data-i18n="没有匹配的收藏夹">没有匹配的收藏夹</p>
       <button id="createCollection" class="collection-create collection-create-tail" type="button"><span data-icon="plus"></span><span data-i18n="新建收藏夹">新建收藏夹</span></button>
       <div class="sidebar-bottom">
         <div class="privacy-note"><span class="lock-icon" data-icon="shield"></span><span data-i18n-html="归档文件只在本地管理<br>添加视频时向 B 站查询资料">归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
-        <div class="side-version"><span data-i18n="B站收藏信息归档">B站收藏信息归档</span> · <span id="sideVersion">4.5</span></div>
+        <div class="side-version"><span data-i18n="哔哩藏库">哔哩藏库</span> · <span id="sideVersion">4.5</span></div>
+        <div class="config-tools">
+          <button id="exportConfig" class="button button-quiet config-button" type="button"><span data-icon="download"></span><span data-i18n="导出配置">导出配置</span></button>
+          <button id="importConfig" class="button button-quiet config-button" type="button"><span data-icon="file"></span><span data-i18n="导入配置">导入配置</span></button>
+          <input id="configFileInput" type="file" accept="application/json,.json" hidden>
+        </div>
       </div>
     </aside>
 
@@ -122,6 +132,17 @@
               <button id="deleteSelected" class="button button-danger" type="button" disabled><span data-icon="trash"></span><span data-i18n="删除">删除</span></button>
             </div>
           </section>
+          <section id="failurePanel" class="failure-panel" aria-label="最近失败" data-i18n-aria="最近失败" hidden>
+            <div class="failure-head">
+              <span class="failure-title" data-icon="alert"><span data-i18n="最近失败">最近失败</span></span>
+              <div class="failure-tools">
+                <button id="copyFailures" class="text-button" type="button" hidden data-i18n="复制全部">复制全部</button>
+                <button id="toggleFailures" class="text-button" type="button" aria-expanded="false" data-i18n="查看详情">查看详情</button>
+                <button id="clearFailures" class="text-button" type="button" hidden data-i18n="清空">清空</button>
+              </div>
+            </div>
+            <div id="failureList" class="failure-list" role="list" hidden></div>
+          </section>
           <div class="view-controls">
             <label class="search-box">
               <span class="icon-slot" data-icon="search"></span>
@@ -129,6 +150,8 @@
               <kbd>Ctrl K</kbd>
             </label>
             <label class="video-filter"><span data-icon="filter"></span><select id="videoFilter" aria-label="筛选视频" data-i18n-aria="筛选视频"><option value="all" data-i18n="全部视频">全部视频</option><option value="invalid" data-i18n="已失效视频">已失效视频</option><option value="downloaded" data-i18n="已下载视频">已下载视频</option></select></label>
+            <label class="video-filter"><span data-icon="user"></span><select id="upFilter" aria-label="按 UP 主筛选" data-i18n-aria="按 UP 主筛选"><option value="all" data-i18n="全部 UP 主">全部 UP 主</option></select></label>
+            <label class="video-filter"><span data-icon="tag"></span><select id="tagFilter" aria-label="按标签筛选" data-i18n-aria="按标签筛选"><option value="all" data-i18n="全部标签">全部标签</option></select></label>
             <button id="addVideo" class="button button-primary" type="button" disabled><span data-icon="plus"></span><span data-i18n="添加视频">添加视频</span></button>
             <label class="sort-select"><span data-icon="sort"></span><select id="sortSelect" aria-label="排序方式" data-i18n-aria="排序方式"><option value="newest" data-i18n="最近收藏">最近收藏</option><option value="oldest" data-i18n="最早收藏">最早收藏</option><option value="title" data-i18n="标题 A–Z">标题 A–Z</option><option value="views" data-i18n="播放量从高到低">播放量从高到低</option></select></label>
             <div class="view-toggle" role="group" aria-label="显示方式" data-i18n-aria="显示方式">

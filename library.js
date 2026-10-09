@@ -81,6 +81,18 @@ const confirmCollectionActionButton = document.getElementById("confirmCollection
 const selectAllActionTargetsButton = document.getElementById("selectAllActionTargets");
 const clearActionTargetsButton = document.getElementById("clearActionTargets");
 const videoFilterSelect = document.getElementById("videoFilter");
+const upFilterSelect = document.getElementById("upFilter");
+const tagFilterSelect = document.getElementById("tagFilter");
+const collectionFilterInput = document.getElementById("collectionFilter");
+const collectionFilterEmpty = document.getElementById("collectionFilterEmpty");
+const failurePanel = document.getElementById("failurePanel");
+const failureList = document.getElementById("failureList");
+const toggleFailuresButton = document.getElementById("toggleFailures");
+const copyFailuresButton = document.getElementById("copyFailures");
+const clearFailuresButton = document.getElementById("clearFailures");
+const exportConfigButton = document.getElementById("exportConfig");
+const importConfigButton = document.getElementById("importConfig");
+const configFileInput = document.getElementById("configFileInput");
 const batchManageButton = document.getElementById("batchManage");
 const batchToolbar = document.getElementById("batchToolbar");
 const selectedCount = document.getElementById("selectedCount");
@@ -100,7 +112,6 @@ const deleteSelectedButton = document.getElementById("deleteSelected");
 let rootHandle = null;
 let collections = [];
 let selectedCollection = "*";
-let coverUrls = [];
 let toastTimer = 0;
 let pendingDeleteAction = null;
 let deleteInProgress = false;
@@ -108,6 +119,9 @@ let collectionCreateInProgress = false;
 let videoAddInProgress = false;
 let selectionMode = false;
 let videoFilter = "all";
+// 4.6：UP 主 / 标签两个精确筛选，值取自当前范围（纯本地计算，不发请求）
+let upFilter = "all";
+let tagFilter = "all";
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
 let pendingCollectionAction = null;
@@ -125,6 +139,15 @@ let statusRefreshInProgress = false;
 // 顶部“本地收藏夹占用”的递归统计状态：防止重复并发扫描，只保留最后一次请求的根目录
 let storageUsageRunning = false;
 let storageUsageQueuedRoot = null;
+// 4.6：上一次扫描的统计（进度、缓存命中）与当前是否强制全量
+let lastScanInfo = null;
+let scanNoticeRefresh = null;
+let forceFullScan = false;
+// 4.6：最近一次「更新视频状态」的失败项（内存态，刷新页面即清空）
+let refreshFailures = [];
+let failuresExpanded = false;
+// 4.6：非 <dialog> 浮层的焦点陷阱栈，保证 Tab 不会跑到浮层外面
+const focusTraps = [];
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -183,10 +206,9 @@ async function optionalFileHandle(directory, name) {
   }
 }
 
+// 封面 blob: URL 由扫描缓存持有（见 readArchiveRecord），页面卸载时统一 revoke
 async function readCover(fileHandle) {
-  const url = URL.createObjectURL(await fileHandle.getFile());
-  coverUrls.push(url);
-  return url;
+  return URL.createObjectURL(await fileHandle.getFile());
 }
 
 function field(info, key) { return info.fields[key] || ""; }
@@ -295,74 +317,224 @@ function matchDownloadedDirectory(video, index) {
   return BcaArchiveCore.findDownloadMatch(video.collection || "", videoIdentifierKeys(video), index);
 }
 
+/* ---------------- 4.6：增量扫描（按 lastModified + size 的缓存） ----------------
+
+   每次进页面重读全部 视频信息.txt 在大目录上很慢，所以按「文件 lastModified + size」做一层缓存：
+   命中就复用上次解析出来的记录（含已生成的封面 blob: URL），未命中才真的读文件。
+   几条硬要求：
+   1. 缓存**按根目录区分**——用 WeakMap 给每个目录句柄发一个自增 id 当键前缀，换目录必然失效；
+   2. 任何一个文件的 lastModified 或 size 变了就重新读那一个文件，不做整体复用；
+   3. 目录列表本身**每次重新枚举**，所以新增/删除目录一定反映得出来（缓存只省文件读取）；
+   4. 「刷新」按钮走强制全量（clearArchiveCache），缓存出问题时永远有退路；
+   5. 读取失败（权限被撤、文件被占用）不写进缓存，避免把一次偶发失败固化下来。
+   缓存只在内存里，页面关掉就没了，不写 localStorage / chrome.storage。 */
+const ARCHIVE_CACHE_MAX_PER_ROOT = 4000;
+const archiveCache = new Map();        // rootKey -> Map<"收藏夹/目录", entry>
+const lastScanRecordCount = new Map(); // rootKey -> 上次扫描的记录数，用于先给一行 0/N
+const rootKeyIds = new WeakMap();
+let rootKeySeq = 0;
+
+function rootCacheKey(handle) {
+  if (!handle) return "root:none";
+  let id = rootKeyIds.get(handle);
+  if (!id) { id = `root:${++rootKeySeq}`; rootKeyIds.set(handle, id); }
+  return id;
+}
+
+function archiveCacheFor(rootKey) {
+  let store = archiveCache.get(rootKey);
+  if (!store) { store = new Map(); archiveCache.set(rootKey, store); }
+  return store;
+}
+
+function clearArchiveCache(handle) {
+  archiveCache.delete(rootCacheKey(handle));
+}
+
+function cacheEntryFor(store, name, size, lastModified) {
+  const entry = store.get(name);
+  if (!entry || entry.size !== size || entry.lastModified !== lastModified) return null;
+  return entry.record;
+}
+
+function storeCacheEntry(store, name, size, lastModified, record) {
+  if (store.size >= ARCHIVE_CACHE_MAX_PER_ROOT) store.clear();
+  store.set(name, { size, lastModified, record });
+}
+
+// 命中缓存时必须复用同一个 blob: URL：重复 createObjectURL 会不断泄漏内存
+async function recordCover(recordEntry, cachedRecord) {
+  if (cachedRecord) return cachedRecord.cover || "";
+  const coverHandle = await optionalFileHandle(recordEntry, "封面.png");
+  if (!coverHandle) return "";
+  return readCover(coverHandle);
+}
+
+// 读一条归档记录。命中缓存时只取 File 的元数据（不读正文），未命中才 getFile().text()。
+async function readArchiveRecord(collectionName, recordEntry, cache, stats) {
+  const cacheName = `${collectionName}/${recordEntry.name}`;
+  const infoHandle = await optionalFileHandle(recordEntry, "视频信息.txt");
+  if (!infoHandle) return null;
+  const meta = await (await infoHandle.getFile());
+  const cachedRecord = cacheEntryFor(cache, cacheName, meta.size, meta.lastModified);
+  if (cachedRecord) {
+    const cover = await recordCover(recordEntry, cachedRecord);
+    if (cover) {
+      stats.hits += 1;
+      return Object.assign({}, cachedRecord, { cover });
+    }
+  }
+  const raw = await meta.text();
+  if (!raw.includes("【基本信息】")) return null;
+  const info = parseInfo(raw);
+  if (!field(info, "视频标题")) return null;
+  const cover = await recordCover(recordEntry, null);
+  // 没有封面就不是一条合法归档，交给上层按「跳过」处理（和 4.5 的行为一致）
+  if (!cover) return null;
+  const share = splitInfoDescription(info);
+  const record = { info, share, savedAt: field(info, "信息保存于"), cover };
+  storeCacheEntry(cache, cacheName, meta.size, meta.lastModified, record);
+  stats.reads += 1;
+  return record;
+}
+
+function videoFromArchiveRecord(collectionName, recordEntry, record, downloadIndex, previousVideos) {
+  const info = record.info;
+  const share = record.share;
+  const url = field(info, "视频链接");
+  const title = field(info, "视频标题") || recordEntry.name;
+  const date = field(info, "视频收藏时间") || recordEntry.name;
+  const bvid = field(info, "BV号");
+  const aid = field(info, "av号");
+  const id = `${collectionName}/${recordEntry.name}`;
+  const previous = previousVideos.get(id);
+  const downloadState = BcaArchiveCore.downloadStateFromIndex(collectionName, videoIdentifierKeys({ bvid, aid }), downloadIndex, previous);
+  return {
+    id,
+    collection: collectionName,
+    directory: recordEntry.name,
+    title,
+    url: /^https?:\/\//i.test(url) ? url : "",
+    bvid,
+    aid,
+    downloaded: downloadState.downloaded,
+    hasDownloadFiles: downloadState.hasFiles,
+    downloadDirectoryName: downloadState.name,
+    downloadCollectionName: downloadState.collectionName,
+    downloadDirectoryHandle: downloadState.handle,
+    isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
+    upName: field(info, "UP主昵称"),
+    upMid: field(info, "UP主UID"),
+    upHome: field(info, "UP主主页"),
+    upFans: realField(info, "UP主粉丝数"),
+    favoriteAt: date,
+    savedAt: record.savedAt,
+    timestamp: parseDate(date, recordEntry.name),
+    category: field(info, "分区"),
+    duration: field(info, "视频时长"),
+    publishDate: field(info, "视频发布时间"),
+    description: share.description,
+    stats: statsFromInfo(info, share.stats),
+    tags: tagsFromInfo(info),
+    info,
+    cover: record.cover
+  };
+}
+
+/* ---------------- 4.6：扫描进度提示（DOM 写入按帧合并，避免每条记录都触发重排） ---------------- */
+
+function progressNotifier(element, render) {
+  if (!element) return { update() {}, flush() {}, stop() {} };
+  let frame = 0;
+  let hasValue = false;
+  let value = null;
+  const cancel = () => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+  };
+  const paint = () => {
+    frame = 0;
+    if (!hasValue) return;
+    element.textContent = render(value);
+  };
+  return {
+    update(next) { value = next; hasValue = true; if (!frame) frame = requestAnimationFrame(paint); },
+    flush() { cancel(); if (hasValue) element.textContent = render(value); },
+    stop() { cancel(); hasValue = false; }
+  };
+}
+
+function setScanNotice(text) {
+  if (!scanNotice) return;
+  scanNotice.hidden = !text;
+  scanNotice.textContent = text || "";
+}
+
+// displayRoot() 收尾时把「读取进度 + 缓存命中 + 读取失败」拼成一条提示
+function refreshScanNotice() {
+  if (scanNoticeRefresh) { scanNoticeRefresh.flush(); scanNoticeRefresh.stop(); scanNoticeRefresh = null; }
+  const info = lastScanInfo;
+  if (!info) return;
+  const lines = [];
+  if (info.total) lines.push(BcaI18n.t("本次扫描 {count} 条记录，其中 {reused} 条直接复用缓存。", { count: info.total, reused: info.hits }));
+  if (info.issues.length) {
+    lines.push(BcaI18n.t("有 {count} 个目录未能读取：{list}", {
+      count: info.issues.length,
+      list: `${info.issues.slice(0, 4).join("；")}${info.issues.length > 4 ? "；…" : ""}`
+    }));
+  }
+  setScanNotice(lines.join("\n"));
+}
+
 async function scanRoot(handle, preserveDownloadStatuses = true) {
   const scanned = [];
   const issues = [];
   const downloadIndex = await scanDownloadedDirectories(handle);
   const previousVideos = new Map(preserveDownloadStatuses ? allVideos().map((video) => [video.id, video]) : []);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
+  // 强制全量（「刷新」按钮）时先丢掉这个根目录的缓存
+  const cacheKey = rootCacheKey(handle);
+  if (forceFullScan) clearArchiveCache(handle);
+  const cache = archiveCacheFor(cacheKey);
+  const stats = { hits: 0, reads: 0, processed: 0, total: 0 };
+  // 目录列表本身每次重新枚举，缓存只省文件读取，所以新增/删除目录一定反映得出来
+  const collections = [];
   for await (const collectionEntry of handle.values()) {
     if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(collectionEntry.name)) continue;
-    const videos = [];
+    collections.push(collectionEntry);
+  }
+  for (const collectionEntry of collections) {
+    const records = [];
     for await (const recordEntry of collectionEntry.values()) {
-      if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
-      try {
-        const infoHandle = await optionalFileHandle(recordEntry, "视频信息.txt");
-        const coverHandle = await optionalFileHandle(recordEntry, "封面.png");
-        if (!infoHandle || !coverHandle) continue;
-        const raw = await (await infoHandle.getFile()).text();
-        if (!raw.includes("【基本信息】")) continue;
-        const info = parseInfo(raw);
-        if (!field(info, "视频标题")) continue;
-        const share = splitInfoDescription(info);
-        const cover = await readCover(coverHandle);
-        const url = field(info, "视频链接");
-        const title = field(info, "视频标题") || recordEntry.name;
-        const date = field(info, "视频收藏时间") || recordEntry.name;
-        const bvid = field(info, "BV号");
-        const aid = field(info, "av号");
-        const id = `${collectionEntry.name}/${recordEntry.name}`;
-        const previous = previousVideos.get(id);
-        const downloadState = BcaArchiveCore.downloadStateFromIndex(collectionEntry.name, videoIdentifierKeys({ bvid, aid }), downloadIndex, previous);
-        videos.push({
-          id,
-          collection: collectionEntry.name,
-          directory: recordEntry.name,
-          title,
-          url: /^https?:\/\//i.test(url) ? url : "",
-          bvid,
-          aid,
-          downloaded: downloadState.downloaded,
-          hasDownloadFiles: downloadState.hasFiles,
-          downloadDirectoryName: downloadState.name,
-          downloadCollectionName: downloadState.collectionName,
-          downloadDirectoryHandle: downloadState.handle,
-          isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
-          upName: field(info, "UP主昵称"),
-          upMid: field(info, "UP主UID"),
-          upHome: field(info, "UP主主页"),
-          upFans: realField(info, "UP主粉丝数"),
-          favoriteAt: date,
-          savedAt: field(info, "信息保存于"),
-          timestamp: parseDate(date, recordEntry.name),
-          category: field(info, "分区"),
-          duration: field(info, "视频时长"),
-          publishDate: field(info, "视频发布时间"),
-          description: share.description,
-          stats: statsFromInfo(info, share.stats),
-          tags: tagsFromInfo(info),
-          info,
-          cover
-        });
-      } catch (error) {
-        issues.push(`${collectionEntry.name}/${recordEntry.name}：${error.message || BcaI18n.t("读取失败")}`);
-      }
+      if (recordEntry.kind === "directory" && timestampPattern.test(recordEntry.name)) records.push(recordEntry);
     }
-    videos.sort((a, b) => b.timestamp - a.timestamp);
-    scanned.push({ name: collectionEntry.name, videos });
+    stats.total += records.length;
+  }
+  const progress = progressNotifier(scanNotice, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
+  try {
+    for (const collectionEntry of collections) {
+      const videos = [];
+      for await (const recordEntry of collectionEntry.values()) {
+        if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
+        stats.processed += 1;
+        if (stats.processed % 8 === 0) progress.update({ done: stats.processed, total: stats.total });
+        try {
+          const record = await readArchiveRecord(collectionEntry.name, recordEntry, cache, stats);
+          if (!record) continue;
+          videos.push(videoFromArchiveRecord(collectionEntry.name, recordEntry, record, downloadIndex, previousVideos));
+        } catch (error) {
+          issues.push(`${collectionEntry.name}/${recordEntry.name}：${error.message || BcaI18n.t("读取失败")}`);
+        }
+      }
+      videos.sort((a, b) => b.timestamp - a.timestamp);
+      scanned.push({ name: collectionEntry.name, videos });
+    }
+  } finally {
+    progress.flush();
   }
   scanned.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
-  return { collections: scanned, issues };
+  // hits/reads/total 挂在返回值上，界面用它显示「本次命中缓存多少条」
+  return { collections: scanned, issues, stats: { hits: stats.hits, reads: stats.reads, total: stats.total } };
 }
 
 function parseDate(value, fallback) {
@@ -498,14 +670,26 @@ async function restoreCollectionOrder() {
 
 function renderCollections() {
   const total = allVideos().length;
+  const query = collectionFilterInput ? collectionFilterInput.value.trim().toLocaleLowerCase() : "";
+  const visible = query ? collections.filter((item) => item.name.toLocaleLowerCase().includes(query)) : collections;
+  const allLabel = BcaI18n.t("全部收藏");
+  const showAllRow = !query || allLabel.toLocaleLowerCase().includes(query);
   collectionTotal.textContent = String(collections.length);
-  const rows = [{ name: BcaI18n.t("全部收藏"), key: "*", count: total, glyph: "library" }, ...collections.map((item) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: "collection" }))];
+  if (collectionFilterEmpty) collectionFilterEmpty.hidden = !query || visible.length > 0 || showAllRow;
+  // 过滤只是隐藏行，不动 collections 本身：拖动排序与其它逻辑照旧
+  const rows = [
+    ...(showAllRow ? [{ name: allLabel, key: "*", count: total, glyph: "library" }] : []),
+    ...visible.map((item) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: "collection" }))
+  ];
+  // 过滤时会被隐藏的行里可能有焦点，重画前先记下，重画后还给同一个收藏夹
+  const focusedKey = document.activeElement?.dataset?.collectionKey || "";
   collectionList.replaceChildren(...rows.map((row) => {
     const wrapper = document.createElement("div");
     wrapper.className = "collection-row";
     const button = document.createElement("button");
     button.className = `collection-button${selectedCollection === row.key ? " active" : ""}`;
     button.type = "button";
+    button.dataset.collectionKey = row.key;
     button.setAttribute("aria-current", selectedCollection === row.key ? "page" : "false");
     button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${BcaIcons.svg(row.glyph)}</span><span class="collection-name"></span>${row.key === "*" ? "" : `<span class="collection-drag-handle" title="${escapeHtml(BcaI18n.t("按住拖动调整顺序"))}" aria-hidden="true">${BcaIcons.svg("grip")}</span>`}<span class="collection-count tnum">${row.count}</span>`;
     button.querySelector(".collection-name").textContent = row.name;
@@ -535,6 +719,10 @@ function renderCollections() {
     }
     return wrapper;
   }));
+  if (focusedKey) {
+    const target = [...collectionList.querySelectorAll(".collection-button")].find((item) => item.dataset.collectionKey === focusedKey);
+    if (target) target.focus();
+  }
 }
 
 function selectedRecords() {
@@ -609,6 +797,54 @@ function safeCover(cover) {
   return `<img src="${escapeHtml(url)}" alt="" loading="lazy">`;
 }
 
+/* ---------------- 4.6：UP 主 / 标签 精确筛选（纯本地，不发任何请求） ---------------- */
+
+// 出现次数从多到少，同数量按字典序；用于两个下拉的选项顺序
+function countByFrequency(values) {
+  const counts = new Map();
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    counts.set(text, (counts.get(text) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"))
+    .map(([value, count]) => ({ value, count }));
+}
+
+// 选项列表要跟着搜索与 #videoFilter 的筛选结果走，但**不受自己的当前选择影响**——
+// 否则一旦选了某个 UP 主，其它 UP 主就从下拉里消失，再也换不回去。
+function populateSelectOptions(select, options, allLabel, currentValue) {
+  const previous = currentValue ?? select.value;
+  const nodes = [new Option(allLabel, "all")];
+  for (const item of options) nodes.push(new Option(`${item.value}（${item.count}）`, item.value));
+  select.replaceChildren(...nodes);
+  select.value = options.some((item) => item.value === previous) ? previous : "all";
+  return select.value;
+}
+
+function syncVideoFilterOptions(videosForOptions) {
+  if (upFilterSelect) upFilter = populateSelectOptions(upFilterSelect, countByFrequency(videosForOptions.map((video) => video.upName)), BcaI18n.t("全部 UP 主"), upFilter);
+  if (tagFilterSelect) tagFilter = populateSelectOptions(tagFilterSelect, countByFrequency(videosForOptions.flatMap((video) => video.tags)), BcaI18n.t("全部标签"), tagFilter);
+}
+
+// 筛选值以外的条件（搜索 + #videoFilter），用来算下拉选项池
+function matchesBaseFilters(video, query) {
+  if (videoFilter === "invalid" && !video.isInvalid) return false;
+  if (videoFilter === "downloaded" && !video.downloaded) return false;
+  if (!query) return true;
+  return [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags]
+    .join(" ").toLocaleLowerCase().includes(query);
+}
+
+function matchesVideoFilters(video, query) {
+  if (!matchesBaseFilters(video, query)) return false;
+  if (upFilter !== "all" && video.upName !== upFilter) return false;
+  // 标签精确到「整条标签」，不做子串匹配
+  if (tagFilter !== "all" && !video.tags.includes(tagFilter)) return false;
+  return true;
+}
+
 function renderVideos() {
   const collectionName = selectedCollection === "*" ? BcaI18n.t("全部收藏") : selectedCollection;
   currentCollection.textContent = collectionName;
@@ -619,7 +855,8 @@ function renderVideos() {
   addVideoButton.title = selectedCollection === "*" ? BcaI18n.t("请先选择一个收藏夹") : BcaI18n.t("添加视频到“{name}”", { name: selectedCollection });
   videoFilter = videoFilterSelect.value;
   const query = searchInput.value.trim().toLocaleLowerCase();
-  const matching = videos.filter((video) => (videoFilter === "all" || (videoFilter === "invalid" && video.isInvalid) || (videoFilter === "downloaded" && video.downloaded)) && (!query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query)));
+  syncVideoFilterOptions(videos.filter((video) => matchesBaseFilters(video, query)));
+  const matching = videos.filter((video) => matchesVideoFilters(video, query));
   const sort = sortSelect.value;
   // 4.5：按播放量从高到低。没有播放量数据的排在最后（用 -1 而不是 0，
   // 否则“0 播放”会和“没有数据”混在一起），同档再按收藏时间倒序。
@@ -648,7 +885,7 @@ function renderVideos() {
         total: videos.filter((video) => videoFilter === "invalid" ? video.isInvalid : video.downloaded).length,
         kind: videoFilter === "invalid" ? BcaI18n.t("失效") : BcaI18n.t("已下载")
       })
-    : query ? BcaI18n.t("{shown} / {total} 个视频", { shown: matching.length, total: videos.length }) : BcaI18n.t("{count} 个视频", { count: videos.length });
+    : query || upFilter !== "all" || tagFilter !== "all" ? BcaI18n.t("{shown} / {total} 个视频", { shown: matching.length, total: videos.length }) : BcaI18n.t("{count} 个视频", { count: videos.length });
   const pageLabel = pageCount > 1 ? ` · ${BcaI18n.t("第 {page}/{pages} 页", { page: currentPage, pages: pageCount })}` : "";
   resultSummary.textContent = (selectedCollection === "*" ? BcaI18n.t("{count}，来自 {collections} 个收藏夹", { count: countLabel, collections: collections.length }) : countLabel) + pageLabel;
   videoGrid.replaceChildren(...pageVideos.map((video) => {
@@ -676,18 +913,29 @@ function renderVideos() {
     }
     card.querySelector(".card-title").innerHTML = highlightMatches(video.title, query);
     card.querySelector(".card-up").textContent = video.upName || video.bvid || BcaI18n.t("本地收藏视频");
-    card.querySelector(".card-date").textContent = compactDate(video.favoriteAt);
+    // 4.6：卡片上显示相对时间，完整时间放到 title 上（详情面板保持原样）
+    const dateText = relativeTime(video.favoriteAt);
+    const dateCell = card.querySelector(".card-date");
+    dateCell.textContent = dateText;
+    if (dateText) card.title = `${video.favoriteAt}（${compactDate(video.favoriteAt)}）`;
     card.addEventListener("click", (event) => {
-      if (!selectionMode) { openDetail(video); return; }
+      if (!selectionMode) { openDetail(video, card); return; }
       if (event.shiftKey) { selectVideoRange(video.id); return; }
       lastSelectedVideoId = video.id;
       setVideoSelected(video.id, !selectedVideoIds.has(video.id));
     });
     card.addEventListener("keydown", (event) => {
-      if (event.target !== card || (event.key !== "Enter" && event.key !== " ")) return;
-      event.preventDefault();
-      if (selectionMode) setVideoSelected(video.id, !selectedVideoIds.has(video.id));
-      else openDetail(video);
+      if (event.target !== card) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (selectionMode) setVideoSelected(video.id, !selectedVideoIds.has(video.id));
+        else openDetail(video, card);
+        return;
+      }
+      // 4.6：方向键在卡片间移动焦点。左右按顺序走，上下按当前列数跳行；
+      // 输入框/下拉框里的事件不会走到这里（event.target !== card）。
+      if (!ARROW_KEYS.has(event.key)) return;
+      if (moveCardFocus(event.key)) event.preventDefault();
     });
     return card;
   }));
@@ -711,6 +959,32 @@ function renderVideos() {
 }
 
 /* ---------------- 4.1：分页与视图切换 ---------------- */
+
+// 4.6：卡片方向键导航。网格列数是自适应的（auto-fill），所以从实际布局算：
+// 统计与第一张卡片同一 offsetTop 的卡片数就是列数；竖列视图自然是 1 列。
+const ARROW_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
+
+function moveCardFocus(key) {
+  const cards = [...videoGrid.querySelectorAll(".video-card")];
+  if (cards.length < 2) return false;
+  const current = cards.indexOf(document.activeElement);
+  if (current < 0) return false;
+  const top = cards[0].offsetTop;
+  let columns = 0;
+  while (columns < cards.length && cards[columns].offsetTop === top) columns += 1;
+  if (columns < 1) columns = 1;
+  let target = current;
+  if (key === "ArrowLeft") target = current - 1;
+  else if (key === "ArrowRight") target = current + 1;
+  else if (key === "ArrowUp") target = current - columns;
+  else if (key === "ArrowDown") target = current + columns;
+  else if (key === "Home") target = 0;
+  else if (key === "End") target = cards.length - 1;
+  if (target < 0 || target >= cards.length || target === current) return false;
+  cards[target].focus();
+  cards[target].scrollIntoView({ block: "nearest" });
+  return true;
+}
 
 function renderPager(total) {
   if (!videoPager) return;
@@ -843,6 +1117,129 @@ async function restoreViewSettings() {
   } catch (_) {}
 }
 
+/* ---------------- 4.6：配置导出 / 导入 ----------------
+
+   只导出「界面偏好」：主题、语言、每页数量、视图模式、收藏夹排序，以及当前这一页的
+   筛选偏好。**绝不导出**目录授权句柄（IndexedDB 里的 rootHandle / downloadFolder）、
+   任何 B 站数据、任何错误报告内容，也不做除用户点选之外的文件访问。 */
+const CONFIG_APP_ID = "bili-vault/library-settings";
+const CONFIG_VERSION = 1;
+// 配置文件的显示名：里面是给机器/人读的英文标识，不进词典（不是界面文字）
+const CONFIG_NAME = "Bili Vault · library settings";
+
+function currentFilterPreferences() {
+  return {
+    search: searchInput?.value || "",
+    videoFilter: videoFilterSelect?.value || "all",
+    upFilter,
+    tagFilter,
+    sort: sortSelect?.value || "newest"
+  };
+}
+
+function buildConfigPayload() {
+  return {
+    app: CONFIG_APP_ID,
+    version: CONFIG_VERSION,
+    name: CONFIG_NAME,
+    exportedAt: new Date().toISOString(),
+    preferences: {
+      theme: BcaTheme.current(),
+      locale: BcaI18n.locale(),
+      pageSize,
+      viewMode,
+      collectionOrder: [...collectionOrder],
+      filters: currentFilterPreferences()
+    }
+  };
+}
+
+function downloadConfigFile() {
+  try {
+    const payload = buildConfigPayload();
+    // 带 BOM，Windows 记事本打开也不会乱码
+    const blob = new Blob([`\ufeff${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `bili-vault-config-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    showToast(BcaI18n.t("配置已导出。"));
+  } catch (error) {
+    showToast(BcaI18n.t("导出配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
+  }
+}
+
+// 导入前逐项校验：任何一项不认识就退回默认值，不让坏文件把界面写成空白
+function sanitizeConfigPreferences(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const filters = source.filters && typeof source.filters === "object" ? source.filters : {};
+  const pageSizeValue = Number(source.pageSize);
+  const search = typeof filters.search === "string" ? filters.search.slice(0, 200) : "";
+  const videoFilterValue = ["all", "invalid", "downloaded"].includes(filters.videoFilter) ? filters.videoFilter : "all";
+  const sortValue = ["newest", "oldest", "title", "views"].includes(filters.sort) ? filters.sort : "newest";
+  return {
+    theme: BcaTheme.isSupported(source.theme) ? source.theme : null,
+    locale: BcaI18n.isSupported(source.locale) ? source.locale : null,
+    pageSize: PAGE_SIZES.includes(pageSizeValue) ? pageSizeValue : null,
+    viewMode: source.viewMode === "list" || source.viewMode === "grid" ? source.viewMode : null,
+    collectionOrder: Array.isArray(source.collectionOrder) ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500) : [],
+    filters: {
+      search,
+      videoFilter: videoFilterValue,
+      upFilter: typeof filters.upFilter === "string" ? filters.upFilter : "all",
+      tagFilter: typeof filters.tagFilter === "string" ? filters.tagFilter : "all",
+      sort: sortValue
+    }
+  };
+}
+
+async function applyConfigPreferences(preferences, rawOrder) {
+  // 主题存 localStorage（theme.js 要同步读它防闪色），所以这里调 BcaTheme.use 而不是写 chrome.storage
+  if (preferences.theme) BcaTheme.use(preferences.theme);
+  if (preferences.locale) await BcaI18n.use(preferences.locale);
+  if (preferences.pageSize) pageSize = preferences.pageSize;
+  if (preferences.viewMode) viewMode = preferences.viewMode;
+  // 收藏夹排序只在配置里带了排序、且本机确实有这些收藏夹时才写，
+  // 否则会把用户现有的顺序覆盖成一份对不上的清单
+  if (rawOrder.length && collections.some((collection) => rawOrder.includes(collection.name))) {
+    collectionOrder = rawOrder;
+    try { await chrome.storage.local.set({ collectionOrder }); } catch (_) {}
+  }
+  searchInput.value = preferences.filters.search;
+  videoFilterSelect.value = preferences.filters.videoFilter;
+  videoFilter = videoFilterSelect.value;
+  upFilter = preferences.filters.upFilter;
+  tagFilter = preferences.filters.tagFilter;
+  sortSelect.value = preferences.filters.sort;
+  saveViewSettings();
+  applyViewMode();
+  resetPaging();
+}
+
+async function importConfigFromText(text) {
+  let payload;
+  try {
+    // 导出时写了 BOM，这里去掉再解析
+    payload = JSON.parse(String(text || "").replace(/^\ufeff/, ""));
+  } catch (_) {
+    throw new Error(BcaI18n.t("这个文件不是合法的 JSON，无法导入。"));
+  }
+  if (!payload || typeof payload !== "object" || payload.app !== CONFIG_APP_ID) {
+    throw new Error(BcaI18n.t("这不是哔哩藏库导出的配置文件。"));
+  }
+  const preferences = sanitizeConfigPreferences(payload.preferences);
+  const rawOrder = Array.isArray(payload.preferences?.collectionOrder) ? preferences.collectionOrder : [];
+  // upFilter / tagFilter 指向的 UP 主或标签可能已经不在本地库里，扫描后统一落回「全部」
+  await applyConfigPreferences(preferences, rawOrder);
+  if (rootHandle) await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已导入配置"));
+  else { renderCollections(); renderVideos(); }
+}
+
+
 /* ---------------- 4.4：更新视频状态 ---------------- */
 
 // 4.5：「更新视频状态」从页面标题栏移到视频详情里，一次只刷新当前这一条，
@@ -856,6 +1253,126 @@ const STATUS_BATCH_LIMIT = 80;
 let statusPendingTargets = [];
 let statusPendingSource = "detail";
 let statusShowingResult = false;
+// 4.6：后台每条都会回一次 bca-status-progress，这里记住「第几条」好拼成本地化的 N/M
+let statusProgressState = { done: 0, total: 0, title: "" };
+
+function resetStatusProgress() {
+  statusProgressState = { done: 0, total: 0, title: "" };
+}
+
+// 后台的进度文案固定是中文（service worker 不参与多语言），所以只从里面取出
+// 已经算好的「3/20」与标题，再用本地语言重新拼一遍；取不到就原样显示。
+function statusProgressText(state) {
+  const counter = state.done && state.total ? `${state.done}/${state.total}` : "";
+  if (!counter) return state.title || "";
+  return state.title
+    ? BcaI18n.t("正在更新视频状态 {counter}：{title}", { counter, title: state.title })
+    : BcaI18n.t("正在更新视频状态 {counter}…", { counter });
+}
+
+function applyStatusProgress(message) {
+  const text = String(message?.text || "");
+  const match = text.match(/(\d+)\s*\/\s*(\d+)/);
+  if (match) {
+    statusProgressState.done = Number(match[1]);
+    statusProgressState.total = Number(match[2]);
+    const rest = text.slice((match.index || 0) + match[0].length).replace(/^[\s：:]+/, "").trim();
+    if (rest) statusProgressState.title = rest;
+  } else if (text) {
+    statusProgressState.title = text;
+  }
+  statusConfirmProgress.hidden = false;
+  statusConfirmProgress.textContent = statusProgressText(statusProgressState);
+}
+
+/* ---------------- 4.6：最近一次失败的记录 ----------------
+
+   以前失败要去 001错误报告/*.txt 里翻。这里把 bca-refresh-video-stats 的返回值
+   收成一份可读清单（有 failures 数组就用它，没有就退回 reportPath 提示）。
+   **不修改 background.js**：两种返回结构都兼容。 */
+function normalizeFailureEntry(entry) {
+  if (entry && typeof entry === "object") {
+    const collection = String(entry.collection || entry.collectionName || "").trim();
+    const directory = String(entry.directory || entry.directoryName || "").trim();
+    const name = String(entry.name || entry.title || entry.path || `${collection}/${directory}`.replace(/^\/+|\/+$/g, "")).trim();
+    const message = String(entry.message || entry.error || entry.reason || "").trim();
+    return { name, message, text: message ? `${name}：${message}` : name };
+  }
+  const text = String(entry || "").trim();
+  const [name, ...rest] = text.split(/[：:]/);
+  return { name: name.trim(), message: rest.join("：").trim(), text };
+}
+
+function setRefreshFailures(entries, reportPath = "") {
+  const stamp = Date.now();
+  const seen = new Set();
+  refreshFailures = [];
+  for (const entry of entries) {
+    const failure = normalizeFailureEntry(entry);
+    if (!failure.text || seen.has(failure.text)) continue;
+    seen.add(failure.text);
+    refreshFailures.push({ ...failure, reportPath: String(reportPath || ""), at: stamp });
+  }
+  renderFailures();
+}
+
+// 后台没有回 failures 数组时至少还有报告文件路径，用它给个提示（不改 background.js）
+function lastReportPath() {
+  return refreshFailures.find((failure) => failure.reportPath)?.reportPath || "";
+}
+
+function failureLines() {
+  const lines = refreshFailures.map((failure) => failure.text);
+  const reportPath = lastReportPath();
+  if (reportPath) lines.push(BcaI18n.t("完整报告：{path}", { path: reportPath }));
+  return lines;
+}
+
+function renderFailures() {
+  if (!failurePanel) return;
+  // 只看「最近一次」：清空或下一次成功刷新后入口就消失
+  const hasEntries = refreshFailures.length > 0;
+  const reportPath = lastReportPath();
+  failurePanel.hidden = !hasEntries && !reportPath;
+  if (failurePanel.hidden) return;
+  const rows = refreshFailures.map((failure) => {
+    const row = document.createElement("div");
+    row.className = "failure-row";
+    row.setAttribute("role", "listitem");
+    const path = document.createElement("span");
+    path.className = "failure-row-path";
+    path.textContent = failure.name;
+    row.append(path);
+    if (failure.message) {
+      const message = document.createElement("span");
+      message.className = "failure-row-message";
+      message.textContent = failure.message;
+      row.append(message);
+    }
+    return row;
+  });
+  failureList.replaceChildren(...rows);
+  if (reportPath) {
+    const note = document.createElement("p");
+    note.className = "failure-note";
+    note.textContent = BcaI18n.t("完整报告：{path}", { path: reportPath });
+    failureList.append(note);
+  }
+  // 少于三条时不值得再折叠一层，直接摊开（列表本身仍可滚动）
+  const collapsible = refreshFailures.length >= 3;
+  failureList.hidden = collapsible && !failuresExpanded;
+  toggleFailuresButton.hidden = !collapsible;
+  toggleFailuresButton.setAttribute("aria-expanded", String(failuresExpanded));
+  toggleFailuresButton.textContent = failuresExpanded ? BcaI18n.t("收起") : BcaI18n.t("查看详情");
+  clearFailuresButton.hidden = refreshFailures.length < 1;
+  copyFailuresButton.hidden = !hasEntries && !reportPath;
+}
+
+function clearRefreshFailures() {
+  refreshFailures = [];
+  failuresExpanded = false;
+  renderFailures();
+}
 
 function statusDetailText(result) {
   if (result.markedInvalid) return BcaI18n.t("解析发现已失效：已保留原有资料，只标记为已失效。");
@@ -887,6 +1404,7 @@ function openStatusConfirm(videos, source) {
   statusPendingTargets = targets;
   statusPendingSource = source;
   statusShowingResult = false;
+  resetStatusProgress();
   const capped = Math.min(targets.length, STATUS_BATCH_LIMIT);
   statusConfirmCount.textContent = BcaI18n.t("本次将更新 {count} 条记录。", { count: capped });
   statusConfirmMore.hidden = targets.length <= capped;
@@ -913,6 +1431,7 @@ async function runStatusRefresh() {
   statusConfirmGo.disabled = true;
   statusConfirmCancel.disabled = true;
   statusConfirmGo.textContent = BcaI18n.t("正在更新…");
+  resetStatusProgress();
   statusConfirmProgress.hidden = false;
   statusConfirmProgress.textContent = BcaI18n.t("正在请求 B 站接口，请勿关闭页面…");
   if (detailButton) detailButton.disabled = true;
@@ -927,13 +1446,18 @@ async function runStatusRefresh() {
     const summary = targets.length === 1 ? statusDetailText(result) : statusSummaryText(result);
     const remaining = Number(result.remaining) || 0;
     statusConfirmProgress.textContent = summary + (remaining ? BcaI18n.t("还有 {count} 条没处理，可以再点一次继续。", { count: remaining }) : "");
+    // 有失败就列出来；后台只回 reportPath 时也能用它提示，不用去翻 001错误报告
+    const failures = Array.isArray(result.failures) ? result.failures : [];
+    if (failures.length || result.reportPath) setRefreshFailures(failures, result.reportPath || "");
+    else clearRefreshFailures();
     statusShowingResult = true;
     statusConfirmGo.textContent = BcaI18n.t("完成");
     await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已刷新"));
     if (anchorId) {
       const refreshed = allVideos().find((item) => item.id === anchorId);
       if (refreshed) {
-        openDetail(refreshed);
+        // displayRoot 已经重画过页面，这里再开详情不要再叠一层焦点陷阱
+        openDetail(refreshed, null, { trap: false });
         const again = detailContent.querySelector(".detail-refresh-status");
         if (again) { again.hidden = false; again.textContent = summary; }
       }
@@ -941,6 +1465,7 @@ async function runStatusRefresh() {
   } catch (error) {
     statusConfirmProgress.textContent = BcaI18n.t("更新失败：{message}", { message: error?.message || BcaI18n.t("未知错误") });
     statusConfirmGo.textContent = BcaI18n.t("重试");
+    setRefreshFailures([{ name: source === "batch" ? BcaI18n.t("批量更新视频状态") : (detailVideo()?.title || BcaI18n.t("更新视频状态")), message: error?.message || BcaI18n.t("未知错误") }]);
   } finally {
     statusRefreshInProgress = false;
     statusConfirmGo.disabled = false;
@@ -1001,6 +1526,39 @@ function dismissImportHint() {
 function compactDate(value) {
   const match = value.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
   return match ? `${match[1]}.${String(match[2]).padStart(2, "0")}.${String(match[3]).padStart(2, "0")}` : value;
+}
+
+// 4.6：卡片上的日期改成相对时间（今天 / 昨天 / 3 天前 / 2 个月前 / 2025.03），
+// 完整时间放在卡片 title 上；详情面板仍用 视频收藏时间 原文。
+// 按「自然日」而不是 24 小时算，所以今天 00:30 与昨天 23:30 差 1 天而不是 0 天。
+function startOfDay(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function relativeDayLabel(date) {
+  const today = startOfDay(new Date());
+  const target = startOfDay(date);
+  if (!target) return "";
+  const days = Math.round((today.getTime() - target.getTime()) / 86400000);
+  if (days <= 0) return BcaI18n.t("今天");
+  if (days === 1) return BcaI18n.t("昨天");
+  if (days < 30) return BcaI18n.t("{count} 天前", { count: days });
+  return BcaI18n.t("{count} 个月前", { count: Math.max(1, Math.round(days / 30)) });
+}
+
+// 卡片上的相对时间：今天 / 昨天 / N 天前 / N 个月前 / 超过一年时只到月份（2025.03）
+function relativeTime(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒)?/);
+  // 不是归档里的中文时间格式（异常值）就退回 2026.10.09，至少不显示空白
+  if (!match) return compactDate(text);
+  const date = new Date(+match[1], +match[2] - 1, +match[3], +(match[4] || 0), +(match[5] || 0), +(match[6] || 0));
+  const days = Math.round((startOfDay(new Date()).getTime() - startOfDay(date).getTime()) / 86400000);
+  if (days >= 365) return `${match[1]}.${String(match[2]).padStart(2, "0")}`;
+  return relativeDayLabel(date);
 }
 
 // extra 用来在值后面追加徽标等附加内容（例如 UP 主那一行的粉丝数）
@@ -1101,6 +1659,58 @@ async function copyToClipboard(text, successMessage) {
   }
 }
 
+/* ---------------- 4.6：非 <dialog> 浮层的焦点陷阱 ----------------
+
+   showModal() 的 <dialog> 浏览器自带焦点限制，不用管；
+   但 #confirmBackdrop 与详情面板是普通 div 浮层，不补的话 Tab 会跑到背后的页面上。
+   这里做一个最小的陷阱栈：打开时把焦点移进去、Tab 循环限制在浮层内、关闭后还给触发它的元素。 */
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+function focusableWithin(container) {
+  if (!container) return [];
+  return [...container.querySelectorAll(FOCUSABLE_SELECTOR)].filter((element) => {
+    if (element.hidden) return false;
+    if (element.closest("[hidden]")) return false;
+    // 没有布局盒子的元素（display:none）也拿不到焦点
+    return element.offsetWidth > 0 || element.offsetHeight > 0 || element.getClientRects().length > 0;
+  });
+}
+
+function trapFocus(container, preferred, restoreTo) {
+  if (!container || focusTraps.some((trap) => trap.container === container)) return;
+  const trap = { container, restoreTo: restoreTo || document.activeElement, keydown: null };
+  focusTraps.push(trap);
+  const first = preferred && !preferred.hidden && preferred.offsetParent !== null ? preferred : (focusableWithin(container)[0] || container);
+  if (first === container && !container.hasAttribute("tabindex")) container.setAttribute("tabindex", "-1");
+  try { first.focus(); } catch (_) {}
+  trap.keydown = (event) => {
+    if (event.key !== "Tab" || focusTraps[focusTraps.length - 1] !== trap) return;
+    const items = focusableWithin(trap.container);
+    if (!items.length) { event.preventDefault(); return; }
+    const index = items.indexOf(document.activeElement);
+    // 焦点已经跑出浮层时，Tab 也拉回列表里，而不是放它继续往外走
+    if (index < 0) {
+      event.preventDefault();
+      (event.shiftKey ? items[items.length - 1] : items[0]).focus();
+      return;
+    }
+    if (event.shiftKey && index === 0) { event.preventDefault(); items[items.length - 1].focus(); }
+    else if (!event.shiftKey && index === items.length - 1) { event.preventDefault(); items[0].focus(); }
+  };
+  container.addEventListener("keydown", trap.keydown);
+}
+
+function releaseFocusTrap(container) {
+  const index = focusTraps.findIndex((trap) => trap.container === container);
+  if (index < 0) return;
+  const [trap] = focusTraps.splice(index, 1);
+  if (trap.keydown) container.removeEventListener("keydown", trap.keydown);
+  const restoreTo = trap.restoreTo;
+  if (restoreTo && document.contains(restoreTo) && typeof restoreTo.focus === "function") {
+    try { restoreTo.focus(); } catch (_) {}
+  }
+}
+
 function copyFieldButton(value, label) {
   const button = document.createElement("button");
   button.type = "button";
@@ -1190,7 +1800,9 @@ function openDownloadInterface(videos) {
   });
 }
 
-function openDetail(video) {
+// restoreTo：关闭后焦点还给它（通常是触发它的那张卡片）；
+// options.trap = false 用于「重画后重新打开同一个详情」，避免叠加第二层焦点陷阱。
+function openDetail(video, restoreTo, options = {}) {
   detailPanel.classList.toggle("invalid-video", video.isInvalid);
   const rows = [];
   addField(rows, BcaI18n.t("收藏时间"), video.favoriteAt);
@@ -1257,7 +1869,9 @@ function openDetail(video) {
   detailPanel.setAttribute("aria-hidden", "false");
   detailBackdrop.hidden = false;
   document.body.style.overflow = "hidden";
-  closeDetailButton.focus();
+  // 详情面板不是 <dialog>，Tab 得自己限制在里面；关闭后焦点回到触发它的卡片
+  if (options.trap === false) closeDetailButton.focus();
+  else trapFocus(detailPanel, closeDetailButton, restoreTo);
 }
 
 const NATIVE_HOST_NAME = "com.bcatch.folder_opener";
@@ -1359,11 +1973,18 @@ async function copyDownloadPath(video) {
 function closeDetail() {
   if (deleteInProgress) return;
   closeDeleteConfirmation();
+  releaseFocusTrap(detailPanel);
   detailPanel.classList.remove("open");
   detailPanel.classList.remove("invalid-video");
   detailPanel.setAttribute("aria-hidden", "true");
   detailBackdrop.hidden = true;
   document.body.style.overflow = "";
+}
+
+// 确认弹层（#confirmBackdrop）也是普通 div 浮层，四个入口共用一套打开/关闭逻辑
+function openConfirmBackdrop() {
+  confirmBackdrop.hidden = false;
+  trapFocus(confirmBackdrop, confirmDeleteButton, document.activeElement);
 }
 
 function askToDeleteVideo(video) {
@@ -1373,8 +1994,7 @@ function askToDeleteVideo(video) {
   confirmDeleteButton.textContent = BcaI18n.t("删除本地文件");
   deleteDownloadsOption.hidden = !video.hasDownloadFiles;
   deleteAssociatedDownloads.checked = false;
-  confirmBackdrop.hidden = false;
-  confirmDeleteButton.focus();
+  openConfirmBackdrop();
 }
 
 function askToDeleteCollection(collection) {
@@ -1385,8 +2005,7 @@ function askToDeleteCollection(collection) {
   confirmDeleteButton.textContent = BcaI18n.t("删除收藏夹");
   deleteDownloadsOption.hidden = !collection.videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
-  confirmBackdrop.hidden = false;
-  confirmDeleteButton.focus();
+  openConfirmBackdrop();
 }
 
 function askToDeleteBatch(videos) {
@@ -1397,12 +2016,12 @@ function askToDeleteBatch(videos) {
   confirmDeleteButton.textContent = BcaI18n.t("删除 {count} 个视频", { count: videos.length });
   deleteDownloadsOption.hidden = !videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
-  confirmBackdrop.hidden = false;
-  confirmDeleteButton.focus();
+  openConfirmBackdrop();
 }
 
 function closeDeleteConfirmation() {
   if (deleteInProgress) return;
+  releaseFocusTrap(confirmBackdrop);
   confirmBackdrop.hidden = true;
   deleteDownloadsOption.hidden = true;
   deleteAssociatedDownloads.checked = false;
@@ -1939,11 +2558,23 @@ collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInP
 videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
 
 async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n.t("已读取")) {
-  for (const url of coverUrls) URL.revokeObjectURL(url);
-  coverUrls = [];
+  // 封面 blob: URL 现在跟着缓存条目走，这里不再整批 revoke —— 缓存未命中的条目
+  // 会在下次扫描时被新 URL 取代，复用中的条目则必须保留原来的 URL。
   const preserveDownloadStatuses = rootHandle === handle;
   rootHandle = handle;
+  // 先按上一次的记录数给一行「正在读取 0/43…」，别让界面在这次扫描期间完全没反应
+  lastScanInfo = null;
+  scanNoticeRefresh = progressNotifier(scanNotice, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
+  scanNoticeRefresh.update({ done: 0, total: lastScanRecordCount.get(rootCacheKey(handle)) || 0 });
   const result = await scanRoot(handle, preserveDownloadStatuses);
+  forceFullScan = false;
+  lastScanInfo = {
+    hits: result.stats?.hits || 0,
+    reads: result.stats?.reads || 0,
+    total: result.stats?.total || 0,
+    issues: result.issues
+  };
+  if (result.stats?.total) lastScanRecordCount.set(rootCacheKey(handle), result.stats.total);
   collections = applyCollectionOrder(result.collections);
   const existingVideoIds = new Set(allVideos().map((video) => video.id));
   for (const id of selectedVideoIds) if (!existingVideoIds.has(id)) selectedVideoIds.delete(id);
@@ -1951,8 +2582,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   setDynamicText(rootLabel, handle.name);
   statusDot.classList.add("ready");
   refreshLibraryButton.disabled = false;
-  scanNotice.hidden = result.issues.length === 0;
-  scanNotice.textContent = result.issues.length ? BcaI18n.t("有 {count} 个目录未能读取：{list}", { count: result.issues.length, list: `${result.issues.slice(0, 4).join("；")}${result.issues.length > 4 ? "；…" : ""}` }) : "";
+  // 扫描期间的「正在读取 N/M…」在这里收尾，换成缓存命中统计与读取失败清单
+  refreshScanNotice();
   welcome.hidden = true;
   library.hidden = false;
   renderCollections();
@@ -2022,13 +2653,17 @@ async function refreshCurrentRoot() {
   if (!rootHandle) { showToast(BcaI18n.t("请先选择本地收藏根目录。")); return; }
   const collectionToKeep = selectedCollection;
   setBusy(true, "refreshing");
+  // 「刷新」按强制全量走：清掉这个根目录的缓存并重新读所有文件。
+  // 增量缓存一旦出问题（文件时间戳被外部工具改写、内容被手工编辑过），这里是退路。
+  forceFullScan = true;
+  clearArchiveCache(rootHandle);
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "read" });
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录读取权限。"));
     await displayRoot(rootHandle, collectionToKeep, BcaI18n.t("已刷新"));
   } catch (error) {
     if (error?.name !== "AbortError") showToast(BcaI18n.t("刷新失败：{message}", { message: error?.message || BcaI18n.t("无法读取本地目录。") }));
-  } finally { setBusy(false); }
+  } finally { forceFullScan = false; setBusy(false); }
 }
 
 async function chooseAndScan() {
@@ -2125,6 +2760,46 @@ function themeLabel(id) {
   return BcaI18n.t("跟随系统");
 }
 
+// 4.6：键盘操作悬浮球菜单——↑↓ 在选项间移动、Home/End 跳首尾、Enter/Space 选中、
+// Esc 关闭并把焦点还给球。选中态本来就是 aria-checked，这里不另造状态。
+function dockMenuOptions(menu) {
+  return [...menu.querySelectorAll('button[role="menuitemradio"]')];
+}
+
+function moveDockMenuFocus(menu, key) {
+  const options = dockMenuOptions(menu);
+  if (!options.length) return false;
+  const current = options.indexOf(document.activeElement);
+  if (key === "Home") { options[0].focus(); return true; }
+  if (key === "End") { options[options.length - 1].focus(); return true; }
+  if (key === "ArrowDown") { options[current < 0 ? 0 : (current + 1) % options.length].focus(); return true; }
+  if (key === "ArrowUp") { options[current < 0 ? options.length - 1 : (current - 1 + options.length) % options.length].focus(); return true; }
+  return false;
+}
+
+function activeDockMenu() {
+  if (themeMenu && !themeMenu.hidden) return { menu: themeMenu, ball: themeBall };
+  if (localeMenu && !localeMenu.hidden) return { menu: localeMenu, ball: localeBall };
+  return null;
+}
+
+function handleDockMenuKeydown(event) {
+  const active = activeDockMenu();
+  if (!active) return;
+  // 输入框/下拉框里的方向键属于光标与选项，不能被菜单抢走
+  if (event.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
+  if (event.key === "Escape") { event.preventDefault(); closeDockMenus(); active.ball.focus(); return; }
+  if (event.key === "Tab") { closeDockMenus(); return; }
+  const option = event.target.closest?.('button[role="menuitemradio"]');
+  if ((event.key === "Enter" || event.key === " ") && option && active.menu.contains(option)) {
+    event.preventDefault();
+    option.click();
+    return;
+  }
+  if (!event.key.startsWith("Arrow") && event.key !== "Home" && event.key !== "End") return;
+  if (moveDockMenuFocus(active.menu, event.key)) event.preventDefault();
+}
+
 function closeDockMenus(except) {
   for (const [ball, menu] of [[themeBall, themeMenu], [localeBall, localeMenu]]) {
     if (menu === except) continue;
@@ -2138,6 +2813,12 @@ function toggleDockMenu(ball, menu) {
   closeDockMenus(menu);
   menu.hidden = !open;
   ball.setAttribute("aria-expanded", String(open));
+  // 打开后把焦点交给当前选中项（没有就交给第一项），键盘用户不用先 Tab 进去
+  if (open) {
+    const options = dockMenuOptions(menu);
+    const checked = options.find((option) => option.getAttribute("aria-checked") === "true");
+    (checked || options[0])?.focus();
+  }
 }
 
 function buildDockMenu(menu, entries, currentId, onPick) {
@@ -2155,6 +2836,14 @@ function buildDockMenu(menu, entries, currentId, onPick) {
     });
     return button;
   }));
+}
+
+// 选中态就地刷新，不重建按钮：重建会把键盘焦点弄丢（切主题时 onChange 又会重画一次）
+function syncDockMenuChecked(menu, currentId) {
+  if (!menu) return;
+  for (const option of dockMenuOptions(menu)) {
+    option.setAttribute("aria-checked", String(option.dataset.value === currentId));
+  }
 }
 
 function renderDockMenus() {
@@ -2175,6 +2864,8 @@ function renderDockMenus() {
   themeBallIcon.setAttribute("data-icon", THEME_ICONS[BcaTheme.current()] || "monitor");
   themeBallIcon.dataset.iconReady = "";
   BcaIcons.hydrate(themeBallIcon.parentElement);
+  syncDockMenuChecked(themeMenu, BcaTheme.current());
+  syncDockMenuChecked(localeMenu, BcaI18n.locale());
 }
 
 renderDockMenus();
@@ -2182,6 +2873,10 @@ themeBall.addEventListener("click", (event) => { event.stopPropagation(); toggle
 localeBall.addEventListener("click", (event) => { event.stopPropagation(); toggleDockMenu(localeBall, localeMenu); });
 themeMenu.addEventListener("click", (event) => event.stopPropagation());
 localeMenu.addEventListener("click", (event) => event.stopPropagation());
+themeMenu.addEventListener("keydown", handleDockMenuKeydown);
+localeMenu.addEventListener("keydown", handleDockMenuKeydown);
+// 菜单打开时焦点在菜单里，事件不会冒泡到 document，所以这里只是补一层兜底
+document.addEventListener("keydown", handleDockMenuKeydown);
 document.addEventListener("click", () => closeDockMenus());
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDockMenus(); });
 
@@ -2198,8 +2893,10 @@ function relabelAfterLocaleChange() {
   renderDockMenus();
   renderCollections();
   renderVideos();
+  renderFailures();
   const current = detailVideo();
-  if (current) openDetail(current);
+  // 详情重开时不要再叠一层焦点陷阱
+  if (current) openDetail(current, null, { trap: false });
 }
 BcaI18n.onChange(() => relabelAfterLocaleChange());
 videoFilterSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
@@ -2208,13 +2905,26 @@ viewGridButton?.addEventListener("click", () => setViewMode("grid"));
 viewListButton?.addEventListener("click", () => setViewMode("list"));
 
 
-// 4.4：更新状态时的进度回报
+// 4.4：更新状态时的进度回报。4.6 起同时把它接到确认框的进度行上（N/M），
+// 批量更新时用户不用再盯着详情面板里那一行小字。
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "bca-status-progress") return;
+  if (!statusRefreshInProgress) return;
   const status = detailContent.querySelector(".detail-refresh-status");
-  if (status && statusRefreshInProgress) { status.hidden = false; status.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在更新…"); }
+  if (status) { status.hidden = false; status.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在更新…"); }
+  applyStatusProgress(message);
 });
 dismissImportHintButton?.addEventListener("click", dismissImportHint);
+toggleFailuresButton?.addEventListener("click", () => {
+  failuresExpanded = !failuresExpanded;
+  renderFailures();
+});
+copyFailuresButton?.addEventListener("click", () => copyToClipboard(failureLines().join("\n"), BcaI18n.t("已复制失败清单。")));
+clearFailuresButton?.addEventListener("click", () => clearRefreshFailures());
+collectionFilterInput?.addEventListener("input", () => renderCollections());
+collectionFilterInput?.addEventListener("keydown", (event) => { if (event.key === "Escape") { collectionFilterInput.value = ""; renderCollections(); } });
+upFilterSelect?.addEventListener("change", () => { upFilter = upFilterSelect.value; resetPaging(); renderVideos(); });
+tagFilterSelect?.addEventListener("change", () => { tagFilter = tagFilterSelect.value; resetPaging(); renderVideos(); });
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
 cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
@@ -2246,6 +2956,26 @@ clearActionTargetsButton.addEventListener("click", () => {
 confirmBackdrop.addEventListener("click", (event) => {
   if (event.target === confirmBackdrop && !deleteInProgress) closeDeleteConfirmation();
 });
+exportConfigButton?.addEventListener("click", downloadConfigFile);
+importConfigButton?.addEventListener("click", () => {
+  configFileInput.value = "";
+  configFileInput.click();
+});
+configFileInput?.addEventListener("change", async () => {
+  const file = configFileInput.files?.[0];
+  if (!file) return;
+  importConfigButton.disabled = true;
+  try {
+    await importConfigFromText(await file.text());
+    showToast(BcaI18n.t("配置已导入。"));
+  } catch (error) {
+    // 导入失败必须说清楚原因，不能静默
+    showToast(BcaI18n.t("导入配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
+  } finally {
+    importConfigButton.disabled = false;
+    configFileInput.value = "";
+  }
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (!confirmBackdrop.hidden) {
@@ -2261,7 +2991,12 @@ document.addEventListener("keydown", (event) => {
     if (!typing) { event.preventDefault(); selectAllVisible(); }
   }
 });
-window.addEventListener("beforeunload", () => coverUrls.forEach(URL.revokeObjectURL));
+window.addEventListener("beforeunload", () => {
+  for (const store of archiveCache.values()) {
+    for (const entry of store.values()) if (entry.record.cover) URL.revokeObjectURL(entry.record.cover);
+  }
+  archiveCache.clear();
+});
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
   if (changes.downloadRevision && rootHandle) refreshDownloadStatuses();
