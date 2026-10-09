@@ -4,15 +4,15 @@
 
 ## 项目基线
 
-- 项目目录：仓库根（扩展直接从该目录加载）。**正式版目录名是 `bili-vault-V1.0.0`**；`bili-vault-beta4.9` 及更早的 `bili-vault-beta*` 是历史版本，只作对照，不要在上面继续改。
+- 项目目录：`Desktop\bili-vault\` —— **仓库根就是扩展目录**，扩展文件直接放在根目录，不再套一层带版本号的文件夹（版本交给 git tag 管理）。V1.0.0 交付时曾短暂叫过 `b-vault-V1.0.0`，**该名字已废弃**。`Desktop\bili-vault-beta\` 下是 1.0–4.9 的独立快照，只作对照，不要在上面继续改。
 - 扩展版本：`1.0.0`（界面显示 `V1.0.0`），Chrome Manifest V3，最低 Chrome 版本 111。测试版时期界面显示 `beta4.x`，差别只在 `library.js` / `popup.js` 里的 `RELEASE_CHANNEL` 常量。
-- `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **版本管理方式在 V1.0.0 改了**：以前每个版本是一个独立文件夹（`b_catch_*` → `bili-vault-beta*`），现在**改用 git**——36 个版本对应 36 个 commit 与 36 个同名 tag（`beta1.0` … `beta4.9`、`V1.0.0`），提交日期用的是各版本快照的真实文件时间，所以 `git log` 直接就是那条时间线。远程：`https://github.com/shijunan-Andrew/bili-vault`。**新版本直接在当前目录改并提交，不要再复制文件夹。**
 - **历史版本编号沿革**：项目最初叫 `b_catch`，目录名 `b_catch_1.0` … `b_catch_3.8`（这些原始快照保存在 `Desktop\bili-vault-beta\` 下，已同步改名为 `bili-vault-beta1.0` … `bili-vault-beta3.8`）。**注意 `b_catch_1.0` 目录里的 `manifest.json` 写的是 `1.1.3`，`b_catch_1.1` 写的是 `1.1.4`**——早期目录名与 manifest 版本号并不同步，别被绕进去。3.6 之前没有测试套件、没有 `archive-core.js`、也没有本文件；3.6 起才建立「抽取纯逻辑 + 静态回归测试 + 交接文档」这套工程约定。完整的逐版本演变见 `README.md` 的版本历史段，图示与量化数据见 `Desktop\bili-vault开发文档\`。
 - **4.0 是一次纯界面重构**，磁盘格式与数据流完全没动：它把四份互相覆写的 CSS 收敛成 `theme.css` 单层令牌体系，并确立了本文件「界面与设计系统」那六条约定。4.0 之前的 CSS 是层层追加的补丁（`.library-link` 被定义 4 次、`.primary` 和 `.toggle-switch` 各 3 次），改一处样式极容易被下游区块盖掉——**若要理解某条界面约定的来历，先看这一条**。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
-- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（例如 `bili-vault-beta4.9` → `bili-vault-V1.0.0`）ID 就会变，安装原生助手时必须填入新 ID。
+- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（例如 `bili-vault-beta4.9` → `bili-vault`，或 V1.0.0 那次从 `b-vault-V1.0.0` 改名）ID 就会变，安装原生助手时必须填入新 ID。**所以尽量不要改这个目录的名字。**
 
 ## 功能概览
 
@@ -25,7 +25,9 @@
 ## 目录结构
 
 ```text
-bili-vault-V1.0.0/                # 目录名即版本；换目录会改变扩展 ID，必须重装原生助手
+bili-vault/                       # 仓库根即扩展目录；改名会改变扩展 ID，必须重装原生助手
+├── .git/                         # 36 个版本的完整历史（tag: beta1.0 … beta4.9、V1.0.0）
+├── .gitignore / .gitattributes   # 忽略本地归档；换行策略（.bat/.ps1/.cs 钉死 CRLF）
 ├── manifest.json                 # MV3 权限、后台 worker、内容脚本注册
 ├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡

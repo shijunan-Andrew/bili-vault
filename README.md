@@ -197,7 +197,7 @@ Chrome 不允许扩展页面直接启动 Windows 文件资源管理器。若要�
 3. 在 `chrome://extensions` 中重新加载本插件，然后完全退出 Chrome（关闭所有窗口，必要时在任务管理器结束 chrome.exe）并重新打开。
 4. 打开本地收藏库，点击“打开本地视频目录”。
 
-安装脚本会用 Windows 自带的 C# 编译器把 `native\folder-opener-launcher.cs` 编译成宿主启动器 `folder-opener-launcher.exe`，放进 `%LOCALAPPDATA%\BcaFolderOpener`，并写入 Chrome 原生消息清单和当前用户注册表。**扩展程序 ID 是由插件所在目录的绝对路径决定的**：换了插件目录（例如从 `bili-vault-beta4.9` 换到 `bili-vault-V1.0.0`）ID 就会变，此时必须用新 ID 重新运行一次安装脚本。
+安装脚本会用 Windows 自带的 C# 编译器把 `native\folder-opener-launcher.cs` 编译成宿主启动器 `folder-opener-launcher.exe`，放进 `%LOCALAPPDATA%\BcaFolderOpener`，并写入 Chrome 原生消息清单和当前用户注册表。**扩展程序 ID 是由插件所在目录的绝对路径决定的**：换了插件目录（例如从 `bili-vault-beta4.9` 换到 `bili-vault`）ID 就会变，此时必须用新 ID 重新运行一次安装脚本。**所以尽量不要重命名这个文件夹。**
 
 安装后可以先做一次不依赖 Chrome 的自检（不会打开资源管理器）：
 
