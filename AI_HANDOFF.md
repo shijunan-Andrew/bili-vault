@@ -1,13 +1,13 @@
-# AI 项目交接说明：B站收藏信息归档 4.0
+# AI 项目交接说明：B站收藏信息归档 4.1
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.0`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
-- 扩展版本：`4.0.0`，Chrome Manifest V3，最低 Chrome 版本 111。
-- `b_catch_3.8` 是 4.0 的来源稳定基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
-- **4.0 是纯表现层改版**：`background.js`、`favorites-import.js`、`archive-core.js`、原生助手协议与磁盘格式一行未动；`content.js` 只重写了注入提示卡的样式；`library.js`/`download.js`/`popup.js` 只改了渲染与交互，没有改任何数据操作。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.1`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
+- 扩展版本：`4.1.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- `b_catch_4.0` 是 4.1 的来源稳定基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **4.0 是纯表现层改版；4.1 在其上修了详情面板的标签/简介错位 bug，并加了分页与视图切换。** `background.js`、`favorites-import.js`、原生助手协议与磁盘格式始终未动；`archive-core.js` 在 4.1 新增了若干纯函数（`parseInfoFile`/`descriptionFromInfo`/`tagsFromInfo`/`pageSequence`），只是把原本写在 `library.js` 里的纯逻辑搬过来以便单元测试，行为不变。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
 - 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.8 → 4.0）ID 就会变，安装原生助手时必须填入新 ID。
@@ -23,16 +23,16 @@
 ## 目录结构
 
 ```text
-b_catch_4.0/
+b_catch_4.1/
 ├── manifest.json                 # MV3 权限、后台 worker、页面脚本注册、library.html 的 web_accessible_resources
-├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由（4.0 未改动）
+├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由（4.0/4.1 未改动）
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 4.0 重写的提示卡
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
 ├── theme.css                     # 4.0 新增：唯一的设计令牌与通用基元（所有页面共用）
-├── icons.js                      # 4.0 新增：30 个线性 SVG 图标，替代字符图标
+├── icons.js                      # 4.0 新增：线性 SVG 图标，替代字符图标
 ├── popup.html/js/css              # 插件弹窗、自动归档开关、根目录和导入界面
-├── library.html/js/css            # 本地收藏库页面
-├── archive-core.js                # 可复用的安全名称、下载目录匹配、下载路径与状态逻辑
+├── library.html/js/css            # 本地收藏库页面（4.1 加分页与网格/竖列切换）
+├── archive-core.js                # 可复用的纯逻辑：安全名称、下载目录匹配、下载路径、视频信息解析、页码序列
 ├── download.html/js/css           # 视频解析和下载界面
 ├── native/
 │   ├── folder-opener-launcher.cs  # 原生消息宿主启动器源码（编译成 exe）
@@ -41,6 +41,7 @@ b_catch_4.0/
 ├── uninstall-native-folder-opener.ps1
 ├── test-native-folder-opener.ps1   # 不依赖 Chrome 的安装自检脚本
 ├── test/stability.test.cjs         # Node 内置测试，无第三方依赖
+├── test/archive-audit.cjs          # 4.1 新增：本地归档的标签/简介覆盖情况体检
 ├── README.md                       # 面向使用者的安装与功能说明
 └── AI_HANDOFF.md                   # 本文件
 ```
@@ -182,7 +183,13 @@ b_catch_4.0/
 node test/stability.test.cjs
 ```
 
-当前包含 17 项检查：9 项纯逻辑回归（收藏夹传递、BV/av 下载目录识别、同收藏夹优先与 3.5 旧目录回退、媒体文件判定、扫描权限不明时保留状态、收藏夹目录名安全处理、下载相对路径拼接、原生消息清单不得含 `args`、工作脚本必须以 UTF-8 读取设置），8 项表现层静态回归（每页引入 theme.css/icons.js 且顺序正确、设计令牌齐全且含 reduced-motion 与 focus-visible、字号不低于 11px、不再使用字符图标、所有引用到的图标名都存在、孤儿页保持删除、注入提示卡支持深色与悬停暂停、manifest 版本与 web_accessible_resources 范围）。无第三方包。
+当前包含 25 项检查：9 项纯逻辑回归（收藏夹传递、BV/av 下载目录识别、同收藏夹优先与 3.5 旧目录回退、媒体文件判定、扫描权限不明时保留状态、收藏夹目录名安全处理、下载相对路径拼接、原生消息清单不得含 `args`、工作脚本必须以 UTF-8 读取设置），9 项表现层静态回归（每页引入 theme.css/icons.js 且顺序正确、设计令牌齐全、`[hidden]` 全局兜底、字号不低于 11px、不再使用字符图标、所有引用到的图标名都存在、孤儿页保持删除、注入提示卡支持深色、manifest 版本与 web_accessible_resources 范围），7 项 4.1 回归（占位值按无数据处理、真实标签与多行简介解析、以破折号开头的简介不被误判、空标签占位符不再抢占 `.detail-description`、已下载标题绿色且失效优先红色、B 站式页码窗口、分页与视图切换的接线）。无第三方包。
+
+另外在本地归档上跑一次体检（统计有多少条记录其实没有标签或简介）：
+
+```powershell
+node test/archive-audit.cjs "C:\Users\Maxwell\Desktop\本地收藏夹"
+```
 
 每次改动还应执行：
 
@@ -202,6 +209,7 @@ node test/stability.test.cjs
 - 用户曾报告收藏成功但本地归档失败，并看到 B 站收藏弹窗提示 `The next() called multiple times`。另一次控制台网络错误指向 Kaspersky 浏览器组件的 `gc.kis.v2.scr.kaspersky-labs.com`。后者不是本项目域名；判断归因前需在禁用相关第三方扩展的环境中复现。不要把这类外部错误直接归为本扩展故障。
 - 3.8 修复的两个原生助手缺陷都是运行时问题，Node 静态检查发现不了：一个是 Chrome 静默忽略清单 `args`，一个是 PowerShell 5.1 的默认 ANSI 读取。改动这一块必须跑 `test-native-folder-opener.ps1`，不能只做语法检查。
 - 待确认（尚未定性）：`content.js` 在 MV3 隔离世界中读取页面变量 `window.__INITIAL_STATE__`，而清单未声明 `world: "MAIN"`，该变量很可能始终读不到，元数据实际走 DOM/meta 回退，自动归档的“分区/视频时长/视频发布时间/标签”容易落成“未知”。需要用一份真实的 `视频信息.txt` 核对后再决定是否改用其他采集方式。
+- **归档数据本身的完整度**（4.1 实测用户档案 333 条记录）：只有 75 条（22.5%）有标签、142 条（42.6%）有简介，150 条（45%）两者都没有。原因是导入流程里 `normalizeImportMedia()` 把 `tags` 硬编码为 `[]`，`importMetadata()` 因此写入「未知」；而失效视频恢复流程只对 `isInvalid` 的条目补抓标签和简介。也就是说**这不是显示问题，而是文件里确实没有数据**——4.1 只负责把已有数据正确显示，并把缺失显示成空状态。若要让这些记录补上标签/简介，需要改 `background.js` 的导入流程（为正常条目也调用 `/x/tag/archive/tags` 与 `/x/web-interface/view`），属于底层逻辑改动，须单独确认。
 - 3.7 的下载目录日志修复仍建议在 Chrome/B 站实际触发一次验证，因为历史报告表明错误发生在目录创建的运行时路径。
 
 ## 修改原则

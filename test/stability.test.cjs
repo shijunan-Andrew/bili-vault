@@ -178,9 +178,102 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("manifest opens the library page to Bilibili pages only", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.0.0");
+  assert.equal(manifest.version, "4.1.0");
   const entry = (manifest.web_accessible_resources || []).find((item) => item.resources.includes("library.html"));
   assert.ok(entry, "缺少 library.html 的 web_accessible_resources");
   assert.ok(entry.matches.every((pattern) => pattern.includes("bilibili.com")), "library.html 只应对 B 站页面开放");
   assert.ok(manifest.permissions.includes("clipboardWrite"));
+});
+
+/* ------------------------- 4.1 归档解析与浏览 ------------------------- */
+
+// 用户真实档案里的内容：导入来的视频标签是“未知”、简介是“-”
+const PLACEHOLDER_INFO = [
+  "【基本信息】",
+  "视频收藏时间：2026年09月10日 15时02分20秒.000",
+  "视频标题：这下是17岁未亡人了😡",
+  "BV号：BV1LKGm6ZErR",
+  "av号：av116645959959066",
+  "",
+  "【UP主】",
+  "UP主昵称：长崎素世",
+  "UP主UID：3706936430168922",
+  "",
+  "【标签】",
+  "未知",
+  "",
+  "【视频简介】",
+  "-",
+  ""
+].join("\n");
+
+test("placeholder archive values are read as missing data, not as content", () => {
+  const info = core.parseInfoFile(PLACEHOLDER_INFO);
+  assert.equal(info.fields["视频标题"], "这下是17岁未亡人了😡");
+  assert.equal(info.fields["UP主昵称"], "长崎素世");
+  assert.equal(info.fields["BV号"], "BV1LKGm6ZErR");
+  assert.deepEqual(core.tagsFromInfo(info), [], "“未知”不应被当成标签");
+  assert.equal(core.descriptionFromInfo(info), "", "“-”不应被当成简介");
+  for (const value of ["未知", "无", "-", "--", "—", "暂无", " ", ""]) {
+    assert.equal(core.isPlaceholderValue(value), true, `${value} 应视为占位值`);
+  }
+  assert.equal(core.isPlaceholderValue("正常内容"), false);
+});
+
+test("real tags and multi-line descriptions survive parsing", () => {
+  const info = core.parseInfoFile([
+    "【标签】",
+    "发现《Bangarang (feat. Sirah)》、人力VOCALOID、鬼畜、音mad",
+    "",
+    "【视频简介】",
+    "我的vegas好难用。",
+    "第二行",
+    ""
+  ].join("\n"));
+  assert.deepEqual(core.tagsFromInfo(info), ["发现《Bangarang (feat. Sirah)》", "人力VOCALOID", "鬼畜", "音mad"]);
+  assert.equal(core.descriptionFromInfo(info), "我的vegas好难用。\n第二行");
+});
+
+test("a description made of dashes is kept, only a lone placeholder is dropped", () => {
+  const info = core.parseInfoFile(["【视频简介】", "- 第一点", "- 第二点", ""].join("\n"));
+  assert.equal(core.descriptionFromInfo(info), "- 第一点\n- 第二点");
+});
+
+// 4.0 的 bug：空标签占位符复用了 .detail-description，querySelector 先取到占位符，
+// 简介被写进了“标签”区块，真正的简介区永远空白。
+test("the empty-tags placeholder no longer steals the description element", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /class="detail-empty"/);
+  assert.equal(/class="detail-description">暂无标签/.test(library), false);
+  assert.equal((library.match(/class="detail-description"/g) || []).length, 1, "详情里只应存在一个 .detail-description");
+  assert.match(readProjectFile("library.css"), /\.detail-empty\s*\{/);
+});
+
+test("downloaded video titles turn green while invalid ones stay red", () => {
+  const css = readProjectFile("library.css");
+  assert.match(css, /\.video-card\.downloaded-video \.card-title\s*\{[^}]*--success-strong/);
+  assert.match(css, /\.video-card\.downloaded-video\.invalid-video \.card-title\s*\{[^}]*--danger/);
+});
+
+test("page numbers follow the Bilibili-style window", () => {
+  assert.deepEqual(core.pageSequence(1, 3), [1, 2, 3]);
+  assert.deepEqual(core.pageSequence(1, 38), [1, 2, 3, 4, "gap", 38]);
+  assert.deepEqual(core.pageSequence(4, 38), [1, "gap", 3, 4, 5, "gap", 38]);
+  assert.deepEqual(core.pageSequence(20, 38), [1, "gap", 19, 20, 21, "gap", 38]);
+  assert.deepEqual(core.pageSequence(38, 38), [1, "gap", 35, 36, 37, 38]);
+  assert.deepEqual(core.pageSequence(1, 0), []);
+});
+
+test("the library paginates and can switch between grid and list view", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /id="videoPager"/);
+  assert.match(html, /id="viewGrid"/);
+  assert.match(html, /id="viewList"/);
+  assert.match(html, /data-icon="view-list"/);
+  assert.ok(readProjectFile("icons.js").includes('"view-list"'), "icons.js 缺少 view-list 图标");
+  assert.match(library, /function renderPager\(/);
+  assert.match(library, /list-view/);
+  assert.match(readProjectFile("library.css"), /\.video-grid\.list-view/);
+  assert.match(readProjectFile("library.css"), /\.pager-page\.current/);
 });

@@ -86,6 +86,80 @@
     return `${base}\\${label}`;
   }
 
+  /* ---------- 视频信息.txt 解析（4.1 从 library.js 移到这里，便于单元测试） ---------- */
+
+  // 归档时字段缺失会写成这些占位值。它们不是真实内容，必须按“无数据”处理，
+  // 否则详情面板会把“未知”“-”当成标签或简介显示出来。
+  const INFO_PLACEHOLDERS = new Set(["", "无", "未知", "-", "--", "—", "暂无", "/", "N/A", "n/a", "null", "undefined"]);
+
+  function isPlaceholderValue(value) {
+    return INFO_PLACEHOLDERS.has(String(value ?? "").trim());
+  }
+
+  function fieldValue(info, key) {
+    return info?.fields?.[key] || "";
+  }
+
+  function parseInfoFile(text) {
+    const raw = String(text ?? "");
+    const fields = {};
+    const sections = {};
+    let section = "基本信息";
+    for (const line of raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").split("\n")) {
+      const heading = line.match(/^【(.+?)】\s*$/);
+      if (heading) { section = heading[1]; sections[section] ||= []; continue; }
+      if (section === "视频简介") {
+        if (line.trim()) sections[section].push(line);
+        continue;
+      }
+      if (section === "标签") {
+        if (line.trim() && !isPlaceholderValue(line)) {
+          sections[section].push(...line.split(/[、,，]/).map((tag) => tag.trim()).filter((tag) => tag && !isPlaceholderValue(tag)));
+        }
+        continue;
+      }
+      const divider = line.indexOf("：") >= 0 ? line.indexOf("：") : line.indexOf(":");
+      if (divider > 0) {
+        const key = line.slice(0, divider).trim();
+        const value = line.slice(divider + 1).trim();
+        if (key) fields[key] = value;
+      } else if (line.trim()) {
+        sections[section] ||= [];
+        sections[section].push(line.trim());
+      }
+    }
+    return { fields, sections, raw };
+  }
+
+  // 只有整段简介都是占位符时才当作空，避免误伤正文里出现“-”的正常简介
+  function descriptionFromInfo(info) {
+    const text = (info?.sections?.["视频简介"]?.join("\n") || fieldValue(info, "视频简介") || "").trim();
+    return isPlaceholderValue(text) ? "" : text;
+  }
+
+  function tagsFromInfo(info) {
+    return (info?.sections?.["标签"] || []).filter((tag) => !isPlaceholderValue(tag));
+  }
+
+  /* ---------- 分页页码（4.1，参考 B 站：首尾各留一段，中间用省略号） ---------- */
+
+  function pageSequence(current, total) {
+    if (!Number.isFinite(total) || total <= 0) return [];
+    if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+    const wanted = new Set([1, total, current, current - 1, current + 1]);
+    if (current <= 3) [2, 3, 4].forEach((page) => wanted.add(page));
+    if (current >= total - 2) [total - 1, total - 2, total - 3].forEach((page) => wanted.add(page));
+    const pages = [...wanted].filter((page) => page >= 1 && page <= total).sort((left, right) => left - right);
+    const sequence = [];
+    let previous = 0;
+    for (const page of pages) {
+      if (previous && page - previous > 1) sequence.push("gap");
+      sequence.push(page);
+      previous = page;
+    }
+    return sequence;
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     withSourceCollection,
@@ -95,7 +169,12 @@
     downloadStateFromIndex,
     isMediaFileName,
     downloadPathLabel,
-    joinDownloadPath
+    joinDownloadPath,
+    isPlaceholderValue,
+    parseInfoFile,
+    descriptionFromInfo,
+    tagsFromInfo,
+    pageSequence
   });
   global.BcaArchiveCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

@@ -98,12 +98,17 @@
             <label class="video-filter"><span data-icon="filter"></span><select id="videoFilter" aria-label="筛选视频"><option value="all">全部视频</option><option value="invalid">已失效视频</option><option value="downloaded">已下载视频</option></select></label>
             <button id="addVideo" class="button button-primary" type="button" disabled><span data-icon="plus"></span>添加视频</button>
             <label class="sort-select"><span data-icon="sort"></span><select id="sortSelect" aria-label="排序方式"><option value="newest">最近收藏</option><option value="oldest">最早收藏</option><option value="title">标题 A–Z</option></select></label>
+            <div class="view-toggle" role="group" aria-label="显示方式">
+              <button id="viewGrid" class="view-toggle-button active" type="button" title="网格显示" aria-label="网格显示" aria-pressed="true"><span data-icon="library"></span></button>
+              <button id="viewList" class="view-toggle-button" type="button" title="竖列显示" aria-label="竖列显示" aria-pressed="false"><span data-icon="view-list"></span></button>
+            </div>
           </div>
         </div>
 
         <div id="scanProgress" class="scan-progress" hidden></div>
         <div id="scanNotice" class="scan-notice" hidden></div>
         <div id="videoGrid" class="video-grid"></div>
+        <nav id="videoPager" class="pager" aria-label="分页" hidden></nav>
         <div id="emptySearch" class="empty-search" hidden>
           <div class="empty-search-icon" data-icon="search"></div>
           <h2>没有找到相关视频</h2>

@@ -313,6 +313,23 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 }
 .video-filter select:focus-visible, .sort-select select:focus-visible { border-color: var(--brand); }
 
+/* 网格 / 竖列 显示切换（4.1） */
+.view-toggle { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); }
+.view-toggle-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  background: transparent;
+  font-size: var(--fs-lg);
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.view-toggle-button:hover { color: var(--brand-deep); background: var(--brand-soft); }
+.view-toggle-button.active { color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
+
 .batch-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -354,6 +371,19 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 
 /* ---------- 卡片网格：自适应列宽（宽屏自动 4~5 列，无需断点） ---------- */
 .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--sp-5) var(--sp-4); }
+
+/* 竖列视图：一行一个视频，封面在左、信息在右 */
+.video-grid.list-view { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.video-grid.list-view .video-card { display: grid; grid-template-columns: 176px minmax(0, 1fr); }
+.video-grid.list-view .card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) 0;
+}
+.video-grid.list-view .card-title { min-height: 0; -webkit-line-clamp: 2; }
+.video-grid.list-view .card-meta { flex-direction: column; align-items: flex-end; gap: 2px; margin-top: 0; white-space: nowrap; }
 
 .video-card {
   min-width: 0;
@@ -453,7 +483,10 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+/* 4.1：已下载的视频标题显示为绿色；失效视频的红色规则放在后面，两者同时命中时红色优先 */
+.video-card.downloaded-video .card-title { color: var(--success-strong); }
 .video-card.invalid-video .card-title { color: var(--danger); }
+.video-card.downloaded-video.invalid-video .card-title { color: var(--danger); }
 .card-title mark { border-radius: 3px; color: inherit; background: #ffe9a8; }
 .card-meta { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font-size: var(--fs-sm); }
 .card-up { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -463,6 +496,63 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .empty-search-icon { display: grid; place-items: center; width: 54px; height: 54px; margin: 0 auto var(--sp-4); border-radius: var(--r-md); color: var(--brand-strong); background: var(--brand-soft); font-size: 26px; }
 .empty-search h2 { margin: 0; color: var(--ink); font-size: var(--fs-lg); }
 .empty-search p { margin: var(--sp-2) 0 var(--sp-4); color: var(--muted); font-size: var(--fs-base); }
+
+/* ---------- 分页（4.1，参考 B 站页码样式） ---------- */
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-6);
+}
+.pager-page, .pager-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--surface);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.pager-page:hover, .pager-step:hover:not(:disabled) { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
+.pager-page.current { border-color: transparent; color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
+.pager-step:disabled { opacity: .5; cursor: not-allowed; }
+.pager-gap { min-width: 24px; color: var(--faint); font-size: var(--fs-base); text-align: center; }
+.pager-info { color: var(--muted); font-size: var(--fs-sm); }
+.pager-jump {
+  width: 68px;
+  height: 40px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+  color: var(--text);
+  background: var(--surface);
+  font-size: var(--fs-base);
+  text-align: center;
+}
+.pager-jump:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.pager-size { display: inline-flex; align-items: center; gap: 6px; margin-left: var(--sp-3); color: var(--muted); font-size: var(--fs-sm); }
+.pager-size select {
+  height: 40px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+  color: var(--text);
+  background: var(--surface);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+.pager-size select:focus-visible { border-color: var(--brand); }
 
 /* ---------- 详情面板 ---------- */
 .detail-backdrop { position: fixed; inset: 0; z-index: 5; background: #10182873; }
@@ -562,6 +652,10 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .detail-profile-link:hover { background: var(--brand-soft-strong); }
 
 .detail-description { max-height: 320px; margin: 0; overflow: hidden; color: var(--text); font-size: var(--fs-base); line-height: 1.9; white-space: pre-wrap; }
+/* 4.1：标签/简介缺失时的空状态。注意不能复用 .detail-description，
+   否则 querySelector(".detail-description") 会先取到占位符，把简介写错位置。 */
+.detail-empty { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: var(--fs-base); }
+.detail-empty .icon { color: var(--ghost); }
 .detail-description.clamped { position: relative; max-height: 132px; }
 .detail-description.clamped::after { position: absolute; right: 0; bottom: 0; left: 0; height: 52px; background: linear-gradient(transparent, var(--surface)); content: ""; }
 .detail-description-toggle { margin-top: var(--sp-2); }
@@ -696,6 +790,10 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   .search-box { width: 100%; flex: 1 0 100%; }
   .batch-selection-tools, .batch-actions { width: 100%; justify-content: space-between; }
   .video-grid { gap: var(--sp-4) var(--sp-3); }
+  .video-grid.list-view .video-card { grid-template-columns: 132px minmax(0, 1fr); }
+  .video-grid.list-view .card-body { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); padding: var(--sp-2) var(--sp-3) var(--sp-2) 0; }
+  .video-grid.list-view .card-meta { flex-direction: row; align-items: center; justify-content: space-between; }
+  .pager-size { margin-left: 0; }
   .detail-panel { padding: var(--sp-4) var(--sp-4) var(--sp-6); }
   .detail-fields { grid-template-columns: 96px minmax(0, 1fr); }
   .collection-action-footer { flex-wrap: wrap; }

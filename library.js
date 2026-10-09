@@ -17,6 +17,9 @@ const pageTitle = document.getElementById("pageTitle");
 const resultSummary = document.getElementById("resultSummary");
 const scanNotice = document.getElementById("scanNotice");
 const scanProgress = document.getElementById("scanProgress");
+const videoPager = document.getElementById("videoPager");
+const viewGridButton = document.getElementById("viewGrid");
+const viewListButton = document.getElementById("viewList");
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
@@ -84,6 +87,12 @@ let collectionOrder = [];
 let draggedCollectionName = "";
 let downloadStatusCheckRunning = false;
 let lastSelectedVideoId = "";
+// 分页与视图（4.1）：默认每页 24 个，网格显示；两项都会记住
+const PAGE_SIZES = [24, 48, 96];
+let pageSize = PAGE_SIZES[0];
+let currentPage = 1;
+let pageCount = 1;
+let viewMode = "grid";
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -128,35 +137,11 @@ async function readSavedSetting(key) {
   } finally { db.close(); }
 }
 
-function parseInfo(text) {
-  const fields = {};
-  const sections = {};
-  let section = "基本信息";
-  for (const line of text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").split("\n")) {
-    const heading = line.match(/^【(.+?)】\s*$/);
-    if (heading) { section = heading[1]; sections[section] ||= []; continue; }
-    if (section === "视频简介") {
-      if (line.trim()) sections[section].push(line);
-      continue;
-    }
-    if (section === "标签") {
-      if (line.trim() && !["无", "未知"].includes(line.trim())) {
-        sections[section].push(...line.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean));
-      }
-      continue;
-    }
-    const divider = line.indexOf("：") >= 0 ? line.indexOf("：") : line.indexOf(":");
-    if (divider > 0) {
-      const key = line.slice(0, divider).trim();
-      const value = line.slice(divider + 1).trim();
-      if (key) fields[key] = value;
-    } else if (line.trim()) {
-      sections[section] ||= [];
-      sections[section].push(line.trim());
-    }
-  }
-  return { fields, sections, raw: text };
-}
+// 这些纯函数放在 archive-core.js，可以直接单元测试
+const parseInfo = BcaArchiveCore.parseInfoFile;
+const descriptionFromInfo = BcaArchiveCore.descriptionFromInfo;
+const tagsFromInfo = BcaArchiveCore.tagsFromInfo;
+const pageSequence = BcaArchiveCore.pageSequence;
 
 async function optionalFileHandle(directory, name) {
   try { return await directory.getFileHandle(name); }
@@ -289,8 +274,8 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
           category: field(info, "分区"),
           duration: field(info, "视频时长"),
           publishDate: field(info, "视频发布时间"),
-          description: info.sections["视频简介"]?.join("\n") || field(info, "视频简介") || "",
-          tags: info.sections["标签"] || [],
+          description: descriptionFromInfo(info),
+          tags: tagsFromInfo(info),
           info,
           cover
         });
@@ -452,6 +437,7 @@ function renderCollections() {
     button.addEventListener("click", () => {
       if (selectedCollection !== row.key) selectedVideoIds.clear();
       selectedCollection = row.key;
+      resetPaging();
       closeDetail();
       renderCollections();
       renderVideos();
@@ -546,14 +532,23 @@ function renderVideos() {
   videoFilter = videoFilterSelect.value;
   const query = searchInput.value.trim().toLocaleLowerCase();
   const matching = videos.filter((video) => (videoFilter === "all" || (videoFilter === "invalid" && video.isInvalid) || (videoFilter === "downloaded" && video.downloaded)) && (!query || [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase().includes(query)));
-  visibleVideoIds = matching.map((video) => video.id);
   const sort = sortSelect.value;
   matching.sort((a, b) => sort === "title" ? a.title.localeCompare(b.title, "zh-CN") : sort === "oldest" ? a.timestamp - b.timestamp : b.timestamp - a.timestamp);
+
+  // 分页：网格里只渲染当前页，visibleVideoIds 也跟着当前页走
+  pageCount = Math.max(1, Math.ceil(matching.length / pageSize));
+  if (currentPage > pageCount) currentPage = pageCount;
+  if (currentPage < 1) currentPage = 1;
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageVideos = matching.slice(pageStart, pageStart + pageSize);
+  visibleVideoIds = pageVideos.map((video) => video.id);
+
   const countLabel = videoFilter !== "all"
     ? `${matching.length} / ${videos.filter((video) => videoFilter === "invalid" ? video.isInvalid : video.downloaded).length} 个${videoFilter === "invalid" ? "失效" : "已下载"}视频`
     : query ? `${matching.length} / ${videos.length} 个视频` : `${videos.length} 个视频`;
-  resultSummary.textContent = selectedCollection === "*" ? `${countLabel}，来自 ${collections.length} 个收藏夹` : countLabel;
-  videoGrid.replaceChildren(...matching.map((video) => {
+  const pageLabel = pageCount > 1 ? ` · 第 ${currentPage}/${pageCount} 页` : "";
+  resultSummary.textContent = (selectedCollection === "*" ? `${countLabel}，来自 ${collections.length} 个收藏夹` : countLabel) + pageLabel;
+  videoGrid.replaceChildren(...pageVideos.map((video) => {
     const card = document.createElement("article");
     card.className = "video-card";
     card.classList.toggle("invalid-video", video.isInvalid);
@@ -601,7 +596,141 @@ function renderVideos() {
     const emptyCopy = selectedCollection === "*" ? "选择一个收藏夹，或新建收藏夹并添加视频。" : "点击右上角“添加视频”，输入 B 站网址、BV 号或 av 号。";
     videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">${BcaIcons.svg("collection")}</div><h2>${emptyTitle}</h2><p>${emptyCopy}</p></div>`;
   }
+  renderPager(matching.length);
   updateBatchControls();
+}
+
+/* ---------------- 4.1：分页与视图切换 ---------------- */
+
+function renderPager(total) {
+  if (!videoPager) return;
+  videoPager.hidden = total === 0;
+  if (!total) { videoPager.replaceChildren(); return; }
+
+  const nodes = [];
+  const step = (label, target, disabled) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "pager-step";
+    button.textContent = label;
+    button.disabled = disabled;
+    if (!disabled) button.addEventListener("click", () => goToPage(target));
+    return button;
+  };
+  nodes.push(step("上一页", currentPage - 1, currentPage <= 1));
+
+  for (const entry of pageSequence(currentPage, pageCount)) {
+    if (entry === "gap") {
+      const gap = document.createElement("span");
+      gap.className = "pager-gap";
+      gap.textContent = "…";
+      nodes.push(gap);
+      continue;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `pager-page tnum${entry === currentPage ? " current" : ""}`;
+    button.textContent = String(entry);
+    button.setAttribute("aria-label", `第 ${entry} 页`);
+    if (entry === currentPage) button.setAttribute("aria-current", "page");
+    button.addEventListener("click", () => goToPage(entry));
+    nodes.push(button);
+  }
+
+  nodes.push(step("下一页", currentPage + 1, currentPage >= pageCount));
+
+  const info = document.createElement("span");
+  info.className = "pager-info tnum";
+  info.textContent = `共 ${pageCount} 页 / ${total} 个，跳至`;
+
+  const jump = document.createElement("input");
+  jump.type = "number";
+  jump.className = "pager-jump tnum";
+  jump.min = "1";
+  jump.max = String(pageCount);
+  jump.value = String(currentPage);
+  jump.setAttribute("aria-label", "跳转到指定页");
+  const applyJump = () => {
+    const wanted = Number(jump.value);
+    if (!Number.isFinite(wanted) || wanted < 1) { jump.value = String(currentPage); return; }
+    goToPage(wanted);
+  };
+  jump.addEventListener("change", applyJump);
+  jump.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    applyJump();
+  });
+
+  const pageSuffix = document.createElement("span");
+  pageSuffix.className = "pager-info";
+  pageSuffix.textContent = "页";
+
+  const sizeLabel = document.createElement("label");
+  sizeLabel.className = "pager-size";
+  sizeLabel.append(document.createTextNode("每页"));
+  const sizeSelect = document.createElement("select");
+  sizeSelect.setAttribute("aria-label", "每页显示数量");
+  for (const value of PAGE_SIZES) sizeSelect.add(new Option(`${value} 个`, String(value)));
+  sizeSelect.value = String(pageSize);
+  sizeSelect.addEventListener("change", () => {
+    pageSize = Number(sizeSelect.value) || PAGE_SIZES[0];
+    resetPaging();
+    saveViewSettings();
+    renderVideos();
+  });
+  sizeLabel.append(sizeSelect);
+
+  videoPager.replaceChildren(...nodes, info, jump, pageSuffix, sizeLabel);
+}
+
+// 页码序列由 archive-core.js 的 pageSequence 提供（见文件顶部的解构）
+
+function goToPage(page) {
+  const next = Math.min(Math.max(1, Math.round(Number(page) || 1)), Math.max(1, pageCount));
+  if (next === currentPage) return;
+  currentPage = next;
+  renderVideos();
+  videoGrid.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function resetPaging() {
+  currentPage = 1;
+}
+
+function applyViewMode() {
+  if (!videoGrid) return;
+  videoGrid.classList.toggle("list-view", viewMode === "list");
+  if (viewGridButton) {
+    viewGridButton.classList.toggle("active", viewMode === "grid");
+    viewGridButton.setAttribute("aria-pressed", String(viewMode === "grid"));
+  }
+  if (viewListButton) {
+    viewListButton.classList.toggle("active", viewMode === "list");
+    viewListButton.setAttribute("aria-pressed", String(viewMode === "list"));
+  }
+}
+
+function setViewMode(mode) {
+  const next = mode === "list" ? "list" : "grid";
+  if (next === viewMode) return;
+  viewMode = next;
+  applyViewMode();
+  saveViewSettings();
+  renderVideos();
+}
+
+function saveViewSettings() {
+  chrome.storage.local.set({ libraryViewMode: viewMode, libraryPageSize: pageSize }).catch(() => {});
+}
+
+async function restoreViewSettings() {
+  try {
+    const saved = await chrome.storage.local.get(["libraryViewMode", "libraryPageSize"]);
+    if (saved.libraryViewMode === "list" || saved.libraryViewMode === "grid") viewMode = saved.libraryViewMode;
+    const size = Number(saved.libraryPageSize);
+    if (PAGE_SIZES.includes(size)) pageSize = size;
+  } catch (_) {}
 }
 
 function compactDate(value) {
@@ -735,7 +864,11 @@ function openDetail(video) {
   addField(rows, "BV 号", video.bvid);
   addField(rows, "av 号", video.aid);
   addField(rows, "归档目录", video.directory);
-  const tags = video.tags.length ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : '<p class="detail-description">暂无标签</p>';
+  // 注意：空标签占位符不能再用 .detail-description —— 它和真正的简介元素同名时，
+  // 下面的 querySelector(".detail-description") 会取到占位符，把简介写进“标签”里。
+  const tags = video.tags.length
+    ? `<div class="detail-tags">${video.tags.map((tag) => `<span class="detail-tag">${escapeHtml(tag)}</span>`).join("")}</div>`
+    : `<p class="detail-empty">${BcaIcons.svg("tag")}这个归档没有记录标签</p>`;
   detailContent.dataset.videoId = video.id;
   detailContent.innerHTML = `<div class="detail-cover">${safeCover(video.cover)}</div><span class="detail-collection"></span><h2 class="detail-title"></h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}在 B 站打开视频</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}本地视频</h3><div class="detail-primary-actions"><button class="button button-download download-local" type="button">${BcaIcons.svg("download")}下载视频</button><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}打开目录</button></div><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}复制视频目录路径</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}本地收藏管理</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}移动或复制</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}删除本地归档</button><p class="management-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p></section><h3 class="detail-section-title">${BcaIcons.svg("file")}视频信息</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}标签</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}视频简介</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>展开全部简介</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · 已失效` : video.collection;
@@ -753,7 +886,12 @@ function openDetail(video) {
   if (video.url) bvidField.append(copyFieldButton(video.url, "复制视频链接"));
 
   const description = detailContent.querySelector(".detail-description");
-  description.textContent = video.description || "暂无简介";
+  if (video.description) {
+    description.textContent = video.description;
+  } else {
+    description.className = "detail-empty";
+    description.innerHTML = `${BcaIcons.svg("info")}这个归档没有记录简介`;
+  }
   const descriptionToggle = detailContent.querySelector(".detail-description-toggle");
   if ((video.description || "").length > 160) {
     description.classList.add("clamped");
@@ -1609,10 +1747,12 @@ exitBatchButton.addEventListener("click", () => setSelectionMode(false));
 moveSelectedButton.addEventListener("click", () => openCollectionActionDialog(selectedRecords(), "batch"));
 downloadSelectedButton.addEventListener("click", () => openDownloadInterface(selectedRecords()));
 deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRecords()));
-searchInput.addEventListener("input", renderVideos);
-sortSelect.addEventListener("change", renderVideos);
-videoFilterSelect.addEventListener("change", renderVideos);
-clearSearch.addEventListener("click", () => { searchInput.value = ""; renderVideos(); searchInput.focus(); });
+searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
+sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
+videoFilterSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
+clearSearch.addEventListener("click", () => { searchInput.value = ""; resetPaging(); renderVideos(); searchInput.focus(); });
+viewGridButton?.addEventListener("click", () => setViewMode("grid"));
+viewListButton?.addEventListener("click", () => setViewMode("list"));
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
 cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
@@ -1670,7 +1810,13 @@ document.addEventListener("visibilitychange", () => {
 window.setInterval(() => {
   if (!library.hidden && document.visibilityState === "visible") refreshDownloadStatuses();
 }, 60000);
-restoreCollectionOrder().catch(() => { collectionOrder = []; }).finally(() => restoreLastRoot());
+Promise.all([
+  restoreCollectionOrder().catch(() => { collectionOrder = []; }),
+  restoreViewSettings()
+]).finally(() => {
+  applyViewMode();
+  restoreLastRoot();
+});
 
 // 侧栏版本号从 manifest 读取，避免再次出现“界面写着 3.6、实际是 3.7”的错位
 try {
