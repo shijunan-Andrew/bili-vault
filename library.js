@@ -1,6 +1,14 @@
 const DB_NAME = "bili-fav-archiver";
 const DB_STORE = "settings";
 
+// 4.3 安全加固：本地收藏库不应被任何页面嵌套。
+// 虽然已从 manifest 移除 web_accessible_resources，这里再做一层兜底，
+// 避免将来有人重新开放它时被点击劫持（在透明 iframe 上盖诱导按钮）。
+if (window.top !== window.self) {
+  document.body.textContent = "本地收藏库需要在独立标签页中打开，请不要把它嵌入其他页面。";
+  throw new Error("本地收藏库不允许被嵌入其他页面。");
+}
+
 const collectionList = document.getElementById("collectionList");
 const collectionTotal = document.getElementById("collectionTotal");
 const rootLabel = document.getElementById("rootLabel");
@@ -565,8 +573,11 @@ function toggleVisibleSelection() {
 }
 
 function safeCover(cover) {
-  if (!cover) return '<div class="cover-fallback" aria-label="没有封面"></div>';
-  return `<img src="${cover}" alt="" loading="lazy">`;
+  const url = String(cover || "");
+  // 4.3：封面地址只允许代码自己产生的 blob: URL 与内联图片，
+  // 其它一律退回占位图。否则将来若把外部字符串直接塞进来就是一个 HTML 注入点。
+  if (!/^(?:blob:|data:image\/)/i.test(url)) return '<div class="cover-fallback" aria-label="没有封面"></div>';
+  return `<img src="${escapeHtml(url)}" alt="" loading="lazy">`;
 }
 
 function renderVideos() {

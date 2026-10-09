@@ -1,13 +1,13 @@
-# AI 项目交接说明：B站收藏信息归档 4.2
+# AI 项目交接说明：B站收藏信息归档 4.3
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.2`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
-- 扩展版本：`4.2.0`，Chrome Manifest V3，最低 Chrome 版本 111。
-- `b_catch_4.1beta` 是 4.2 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
-- **4.2 是继 4.1beta 之后第二次大改底层**：重写了导入/更新流程（每条视频都抓完整资料、支持暂停取消回滚、区分全量导入与增量更新），并调整了 `视频信息.txt` 的排布（新增 `UP主粉丝数` 与 `【互动数据】` 区块、简介剥离 B 站分享文案）。磁盘目录结构不变。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.3`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
+- 扩展版本：`4.3.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- `b_catch_4.2` 是 4.3 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **4.3 是安全与合规加固版，没有新增功能**：降低了导入请求密度、把失效视频恢复改为默认关闭、消除了扩展页对网页的暴露、收紧了封面 URL、给错误报告加了提示。改动的依据见下文「合规与安全红线」。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
 - 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（3.8 → 4.0）ID 就会变，安装原生助手时必须填入新 ID。
@@ -203,6 +203,7 @@ UP主主页：https://space.bilibili.com/……
 | `get-status` | `popup.js` → `background.js` | 读取最近状态和错误（4.2 起附带 `importState`） |
 | `bca-import-control` | `popup.js` → `background.js` | 4.2：暂停 / 继续 / 取消正在进行的导入 |
 | `bca-import-state` | 任意页面 → `background.js` | 4.2：单独查询导入运行状态 |
+| `bca-open-library` | `content.js` → `background.js` | 4.3：由后台 `chrome.tabs.create` 打开本地收藏库，扩展页因此不必暴露给网页 |
 | `add-manual-video` | `library.js` → `background.js` | 解析手动添加视频并写入一个或多个收藏夹 |
 | `import-bili-favorites` | `favorites-import.js` → `background.js` | 导入所选线上收藏夹 |
 | `bca-list-import-folders` | `popup.js` → `favorites-import.js` | 在收藏夹页请求线上收藏夹列表 |
@@ -236,6 +237,7 @@ UP主主页：https://space.bilibili.com/……
 - `importState`：4.2 起导入的运行状态 `{ running, paused, text, startedAt, finishedAt, summary }`。弹窗靠它恢复按钮；`publishImportState()` 对进度更新做了 500ms 节流，关键状态变化传 `force=true` 立即落盘。导入结束后不会清空，只把 `running` 置 false。
 - `libraryViewMode` / `libraryPageSize`：4.1 起收藏库的网格/竖列与每页数量。
 - `importHintDismissed`：4.2 起收藏库顶部导入提示条是否已被关闭。
+- `recoverInvalidVideos`：4.3 起「尝试恢复失效视频」开关，**默认关闭**。关闭时导入不会调用 APP 接口恢复流程。
 - 还可能包含导入任务进度及其他 UI 状态；改动前搜索全项目读写点。
 
 **`chrome.storage.session`**：临时批量下载队列，键名 `bcaDownloadQueue:<UUID>`。下载页读取后删除。
@@ -248,7 +250,7 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 36 项检查：9 项纯逻辑回归、9 项表现层静态回归、7 项 4.1 回归（占位值按无数据处理、真实标签与多行简介解析、以破折号开头的简介不被误判、空标签占位符不再抢占 `.detail-description`、已下载标题绿色且失效优先红色、B 站式页码窗口、分页与视图切换的接线），以及 11 项 4.2 回归（background 与 archive-core 的分享文案拆分必须一致、真实档案的分享文案被正确拆分、`recordNeedsRefresh` 只挑出真正不完整的记录、新格式含粉丝数与独立互动数据区块、暂停/取消/回滚与三个接口的接线、登记先于写入、弹窗暂停取消与状态恢复、网页端占用统计与提示条、补全功能彻底移除）。无第三方包。
+当前包含 42 项检查：9 项纯逻辑回归、9 项表现层静态回归、7 项 4.1 回归、11 项 4.2 回归（分享文案拆分两边实现必须一致、真实档案拆分正确、`recordNeedsRefresh` 只挑真正不完整的记录、新格式含粉丝数与独立互动数据区块、暂停/取消/回滚与三个接口的接线、登记先于写入、弹窗暂停取消与状态恢复、网页端占用统计与提示条、补全功能彻底移除），以及 6 项 4.3 安全回归（扩展页不对任何网页暴露且改走 `tabs.create`、收藏库拒绝被 iframe 嵌套且检查早于目录读取、封面协议白名单与转义、错误报告含提示行、导入串行且每秒请求数 ≤2、失效视频恢复默认关闭且被开关包住）。无第三方包。
 
 其中 4.1beta 的两项会**从 `background.js` 里把函数源码抽出来执行**（`loadBackgroundFunctions`），因为 background.js 是模块化 service worker、无法 `require`；这样测到的就是生产代码本身，而不是复制品。
 
@@ -286,6 +288,23 @@ node test/import-trial.cjs "C:\Users\Maxwell\Desktop\本地收藏夹" 3
 - **一个已证实的数据错误**：`蜡笔小新/2026年10月09日01时19分50秒` 的归档里 `UP主UID` 写成了 `1515305135`，而接口返回的真实 `owner.mid` 是 `87795103`。抽查另外 4 条记录都是对的，怀疑是收藏夹接口在个别条目上返回了错误的 `upper`。4.2 因为改从 `/x/web-interface/view` 取 UP 主信息，执行一次更新即可修正这类记录。
 - 4.2 的导入会对每条视频发 2–3 个请求（view + tags + 每个 UP 一次的 relation/stat），**这是用户明确要求的完整抓取**。并发 2、间隔 350ms；如果将来风控变严，应先调 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，而不是回到“只补缺失字段”的老逻辑。
 - 3.7 的下载目录日志修复仍建议在 Chrome/B 站实际触发一次验证，因为历史报告表明错误发生在目录创建的运行时路径。
+
+## 合规与安全红线（4.3 确立，后续改动不得突破）
+
+4.3 做过一次完整的安全与合规审计，结论与约束记录如下。
+
+**合规事实**：本项目会代替用户自动请求 B 站接口并下载内容，触碰《哔哩哔哩弹幕网用户使用协议》**4.3.15**（禁止以任何自动程序/脚本获取平台服务、内容、数据）、**1.2**（服务与平台分离）、**1.3**（官方途径是唯一合法方式）、**6.5**（禁止私自转载传播）。协议没有为个人自用归档留例外；后果条款是 **2.6 / 8.3**（可删除账号、暂停或永久停止服务）。这是所有第三方下载类工具的共性处境，不是本项目特有的缺陷。**真正的法律风险在用户分发下载文件的那一刻**，因此 README 必须保留「合规与使用边界」一节。
+
+**由此确立的硬约束**：
+
+1. **导入必须保持低速**：`IMPORT_DETAIL_CONCURRENCY = 1`、`IMPORT_DETAIL_DELAY_MS >= 600`（当前 800）。测试会断言每秒请求数 ≤ 2。**不要为了性能调回去**；要提速请先和用户确认。
+2. **失效视频恢复必须保持可选且默认关闭**：它伪造成官方 iOS 客户端（`platform: ios, mobi_app: iphone`）请求 APP 接口，是合规上最勉强的一环。`enrichImportedInvalidVideos()` 只能被 `recoverInvalidVideos` 开关包住调用。
+3. **不得新增写操作**：全项目只有 GET。任何 POST/PUT/DELETE 都可能改变用户线上账号状态，属于必须避免的类别。
+4. **不得新增第三方域名**：出网只能到 bilibili.com / hdslb.com / bilivideo.com(.cn) / akamaized.net。不要引入任何统计、遥测、CDN 或"更新检查"。
+5. **不得引入远程代码或 npm 依赖**：无 `eval`、无 `new Function`、无动态插标签；MV3 默认严格 CSP。
+6. **扩展页不得对网页开放**：不要重新添加 `web_accessible_resources`；需要从内容脚本打开扩展页时，走 `bca-open-library` 让后台 `chrome.tabs.create`。`library.js` 顶部的 `window.top !== window.self` 防嵌套检查必须保留，且早于任何目录读取。
+7. **错误报告必须带提示行**：`ERROR_REPORT_NOTICE` 常量与 `persistErrorReport()` 的兜底拼接不要删，报告里含本地路径与视频链接。
+8. 改动以上任一项前，先回到这一节确认，并在汇报里说明原因。
 
 ## 修改原则
 

@@ -636,7 +636,14 @@ async function persistDownloadErrorReport() {
     const reportDirectory = await root.getDirectoryHandle("001错误报告", { create: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const file = await reportDirectory.getFileHandle(`下载错误报告_${stamp}.txt`, { create: true });
-    const lines = ["B站视频下载错误报告", `生成时间：${new Date().toLocaleString("zh-CN")}`, `错误数：${downloadErrors.length}`, ""];
+    const lines = [
+      "B站视频下载错误报告",
+      // 4.3：报告含本地路径与视频链接，提醒不要外发
+      "提示：本报告包含本地目录路径与视频链接，仅供自己排查使用，请勿公开分享。",
+      `生成时间：${new Date().toLocaleString("zh-CN")}`,
+      `错误数：${downloadErrors.length}`,
+      ""
+    ];
     downloadErrors.forEach((entry, index) => {
       lines.push(`${index + 1}. ${entry.title || "未知视频"}`);
       if (entry.collection) lines.push(`收藏夹：${entry.collection}`);

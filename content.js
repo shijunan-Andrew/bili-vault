@@ -174,8 +174,12 @@
     @media (prefers-reduced-motion: reduce) { .notice { animation: none; } }
   `;
 
+  // 4.3：不再用 window.open 直接打开扩展页（那要求 library.html 对 B 站页面可见），
+  // 改为请后台用 chrome.tabs.create 打开，扩展页因此不必暴露给任何网页。
   function openLocalLibrary() {
-    try { window.open(chrome.runtime.getURL("library.html"), "_blank", "noopener"); } catch (_) {}
+    try {
+      chrome.runtime.sendMessage({ type: "bca-open-library" }, () => { void chrome.runtime.lastError; });
+    } catch (_) {}
   }
 
   function showNotice(title, message, details, isError, primaryAction) {

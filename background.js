@@ -378,11 +378,15 @@ function addManualVideoInOrder(data) {
   return task;
 }
 
+// 4.3：错误报告里会带本地目录路径、视频链接和堆栈，提醒用户不要外发
+const ERROR_REPORT_NOTICE = "提示：本报告包含本地目录路径与视频链接，仅供自己排查使用，请勿公开分享。";
+
 function reportText(error, context = {}) {
   const now = new Date();
   const metadata = context.metadata || {};
   return [
     "B站收藏信息归档错误报告",
+    ERROR_REPORT_NOTICE,
     `发生时间：${formatChineseDateTime(now, true)}`,
     `错误：${error?.message || String(error)}`,
     `视频标题：${metadata.title || "未知"}`,
@@ -399,7 +403,9 @@ async function persistErrorReport(text) {
     if (!root || await root.queryPermission({ mode: "readwrite" }) !== "granted") return "";
     const directory = await root.getDirectoryHandle("001错误报告", { create: true });
     const filename = `${timestampFolder(new Date())}_${Date.now()}_错误报告.txt`;
-    await writeFile(directory, filename, text);
+    // 统一在落盘前补上提示行，避免各调用方漏写
+    const body = String(text || "").includes(ERROR_REPORT_NOTICE) ? text : `${text}\n\n${ERROR_REPORT_NOTICE}\n`;
+    await writeFile(directory, filename, body);
     return `${root.name}/001错误报告/${filename}`;
   } catch (_) {
     return "";
@@ -910,8 +916,11 @@ const IMPORT_PLACEHOLDER_VALUES = new Set(["", "无", "未知", "-", "--", "—"
 
 const IMPORT_STAT_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
 const IMPORT_STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" };
-const IMPORT_DETAIL_CONCURRENCY = 2;   // 详情抓取并发
-const IMPORT_DETAIL_DELAY_MS = 350;    // 详情抓取间隔，给 B 站接口留余地
+// 4.3 安全加固：把导入的请求密度降到保守档。
+// 之前是并发 2、间隔 350ms（约 5.7 请求/秒），对 B 站接口偏激进，也更容易触发风控。
+// 现在并发 1、间隔 800ms（约 1.2 请求/秒）。嫌慢可以调这两个值，但不要调回 350ms。
+const IMPORT_DETAIL_CONCURRENCY = 1;
+const IMPORT_DETAIL_DELAY_MS = 800;
 
 function importIsPlaceholder(value) {
   return IMPORT_PLACEHOLDER_VALUES.has(importClean(value));
@@ -1355,7 +1364,7 @@ function sendImportProgress(text) {
 
 async function importBiliFavorites(data, tabId = null) {
   const selectedIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
-  const reportLines = ["B站收藏夹本地导入报告", `开始时间：${formatChineseDateTime(new Date(), true)}`];
+  const reportLines = ["B站收藏夹本地导入报告", ERROR_REPORT_NOTICE, `开始时间：${formatChineseDateTime(new Date(), true)}`];
   const root = await getRootHandle();
   if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
   await ensureWritePermission(root);
@@ -1363,6 +1372,9 @@ async function importBiliFavorites(data, tabId = null) {
 
   importRun = { active: true, paused: false, cancelled: false, waiters: [] };
   upFansCache = new Map();
+  // 4.3：失效视频恢复依赖伪造官方 APP 客户端去请求 APP 接口，默认关闭
+  const settings = await chrome.storage.local.get("recoverInvalidVideos").catch(() => ({}));
+  const recoverInvalidVideos = settings?.recoverInvalidVideos === true;
   const journal = createImportJournal();
   publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "" }, true);
 
@@ -1449,16 +1461,22 @@ async function importBiliFavorites(data, tabId = null) {
         if (record && recordNeedsRefresh(record)) refreshTargets.push({ item, record });
       }
 
-      // 失效视频先走原有的恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）
-      try { await enrichImportedInvalidVideos(pendingItems, folder, tabId); }
-      catch (error) {
-        if (error?.name === "ImportCancelled") throw error;
-        folderLog.push(`失效视频恢复流程异常：${error.message}`);
-      }
-      for (const item of pendingItems) {
-        for (const message of item.recoveryErrors || []) {
-          if (!folderLog.includes(message)) folderLog.push(message);
+      // 失效视频先走原有的恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）。
+      // 4.3：这条路径会伪造成官方 iOS 客户端请求 APP 接口，默认关闭，
+      // 只有用户在插件弹窗里显式开启（recoverInvalidVideos）才会执行。
+      if (recoverInvalidVideos) {
+        try { await enrichImportedInvalidVideos(pendingItems, folder, tabId); }
+        catch (error) {
+          if (error?.name === "ImportCancelled") throw error;
+          folderLog.push(`失效视频恢复流程异常：${error.message}`);
         }
+        for (const item of pendingItems) {
+          for (const message of item.recoveryErrors || []) {
+            if (!folderLog.includes(message)) folderLog.push(message);
+          }
+        }
+      } else if (pendingItems.some((item) => item.isInvalid)) {
+        folderNotes.push(`「${folder.title}」有失效视频，但「尝试恢复失效视频」未开启，已按“未知”保存。可在插件弹窗的导入面板中开启后重新导入。`);
       }
 
       // 4.2：每条视频都抓一次完整资料（标签 / 简介 / 发布时间 / 分区 / 互动数据 / UP 主粉丝数）
@@ -1701,6 +1719,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "bca-download-subtitles") {
     getDownloadSubtitles(message).then((subtitles) => sendResponse({ ok: true, subtitles })).catch((error) => sendResponse({ ok: false, message: error?.message || "读取字幕失败。" }));
+    return true;
+  }
+  if (message?.type === "bca-open-library") {
+    // 4.3：由后台打开本地收藏库，这样 library.html 不必作为 web_accessible_resource
+    // 暴露给任何网页（否则 B 站页面可以把它嵌进 iframe 做点击劫持）
+    chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "无法打开本地收藏库。" }));
     return true;
   }
   if (message?.type === "bca-import-control") {

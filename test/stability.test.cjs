@@ -195,13 +195,67 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
   assert.match(content, /mouseenter/);
 });
 
-test("manifest opens the library page to Bilibili pages only", () => {
+test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.2.0");
-  const entry = (manifest.web_accessible_resources || []).find((item) => item.resources.includes("library.html"));
-  assert.ok(entry, "缺少 library.html 的 web_accessible_resources");
-  assert.ok(entry.matches.every((pattern) => pattern.includes("bilibili.com")), "library.html 只应对 B 站页面开放");
-  assert.ok(manifest.permissions.includes("clipboardWrite"));
+  assert.equal(manifest.version, "4.3.0");
+  // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
+  assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
+  assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
+  // 打开本地收藏库改由后台 chrome.tabs.create 完成
+  const background = readProjectFile("background.js");
+  const content = readProjectFile("content.js");
+  assert.match(background, /"bca-open-library"/);
+  assert.match(background, /chrome\.tabs\.create\(\{ url: chrome\.runtime\.getURL\("library\.html"\) \}\)/);
+  assert.match(content, /type: "bca-open-library"/);
+  assert.equal(/window\.open\(chrome\.runtime\.getURL/.test(content), false, "不应再用 window.open 打开扩展页");
+});
+
+/* ------------------------- 4.3 安全加固 ------------------------- */
+
+test("the library refuses to run inside a frame", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /if \(window\.top !== window\.self\)/);
+  // 必须在读取本地目录之前就拦下来
+  const guardIndex = library.indexOf("window.top !== window.self");
+  const restoreIndex = library.indexOf("restoreLastRoot()");
+  assert.ok(guardIndex > 0 && restoreIndex > guardIndex, "防嵌套检查必须早于目录读取");
+});
+
+test("cover images are restricted to blob and inline image URLs", () => {
+  const library = readProjectFile("library.js");
+  assert.ok(library.includes("blob:|data:image"), "safeCover 应有协议白名单");
+  assert.ok(library.includes('return `<img src="${escapeHtml(url)}"'), "safeCover 应转义 URL");
+});
+
+test("error reports warn that they contain local paths", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const ERROR_REPORT_NOTICE = "提示：本报告包含本地目录路径与视频链接/);
+  assert.match(background, /includes\(ERROR_REPORT_NOTICE\)/, "persistErrorReport 应兜底补提示");
+  assert.match(readProjectFile("download.js"), /请勿公开分享/);
+});
+
+test("the import asks Bilibili slowly instead of in bursts", () => {
+  const background = readProjectFile("background.js");
+  const concurrency = Number(background.match(/const IMPORT_DETAIL_CONCURRENCY = (\d+);/)?.[1]);
+  const delay = Number(background.match(/const IMPORT_DETAIL_DELAY_MS = (\d+);/)?.[1]);
+  assert.equal(concurrency, 1, "导入详情抓取应串行");
+  assert.ok(delay >= 600, `请求间隔至少 600ms，当前 ${delay}ms`);
+  assert.ok(concurrency / (delay / 1000) <= 2, `每秒请求数不应超过 2，当前 ${(concurrency / (delay / 1000)).toFixed(2)}`);
+});
+
+test("invalid-video recovery through the APP API is opt-in and off by default", () => {
+  const background = readProjectFile("background.js");
+  const popup = readProjectFile("popup.js");
+  const html = readProjectFile("popup.html");
+  assert.match(background, /const recoverInvalidVideos = settings\?\.recoverInvalidVideos === true/);
+  assert.match(html, /id="recoverInvalid"/);
+  assert.match(popup, /recoverInvalidVideos: recoverInvalidCheckbox\.checked/);
+  // 默认关闭：只有显式存过 true 才勾选
+  assert.match(popup, /recoverInvalidCheckbox\.checked = saved\?\.recoverInvalidVideos === true/);
+  // 恢复流程必须被开关包住
+  const gateIndex = background.indexOf("if (recoverInvalidVideos) {");
+  const callIndex = background.indexOf("await enrichImportedInvalidVideos(pendingItems, folder, tabId)");
+  assert.ok(gateIndex > 0 && callIndex > gateIndex, "APP 接口恢复流程必须在开关之内");
 });
 
 /* ---------------- 4.2：归档改为整条重写，不再做定点补丁 ---------------- */

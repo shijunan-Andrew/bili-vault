@@ -118,6 +118,11 @@ button:disabled { cursor: wait; opacity: .6; }
 .import-folder-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .import-folder-count { color: var(--faint); font-size: var(--fs-sm); }
 .import-warning { margin: var(--sp-2) 0 var(--sp-1); color: var(--danger); font-size: var(--fs-sm); line-height: 1.6; }
+/* 4.3：失效视频恢复默认关闭，需要用户显式勾选 */
+.import-option { display: flex; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); cursor: pointer; }
+.import-option input { margin: 2px 0 0; accent-color: var(--brand); }
+.import-option span { display: grid; gap: 2px; color: var(--text); font-size: var(--fs-base); }
+.import-option small { color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
 .import-selection-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); margin: var(--sp-2) 2px; }
 .text-button { width: auto; min-height: 26px; padding: 2px 4px; color: var(--brand-deep); background: transparent; font-size: var(--fs-sm); font-weight: 600; }
 .text-button:hover { color: var(--brand-strong); text-decoration: underline; }

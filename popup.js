@@ -22,6 +22,7 @@ const importControl = document.getElementById("importControl");
 const importControlHint = document.getElementById("importControlHint");
 const pauseImportButton = document.getElementById("pauseImport");
 const cancelImportButton = document.getElementById("cancelImport");
+const recoverInvalidCheckbox = document.getElementById("recoverInvalid");
 const importFolderList = document.getElementById("importFolderList");
 const importCard = document.getElementById("importCard");
 const importStatus = document.getElementById("importStatus");
@@ -72,6 +73,20 @@ async function sendImportControl(action) {
   if (!result?.ok) throw new Error(result?.message || "操作失败。");
   return result;
 }
+
+// 4.3：失效视频恢复会伪造官方 APP 客户端请求 APP 接口，默认关闭，由用户显式开启
+async function restoreRecoverInvalid() {
+  try {
+    const saved = await chrome.storage.local.get("recoverInvalidVideos");
+    recoverInvalidCheckbox.checked = saved?.recoverInvalidVideos === true;
+  } catch (_) {
+    recoverInvalidCheckbox.checked = false;
+  }
+}
+
+recoverInvalidCheckbox.addEventListener("change", () => {
+  chrome.storage.local.set({ recoverInvalidVideos: recoverInvalidCheckbox.checked }).catch(() => {});
+});
 
 function queryCurrentTab() {
   return new Promise((resolve, reject) => {
@@ -127,6 +142,7 @@ function updateImportSelection() {
   // 导入进行中时把折叠面板强制展开，避免进度被收起后看不到
   if (importBusy && importCard) importCard.open = true;
   importFolderList.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = importBusy; });
+  if (recoverInvalidCheckbox) recoverInvalidCheckbox.disabled = importBusy;
   refreshImportFoldersButton.disabled = importBusy;
   selectAllImportFoldersButton.disabled = importBusy;
   clearImportFoldersButton.disabled = importBusy;
@@ -459,6 +475,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   refreshStatus().catch(() => {});
 });
 refreshEnabledState().catch(() => renderEnabledState(true));
+restoreRecoverInvalid().catch(() => {});
 loadImportFolders();
 refreshStatus().catch((error) => {
   lastResult.textContent = error?.message || "无法读取插件状态。";
