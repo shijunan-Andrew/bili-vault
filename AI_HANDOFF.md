@@ -1,11 +1,11 @@
-# AI 项目交接说明：B站收藏信息归档 4.5
+# AI 项目交接说明：B站收藏信息归档 4.5.1
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.5`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
-- 扩展版本：`4.5.0`，Chrome Manifest V3，最低 Chrome 版本 111。
+- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.5.1`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
+- 扩展版本：`4.5.1`，Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -138,6 +138,14 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 ```
 
 后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+### 交互外壳（4.5.1）
+
+- **主题与语言的悬浮球**：收藏库右下角两个固定球（`.floating-dock`，`position: fixed; z-index: 6`），点开是 `.dock-menu` 浮层。菜单由 `renderDockMenus()` 重建，球的图标跟着 `BcaTheme.current()` 走（`THEME_ICONS` 映射 monitor/sun/moon）。**主题名要翻译**（`跟随系统/白天/夜晚` 是界面文字），**语言名不翻译**（`简体中文/繁體中文/English` 是各语言自称）。
+- **插件弹窗的分段控件**：`.segmented`，按钮用 `aria-pressed` 表达选中。**主题按钮的文字必须套 `<span data-i18n>`**——按钮里还有 `<span class="segmented-icon">` 图标，`data-i18n` 用 `textContent` 会把图标清掉。
+- **新建收藏夹**在收藏夹列表之后（`.collection-create-tail`），不要再放回「我的收藏夹」标题行。
+- **更新视频状态必须过确认框**（`openStatusConfirm` → `#statusConfirm`）：单条与批量共用，批量走 `selectedRecords()`（**不是 `selectedVideos()`**——后者是当前收藏夹的全部视频，用错会把整个收藏夹刷一遍，正好是最容易触发风控的行为）。上限 `STATUS_BATCH_LIMIT = 80`，超出部分提示分次继续。
+- **logo 三处同源**：`library.css` 的 `.brand-mark`、`popup.css` 的 `.brand-icon`、`background.js` 里 `updateActionIcon()` 用 OffscreenCanvas 画的工具栏图标。改观感时三处一起改，并保留「关闭自动归档 → 转灰」的行为（灰色也有渐变）。
+
 ### 使用须知（4.4 新增）
 
 同一份六条安全声明必须同时出现在 `library.html`、`download.html`、`popup.html`，**逐字一致**（测试会逐条比对）。

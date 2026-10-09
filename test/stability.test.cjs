@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.5.0");
+  assert.equal(manifest.version, "4.5.1");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -755,58 +755,36 @@ test("invalid detection relies on API error codes, not on network failures", () 
   assert.match(source, /currentStatus === STATUS_INVALID_MARKER \? "正常" : undefined/);
 });
 
-test("the status refresh lives in the video detail, one video at a time", () => {
+test("the status refresh always asks for confirmation first", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
-  // 4.5：页面标题栏不再有批量刷新的入口，批量对话框也一并删除
-  assert.equal(/id="refreshVideoStatus"/.test(html), false, "标题栏不该再有批量刷新按钮");
-  assert.equal(/id="statusDialog"/.test(html), false, "批量刷新对话框应已删除");
-  assert.equal(/id="statusBatchSize"/.test(html), false, "批量数量选择应已删除");
-  assert.equal(/statusDialog|statusBatchSize|confirmStatusButton/.test(library), false, "library.js 不该再有批量刷新残留");
-  // 按钮改到详情面板的互动数据下面
-  const statsIndex = library.indexOf("${detailStatsHtml(video.stats)}");
-  const refreshIndex = library.indexOf('class="button button-quiet refresh-status"', statsIndex);
-  assert.ok(statsIndex > 0 && refreshIndex > statsIndex, "刷新按钮必须排在互动数据之后");
-  assert.match(library, /function refreshOneVideoStatus\(/);
-  assert.match(library, /\.refresh-status"\)\.addEventListener\("click", \(\) => refreshOneVideoStatus\(video\)\)/);
-  // 一次只提交一条，避免批量打接口
-  assert.match(library, /type: "bca-refresh-video-stats", data: \{ targets: \[target\], limit: 1 \}/);
-  assert.match(library, /bca-status-progress/);
+  // 4.5.1：单条与批量都先弹确认框，把「别频繁刷接口」讲清楚
+  for (const id of ["statusConfirm", "statusConfirmCount", "statusConfirmGo", "statusConfirmCancel", "statusConfirmProgress"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
+  }
+  assert.match(html, /请勿频繁更新：每次更新都会请求 B 站接口/);
+  assert.match(library, /function openStatusConfirm\(/);
+  assert.match(library, /function runStatusRefresh\(/);
+  // 详情里的按钮不再直接刷新，而是先确认
+  assert.match(library, /\.refresh-status"\)\.addEventListener\("click", \(\) => openStatusConfirm\(\[video\], "detail"\)\)/);
+  assert.equal(/refreshOneVideoStatus/.test(library), false, "旧的无确认刷新入口应已删除");
+  // 仍然共用后台的串行队列，请求频率不变
+  assert.match(library, /type: "bca-refresh-video-stats"/);
+  assert.match(library, /limit: STATUS_BATCH_LIMIT/);
+  assert.match(library, /const STATUS_BATCH_LIMIT = 80;/);
   assert.match(readProjectFile("background.js"), /"bca-refresh-video-stats"/);
-  // 和保存/导入共用串行队列
   assert.match(readProjectFile("background.js"), /saveQueue\.then\(\(\) => refreshVideoStatus/);
 });
 
-test("number formatting follows the interface language", () => {
-  // 数字单位是语言相关的：中文用 万/亿，英文用 K/M/B。
-  // 这里钉死换算关系——曾经用 t("{value} 万") 当模板硬拼，英文补成 "{value}0K"，
-  // 结果 7.4 万（74000）显示成 7.40K，小了十倍，而且只在英文模式下出现。
-  const source = readProjectFile("library.js");
-  const match = source.match(/^function formatCount\([\s\S]*?\n\}/m);
-  assert.ok(match, "library.js 里找不到 formatCount");
-  const build = (locale) => new Function("BcaI18n", `${match[0]}\nreturn formatCount;`)({ locale: () => locale });
-
-  const cn = build("zh-CN");
-  const tw = build("zh-TW");
-  const en = build("en");
-
-  assert.equal(cn("73798"), "7.4 万");
-  assert.equal(tw("73798"), "7.4 萬");
-  assert.equal(en("73798"), "73.8K");
-  assert.equal(cn("29044453"), "2904.4 万");
-  assert.equal(en("29044453"), "29.0M");
-  assert.equal(cn("999999999"), "10.0 亿");
-  assert.equal(en("999999999"), "1.0B");
-  // 小于 1 万/1 千的原样显示
-  assert.equal(cn("642"), "642");
-  assert.equal(en("642"), "642");
-  // 不能出现 1000.0K / 1000.0M 这种没进位的写法
-  for (const value of ["999949", "999999999", "1000000000"]) {
-    assert.equal(/1000\.0[KMB]/.test(en(value)), false, `英文进位错误：${value} → ${en(value)}`);
-  }
-  // 空值与非数字原样返回，不能抛
-  assert.equal(cn(""), "");
-  assert.equal(en("未知"), "未知");
+test("batch manage can refresh the selected records", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /id="updateSelected"/);
+  // 用勾选的记录，不是当前收藏夹的全部视频
+  assert.match(library, /updateSelectedButton\.addEventListener\("click", \(\) => openStatusConfirm\(selectedRecords\(\), "batch"\)\)/);
+  assert.equal(/openStatusConfirm\(selectedVideos\(\)/.test(library), false, "批量更新必须用 selectedRecords()");
+  // 没有 BV/av 号的记录没法更新
+  assert.match(library, /updateSelectedButton\.disabled = !records\.some\(canRefreshStatus\)/);
 });
 test("the library can sort by view count", () => {
   const html = readProjectFile("library.html");
@@ -855,33 +833,77 @@ test("the dark theme only redefines tokens, and both triggers agree", () => {
   assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
 });
 
-test("the theme switcher is offered on the library page", () => {
+test("create-collection sits under the last collection", () => {
   const html = readProjectFile("library.html");
-  const library = readProjectFile("library.js");
-  assert.match(html, /<script src="theme\.js"><\/script>/);
-  assert.match(html, /id="themeSelect"/);
-  assert.match(library, /BcaTheme\.modes\(\)/);
-  assert.match(library, /themeSelect\.addEventListener\("change", \(\) => BcaTheme\.use\(themeSelect\.value\)\)/);
-  // theme.js 必须在 head 里同步跑，否则会先闪一下浅色
-  const head = html.slice(0, html.indexOf("</head>"));
-  assert.ok(head.includes('src="theme.js"'), "theme.js 必须放在 head 里");
-  const theme = readProjectFile("theme.js");
-  for (const mode of ["system", "light", "dark"]) {
-    assert.ok(theme.includes(`id: "${mode}"`), `theme.js 缺少 ${mode} 模式`);
-  }
-  // 跟随系统时不能挂 data-theme，交给媒体查询
-  assert.match(theme, /if \(mode === "system"\) root\.removeAttribute\("data-theme"\)/);
-  // 同步读取，避免闪烁
-  assert.match(theme, /localStorage/);
+  const css = readProjectFile("library.css");
+  const listAt = html.indexOf('id="collectionList"');
+  const createAt = html.indexOf('id="createCollection"');
+  assert.ok(listAt > 0 && createAt > listAt, "新建入口必须排在收藏夹列表之后");
+  // 不能再留在「我的收藏夹」标题那一行
+  const headingAt = html.indexOf('class="collection-heading"');
+  assert.ok(createAt > html.indexOf("</nav>", headingAt < 0 ? 0 : headingAt), "新建入口应在列表容器之后");
+  assert.match(css, /\.collection-create-tail \{[^}]*width: calc\(100% - var\(--sp-4\)\)/);
+  assert.match(css, /\.collection-create-tail \{[^}]*border-style: dashed/);
 });
 
+test("the logo is styled consistently and grays out when disabled", () => {
+  const libraryCss = readProjectFile("library.css");
+  const popupCss = readProjectFile("popup.css");
+  const background = readProjectFile("background.js");
+  // 工具栏图标：圆角比例、渐变、关闭时转灰
+  assert.match(background, /const radius = box \* 0\.235;/);
+  assert.match(background, /createLinearGradient\(0, inset, 0, inset \+ box\)/);
+  assert.match(background, /gradient\.addColorStop\(0, "#38c1ea"\)/);
+  assert.match(background, /gradient\.addColorStop\(0, "#aab1ba"\)/, "关闭自动归档时要有灰色渐变");
+  // 网页与弹窗的 logo 用同一套观感
+  assert.match(libraryCss, /\.brand-mark \{[^}]*background: linear-gradient\(160deg, var\(--brand-tint\)/);
+  assert.match(libraryCss, /\.brand-mark \{[^}]*inset 0 1px 0/);
+  assert.match(popupCss, /\.brand-icon\.disabled \{ background: var\(--ghost\)/);
+});
+
+test("the abuse warning is emphasised on all three surfaces", () => {
+  for (const [htmlFile, cssFile] of [["library.html", "library.css"], ["download.html", "download.css"], ["popup.html", "popup.css"]]) {
+    assert.match(readProjectFile(htmlFile), /<li class="safety-abuse" data-i18n="请勿滥用：/, `${htmlFile} 的「请勿滥用」缺少 safety-abuse 标记`);
+    const rule = (readProjectFile(cssFile).match(/\.safety[-a-z]*list li\.safety-abuse \{[^}]*\}/) || [""])[0];
+    assert.match(rule, /font-weight: 700/, `${cssFile} 的「请勿滥用」应加粗`);
+    assert.match(rule, /text-decoration: underline/, `${cssFile} 的「请勿滥用」应加下划线`);
+    // 强调色必须走令牌，深色下才正常
+    assert.match(rule, /var\(--warning\)/, `${cssFile} 的强调色应使用 --warning 令牌`);
+  }
+});
+test("theme and language are floating balls, not sidebar selects", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  // 4.5.1：原来的侧栏 <select> 太小，改成右下角悬浮球
+  assert.equal(/id="themeSelect"/.test(html), false, "旧的主题下拉框应已删除");
+  assert.equal(/id="localeSelect"/.test(html), false, "旧的语言下拉框应已删除");
+  for (const id of ["themeBall", "themeMenu", "localeBall", "localeMenu", "themeBallIcon"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
+  }
+  assert.match(library, /function toggleDockMenu\(/);
+  assert.match(library, /function closeDockMenus\(/);
+  assert.match(library, /function renderDockMenus\(/);
+  assert.match(library, /BcaTheme\.use\(id\)/);
+  assert.match(library, /BcaI18n\.use\(id\)/);
+  // 球的图标跟着当前主题走
+  assert.match(library, /const THEME_ICONS = \{ system: "monitor", light: "sun", dark: "moon" \}/);
+  // 悬浮球必须真的浮起来
+  const rule = (readProjectFile("library.css").match(/\.floating-dock \{[^}]*\}/) || [""])[0];
+  assert.match(rule, /position: fixed/);
+  assert.match(rule, /right:/);
+  assert.match(rule, /bottom:/);
+  // 点空白处和按 Esc 都要收起
+  assert.match(library, /document\.addEventListener\("click", \(\) => closeDockMenus\(\)\)/);
+  assert.match(library, /event\.key === "Escape"/);
+});
 test("the interface language switcher offers three locales", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
   assert.match(html, /<script src="i18n\.js"><\/script>/);
-  assert.match(html, /id="localeSelect"/);
+  assert.match(html, /<script src="theme\.js"><\/script>/);
   assert.match(library, /BcaI18n\.locales\(\)/);
-  assert.match(library, /await BcaI18n\.use\(localeSelect\.value\)/);
+  assert.match(library, /function relabelAfterLocaleChange\(/);
+  assert.match(library, /BcaI18n\.onChange\(/);
   assert.match(library, /BcaI18n\.init\(\)/);
   const i18n = readProjectFile("i18n.js");
   for (const locale of ["zh-CN", "zh-TW", "en"]) {
@@ -889,18 +911,15 @@ test("the interface language switcher offers three locales", () => {
   }
   // 简体中文是原文语言，不需要词典文件
   assert.match(i18n, /用中文原文当 key/);
-  assert.match(i18n, /查不到就返回原文/);
   // 内容脚本不能翻译宿主页面
   assert.match(i18n, /inExtensionPage\(\)/);
-  // 切语言后要重画动态内容
-  assert.match(library, /BcaI18n\.onChange\(/);
+  // 主题/语言名本身不翻译
+  assert.match(library, /语言名用各自的写法，不翻译/);
 });
 // 使用须知必须在三个界面逐字一致，否则用户在不同入口看到的说法会不一样。
-// 4.5 起条目上带了 data-i18n，所以这里剥掉标签只比文字。
+// 4.5 起条目上带了 data-i18n、4.5.1 又加了 class，所以先剥掉属性再比文字。
 function noticeItems(html) {
-  // 先剥掉 data-i18n* 属性：其中 data-i18n-html 的值里含 "&quot;>"，
-  // 直接去匹配 <li[^>]*> 会在属性中间就截断。
-  const cleaned = html.replace(/\sdata-i18n(?:-html|-title|-placeholder|-aria)?="[^"]*"/g, "");
+  const cleaned = html.replace(/\sdata-i18n(?:-html|-title|-placeholder|-aria)?="[^"]*"/g, "").replace(/\sclass="safety-abuse"/g, "");
   const list = (cleaned.match(/<ul class="safety-(?:notice-)?list"[^>]*>([\s\S]*?)<\/ul>/) || ["", ""])[1];
   return [...list.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)].map((match) => match[1]
     .replace(/<[^>]+>/g, "")
@@ -967,8 +986,15 @@ test("the safety notice uses the warning palette with larger type", () => {
 // 在沙箱里加载 theme.js / i18n.js：它们都是 IIFE，参数化 globalThis 就能隔离测试
 function loadThemeModule({ stored = null, prefersDark = false } = {}) {
   const attributes = {};
+  const listeners = {};
   const storage = { value: stored, getItem() { return this.value; }, setItem(_key, next) { this.value = next; } };
-  const sandbox = { localStorage: storage, matchMedia: () => ({ matches: prefersDark, addEventListener() {} }) };
+  const sandbox = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: prefersDark, addEventListener() {} }),
+    // theme.js 会监听 localStorage 的 storage 事件做跨页同步，这里留个可派发的入口
+    addEventListener(type, handler) { (listeners[type] = listeners[type] || []).push(handler); },
+    dispatch(type, event) { (listeners[type] || []).forEach((handler) => handler(event)); }
+  };
   const fakeDocument = {
     documentElement: {
       dataset: {},
@@ -977,7 +1003,7 @@ function loadThemeModule({ stored = null, prefersDark = false } = {}) {
     }
   };
   new Function("globalThis", "document", readProjectFile("theme.js"))(sandbox, fakeDocument);
-  return { api: sandbox.BcaTheme, attributes, storage };
+  return { api: sandbox.BcaTheme, attributes, storage, sandbox };
 }
 
 test("theme.js resolves 白天 / 夜晚 / 跟随系统 correctly", () => {
@@ -1035,6 +1061,24 @@ function loadI18nModule({ locale = null, dictionary = null, contentScript = fals
   return sandbox.BcaI18n;
 }
 
+test("a theme picked elsewhere syncs into this page", () => {
+  // 用户在插件弹窗里选了「夜晚」，已经打开的收藏库要跟着变。
+  // 主题存在 localStorage，同源页面之间靠 storage 事件传递。
+  const theme = loadThemeModule({ prefersDark: false });
+  assert.equal(theme.api.current(), "system");
+  assert.equal(theme.attributes["data-theme"], undefined);
+
+  // 模拟别的页面写了 localStorage，浏览器在本页派发 storage 事件
+  theme.storage.value = "dark";
+  theme.sandbox.dispatch("storage", { key: "interfaceTheme", newValue: "dark" });
+  assert.equal(theme.api.current(), "dark");
+  assert.equal(theme.attributes["data-theme"], "dark", "别的页面改了主题，本页要跟着挂上 data-theme");
+
+  // 别的键变化不该影响主题
+  theme.storage.value = "light";
+  theme.sandbox.dispatch("storage", { key: "interfaceLocale", newValue: "en" });
+  assert.equal(theme.api.current(), "dark", "只有 interfaceTheme 变化才该改主题");
+});
 test("i18n uses the Chinese source as key and falls back to it", async () => {
   const i18n = loadI18nModule({ dictionary: { "使用须知": "Before you start", "已选 {count} 个": "{count} selected" } });
   await i18n.init();

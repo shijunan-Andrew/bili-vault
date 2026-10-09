@@ -2,26 +2,50 @@ const DB_NAME = "bili-fav-archiver";
 const DB_STORE = "settings";
 let saveQueue = Promise.resolve();
 
+// 4.5.1：工具栏图标的观感对齐网页/弹窗里的 logo——更大的圆角比例、
+// 竖直渐变、大尺寸下加一圈白色高光。关闭自动归档时整体转灰（保持原有行为）。
 async function updateActionIcon(enabled) {
   const imageData = {};
   for (const size of [16, 32, 48, 128]) {
     const canvas = new OffscreenCanvas(size, size);
     const context = canvas.getContext("2d");
-    const radius = size * 0.22;
+    const inset = Math.max(1, size * 0.045);
+    const box = size - inset * 2;
+    const radius = box * 0.235;
+
+    const gradient = context.createLinearGradient(0, inset, 0, inset + box);
+    if (enabled) {
+      gradient.addColorStop(0, "#38c1ea");
+      gradient.addColorStop(0.52, "#00a1d6");
+      gradient.addColorStop(1, "#0089b8");
+    } else {
+      gradient.addColorStop(0, "#aab1ba");
+      gradient.addColorStop(1, "#8d949e");
+    }
+
     context.beginPath();
-    context.moveTo(radius, 1);
-    context.arcTo(size - 1, 1, size - 1, radius, radius);
-    context.arcTo(size - 1, size - 1, size - radius, size - 1, radius);
-    context.arcTo(1, size - 1, 1, size - radius, radius);
-    context.arcTo(1, 1, radius, 1, radius);
+    context.moveTo(inset + radius, inset);
+    context.arcTo(inset + box, inset, inset + box, inset + radius, radius);
+    context.arcTo(inset + box, inset + box, inset + radius, inset + box, radius);
+    context.arcTo(inset, inset + box, inset, inset + radius, radius);
+    context.arcTo(inset, inset, inset + radius, inset, radius);
     context.closePath();
-    context.fillStyle = enabled ? "#00a1d6" : "#9ba2ac";
+    context.fillStyle = gradient;
     context.fill();
-    context.fillStyle = "#ffffff";
-    context.font = `bold ${Math.round(size * 0.62)}px Arial, sans-serif`;
+
+    // 16px 下加高光只会糊成一团，从 32px 起才画
+    if (size >= 32) {
+      context.strokeStyle = "rgba(255, 255, 255, 0.34)";
+      context.lineWidth = Math.max(1, size * 0.03);
+      context.stroke();
+    }
+
+    context.fillStyle = "#ffffff";   // 彩色底上的白字，不随主题变
+    context.font = `800 ${Math.round(box * 0.66)}px "Segoe UI", system-ui, Arial, sans-serif`;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText("B", size / 2, size / 2 + size * 0.03);
+    context.fillText("B", size / 2, size / 2 + box * 0.035);
+
     imageData[size] = context.getImageData(0, 0, size, size);
   }
   await chrome.action.setIcon({ imageData });

@@ -20,7 +20,7 @@
         <span class="chevron" data-icon="chevron-down"></span>
       </summary>
       <ul class="safety-notice-list">
-        <li data-i18n="请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。">请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
+        <li class="safety-abuse" data-i18n="请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。">请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
         <li data-i18n-html="本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 &lt;a href=&quot;https://github.com/leiurayer/downkyi&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;DownKyi&lt;/a&gt;。">本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href="https://github.com/leiurayer/downkyi" target="_blank" rel="noopener noreferrer">DownKyi</a>。</li>
         <li data-i18n="下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。">下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。</li>
         <li data-i18n="本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。">本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。</li>
@@ -36,6 +36,23 @@
         <p class="subtitle" data-i18n="自动归档视频，也可批量导入收藏夹">自动归档视频，也可批量导入收藏夹</p>
       </div>
     </div>
+
+    <!-- 4.5.1：主题与语言从页脚移到顶部，改成图标 + 文字的分段控件。
+         主题名是界面文字，必须可翻译；因为有图标兄弟节点，data-i18n 只能套在文字 span 上
+         （data-i18n 走 textContent，直接标在按钮上会把图标清掉）。
+         语言名（简体中文 / 繁體中文 / English）是各语言的自称，任何界面下都原样显示，不翻译。 -->
+    <section class="card controls-card">
+      <div class="segmented" role="group" data-i18n-aria="主题" aria-label="主题">
+        <button type="button" data-theme-value="system" aria-pressed="false" data-i18n-title="跟随系统" title="跟随系统"><span class="segmented-icon" data-icon="monitor"></span><span data-i18n="跟随系统">跟随系统</span></button>
+        <button type="button" data-theme-value="light" aria-pressed="false" data-i18n-title="白天" title="白天"><span class="segmented-icon" data-icon="sun"></span><span data-i18n="白天">白天</span></button>
+        <button type="button" data-theme-value="dark" aria-pressed="false" data-i18n-title="夜晚" title="夜晚"><span class="segmented-icon" data-icon="moon"></span><span data-i18n="夜晚">夜晚</span></button>
+      </div>
+      <div class="segmented" role="group" data-i18n-aria="界面语言" aria-label="界面语言">
+        <button type="button" data-locale="zh-CN" aria-pressed="false" title="简体中文"><span class="segmented-icon" data-icon="globe"></span>简体中文</button>
+        <button type="button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>
+        <button type="button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
+      </div>
+    </section>
 
     <section class="card feature-card">
       <div>
@@ -123,8 +140,7 @@
     <div class="popup-foot">
       <a class="support-link" href="https://space.bilibili.com/1515305135" target="_blank" rel="noopener noreferrer"><span data-icon="sparkle"></span><span data-i18n="给 up 一个一键三连">给 up 一个一键三连</span></a>
       <div class="foot-right">
-        <!-- 语言名本身就是选项文案，不翻译 -->
-        <select id="localeSelect" class="locale-select" data-i18n-aria="界面语言" aria-label="界面语言"></select>
+        <!-- 4.5.1：语言切换已移到顶部控件组，页脚只留版本号 -->
         <div id="popupVersion" class="popup-version"></div>
       </div>
     </div>

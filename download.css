@@ -42,6 +42,8 @@ body {
 .safety-notice-heading .icon { font-size: var(--fs-lg); color: var(--warning); }
 .safety-notice-list { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
 .safety-notice-list li { color: var(--text); font-size: var(--fs-md); line-height: 1.8; overflow-wrap: anywhere; }
+/* 4.5.1：「请勿滥用」是整段须知里最要紧的一条，加粗并加下划线 */
+.safety-notice-list li.safety-abuse { color: var(--warning); font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .safety-notice-list a { color: var(--brand-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .safety-notice-list a:hover { color: var(--brand-strong); }
 

@@ -19,20 +19,10 @@
       </a>
       <div class="collection-heading">
         <div class="side-label"><span data-icon="collection"></span><span data-i18n="我的收藏夹" style="color: var(--faint); font-weight: 650">我的收藏夹</span> <span id="collectionTotal">—</span><span class="collection-sort-hint" data-i18n="拖动排序">拖动排序</span></div>
-        <button id="createCollection" class="collection-create" type="button"><span data-icon="plus"></span><span data-i18n="新建">新建</span></button>
       </div>
       <nav id="collectionList" class="collection-list" aria-label="收藏夹" data-i18n-aria="收藏夹"></nav>
+      <button id="createCollection" class="collection-create collection-create-tail" type="button"><span data-icon="plus"></span><span data-i18n="新建收藏夹">新建收藏夹</span></button>
       <div class="sidebar-bottom">
-        <div class="preference-row">
-          <label class="preference">
-            <span class="preference-label" data-i18n="主题">主题</span>
-            <select id="themeSelect" aria-label="主题" data-i18n-aria="主题"></select>
-          </label>
-          <label class="preference">
-            <span class="preference-label" data-i18n="语言">语言</span>
-            <select id="localeSelect" aria-label="语言" data-i18n-aria="语言"></select>
-          </label>
-        </div>
         <div class="privacy-note"><span class="lock-icon" data-icon="shield"></span><span data-i18n-html="归档文件只在本地管理<br>添加视频时向 B 站查询资料">归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
         <div class="side-version"><span data-i18n="B站收藏信息归档">B站收藏信息归档</span> · <span id="sideVersion">4.5</span></div>
       </div>
@@ -87,7 +77,7 @@
             <span class="chevron" data-icon="chevron-down"></span>
           </summary>
           <ul class="safety-list">
-            <li data-i18n="请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。">请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
+            <li class="safety-abuse" data-i18n="请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。">请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
             <li data-i18n-html="本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href=&quot;https://github.com/leiurayer/downkyi&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;>DownKyi</a>。">本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href="https://github.com/leiurayer/downkyi" target="_blank" rel="noopener noreferrer">DownKyi</a>。</li>
             <li data-i18n="下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。">下载的文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。</li>
             <li data-i18n="本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。">本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。</li>
@@ -115,6 +105,7 @@
               <button id="exitBatch" class="text-button" type="button" data-i18n="完成">完成</button>
             </div>
             <div class="batch-actions">
+              <button id="updateSelected" class="button button-quiet" type="button" disabled><span data-icon="refresh"></span><span data-i18n="更新视频状态">更新视频状态</span></button>
               <button id="downloadSelected" class="button button-download" type="button" disabled><span data-icon="download"></span><span data-i18n="下载">下载</span></button>
               <button id="moveSelected" class="button button-primary" type="button" disabled><span data-icon="move"></span><span data-i18n="移动或复制">移动或复制</span></button>
               <button id="deleteSelected" class="button button-danger" type="button" disabled><span data-icon="trash"></span><span data-i18n="删除">删除</span></button>
@@ -204,6 +195,19 @@
     </div>
   </dialog>
 
+  <dialog id="statusConfirm" class="editor-dialog" aria-labelledby="statusConfirmTitle">
+    <div class="editor-heading"><span class="editor-heading-icon" data-icon="refresh"></span><h2 id="statusConfirmTitle" data-i18n="更新视频状态">更新视频状态</h2></div>
+    <p id="statusConfirmCount" class="editor-hint"></p>
+    <p class="editor-hint" data-i18n="重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签。">重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签。</p>
+    <p class="status-warning"><span data-icon="alert"></span><span data-i18n="请勿频繁更新：每次更新都会请求 B 站接口，短时间内反复操作可能触发风控。建议一次少选一些，分批进行。">请勿频繁更新：每次更新都会请求 B 站接口，短时间内反复操作可能触发风控。建议一次少选一些，分批进行。</span></p>
+    <p id="statusConfirmMore" class="editor-hint" hidden></p>
+    <p id="statusConfirmProgress" class="dialog-progress" role="status" hidden></p>
+    <div class="editor-actions">
+      <button id="statusConfirmCancel" class="button button-quiet" type="button" data-i18n="取消">取消</button>
+      <button id="statusConfirmGo" class="button button-primary" type="button" data-i18n="开始更新">开始更新</button>
+    </div>
+  </dialog>
+
   <div id="confirmBackdrop" class="confirm-backdrop" hidden>
     <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="confirm-icon" data-icon="alert"></div>
@@ -218,6 +222,18 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- 4.5.1：主题与语言改成右下角的悬浮球，比原来侧栏里的下拉框更好点、也更好看 -->
+  <div class="floating-dock">
+    <div class="dock-slot">
+      <div id="themeMenu" class="dock-menu" role="menu" hidden></div>
+      <button id="themeBall" class="dock-ball" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" aria-label="主题" data-i18n-aria="主题" title="主题" data-i18n-title="主题"><span id="themeBallIcon" data-icon="monitor"></span></button>
+    </div>
+    <div class="dock-slot">
+      <div id="localeMenu" class="dock-menu" role="menu" hidden></div>
+      <button id="localeBall" class="dock-ball" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="localeMenu" aria-label="语言" data-i18n-aria="语言" title="语言" data-i18n-title="语言"><span data-icon="globe"></span></button>
+    </div>
+  </div>
 
   <script src="icons.js"></script>
   <script src="archive-core.js"></script>

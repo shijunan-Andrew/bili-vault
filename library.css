@@ -27,17 +27,23 @@ body {
 }
 
 .brand { display: flex; align-items: center; gap: var(--sp-3); margin: 0 var(--sp-2) var(--sp-6); color: inherit; text-decoration: none; }
+/* 4.5.1：logo 往「应用图标」的观感靠——更大的圆角比例、顶部高光、
+   文字带一点投影。与 background.js 里程序化生成的工具栏图标保持同一套观感。 */
 .brand-mark {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: var(--r-md);
-  color: #fff;
-  background: linear-gradient(140deg, var(--brand), var(--brand-strong));
-  box-shadow: var(--shadow-brand);
-  font-size: var(--fs-xl);
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  color: #fff;                      /* 彩色底上的白字，不随主题变 */
+  background: linear-gradient(160deg, var(--brand-tint), var(--brand) 46%, var(--brand-strong));
+  box-shadow: var(--shadow-brand), inset 0 1px 0 #ffffff59;
+  font-size: 25px;
   font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.5px;
+  text-shadow: 0 1px 2px #10182833;
 }
 .brand strong { display: block; color: var(--ink); font-size: var(--fs-md); letter-spacing: -.2px; }
 .brand small { display: block; margin-top: 2px; color: var(--faint); font-size: var(--fs-micro); font-weight: 600; letter-spacing: 1.1px; }
@@ -62,6 +68,15 @@ body {
   white-space: nowrap;
 }
 .collection-create:hover { border-color: var(--accent); background: var(--accent-soft); }
+/* 4.5.1：新建收藏夹移到收藏夹列表最后一项的下方 */
+.collection-create-tail {
+  width: calc(100% - var(--sp-4));
+  margin: var(--sp-2) var(--sp-2) var(--sp-3);
+  justify-content: center;
+  border-style: dashed;
+  color: var(--faint);
+}
+.collection-create-tail:hover { color: var(--accent); }
 
 .collection-list { display: grid; gap: 3px; }
 .collection-row { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
@@ -132,20 +147,59 @@ body {
 
 .sidebar-bottom { margin-top: auto; padding: var(--sp-3) var(--sp-2) 0; }
 
-/* 4.5：主题与语言切换 */
-.preference-row { display: grid; gap: var(--sp-2); padding: 0 2px var(--sp-3); }
-.preference { display: grid; gap: 3px; }
-.preference-label { color: var(--faint); font-size: var(--fs-micro); }
-.preference select {
-  width: 100%;
-  padding: 5px var(--sp-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-xs);
+/* 4.5.1：主题与语言改成右下角悬浮球 */
+.floating-dock { position: fixed; right: var(--sp-5); bottom: var(--sp-5); z-index: 6; display: grid; gap: var(--sp-3); }
+.dock-slot { position: relative; display: grid; justify-items: end; }
+.dock-ball {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--brand-line);
+  border-radius: 50%;
   background: var(--surface);
-  color: var(--text);
-  font-size: var(--fs-sm);
+  color: var(--brand-deep);
+  font-size: var(--fs-lg);
+  box-shadow: var(--shadow-md);
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.preference select:hover { border-color: var(--brand-line); }
+.dock-ball:hover { transform: translateY(-2px); border-color: var(--brand); box-shadow: var(--shadow-lg); }
+.dock-ball:active { transform: translateY(0) scale(.96); }
+.dock-ball[aria-expanded="true"] { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+
+.dock-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--sp-2));
+  display: grid;
+  gap: 2px;
+  min-width: 176px;
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: dock-in var(--dur) var(--ease);
+}
+@keyframes dock-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.dock-menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-base);
+  text-align: left;
+}
+.dock-menu button:hover { background: var(--surface-soft); color: var(--ink); }
+.dock-menu button .icon { color: var(--faint); font-size: var(--fs-md); }
+.dock-menu button[aria-checked="true"] { background: var(--brand-soft); color: var(--brand-deep); font-weight: 650; }
+.dock-menu button[aria-checked="true"] .icon { color: var(--brand); }
+.dock-menu button .dock-check { margin-left: auto; color: var(--brand); font-size: var(--fs-sm); visibility: hidden; }
+.dock-menu button[aria-checked="true"] .dock-check { visibility: visible; }
 .privacy-note {
   display: flex;
   gap: var(--sp-2);
@@ -327,6 +381,8 @@ body {
   line-height: 1.85;
 }
 .safety-list li { margin-bottom: var(--sp-2); }
+/* 4.5.1：「请勿滥用」是整段须知里最要紧的一条，加粗并加下划线 */
+.safety-list li.safety-abuse { color: var(--warning); font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .safety-list a { color: var(--brand-deep); font-weight: 600; }
 
 /* 4.4：更新视频状态的进度提示 */
@@ -803,7 +859,25 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .editor-dialog input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 .editor-dialog select { width: 100%; height: 42px; padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); outline: none; color: var(--text); background: var(--surface); font-size: var(--fs-base); cursor: pointer; }
 .editor-dialog select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
-.editor-hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; }
+/* 4.5.1：更新视频状态的确认对话框 */
+.editor-heading { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.editor-heading-icon { display: inline-flex; color: var(--brand); font-size: var(--fs-lg); }
+.editor-heading h2 { margin: 0; color: var(--ink); font-size: var(--fs-lg); }
+.status-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--warning-line);
+  border-radius: var(--r-sm);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--fs-base);
+  font-weight: 650;
+  line-height: 1.75;
+}
+.status-warning .icon { margin-top: 3px; font-size: var(--fs-md); }.editor-hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.7; }
 .editor-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-5); }
 .editor-actions .button { min-width: 108px; }
 

@@ -36,8 +36,11 @@ const safetyNotice = document.getElementById("safetyNotice");
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
-const themeSelect = document.getElementById("themeSelect");
-const localeSelect = document.getElementById("localeSelect");
+const themeBall = document.getElementById("themeBall");
+const themeBallIcon = document.getElementById("themeBallIcon");
+const themeMenu = document.getElementById("themeMenu");
+const localeBall = document.getElementById("localeBall");
+const localeMenu = document.getElementById("localeMenu");
 const emptySearch = document.getElementById("emptySearch");
 const clearSearch = document.getElementById("clearSearch");
 const detailBackdrop = document.getElementById("detailBackdrop");
@@ -82,6 +85,13 @@ const selectVisibleButton = document.getElementById("selectVisible");
 const exitBatchButton = document.getElementById("exitBatch");
 const moveSelectedButton = document.getElementById("moveSelected");
 const downloadSelectedButton = document.getElementById("downloadSelected");
+const updateSelectedButton = document.getElementById("updateSelected");
+const statusConfirm = document.getElementById("statusConfirm");
+const statusConfirmCount = document.getElementById("statusConfirmCount");
+const statusConfirmMore = document.getElementById("statusConfirmMore");
+const statusConfirmProgress = document.getElementById("statusConfirmProgress");
+const statusConfirmCancel = document.getElementById("statusConfirmCancel");
+const statusConfirmGo = document.getElementById("statusConfirmGo");
 const deleteSelectedButton = document.getElementById("deleteSelected");
 
 let rootHandle = null;
@@ -537,6 +547,8 @@ function updateBatchControls() {
   moveSelectedButton.disabled = records.length === 0;
   downloadSelectedButton.disabled = records.length === 0;
   deleteSelectedButton.disabled = records.length === 0;
+    // 没有 BV/av 号的记录没法更新，按可更新的条数判断
+    updateSelectedButton.disabled = !records.some(canRefreshStatus);
 }
 
 // 「批量管理 / 完成」两段文案都写在 HTML 里（各自带 data-i18n），这里只切换显示哪一个，
@@ -836,42 +848,101 @@ function refreshTargetOf(video) {
   return video?.bvid || video?.aid ? { collection: video.collection, directory: video.directory } : null;
 }
 
-async function refreshOneVideoStatus(video) {
+// 4.5.1：单条与批量都先过一遍确认对话框，把「别频繁刷接口」讲清楚
+const STATUS_BATCH_LIMIT = 80;
+let statusPendingTargets = [];
+let statusPendingSource = "detail";
+let statusShowingResult = false;
+
+function statusDetailText(result) {
+  if (result.markedInvalid) return BcaI18n.t("解析发现已失效：已保留原有资料，只标记为已失效。");
+  if (result.updated) return BcaI18n.t("已更新播放量、点赞、粉丝数等数值。");
+  return BcaI18n.t("接口返回的数据与本地一致，没有需要改写的内容。");
+}
+
+function statusSummaryText(result) {
+  return BcaI18n.t("本次处理 {processed} 条：更新 {updated} 条，新标记失效 {markedInvalid} 条，无变化 {unchanged} 条，失败 {failed} 条。", {
+    processed: result.processed,
+    updated: result.updated,
+    markedInvalid: result.markedInvalid,
+    unchanged: result.unchanged,
+    failed: result.failed
+  });
+}
+
+function canRefreshStatus(video) {
+  return Boolean(video?.bvid || video?.aid);
+}
+
+function openStatusConfirm(videos, source) {
   if (statusRefreshInProgress) return;
-  const target = refreshTargetOf(video);
-  if (!target) { showToast(BcaI18n.t("这条记录没有 BV/av 号，无法更新状态。")); return; }
-  const button = detailContent.querySelector(".refresh-status");
-  const status = detailContent.querySelector(".detail-refresh-status");
-  const setBusy = (busy) => {
-    statusRefreshInProgress = busy;
-    if (button) button.disabled = busy;
-    if (status) status.hidden = !busy && !status.textContent;
-  };
-  setBusy(true);
-  if (status) { status.hidden = false; status.textContent = BcaI18n.t("正在请求 B 站接口…"); }
+  const targets = videos.map(refreshTargetOf).filter(Boolean);
+  if (!targets.length) {
+    showToast(source === "batch" ? BcaI18n.t("所选的记录都没有 BV/av 号，无法更新状态。") : BcaI18n.t("这条记录没有 BV/av 号，无法更新状态。"));
+    return;
+  }
+  statusPendingTargets = targets;
+  statusPendingSource = source;
+  statusShowingResult = false;
+  const capped = Math.min(targets.length, STATUS_BATCH_LIMIT);
+  statusConfirmCount.textContent = BcaI18n.t("本次将更新 {count} 条记录。", { count: capped });
+  statusConfirmMore.hidden = targets.length <= capped;
+  if (targets.length > capped) {
+    statusConfirmMore.textContent = BcaI18n.t("所选较多，本次只处理前 {count} 条；完成后可以再点一次继续。", { count: capped });
+  }
+  statusConfirmProgress.hidden = true;
+  statusConfirmProgress.textContent = "";
+  statusConfirmGo.disabled = false;
+  statusConfirmCancel.disabled = false;
+  statusConfirmGo.textContent = BcaI18n.t("开始更新");
+  statusConfirm.showModal();
+}
+
+async function runStatusRefresh() {
+  if (statusRefreshInProgress || !statusPendingTargets.length) return;
+  // 已经出结果时，这个按钮变成「完成」
+  if (statusShowingResult) { statusConfirm.close(); return; }
+  const targets = statusPendingTargets;
+  const source = statusPendingSource;
+  const anchorId = source === "detail" ? detailVideo()?.id : null;
+  const detailButton = detailContent.querySelector(".refresh-status");
+  statusRefreshInProgress = true;
+  statusConfirmGo.disabled = true;
+  statusConfirmCancel.disabled = true;
+  statusConfirmGo.textContent = BcaI18n.t("正在更新…");
+  statusConfirmProgress.hidden = false;
+  statusConfirmProgress.textContent = BcaI18n.t("正在请求 B 站接口，请勿关闭页面…");
+  if (detailButton) detailButton.disabled = true;
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
-    const result = await chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [target], limit: 1 } });
+    const result = await chrome.runtime.sendMessage({
+      type: "bca-refresh-video-stats",
+      data: { targets, limit: STATUS_BATCH_LIMIT }
+    });
     if (!result?.ok) throw new Error(result?.message || BcaI18n.t("更新失败。"));
-    const detail = result.markedInvalid
-      ? BcaI18n.t("解析发现这条视频已失效：已保留原有资料，只标记为已失效。")
-      : result.updated
-        ? BcaI18n.t("已更新播放量、点赞、粉丝数等数值。")
-        : BcaI18n.t("接口返回的数据与本地一致，没有需要改写的内容。");
-    if (status) { status.hidden = false; status.textContent = detail; }
+    const summary = targets.length === 1 ? statusDetailText(result) : statusSummaryText(result);
+    const remaining = Number(result.remaining) || 0;
+    statusConfirmProgress.textContent = summary + (remaining ? BcaI18n.t("还有 {count} 条没处理，可以再点一次继续。", { count: remaining }) : "");
+    statusShowingResult = true;
+    statusConfirmGo.textContent = BcaI18n.t("完成");
     await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已刷新"));
-    const refreshed = allVideos().find((item) => item.id === video.id);
-    if (refreshed) {
-      openDetail(refreshed);
-      const again = detailContent.querySelector(".detail-refresh-status");
-      if (again) { again.hidden = false; again.textContent = detail; }
+    if (anchorId) {
+      const refreshed = allVideos().find((item) => item.id === anchorId);
+      if (refreshed) {
+        openDetail(refreshed);
+        const again = detailContent.querySelector(".detail-refresh-status");
+        if (again) { again.hidden = false; again.textContent = summary; }
+      }
     }
   } catch (error) {
-    if (status) { status.hidden = false; status.textContent = BcaI18n.t("更新失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }); }
+    statusConfirmProgress.textContent = BcaI18n.t("更新失败：{message}", { message: error?.message || BcaI18n.t("未知错误") });
+    statusConfirmGo.textContent = BcaI18n.t("重试");
   } finally {
     statusRefreshInProgress = false;
-    if (button) button.disabled = false;
+    statusConfirmGo.disabled = false;
+    statusConfirmCancel.disabled = false;
+    if (detailButton) detailButton.disabled = false;
   }
 }
 /* ---------------- 使用须知（4.4.1：可折叠，但不允许永久关闭） ---------------- */
@@ -1148,7 +1219,7 @@ function openDetail(video) {
   if (link) link.href = video.url;
   const moveButton = detailContent.querySelector(".move-local");
   moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
-  detailContent.querySelector(".refresh-status").addEventListener("click", () => refreshOneVideoStatus(video));
+  detailContent.querySelector(".refresh-status").addEventListener("click", () => openStatusConfirm([video], "detail"));
   detailContent.querySelector(".download-local").addEventListener("click", () => openDownloadInterface([video]));
   detailContent.querySelector(".open-download-directory").addEventListener("click", () => openDownloadDirectory(video));
   detailContent.querySelector(".copy-download-path").addEventListener("click", () => copyDownloadPath(video));
@@ -2005,46 +2076,97 @@ exitBatchButton.addEventListener("click", () => setSelectionMode(false));
 moveSelectedButton.addEventListener("click", () => openCollectionActionDialog(selectedRecords(), "batch"));
 downloadSelectedButton.addEventListener("click", () => openDownloadInterface(selectedRecords()));
 deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRecords()));
+  // 4.5.1：批量更新状态——用勾选的记录，不是当前收藏夹的全部视频
+  updateSelectedButton.addEventListener("click", () => openStatusConfirm(selectedRecords(), "batch"));
+  statusConfirmGo.addEventListener("click", () => { runStatusRefresh().catch(() => {}); });
+  statusConfirmCancel.addEventListener("click", () => { if (!statusRefreshInProgress) statusConfirm.close(); });
+  statusConfirm.addEventListener("cancel", (event) => { if (statusRefreshInProgress) event.preventDefault(); });
 searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
 sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
 
-/* ---------------- 4.5：主题与语言切换 ---------------- */
+/* ---------------- 4.5.1：主题与语言悬浮球 ---------------- */
 
 // 主题标签必须写成字面量：词条工具靠扫描 t("...") 取词，
 // 从 theme.js 的对象里取 label 会扫不到，那三个词就永远不会被翻译。
+const THEME_ICONS = { system: "monitor", light: "sun", dark: "moon" };
+
 function themeLabel(id) {
   if (id === "light") return BcaI18n.t("白天");
   if (id === "dark") return BcaI18n.t("夜晚");
   return BcaI18n.t("跟随系统");
 }
-function renderThemeOptions() {
-  themeSelect.replaceChildren(...BcaTheme.modes().map((item) => {
-    const option = document.createElement("option");
-    option.value = item.id;
-    option.textContent = themeLabel(item.id);
-    return option;
-  }));
-  themeSelect.value = BcaTheme.current();
-}
-renderThemeOptions();
-themeSelect.addEventListener("change", () => BcaTheme.use(themeSelect.value));
 
-localeSelect.replaceChildren(...BcaI18n.locales().map((item) => {
-  const option = document.createElement("option");
-  option.value = item.id;
-  // 语言名用各自的写法，不翻译
-  option.textContent = item.label;
-  return option;
-}));
-localeSelect.value = BcaI18n.locale();
-localeSelect.addEventListener("change", async () => {
-  await BcaI18n.use(localeSelect.value);
+function closeDockMenus(except) {
+  for (const [ball, menu] of [[themeBall, themeMenu], [localeBall, localeMenu]]) {
+    if (menu === except) continue;
+    menu.hidden = true;
+    ball.setAttribute("aria-expanded", "false");
+  }
+}
+
+function toggleDockMenu(ball, menu) {
+  const open = menu.hidden;
+  closeDockMenus(menu);
+  menu.hidden = !open;
+  ball.setAttribute("aria-expanded", String(open));
+}
+
+function buildDockMenu(menu, entries, currentId, onPick) {
+  menu.replaceChildren(...entries.map((entry) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitemradio");
+    button.setAttribute("aria-checked", String(entry.id === currentId));
+    button.dataset.value = entry.id;
+    button.innerHTML = `${BcaIcons.svg(entry.icon)}<span></span><span class="dock-check">${BcaIcons.svg("check")}</span>`;
+    button.querySelector("span").textContent = entry.label;
+    button.addEventListener("click", () => {
+      onPick(entry.id);
+      closeDockMenus();
+    });
+    return button;
+  }));
+}
+
+function renderDockMenus() {
+  buildDockMenu(
+    themeMenu,
+    BcaTheme.modes().map((item) => ({ id: item.id, icon: THEME_ICONS[item.id] || "monitor", label: themeLabel(item.id) })),
+    BcaTheme.current(),
+    (id) => BcaTheme.use(id)
+  );
+  buildDockMenu(
+    localeMenu,
+    // 语言名用各自的写法，不翻译
+    BcaI18n.locales().map((item) => ({ id: item.id, icon: "globe", label: item.label })),
+    BcaI18n.locale(),
+    (id) => { BcaI18n.use(id).catch(() => {}); }
+  );
+  // 球的图标跟着当前主题走：跟随系统=显示器、白天=太阳、夜晚=月亮
+  themeBallIcon.setAttribute("data-icon", THEME_ICONS[BcaTheme.current()] || "monitor");
+  themeBallIcon.dataset.iconReady = "";
+  BcaIcons.hydrate(themeBallIcon.parentElement);
+}
+
+renderDockMenus();
+themeBall.addEventListener("click", (event) => { event.stopPropagation(); toggleDockMenu(themeBall, themeMenu); });
+localeBall.addEventListener("click", (event) => { event.stopPropagation(); toggleDockMenu(localeBall, localeMenu); });
+themeMenu.addEventListener("click", (event) => event.stopPropagation());
+localeMenu.addEventListener("click", (event) => event.stopPropagation());
+document.addEventListener("click", () => closeDockMenus());
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDockMenus(); });
+
+// 主题换成别的页面改的也要跟着更新图标
+BcaTheme.onChange(() => {
+  themeBallIcon.setAttribute("data-icon", THEME_ICONS[BcaTheme.current()] || "monitor");
+  themeBallIcon.dataset.iconReady = "";
+  BcaIcons.hydrate(themeBallIcon.parentElement);
+  renderDockMenus();
 });
 
 // 切语言后要重画所有由 JS 生成的文字
 function relabelAfterLocaleChange() {
-  localeSelect.value = BcaI18n.locale();
-  renderThemeOptions();
+  renderDockMenus();
   renderCollections();
   renderVideos();
   const current = detailVideo();

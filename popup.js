@@ -36,7 +36,9 @@ const resultDetails = document.getElementById("resultDetails");
 const resultDetailsSummary = document.getElementById("resultDetailsSummary");
 const resultPath = document.getElementById("resultPath");
 const popupVersion = document.getElementById("popupVersion");
-const localeSelect = document.getElementById("localeSelect");
+// 4.5.1：主题 / 语言改成分段控件，按钮直接写在 popup.html 里
+const themeButtons = [...document.querySelectorAll(".segmented button[data-theme-value]")];
+const localeButtons = [...document.querySelectorAll(".segmented button[data-locale]")];
 let errorReport = "";
 let rootHandle = null;
 let permissionNotice = "";
@@ -487,12 +489,20 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   refreshStatus().catch(() => {});
 });
 
-/* ---------------- 4.5：语言切换 ---------------- */
+/* ---------------- 4.5：主题与语言切换 ---------------- */
 
-// 选项文案就是语言名本身，不翻译
+// 主题名走 data-i18n（由 BcaI18n.apply 翻译），语言名是各语言的自称、不翻译。
+// 这里只切选中态，绝不写 textContent：写死文字会把切语言后的译文盖回中文。
+function renderThemeOptions() {
+  for (const button of themeButtons) {
+    button.setAttribute("aria-pressed", String(button.dataset.themeValue === BcaTheme.current()));
+  }
+}
+
 function renderLocaleOptions() {
-  localeSelect.replaceChildren(...BcaI18n.locales().map((item) => new Option(item.label, item.id)));
-  localeSelect.value = BcaI18n.locale();
+  for (const button of localeButtons) {
+    button.setAttribute("aria-pressed", String(button.dataset.locale === BcaI18n.locale()));
+  }
 }
 
 // 切换语言：静态节点由 BcaI18n.use() 自己 apply，动态内容在这里重画
@@ -514,8 +524,16 @@ async function applyLocale(locale) {
 async function boot() {
   // 第一次渲染之前初始化，避免先闪一下中文
   await BcaI18n.init();
+  // 主题已经在 head 里由 theme.js 定好；这里先让控件反映现状，再绑定切换
+  renderThemeOptions();
+  BcaTheme.onChange(renderThemeOptions);
+  for (const button of themeButtons) {
+    button.addEventListener("click", () => BcaTheme.use(button.dataset.themeValue));
+  }
   renderLocaleOptions();
-  localeSelect.addEventListener("change", () => { applyLocale(localeSelect.value).catch(() => {}); });
+  for (const button of localeButtons) {
+    button.addEventListener("click", () => { applyLocale(button.dataset.locale).catch(() => {}); });
+  }
   refreshEnabledState().catch(() => renderEnabledState(true));
   restoreRecoverInvalid().catch(() => {});
   loadImportFolders();

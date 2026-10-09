@@ -13,15 +13,15 @@ body {
   background: var(--bg);
 }
 
-main { padding: var(--sp-4); }
+main { padding: var(--sp-3) var(--sp-4) var(--sp-2); }
 
-.brand-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.brand-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
 /* 纯白字母压在品牌蓝渐变上，属于“彩色底上的文字”，不随主题变 */
 .brand-icon {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--r-md);
   color: #fff;
   background: linear-gradient(140deg, var(--brand), var(--brand-strong));
@@ -34,9 +34,49 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .subtitle { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); }
 
 .card { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-sm); }
-.feature-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); padding: var(--sp-3) var(--sp-4); }
+.feature-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-4); }
 .feature-title { color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
 .feature-hint { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
+
+/* ---------- 4.5.1：主题 / 语言分段控件 ----------
+   一条 --surface-soft 浅槽里放三个等宽按钮，选中的用 --surface 底 + --shadow-sm 凸起。
+   颜色只走 theme.css 的令牌，深色主题下自动跟着换。 */
+/* 卡片间距统一收到 --sp-2：4.5.1 顶部多了主题 / 语言两行控件，
+   不改功能、只压留白，尽量把默认视图拉回 600px 以内。 */
+.controls-card { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+.segmented {
+  display: flex;
+  gap: var(--sp-1);
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-soft);
+}
+/* 宽度覆盖 button 基类的 100%，让三个按钮等分整条槽 */
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  min-width: 0;
+  min-height: 30px;
+  flex: 1;
+  padding: 0 var(--sp-1);
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.segmented button:hover:not([aria-pressed="true"]) { color: var(--ink); background: var(--surface-sunken); }
+/* 选中态：卡片底色 + 细描边 + 小阴影，从槽里“凸”出来 */
+.segmented button[aria-pressed="true"] { border-color: var(--line); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm); }
+.segmented-icon { display: inline-flex; font-size: var(--fs-md); opacity: .75; }
+.segmented button[aria-pressed="true"] .segmented-icon { color: var(--brand); opacity: 1; }
 
 .toggle-switch { position: relative; width: 46px; min-width: 46px; height: 26px; min-height: 26px; padding: 0; border: 0; border-radius: var(--r-pill); background: var(--brand); transition: background var(--dur) var(--ease); }
 /* 滑块固定用纯白：它压在 --brand / --ghost 的彩色轨道上，和主题无关 */
@@ -49,9 +89,9 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  min-height: 54px;
-  margin-bottom: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  min-height: 48px;
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
   border: 1px solid var(--success-line);
   border-radius: var(--r-md);
   color: var(--success-strong);
@@ -67,9 +107,9 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .library-link .icon { font-size: var(--fs-lg); }
 
 .folder-card, .status-card { padding: var(--sp-4); }
-.status-card { margin-top: var(--sp-3); }
-.section-label { margin-bottom: var(--sp-2); color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
-.folder-name { margin-bottom: var(--sp-3); color: var(--ink); font-size: var(--fs-md); font-weight: 650; overflow-wrap: anywhere; }
+.status-card { margin-top: var(--sp-2); }
+.section-label { margin-bottom: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+.folder-name { margin-bottom: var(--sp-2); color: var(--ink); font-size: var(--fs-md); font-weight: 650; overflow-wrap: anywhere; }
 .folder-name.unselected { color: var(--danger); }
 
 button { width: 100%; min-height: 38px; border: 0; border-radius: var(--r-sm); cursor: pointer; font: inherit; font-size: var(--fs-base); font-weight: 650; }
@@ -80,6 +120,9 @@ button:disabled { cursor: wait; opacity: .6; }
 .secondary { margin-top: var(--sp-2); border: 1px solid var(--line); color: var(--text); background: var(--surface); }
 .secondary:hover:not(:disabled) { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
 .hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+/* 文件夹卡片专用：这条说明和上面的按钮同属一组，间距收到 4px
+   （原来的 --sp-2 / --sp-3 留白，4.5.1 让位给顶部的主题 / 语言控件） */
+.folder-card .hint { margin-top: 4px; }
 .muted { color: var(--text); font-size: var(--fs-base); line-height: 1.6; overflow-wrap: anywhere; }
 
 /* ---------- 可折叠的导入区块 ---------- */
@@ -151,7 +194,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .report-path { color: var(--faint); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
 /* ---------- 使用须知（4.4.1：置顶、黄色底、字号调大、可折叠但不能关闭） ---------- */
-.safety-notice { margin: 0 0 var(--sp-3); padding: 0; overflow: hidden; border-color: var(--warning-line); background: var(--warning-soft); }
+.safety-notice { margin: 0 0 var(--sp-2); padding: 0; overflow: hidden; border-color: var(--warning-line); background: var(--warning-soft); }
 .safety-notice > summary {
   display: flex;
   align-items: center;
@@ -171,6 +214,8 @@ button:disabled { cursor: wait; opacity: .6; }
 .safety-notice[open] > summary .chevron { transform: rotate(180deg); }
 .safety-notice-list { max-height: 200px; overflow-y: auto; display: grid; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--warning-line); list-style: none; }
 .safety-notice-list li { color: var(--text); font-size: var(--fs-md); line-height: 1.8; overflow-wrap: anywhere; }
+/* 4.5.1：第一条「请勿滥用」加重。深色下 --warning 本身就是提亮过的金色，直接用令牌 */
+.safety-notice-list li.safety-abuse { color: var(--warning); font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .safety-notice-list a { color: var(--brand-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .safety-notice-list a:hover { color: var(--brand-strong); }
 
@@ -179,7 +224,5 @@ button:disabled { cursor: wait; opacity: .6; }
 .support-link { display: inline-flex; align-items: center; gap: 5px; color: var(--brand-deep); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
 .support-link:hover { text-decoration: underline; }
 .foot-right { display: flex; align-items: center; gap: var(--sp-2); }
-/* 4.5：语言切换。紧凑到只占页脚一行，选项文案是语言名本身，不翻译 */
-.locale-select { width: auto; min-height: 24px; padding: 1px var(--sp-1); border: 1px solid var(--line); border-radius: var(--r-xs); color: var(--muted); background: var(--surface); font-size: var(--fs-sm); }
-.locale-select:hover { border-color: var(--brand-line); color: var(--brand-deep); }
+/* 4.5.1：语言切换已移出页脚（顶部 .segmented 承担），这里只留版本号 */
 .popup-version { color: var(--faint); font-size: var(--fs-sm); }
