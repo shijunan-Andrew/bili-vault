@@ -759,7 +759,7 @@ async function start() {
           const directoryInfo = await findOrCreateVideoDirectory(collectionDirectory, video, index);
           folderInfo = { collectionDirectory, directory: directoryInfo.directory, collectionName, created: directoryInfo.created };
           folderCache.set(item.id, folderInfo);
-          addLog(`保存位置：${downloadFolder.name}/${collectionName}/${directory.name}`, "info");
+          addLog(`保存位置：${downloadFolder.name}/${collectionName}/${directoryInfo.directory.name}`, "info");
         } catch (error) {
           const skippedTasks = taskCountForCurrentSettings(selectedPages(item).length);
           failedCount += skippedTasks;
