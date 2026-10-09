@@ -7,6 +7,20 @@ const core = require("../archive-core.js");
 const projectRoot = path.join(__dirname, "..");
 const readProjectFile = (relativePath) => fs.readFileSync(path.join(projectRoot, relativePath), "utf8");
 
+// 从 background.js 里取出指定的顶层函数并在测试里执行。
+// background.js 是模块化 service worker，不能 require，但它里面的文本处理函数是纯函数，
+// 直接按函数体抽出来测，测的就是真正跑在生产代码里的那份实现。
+function loadBackgroundFunctions(names) {
+  const source = readProjectFile("background.js");
+  const bodies = names.map((name) => {
+    const pattern = new RegExp(`^function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, "m");
+    const match = source.match(pattern);
+    assert.ok(match, `background.js 中找不到函数 ${name}`);
+    return match[0];
+  });
+  return new Function(`${bodies.join("\n\n")}\nreturn { ${names.join(", ")} };`)();
+}
+
 test("library download queue preserves its source collection after Bilibili parsing", () => {
   const parsed = core.withSourceCollection({ bvid: "BV1abcdefgh1", title: "视频" }, { collection: "收藏夹 A" });
   assert.equal(parsed.collection, "收藏夹 A");
@@ -178,11 +192,94 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("manifest opens the library page to Bilibili pages only", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.1.0");
+  assert.equal(manifest.version, "4.1.1");
   const entry = (manifest.web_accessible_resources || []).find((item) => item.resources.includes("library.html"));
   assert.ok(entry, "缺少 library.html 的 web_accessible_resources");
   assert.ok(entry.matches.every((pattern) => pattern.includes("bilibili.com")), "library.html 只应对 B 站页面开放");
   assert.ok(manifest.permissions.includes("clipboardWrite"));
+});
+
+/* ---------------- 4.1beta：为正常条目补全标签和简介 ---------------- */
+
+const ARCHIVE_SAMPLE = [
+  "【基本信息】",
+  "视频收藏时间：2026年09月10日 15时02分20秒.000",
+  "信息保存于：2026-10-09 01:11:21",
+  "保存文件夹：2026年09月10日15时02分20秒",
+  "视频标题：这下是17岁未亡人了😡",
+  "视频链接：https://www.bilibili.com/video/BV1LKGm6ZErR/",
+  "BV号：BV1LKGm6ZErR",
+  "av号：av116645959959066",
+  "",
+  "【UP主】",
+  "UP主昵称：长崎素世",
+  "UP主主页：https://space.bilibili.com/3706936430168922",
+  "",
+  "【标签】",
+  "未知",
+  "",
+  "【视频简介】",
+  "-",
+  ""
+].join("\n");
+
+test("patching an archive file only rewrites the tag line and the description block", () => {
+  const { replaceInfoTagLine, replaceInfoDescription } = loadBackgroundFunctions(["replaceInfoTagLine", "replaceInfoDescription"]);
+
+  const withTags = replaceInfoTagLine(ARCHIVE_SAMPLE, "cos、Banddream、白栎、Mygo、Cosplay、长崎素世");
+  assert.match(withTags, /【标签】\ncos、Banddream、白栎、Mygo、Cosplay、长崎素世\n\n【视频简介】\n-\n$/);
+  // 除标签那一行外，其余内容必须逐字不变
+  assert.equal(withTags.replace(/【标签】\n[^\n]*/, "【标签】\n未知"), ARCHIVE_SAMPLE);
+
+  const patched = replaceInfoDescription(withTags, "第一行\n第二行");
+  assert.match(patched, /【视频简介】\n第一行\n第二行\n$/);
+  assert.ok(patched.includes("【UP主】\nUP主昵称：长崎素世"), "不该动到前面的区块");
+  assert.ok(patched.includes("【标签】\ncos、Banddream、白栎、Mygo、Cosplay、长崎素世"));
+
+  // 简介里出现 $ 时不能被当成替换模式
+  const dollar = replaceInfoDescription(ARCHIVE_SAMPLE, "价格是 $& 和 $1 元");
+  assert.match(dollar, /价格是 \$& 和 \$1 元/);
+});
+
+test("the backfill treats the archive placeholders as missing data", () => {
+  const source = readProjectFile("background.js");
+  const declaration = source.match(/const IMPORT_PLACEHOLDER_VALUES = new Set\(\[([^\]]*)\]\)/);
+  assert.ok(declaration, "background.js 缺少 IMPORT_PLACEHOLDER_VALUES");
+  for (const value of ['"未知"', '"无"', '"-"', '"暂无"']) {
+    assert.ok(declaration[1].includes(value), `占位值集合缺少 ${value}`);
+  }
+  // 风控保护：必须有单次上限与请求间隔
+  assert.match(source, /const IMPORT_ENRICH_LIMIT = \d+;/, "缺少每次导入的补全上限");
+  assert.match(source, /const IMPORT_ENRICH_DELAY_MS = \d+;/, "缺少请求间隔");
+  assert.match(source, /Math\.min\(Number\(data\?\.limit\) \|\| 20, 80\)/, "收藏库补全缺少条数上限");
+});
+
+test("the import flow now enriches normal items through the two Bilibili endpoints", () => {
+  const source = readProjectFile("background.js");
+  assert.match(source, /function enrichPendingImportedItems\(/);
+  assert.match(source, /function enrichArchiveRecord\(/);
+  assert.match(source, /function enrichArchiveRecords\(/);
+  assert.match(source, /enrichPendingImportedItems\(pendingItems\.filter\(\(item\) => !item\.isInvalid\)/, "正常条目必须也走补全");
+  assert.match(source, /"\/x\/web-interface\/view"/);
+  assert.match(source, /"\/x\/tag\/archive\/tags"/);
+  // 补全要串在同一队列里，避免和保存/导入同时改写归档文件
+  assert.match(source, /saveQueue\.then\(\(\) => enrichArchiveRecords/);
+  assert.match(source, /"bca-enrich-records"/);
+  // 写回前必须做完整性校验
+  assert.match(source, /补全后的内容未通过校验/);
+});
+
+test("the library offers a batched backfill for records already on disk", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  assert.match(html, /id="enrichLibrary"/);
+  assert.match(html, /id="enrichDialog"/);
+  assert.match(html, /id="enrichBatchSize"/);
+  assert.match(html, /id="enrichProgress"/);
+  assert.match(library, /function enrichmentCandidates\(/);
+  assert.match(library, /function runEnrichment\(/);
+  assert.match(library, /type: "bca-enrich-records"/);
+  assert.match(library, /bca-enrich-progress/);
 });
 
 /* ------------------------- 4.1 归档解析与浏览 ------------------------- */

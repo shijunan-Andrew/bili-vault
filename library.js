@@ -61,6 +61,13 @@ const selectAllActionTargetsButton = document.getElementById("selectAllActionTar
 const clearActionTargetsButton = document.getElementById("clearActionTargets");
 const videoFilterSelect = document.getElementById("videoFilter");
 const batchManageButton = document.getElementById("batchManage");
+const enrichLibraryButton = document.getElementById("enrichLibrary");
+const enrichDialog = document.getElementById("enrichDialog");
+const enrichSummary = document.getElementById("enrichSummary");
+const enrichBatchSize = document.getElementById("enrichBatchSize");
+const enrichProgress = document.getElementById("enrichProgress");
+const cancelEnrichButton = document.getElementById("cancelEnrich");
+const confirmEnrichButton = document.getElementById("confirmEnrich");
 const batchToolbar = document.getElementById("batchToolbar");
 const selectedCount = document.getElementById("selectedCount");
 const selectVisibleButton = document.getElementById("selectVisible");
@@ -93,6 +100,7 @@ let pageSize = PAGE_SIZES[0];
 let currentPage = 1;
 let pageCount = 1;
 let viewMode = "grid";
+let enrichInProgress = false;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -598,7 +606,75 @@ function renderVideos() {
   }
   renderPager(matching.length);
   updateBatchControls();
+  updateEnrichButton();
 }
+
+/* ---------------- 4.1beta：补全缺失的标签和简介 ---------------- */
+
+// 归档里缺数据时写的是“未知 / 无 / -”，这些都不算有内容
+function hasRealValue(value) {
+  return !BcaArchiveCore.isPlaceholderValue(value);
+}
+
+function enrichmentCandidates() {
+  return selectedVideos().filter((video) => video.bvid && (!video.tags.length || !hasRealValue(video.description)));
+}
+
+function updateEnrichButton() {
+  if (!enrichLibraryButton) return;
+  const count = rootHandle ? enrichmentCandidates().length : 0;
+  enrichLibraryButton.disabled = count === 0 || enrichInProgress;
+  enrichLibraryButton.textContent = count ? `补全缺失资料（${count}）` : "补全缺失资料";
+  enrichLibraryButton.title = count
+    ? `为 ${count} 条缺少标签或简介的归档补抓资料`
+    : "当前范围没有需要补全的记录";
+}
+
+function openEnrichDialog() {
+  if (!rootHandle) { showToast("请先打开本地收藏根目录。"); return; }
+  const candidates = enrichmentCandidates();
+  if (!candidates.length) { showToast("当前范围没有需要补全的记录。"); return; }
+  const scope = selectedCollection === "*" ? "全部收藏" : selectedCollection;
+  enrichSummary.textContent = `「${scope}」里有 ${candidates.length} 条记录缺少标签或简介。`;
+  enrichProgress.textContent = "";
+  confirmEnrichButton.disabled = false;
+  cancelEnrichButton.disabled = false;
+  confirmEnrichButton.textContent = "开始补全";
+  enrichDialog.showModal();
+}
+
+async function runEnrichment() {
+  if (enrichInProgress) return;
+  const candidates = enrichmentCandidates();
+  if (!candidates.length) { showToast("当前范围没有需要补全的记录。"); return; }
+  const limit = Number(enrichBatchSize.value) || 20;
+  const targets = candidates.map((video) => ({ collection: video.collection, directory: video.directory }));
+  enrichInProgress = true;
+  updateEnrichButton();
+  confirmEnrichButton.disabled = true;
+  cancelEnrichButton.disabled = true;
+  confirmEnrichButton.textContent = "正在补全…";
+  enrichProgress.textContent = "正在请求 B 站接口，请勿关闭页面…";
+  try {
+    const permission = await rootHandle.requestPermission({ mode: "readwrite" });
+    if (permission !== "granted") throw new Error("没有获得本地目录写入权限。");
+    const result = await chrome.runtime.sendMessage({ type: "bca-enrich-records", data: { targets, limit } });
+    if (!result?.ok) throw new Error(result?.message || "补全失败。");
+    const remaining = Number(result.remaining) || 0;
+    enrichProgress.textContent = `${result.message}${remaining ? `还有 ${remaining} 条没处理，可以再点一次继续。` : "当前范围已处理完。"}${result.reportPath ? ` 失败明细：${result.reportPath}` : ""}`;
+    await displayRoot(rootHandle, selectedCollection, "已刷新");
+  } catch (error) {
+    enrichProgress.textContent = `补全失败：${error?.message || "未知错误"}`;
+  } finally {
+    enrichInProgress = false;
+    confirmEnrichButton.disabled = false;
+    cancelEnrichButton.disabled = false;
+    confirmEnrichButton.textContent = "再补一批";
+    updateEnrichButton();
+  }
+}
+
+
 
 /* ---------------- 4.1：分页与视图切换 ---------------- */
 
@@ -1753,6 +1829,15 @@ videoFilterSelect.addEventListener("change", () => { resetPaging(); renderVideos
 clearSearch.addEventListener("click", () => { searchInput.value = ""; resetPaging(); renderVideos(); searchInput.focus(); });
 viewGridButton?.addEventListener("click", () => setViewMode("grid"));
 viewListButton?.addEventListener("click", () => setViewMode("list"));
+enrichLibraryButton?.addEventListener("click", openEnrichDialog);
+confirmEnrichButton?.addEventListener("click", runEnrichment);
+cancelEnrichButton?.addEventListener("click", () => { if (!enrichInProgress) enrichDialog.close(); });
+enrichDialog?.addEventListener("cancel", (event) => { if (enrichInProgress) event.preventDefault(); });
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "bca-enrich-progress") return;
+  if (enrichProgress && enrichInProgress) enrichProgress.textContent = message.text || "正在补全…";
+});
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
 cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "B站收藏信息归档",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "description": "收藏、整理并下载 B 站视频，支持弹幕、字幕、封面和信息归档。",
   "minimum_chrome_version": "111",
   "permissions": ["storage", "nativeMessaging", "clipboardWrite"],

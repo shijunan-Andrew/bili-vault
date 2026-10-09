@@ -872,6 +872,213 @@ async function importRunLimited(items, limit, worker) {
   await Promise.all(runners);
 }
 
+/* ==========================================================================
+   4.1beta：为「正常」条目补全标签和简介
+   4.1 之前只有失效视频会走 /x/web-interface/view 和 /x/tag/archive/tags，
+   导入进来的正常条目 tags 恒为 []、简介常为空，于是归档里写着「未知 / -」。
+   这里让正常条目也补一次，并且：
+   - 只补缺失的字段，已有内容绝不覆盖；
+   - 单次导入的补全条数设上限，避免一次打太多接口触发 B 站风控；
+   - 本地收藏库另有「补全缺失资料」可以对老档案增量补，逐批推进。
+   ========================================================================== */
+
+// 归档里字段缺失会写成这些占位值，补全时一律当成“空”
+const IMPORT_PLACEHOLDER_VALUES = new Set(["", "无", "未知", "-", "--", "—", "暂无", "/", "N/A", "n/a", "null", "undefined"]);
+
+const IMPORT_ENRICH_LIMIT = 30;          // 每次导入最多补全多少条
+const IMPORT_ENRICH_CONCURRENCY = 2;     // 并发请求数
+const IMPORT_ENRICH_DELAY_MS = 420;      // 每条之间的间隔，给 B 站接口留余地
+
+function importIsPlaceholder(value) {
+  return IMPORT_PLACEHOLDER_VALUES.has(importClean(value));
+}
+
+function importTagNames(tagData) {
+  if (!Array.isArray(tagData)) return [];
+  return [...new Set(tagData.map((tag) => importClean(tag?.tag_name || tag?.name)).filter(Boolean))];
+}
+
+// 只替换【标签】那一行。归档格式里标签永远是单行，所以正则限定在行内。
+function replaceInfoTagLine(text, tagsLine) {
+  return String(text).replace(/(【标签】[^\n]*\n)([^\n]*)/, (match, prefix) => `${prefix}${tagsLine}`);
+}
+
+// 【视频简介】是最后一个区块，直接替换到文件末尾。用函数式 replace 避免 $ 被当成替换模式。
+function replaceInfoDescription(text, description) {
+  const normalized = String(description ?? "").replace(/\r\n/g, "\n").replace(/\n+$/, "");
+  return String(text).replace(/(【视频简介】[^\n]*\n)([\s\S]*)$/, (match, prefix) => `${prefix}${normalized}\n`);
+}
+
+function importNeedsEnrichment(item) {
+  if (!item?.bvid) return false;
+  const missingTags = !Array.isArray(item.tags) || !item.tags.length;
+  return missingTags || importIsPlaceholder(item.description);
+}
+
+// 抓一条视频的缺失资料。只写缺失字段，已存在的简介/标签不会被覆盖。
+async function fetchMissingVideoData(item, tabId = null) {
+  let changed = false;
+  if (importIsPlaceholder(item.description)) {
+    try {
+      const data = await biliImportApiGet("/x/web-interface/view", { bvid: item.bvid }, 10000, tabId);
+      const description = String(data?.desc ?? "").trim();
+      if (description && !importIsPlaceholder(description)) { item.description = description; changed = true; }
+      // 顺手补齐收藏夹接口没给的字段
+      if (!item.cover && data?.pic) item.cover = normalizeUrl(data.pic);
+      if (!item.author && data?.owner?.name) item.author = importClean(data.owner.name);
+      if (!item.authorMid && data?.owner?.mid) item.authorMid = String(data.owner.mid);
+      if (!item.category && data?.tname) item.category = importClean(data.tname);
+      if (!(Number(item.duration) > 0) && data?.duration) item.duration = Number(data.duration) || 0;
+      if (!(Number(item.pubdate) > 0) && data?.pubdate) item.pubdate = Number(data.pubdate) || 0;
+    } catch (error) {
+      item.enrichErrors = [...(item.enrichErrors || []), `${item.title || item.bvid}：视频资料接口：${error.message}`];
+    }
+  }
+  if (!Array.isArray(item.tags) || !item.tags.length) {
+    try {
+      const tags = importTagNames(await biliImportApiGet("/x/tag/archive/tags", { bvid: item.bvid }, 9000, tabId));
+      if (tags.length) { item.tags = tags; changed = true; }
+    } catch (error) {
+      item.enrichErrors = [...(item.enrichErrors || []), `${item.title || item.bvid}：标签接口：${error.message}`];
+    }
+  }
+  if (changed) {
+    if (item.recoverySources instanceof Set) item.recoverySources.add("视频资料接口");
+    else item.recoverySources = new Set(["视频资料接口"]);
+  }
+  return changed;
+}
+
+// 导入流程里的补全：条数受 IMPORT_ENRICH_LIMIT 限制，超出的留给收藏库的增量补全
+async function enrichPendingImportedItems(items, folder, tabId = null) {
+  const candidates = items.filter(importNeedsEnrichment);
+  if (!candidates.length) return { requested: 0, enriched: 0, failed: 0, skipped: 0 };
+  const targets = candidates.slice(0, IMPORT_ENRICH_LIMIT);
+  let cursor = 0;
+  let enriched = 0;
+  let failed = 0;
+  const runners = Array.from({ length: Math.min(IMPORT_ENRICH_CONCURRENCY, targets.length) }, async () => {
+    while (cursor < targets.length) {
+      const item = targets[cursor];
+      cursor += 1;
+      sendImportProgress(`正在补全「${folder.title}」的标签和简介：${cursor}/${targets.length}`);
+      try {
+        if (await fetchMissingVideoData(item, tabId)) enriched += 1;
+      } catch (_) { failed += 1; }
+      await importDelay(IMPORT_ENRICH_DELAY_MS);
+    }
+  });
+  await Promise.all(runners);
+  return { requested: targets.length, enriched, failed, skipped: candidates.length - targets.length };
+}
+
+function sendEnrichProgress(text) {
+  chrome.runtime.sendMessage({ type: "bca-enrich-progress", text }, () => { void chrome.runtime.lastError; });
+}
+
+// 给一条已归档记录增量补全：直接改写 视频信息.txt，只动【标签】和【视频简介】两个区块
+async function enrichArchiveRecord(root, target, tabId) {
+  const directoryName = String(target?.directory || "");
+  if (!directoryName) throw new Error("缺少归档目录名。");
+  const collection = await root.getDirectoryHandle(safeSegment(target.collection));
+  const directory = await collection.getDirectoryHandle(directoryName);
+  const fileHandle = await directory.getFileHandle("视频信息.txt");
+  const text = await (await fileHandle.getFile()).text();
+
+  const bvid = text.match(/^BV号：(.+)$/m)?.[1]?.trim() || "";
+  const aid = text.match(/^av号：(.+)$/m)?.[1]?.trim().replace(/^av/i, "") || "";
+  let resolvedBvid = /^BV[0-9A-Za-z]{10}$/.test(bvid) ? bvid : "";
+  const aidKey = /^\d+$/.test(aid) ? aid : "";
+  if (!resolvedBvid && !aidKey) throw new Error("这条归档没有可用的 BV/av 号。");
+
+  const currentTagsLine = text.match(/【标签】[^\n]*\n([^\n]*)/)?.[1]?.trim() || "";
+  const currentDescription = (text.match(/【视频简介】[^\n]*\n([\s\S]*)$/)?.[1] || "").trim();
+  const needTags = !currentTagsLine || importIsPlaceholder(currentTagsLine);
+  const needDescription = importIsPlaceholder(currentDescription);
+  if (!needTags && !needDescription) return "unchanged";
+
+  let nextTagsLine = currentTagsLine;
+  let nextDescription = currentDescription;
+
+  // 需要简介、或者只有 av 号要先换出 BV 号时，才请求视频资料接口
+  if (needDescription || !resolvedBvid) {
+    const data = await biliImportApiGet("/x/web-interface/view", resolvedBvid ? { bvid: resolvedBvid } : { aid: aidKey }, 10000, tabId);
+    resolvedBvid = String(data?.bvid || resolvedBvid || "");
+    if (needDescription) {
+      const description = String(data?.desc ?? "").trim();
+      if (description && !importIsPlaceholder(description)) nextDescription = description;
+    }
+  }
+  if (needTags && resolvedBvid) {
+    const tags = importTagNames(await biliImportApiGet("/x/tag/archive/tags", { bvid: resolvedBvid }, 9000, tabId));
+    if (tags.length) nextTagsLine = tags.join("、");
+  }
+
+  if (nextTagsLine === currentTagsLine && nextDescription === currentDescription) return "unchanged";
+
+  const updated = replaceInfoDescription(replaceInfoTagLine(text, nextTagsLine), nextDescription);
+  // 写入前做一次完整性校验，宁可跳过也不能把归档写坏
+  if (!updated.includes("【基本信息】") || !updated.includes("【视频简介】") || updated.length < text.length / 2) {
+    throw new Error("补全后的内容未通过校验，已跳过这条记录。");
+  }
+  await writeFile(directory, "视频信息.txt", updated);
+  return "updated";
+}
+
+// 收藏库发起的批量补全。targets 是全部候选，limit 是这一批实际处理多少条。
+async function enrichArchiveRecords(data, tabId = null) {
+  const root = await getRootHandle();
+  if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
+  await ensureWritePermission(root);
+  const targets = (Array.isArray(data?.targets) ? data.targets : []).filter((target) => target?.collection && target?.directory);
+  if (!targets.length) throw new Error("没有需要补全的记录。");
+  const limit = Math.max(1, Math.min(Number(data?.limit) || 20, 80));
+  const queue = targets.slice(0, limit);
+  const failures = [];
+  let updated = 0;
+  let unchanged = 0;
+  let failed = 0;
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(IMPORT_ENRICH_CONCURRENCY, queue.length) }, async () => {
+    while (cursor < queue.length) {
+      const index = cursor;
+      const target = queue[cursor];
+      cursor += 1;
+      sendEnrichProgress(`正在补全 ${index + 1}/${queue.length}：${target.directory}`);
+      try {
+        const result = await enrichArchiveRecord(root, target, tabId);
+        if (result === "updated") updated += 1; else unchanged += 1;
+      } catch (error) {
+        failed += 1;
+        failures.push(`${target.collection}/${target.directory}：${error?.message || "补全失败"}`);
+      }
+      await importDelay(IMPORT_ENRICH_DELAY_MS);
+    }
+  });
+  await Promise.all(runners);
+
+  let reportPath = "";
+  if (failures.length) {
+    reportPath = await persistErrorReport([
+      "B站收藏归档补全报告",
+      `时间：${formatChineseDateTime(new Date(), true)}`,
+      `处理 ${queue.length} 条：更新 ${updated}，无新数据 ${unchanged}，失败 ${failed}`,
+      "",
+      ...failures.slice(0, 200)
+    ].join("\n"));
+  }
+  return {
+    ok: true,
+    processed: queue.length,
+    updated,
+    unchanged,
+    failed,
+    remaining: Math.max(0, targets.length - queue.length),
+    reportPath,
+    message: `本次处理 ${queue.length} 条：更新 ${updated} 条，无新数据 ${unchanged} 条，失败 ${failed} 条。`
+  };
+}
+
 function importedUnknownCover() {
   const canvas = new OffscreenCanvas(640, 360);
   const context = canvas.getContext("2d");
@@ -981,7 +1188,7 @@ function importMetadata(item, cover) {
     invalid: item.isInvalid,
     recoverySummary: item.isInvalid
       ? (sources.length ? `已从${sources.join("、")}找回部分资料（${recoveredFields} 项）` : "未能找回资料，缺失项以“未知”标记")
-      : "收藏夹资料"
+      : (sources.length ? `收藏夹资料 + ${sources.join("、")}` : "收藏夹资料")
   };
 }
 
@@ -1037,7 +1244,8 @@ async function importBiliFavorites(data, tabId = null) {
   const folders = allFolders.filter((folder) => selectedIds.has(String(folder.id)));
   if (!folders.length) throw new Error("所选收藏夹已不存在或没有读取权限，请刷新列表后重试。");
 
-  let imported = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
+  let imported = 0, skipped = 0, failed = 0, total = 0, hasIssues = false, enrichedTotal = 0;
+  const folderNotes = [];
   const savedPaths = [];
   for (let folderIndex = 0; folderIndex < folders.length; folderIndex += 1) {
     const folder = folders[folderIndex];
@@ -1096,6 +1304,18 @@ async function importBiliFavorites(data, tabId = null) {
       }
     }
 
+    // 4.1beta：正常条目也补一次标签和简介（失效视频上一步已经处理过）
+    try {
+      const enrichment = await enrichPendingImportedItems(pendingItems.filter((item) => !item.isInvalid), folder, tabId);
+      enrichedTotal += enrichment.enriched;
+      if (enrichment.skipped) folderNotes.push(`「${folder.title}」还有 ${enrichment.skipped} 条未补全（每次导入最多 ${IMPORT_ENRICH_LIMIT} 条），可在本地收藏库用“补全缺失资料”继续。`);
+      for (const item of pendingItems) {
+        for (const message of item.enrichErrors || []) {
+          if (!folderLog.includes(message)) folderLog.push(message);
+        }
+      }
+    } catch (error) { folderLog.push(`补全标签/简介异常：${error.message}`); }
+
     for (let offset = 0; offset < pendingItems.length; offset += 12) {
       const batch = pendingItems.slice(offset, offset + 12);
       sendImportProgress(`正在准备 ${folder.title} 的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`);
@@ -1124,15 +1344,17 @@ async function importBiliFavorites(data, tabId = null) {
     if (folderLog.length) hasIssues = true;
   }
 
-  reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`, `读取视频：${total}`, `新导入：${imported}`, `已存在跳过：${skipped}`, `失败：${failed}`);
+  reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`, `读取视频：${total}`, `新导入：${imported}`, `已存在跳过：${skipped}`, `补全资料：${enrichedTotal}`, `失败：${failed}`);
+  if (folderNotes.length) reportLines.push("", "备注：", ...folderNotes);
   let reportPath = "";
   if (failed || hasIssues || reportLines.some((line) => line.includes("失败：") || line.includes("失败"))) {
     reportPath = await persistErrorReport(reportLines.join("\n"));
     await chrome.storage.local.set({ lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: Date.now() } });
   }
+  const enrichNote = enrichedTotal ? `已补全 ${enrichedTotal} 条视频的标签/简介。` : "";
   const message = skipped
-    ? `导入/更新完成：已存在相同视频 ${skipped} 个，已跳过；只导入未存在的视频。新导入 ${imported} 个，失败 ${failed} 个。`
-    : `导入/更新完成：新导入 ${imported} 个，失败 ${failed} 个。`;
+    ? `导入/更新完成：已存在相同视频 ${skipped} 个，已跳过；只导入未存在的视频。新导入 ${imported} 个，失败 ${failed} 个。${enrichNote}`
+    : `导入/更新完成：新导入 ${imported} 个，失败 ${failed} 个。${enrichNote}`;
   const pathText = savedPaths.slice(0, 10).join("\n");
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
   return { ok: true, message, imported, skipped, failed, total, reportPath };
@@ -1282,6 +1504,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "bca-download-subtitles") {
     getDownloadSubtitles(message).then((subtitles) => sendResponse({ ok: true, subtitles })).catch((error) => sendResponse({ ok: false, message: error?.message || "读取字幕失败。" }));
+    return true;
+  }
+  if (message?.type === "bca-enrich-records") {
+    // 走同一条串行队列，避免和保存/导入同时改写归档文件
+    const task = saveQueue.then(() => enrichArchiveRecords(message.data, sender?.tab?.id ?? null));
+    saveQueue = task.catch(() => undefined);
+    task.then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "补全失败。" }));
     return true;
   }
   if (message?.type === "list-bili-favorite-folders") {
