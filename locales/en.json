@@ -596,5 +596,8 @@
   "保存位置的写入授权已失效，请先在插件里重新授权保存位置，然后重试回滚。": "Write access to the save location has expired. Re-authorise the save location in the extension first, then retry the rollback.",
   "如果更新时发现视频已经失效：不会用新数据覆盖原有资料，只把这条记录标记为「已失效」——标题变红、封面变灰，与导入时解析到的失效视频表现一致。": "If a video turns out to be unavailable during the refresh, its existing data is kept — the record is simply marked as unavailable, with a red title and a greyed-out cover, just like videos that were already unavailable when imported.",
   "没有获得保存文件夹的写入权限；请在插件弹窗里重新设置保存位置。": "No write permission for the save folder. Please set the save location again in the extension popup.",
-  "无法创建默认下载文件夹 000视频下载，请检查保存文件夹的写入权限。": "Could not create the default download folder 000视频下载. Please check write permission for the save folder."
+  "无法创建默认下载文件夹 000视频下载，请检查保存文件夹的写入权限。": "Could not create the default download folder 000视频下载. Please check write permission for the save folder.",
+  "UP 主主页": "Creator page",
+  "打开 UP 主主页": "Open the creator's page",
+  "B 站没有提供有效的下载地址。": "Bilibili did not provide a usable download URL."
 }

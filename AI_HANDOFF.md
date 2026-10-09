@@ -7,6 +7,8 @@
 - 项目目录：仓库根（扩展直接从该目录加载）。**正式版目录名是 `bili-vault-V1.0.0`**；`bili-vault-beta4.9` 及更早的 `bili-vault-beta*` 是历史版本，只作对照，不要在上面继续改。
 - 扩展版本：`1.0.0`（界面显示 `V1.0.0`），Chrome Manifest V3，最低 Chrome 版本 111。测试版时期界面显示 `beta4.x`，差别只在 `library.js` / `popup.js` 里的 `RELEASE_CHANNEL` 常量。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
+- **历史版本编号沿革**：项目最初叫 `b_catch`，目录名 `b_catch_1.0` … `b_catch_3.8`（这些原始快照保存在 `Desktop\bili-vault-beta\` 下，已同步改名为 `bili-vault-beta1.0` … `bili-vault-beta3.8`）。**注意 `b_catch_1.0` 目录里的 `manifest.json` 写的是 `1.1.3`，`b_catch_1.1` 写的是 `1.1.4`**——早期目录名与 manifest 版本号并不同步，别被绕进去。3.6 之前没有测试套件、没有 `archive-core.js`、也没有本文件；3.6 起才建立「抽取纯逻辑 + 静态回归测试 + 交接文档」这套工程约定。完整的逐版本演变见 `README.md` 的版本历史段，图示与量化数据见 `Desktop\bili-vault开发文档\`。
+- **4.0 是一次纯界面重构**，磁盘格式与数据流完全没动：它把四份互相覆写的 CSS 收敛成 `theme.css` 单层令牌体系，并确立了本文件「界面与设计系统」那六条约定。4.0 之前的 CSS 是层层追加的补丁（`.library-link` 被定义 4 次、`.primary` 和 `.toggle-switch` 各 3 次），改一处样式极容易被下游区块盖掉——**若要理解某条界面约定的来历，先看这一条**。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
@@ -91,7 +93,7 @@ bili-vault-V1.0.0/                # 目录名即版本；换目录会改变扩�
 2. 本地同名收藏夹**不存在**就新建（记进回滚日志），**存在**就读取已有记录（`readExistingImportRecords()` 同时返回去重标识符和每条记录的原文）。
 3. 按 BV/av 把远程条目分成「缺失的」和「已存在但 `recordNeedsRefresh()` 为真」的两类。
 4. 失效视频先走原有恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）。
-5. **对上面两类条目都抓一次完整资料**：`fetchImportDetails()` → `fetchVideoDetail()` 调 `/x/web-interface/view`（简介、发布时间、分区、时长、UP 主、`stat`）与 `/x/tag/archive/tags`（标签），再调 `/x/relation/stat` 取 UP 主粉丝数（`upFansCache` 按 mid 缓存，同一个 UP 只请求一次）。并发 2、间隔 350ms。
+5. **对上面两类条目都抓一次完整资料**：`fetchImportDetails()` → `fetchVideoDetail()` 调 `/x/web-interface/view`（简介、发布时间、分区、时长、UP 主、`stat`）与 `/x/tag/archive/tags`（标签），再调 `/x/relation/stat` 取 UP 主粉丝数（`upFansCache` 按 mid 缓存，同一个 UP 只请求一次）。并发 1、间隔 800ms（4.3 起下调，见下文「合规与安全红线」）。
 6. 已存在的记录用 `refreshImportedRecord()` 按新格式重写，**保留原来的收藏时间与目录名**，原文进回滚日志。
 7. 缺失的条目批量下载封面后写入（`saveImportedItem(..., journal)`，目录句柄先登记再写）。
 
@@ -189,7 +191,7 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [
 
 `.collection-list` 是 `flex: 1 1 auto; min-height: 0; overflow-y: auto`。**`min-height: 0` 不能删**：flex 项的默认 `min-height` 是 `auto`，不写它列表不会收缩，收藏夹一多就会把 `margin-top: auto` 的底部信息挤出可视区。新建收藏夹按钮和底部信息都是列表的兄弟节点，所以始终可见。
 
-### 页面代取的 412 不是风控定论（4.9.1）
+### 页面代取的 412 不是风控定论（V1.0.0 修复 1）
 
 **`biliImportApiGet` 的 `catch (pageError)` 分支里绝不能因为消息含 "HTTP 412" 就抛风控。**
 
@@ -199,7 +201,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 风控判定只以**后台直连自己的响应**为准（`response.status === 412`）。
 
-### 收藏夹总数与接口返回数对不上是正常的（4.9.2）
+### 收藏夹总数与接口返回数对不上是正常的（V1.0.0 修复 2）
 
 **B 站收藏夹里的视频被删除后会留下「占位空槽」**：它仍计入收藏夹总数（页面显示、`media_count` 也算），页面上是一块空白，但 `/x/v3/fav/resource/list` 不返回它。
 
@@ -215,7 +217,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 另外 B 站的列表接口**可能把同一个条目返回两次**：上表那次「生存」读取 231、去重 1、导入 230。去重逻辑会正确合并，不必额外处理。
 
-### 给元素写文字前先看它有没有子节点（4.9.3）
+### 给元素写文字前先看它有没有子节点（V1.0.0 修复 3）
 
 **`progressNotifier(element, render)` 用 `textContent` 写目标元素 —— 传进去的必须是只放文字的节点，不能是带子元素的容器**，否则会把容器里的子节点整个抹掉。函数旁边已写了这条约束。
 
@@ -225,7 +227,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 4.9：一次全面审视后的修复
 
-对 15427 行 JS 做过一次三路只读审计（导入链路规模化 / 本地加载性能 / 安全与误操作）。安全侧**未发现致命或高危漏洞**，41 项防护经核实到位；修的是导入链路与加载性能上的真问题。下面记的是**改动背后的约束**，改这些地方之前先读懂。
+对 约 8800 行 JS 做过一次三路只读审计（导入链路规模化 / 本地加载性能 / 安全与误操作）。安全侧**未发现致命或高危漏洞**，41 项防护经核实到位；修的是导入链路与加载性能上的真问题。下面记的是**改动背后的约束**，改这些地方之前先读懂。
 
 - **导入的保活是显式行为，不是副作用**：`keepServiceWorkerAlive()`（background.js:1357，调 `chrome.runtime.getPlatformInfo()`，内部 20 秒节流）。MV3 的 Service Worker 只认"扩展 API 调用/事件"来重置空闲计时器，**纯 `await` 不算**。原来唯一的"保活"是 `publishImportState` 每 500ms 写 storage 的副作用——没有任何一行声明这个意图，暂停态与超长 `await` 段都会失去保护。**改导入主循环时不要把这个调用删掉。**
 - **`IMPORT_KEEPALIVE_INTERVAL_MS` 的余量很紧**：20 秒是审计给的保守值，而单次 `biliImportApiGet` 最坏是"页面代取 15s + 直连 15s"。已在每次请求结束补一次保活，把最坏间隙压到 15+20 秒内。**若真机上出现后台被回收，优先把这个常量调到 12000~15000**（一个常量，不影响任何测试）。
@@ -241,9 +243,9 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 已知限制（4.9 审视结论，未修的部分）
 
-一次覆盖 15427 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**
+一次覆盖 约 8800 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**
 
-- **测试套件是文本级断言，不执行被测代码**。109 项里只有约 12 处真的运行逻辑，其余是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
+- **测试套件是文本级断言，不执行被测代码**。125 项里只有约 12 处真的运行逻辑，其余是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
 - **配置没有版本迁移**。`CONFIG_VERSION = 1`，导入配置时只校验结构不做迁移。将来升版本必须补。
 - **没有多标签页互斥**。两个标签页同时打开同一归档、同时做写操作（标记已下载 / 删除 / 移动）没有锁。日常使用很难触发，但理论上存在竞态。
 - **没有归档完整性校验与备份机制**。`视频信息.txt` 损坏就是永久丢失，插件没有校验和、没有导出元数据的功能。
@@ -306,11 +308,11 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 使用须知（4.4 新增）
 
-同一份六条安全声明必须同时出现在 `library.html`、`download.html`、`popup.html`，**逐字一致**（测试会逐条比对）。
+同一份**七条**安全声明必须同时出现在 `library.html`、`download.html`、`popup.html`，**逐字一致**（测试会逐条比对）。
 
-4.4.1 起：三处统一用 --warning-soft / --warning-line 黄色底、正文 --fs-md(15px)；收藏库默认展开、可折叠，但**不允许永久关闭**（dismissSafety 按钮与 safetyNoticeDismissed 写入都已删除，只保留一次性的旧标记清理）；弹窗里**置顶**（排在 rand-row 之前）且默认折叠，避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要；也不要把「不再提示」加回来。**
+4.4.1 起：三处统一用 --warning-soft / --warning-line 黄色底、正文 --fs-md(15px)；收藏库默认展开、可折叠，但**不允许永久关闭**（dismissSafety 按钮与 safetyNoticeDismissed 写入都已删除，只保留一次性的旧标记清理）；弹窗里**置顶**（排在 brand-row 之前）且默认折叠，避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要；也不要把「不再提示」加回来。**
 
-4.5 起：**「请勿滥用……」一条必须排在最前面**（测试会断言第一条以「请勿滥用：」开头，且三个界面的六条文字完全一致）。条目上带 data-i18n，其中含 DownKyi 链接的那条用 data-i18n-html。
+4.5 起：**「请勿滥用……」一条必须排在最前面**（测试会断言第一条以「请勿滥用：」开头，且三个界面的**七条**文字完全一致）。条目上带 data-i18n，其中含 DownKyi 链接的那条用 data-i18n-html。
 
 ### 本地收藏库
 
@@ -424,9 +426,9 @@ UP主主页：https://space.bilibili.com/……
 | `bca-import-control` | `popup.js` → `background.js` | 4.2：暂停 / 继续 / 取消正在进行的导入 |
 | `bca-import-state` | 任意页面 → `background.js` | 4.2：单独查询导入运行状态 |
 | `bca-locale` | 内容脚本 `i18n.js` → `background.js` | 4.5：内容脚本请后台代取词典。**不能自己 fetch**——从网页上下文读扩展资源必须声明 `web_accessible_resources`，而 4.3 起刻意不开放任何扩展资源给网页；直接 fetch 会被拦、被 `try/catch` 吞成空词典，表现为提示卡永远中文且不报错 |
-| ca-open-library | content.js → ackground.js | 4.3：由后台 chrome.tabs.create 打开本地收藏库，扩展页因此不必暴露给网页 |
-| ca-refresh-video-stats | library.js → ackground.js | 4.4：分批重新解析并更新互动数据与粉丝数；失效只打标记 |
-| ca-status-progress | ackground.js → library.js | 4.4：更新视频状态的进度回报 |
+| `bca-open-library` | `content.js` → `background.js` | 4.3：由后台 `chrome.tabs.create` 打开本地收藏库，扩展页因此不必暴露给网页 |
+| `bca-refresh-video-stats` | `library.js` → `background.js` | 4.4：重新解析并更新互动数据与粉丝数；失效只打标记 |
+| `bca-status-progress` | `background.js` → `library.js` | 4.4：更新视频状态的进度回报 |
 | `add-manual-video` | `library.js` → `background.js` | 解析手动添加视频并写入一个或多个收藏夹 |
 | `import-bili-favorites` | `favorites-import.js` → `background.js` | 导入所选线上收藏夹 |
 | `bca-list-import-folders` | `popup.js` → `favorites-import.js` | 在收藏夹页请求线上收藏夹列表 |
@@ -507,7 +509,9 @@ node test/i18n-extract.cjs --check   # 校验 zh-TW / en 覆盖了全部词条
 node test/_unmarked.cjs
 ```
 
-`i18n-extract` 只能证明「已经标记的能翻」，证明不了「该标的都标了」。`_unmarked` 扫描「含中文的字符串字面量、却没被 `t()` 包住」的位置，补上另一半。4.5 就是靠它发现 `library.js` 有 74 处、`download.js` 有 46 处漏标记——界面看起来正常，但切到英文时那些文案纹丝不动。
+`i18n-extract` 只能证明「已经标记的能翻」，证明不了「该标的都标了」。`_unmarked` 扫描「含中文的字符串字面量、却没被 `t()` 包住」的位置，补上另一半。
+
+**两个工具都会漏，别把 `--check` 全绿当成零漏译。** 已经证实的一类：**`BcaI18n.t("…")` 嵌在一段长模板字符串的 `${}` 里时，`i18n-extract` 提取不到**——`library.js` 详情面板拼 `UP 主主页` / `打开 UP 主主页` 的那一行就是（V1.0.0 才发现，两条都没进词典）。`test/stability.test.cjs` 里有一条**不依赖提取器**的断言直接扫源码，把每个 `t()` 字面量与词典比对，这类漏网由它兜住。4.5 就是靠它发现 `library.js` 有 74 处、`download.js` 有 46 处漏标记——界面看起来正常，但切到英文时那些文案纹丝不动。
 
 它会有两类固定误报，看输出时要自己排除：
 
@@ -515,7 +519,6 @@ node test/_unmarked.cjs
 2. **匹配宿主页面的选择器**（`content.js` 里的 `添加到收藏夹`、`确定`）和**跨行模板字符串**——翻译了功能就坏，或只是脚本解析局限。
 
 规律：**文案只要不是以字面量出现在 `t()` 或 `data-i18n` 里，就一定会漏。** 已经踩过两次：主题标签写在 `theme.js` 的对象里、内容脚本提示卡走 `showNotice(...)` 传参。
-```
 
 只读预览 4.2 的导入会抓到什么（不改任何文件，适合改完接口逻辑后先验证）：
 

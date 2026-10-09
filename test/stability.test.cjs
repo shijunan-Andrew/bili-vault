@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.9.0");
+  assert.equal(manifest.version, "1.0.0");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -895,6 +895,38 @@ test("every shipped script actually parses", () => {
   }
 });
 
+test("every t() literal in the shipped scripts has a dictionary entry", () => {
+  // 这条**不走 i18n-extract**，而是直接扫源码里所有的 BcaI18n.t("字面量")。
+  // 原因：提取器会漏掉嵌在长模板字符串 ${} 里的 t() —— V1.0.0 真的漏过两条
+  // （library.js 详情面板的「UP 主主页」「打开 UP 主主页」），而 --check 当时是全绿的。
+  const SOURCES = ["library.js", "download.js", "popup.js", "content.js", "background.js"];
+  const NEVER = new Set(["简体中文", "繁體中文", "English", "DownKyi", "本地收藏库", "LOCAL VIDEO LIBRARY"]);
+  const dicts = ["zh-TW", "en"].map((loc) => JSON.parse(readProjectFile(`locales/${loc}.json`)));
+  const missing = [];
+  for (const file of SOURCES) {
+    // 先剥掉注释：注释里也会出现 BcaI18n.t("字面量") 这种示例，会把测试带偏。
+    // **必须先统一换行** —— JS 的 `.` 不匹配 \r（它属于 LineTerminator），
+    // 所以在 CRLF 文件上 /^\s*\/\/.*$/ 永远匹配不到行尾，剥注释会静默失效。
+    const source = readProjectFile(file)
+      .replace(/\r\n?/g, "\n")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((line) => line.replace(/^\s*\/\/.*$/, ""))
+      .join("\n");
+    // t("…")：允许字符串里有转义序列（例如路径里的 \\ ）
+    for (const match of source.matchAll(/BcaI18n\.t\("((?:[^"\\\n]|\\.)+)"/g)) {
+      // 源码里写的是转义形式，取运行时真值后再与词典比对
+      const key = match[1].replace(/\\(.)/g, "$1");
+      if (NEVER.has(key)) continue;
+      if (!/[\u4e00-\u9fff]/.test(key)) continue;   // 不含中文的 key 不需要词典
+      for (const dict of dicts) {
+        if (dict[key] === undefined) missing.push(`${file}: ${key}`);
+      }
+    }
+  }
+  assert.deepEqual([...new Set(missing)], [], "这些 t() 字面量没有词典条目：" + [...new Set(missing)].join(" / "));
+});
+
 /* ------------------------- 4.9 全面修复 ------------------------- */
 test("the archive cache evicts one entry instead of clearing itself", () => {
   const library = readProjectFile("library.js");
@@ -1438,8 +1470,13 @@ test("the version shown in the UI carries a release-channel prefix", () => {
   for (const raw of ["4.7.0", "4.7.1", "1.0.0", ""]) {
     assert.equal(fromLibrary(raw), fromPopup(raw), "两个文件的 displayVersion 对 " + raw + " 结果不一致");
   }
-  assert.equal(fromLibrary("4.7.0"), "beta4.7");
-  assert.equal(fromLibrary("4.7.1"), "beta4.7.1");
+  // 正式版：渠道为 release，显示 V + 完整三段版本号
+  assert.equal(fromLibrary("1.0.0"), "V1.0.0");
+  assert.equal(fromLibrary("1.0.1"), "V1.0.1");
+  assert.equal(fromLibrary("4.7.0"), "V4.7.0");
+  // 渠道常量本身也要是 release —— 测试版时期这里是 "beta"
+  assert.match(readProjectFile("library.js"), /const RELEASE_CHANNEL = "release";/);
+  assert.match(readProjectFile("popup.js"), /const RELEASE_CHANNEL = "release";/);
   assert.match(readProjectFile("library.js"), /sideVersion\.textContent = displayVersion\(/);
   assert.match(readProjectFile("popup.js"), /displayVersion\(chrome\.runtime\.getManifest\(\)\.version\)/);
 });

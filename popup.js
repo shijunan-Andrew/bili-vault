@@ -57,7 +57,7 @@ let cancelArmTimer = 0;
 
 // 测试版显示 beta4.7、正式版显示 V1.0.0。
 // library.js 里有一份同样的实现，改动时两边必须同步（测试会比对两份输出）。
-const RELEASE_CHANNEL = "beta";
+const RELEASE_CHANNEL = "release";
 
 function displayVersion(raw) {
   const version = String(raw || "");
