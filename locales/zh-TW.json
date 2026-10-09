@@ -540,5 +540,6 @@
   "所选较多，本次只处理前 {count} 条；完成后可以再点一次继续。": "所選較多，本次只處理前 {count} 條；完成後可以再點一次繼續。",
   "正在请求 B 站接口，请勿关闭页面…": "正在請求 B 站介面，請勿關閉頁面…",
   "还有 {count} 条没处理，可以再点一次继续。": "還有 {count} 條沒處理，可以再點一次繼續。",
-  "本次处理 {processed} 条：更新 {updated} 条，新标记失效 {markedInvalid} 条，无变化 {unchanged} 条，失败 {failed} 条。": "本次處理 {processed} 條：更新 {updated} 條，新標記失效 {markedInvalid} 條，無變化 {unchanged} 條，失敗 {failed} 條。"
+  "本次处理 {processed} 条：更新 {updated} 条，新标记失效 {markedInvalid} 条，无变化 {unchanged} 条，失败 {failed} 条。": "本次處理 {processed} 條：更新 {updated} 條，新標記失效 {markedInvalid} 條，無變化 {unchanged} 條，失敗 {failed} 條。",
+  "本项目已在 GitHub 上开源，点击查看": "本專案已在 GitHub 上開源，點擊查看"
 }

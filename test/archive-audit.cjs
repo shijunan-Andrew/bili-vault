@@ -3,7 +3,7 @@
  * 用来回答“有多少条归档其实没有标签 / 没有简介”，以及新版解析是否把它们读对了。
  *
  * 用法：
- *   node test/archive-audit.cjs "C:\Users\Maxwell\Desktop\本地收藏夹"
+ *   node test/archive-audit.cjs "<你的收藏根目录>"
  */
 const fs = require("node:fs");
 const path = require("node:path");

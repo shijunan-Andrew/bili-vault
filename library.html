@@ -11,6 +11,17 @@
   <script src="i18n.js"></script>
 </head>
 <body>
+  <!-- 4.5.2：开源横幅。仓库地址在业务脚本的 PROJECT_REPO_URL 常量里改，一处即可 -->
+  <div id="githubBanner" class="github-banner" hidden>
+    <a id="githubBannerLink" class="banner-track" href="https://github.com/" target="_blank" rel="noopener noreferrer">
+      <span class="banner-scroll">
+        <span class="banner-run" data-i18n="本项目已在 GitHub 上开源，点击查看">本项目已在 GitHub 上开源，点击查看</span>
+        <span class="banner-run" aria-hidden="true" data-i18n="本项目已在 GitHub 上开源，点击查看">本项目已在 GitHub 上开源，点击查看</span>
+      </span>
+    </a>
+    <button id="dismissGithubBanner" class="banner-close" type="button" aria-label="关闭" data-i18n-aria="关闭"><span data-icon="close"></span></button>
+  </div>
+
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#" aria-label="本地收藏库首页" data-i18n-aria="本地收藏库首页">
@@ -93,7 +104,7 @@
             <p id="resultSummary" class="heading-subtitle"></p>
           </div>
           <div class="page-heading-actions">
-            <button id="batchManage" class="button button-quiet" type="button" aria-pressed="false"><span data-label="manage" data-i18n="批量管理">批量管理</span><span data-label="done" data-i18n="完成" hidden>完成</span></button>
+            <button id="batchManage" class="button button-success" type="button" aria-pressed="false"><span data-label="manage" data-i18n="批量管理">批量管理</span><span data-label="done" data-i18n="完成" hidden>完成</span></button>
           </div>
         </div>
 
@@ -105,7 +116,7 @@
               <button id="exitBatch" class="text-button" type="button" data-i18n="完成">完成</button>
             </div>
             <div class="batch-actions">
-              <button id="updateSelected" class="button button-quiet" type="button" disabled><span data-icon="refresh"></span><span data-i18n="更新视频状态">更新视频状态</span></button>
+              <button id="updateSelected" class="button button-warning" type="button" disabled><span data-icon="refresh"></span><span data-i18n="更新视频状态">更新视频状态</span></button>
               <button id="downloadSelected" class="button button-download" type="button" disabled><span data-icon="download"></span><span data-i18n="下载">下载</span></button>
               <button id="moveSelected" class="button button-primary" type="button" disabled><span data-icon="move"></span><span data-i18n="移动或复制">移动或复制</span></button>
               <button id="deleteSelected" class="button button-danger" type="button" disabled><span data-icon="trash"></span><span data-i18n="删除">删除</span></button>

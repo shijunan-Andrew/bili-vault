@@ -11,6 +11,45 @@ body {
   background: var(--bg);
 }
 
+/* 4.5.2：开源横幅。用固定定位 + 一个高度变量把侧栏、顶栏、主区一起推下来，
+   这样横幅显示/隐藏时布局能整块上下移动，不会互相压住。 */
+:root { --banner-h: 0px; }
+html.banner-visible { --banner-h: 42px; }
+.sidebar { top: var(--banner-h); }
+.main-area { padding-top: var(--banner-h); }
+
+.github-banner {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  height: var(--banner-h);
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--success-solid), var(--success));
+  color: #fff;                       /* 绿色底上的白字，不随主题变 */
+  box-shadow: var(--shadow-sm);
+}
+.banner-track { display: flex; flex: 1; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; }
+.banner-scroll { display: flex; width: max-content; animation: banner-scroll 20s linear infinite; }
+/* 两段一模一样的文字，位移 50% 正好接上，循环看不出接缝 */
+@keyframes banner-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.banner-track:hover .banner-scroll { animation-play-state: paused; }
+.banner-run { flex: 0 0 auto; padding-right: 120px; font-size: var(--fs-base); font-weight: 650; white-space: nowrap; }
+.banner-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: var(--banner-h);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-base);
+  opacity: .85;
+}
+.banner-close:hover { background: #ffffff2e; opacity: 1; }
+
 .app-shell { min-height: 100vh; }
 
 /* ---------- 侧栏 ---------- */
@@ -265,7 +304,15 @@ body {
 .button-primary:hover:not(:disabled) { background: var(--brand-strong); }
 .button-quiet { color: var(--text); border-color: var(--line); background: var(--surface); }
 .button-quiet:hover:not(:disabled) { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
-.button-download { color: #fff; border-color: var(--success-strong); background: var(--success); box-shadow: 0 5px 14px var(--success-line); }
+/* 实心按钮的白字必须压在 --success-solid 上：--success 在深色主题里是浅绿（#4cc38a），
+   白字压上去只有 2.22 对比度，根本读不清。--success-solid 在两套主题下都 >= 5.4。 */
+.button-download { color: #fff; border-color: var(--success-solid); background: var(--success-solid); box-shadow: 0 5px 14px var(--success-line); }
+.button-success { color: #fff; border-color: var(--success-solid); background: var(--success-solid); box-shadow: 0 5px 14px var(--success-line); }
+.button-success:hover:not(:disabled) { background: var(--success-strong); }
+.button-success[aria-pressed="true"] { background: var(--success-strong); }
+/* 黄色按钮走软底 + 深色文字，两套主题下都清楚，也符合「提醒但非危险」的语义 */
+.button-warning { color: var(--warning); border-color: var(--warning-line); background: var(--warning-soft); }
+.button-warning:hover:not(:disabled):not(:disabled) { border-color: var(--warning); background: var(--warning-soft-strong); }
 .button-download:hover:not(:disabled) { border-color: var(--success-strong); background: var(--success-strong); }
 .button-danger { color: #fff; background: var(--danger); }
 .button-danger:hover:not(:disabled) { background: var(--danger-strong); }
@@ -600,7 +647,7 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   padding: 5px var(--sp-2);
   border-radius: var(--r-xs);
   color: #fff;
-  background: var(--success);
+  background: var(--success-solid);
   box-shadow: var(--shadow-sm);
   font-size: var(--fs-micro);
   font-weight: 700;

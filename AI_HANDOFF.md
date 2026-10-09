@@ -1,11 +1,11 @@
-# AI 项目交接说明：B站收藏信息归档 4.5.1
+# AI 项目交接说明：B站收藏信息归档 4.5.2
 
 本文面向后续接手代码的 AI，记录当前项目结构、数据流、关键约束和验证方法。请先阅读本文，再看 [README.md](README.md) 和相关源文件。
 
 ## 项目基线
 
-- 项目目录：`C:\Users\Maxwell\Desktop\b_catch\b_catch_4.5.1`（历史版本另存于 `C:\Users\Maxwell\Desktop\cdx1\b_catch_1.0` … `b_catch_3.8`）。
-- 扩展版本：`4.5.1`，Chrome Manifest V3，最低 Chrome 版本 111。
+- 项目目录：`<项目目录>`（历史版本另存于 `<历史版本目录>`）。
+- 扩展版本：`4.5.2`，Chrome Manifest V3，最低 Chrome 版本 111。
 - `b_catch_4.4.1` 是 4.5 的来源基线，原目录保持不变。用户要求版本间使用独立目录；后续版本继续使用新目录并保留历史版本，除非用户明确要求直接改当前目录。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
@@ -337,7 +337,7 @@ node test/stability.test.cjs
 另外在本地归档上跑一次体检（统计有多少条记录其实没有标签或简介）：
 
 ```powershell
-node test/archive-audit.cjs "C:\Users\Maxwell\Desktop\本地收藏夹"
+node test/archive-audit.cjs "<你的收藏根目录>"
 ```
 
 多语言的词条工具（改过任何界面文字之后都要跑）：
@@ -367,7 +367,7 @@ node test/_unmarked.cjs
 只读预览 4.2 的导入会抓到什么（不改任何文件，适合改完接口逻辑后先验证）：
 
 ```powershell
-node test/import-trial.cjs "C:\Users\Maxwell\Desktop\本地收藏夹" 3
+node test/import-trial.cjs "<你的收藏根目录>" 3
 ```
 
 每次改动还应执行：

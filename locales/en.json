@@ -540,5 +540,6 @@
   "所选较多，本次只处理前 {count} 条；完成后可以再点一次继续。": "That is a lot at once, so only the first {count} will be processed; click again to continue when this batch finishes.",
   "正在请求 B 站接口，请勿关闭页面…": "Contacting the Bilibili API — do not close this page…",
   "还有 {count} 条没处理，可以再点一次继续。": "{count} records are still pending; click again to continue.",
-  "本次处理 {processed} 条：更新 {updated} 条，新标记失效 {markedInvalid} 条，无变化 {unchanged} 条，失败 {failed} 条。": "Processed {processed}: updated {updated}, newly marked unavailable {markedInvalid}, unchanged {unchanged}, failed {failed}."
+  "本次处理 {processed} 条：更新 {updated} 条，新标记失效 {markedInvalid} 条，无变化 {unchanged} 条，失败 {failed} 条。": "Processed {processed}: updated {updated}, newly marked unavailable {markedInvalid}, unchanged {unchanged}, failed {failed}.",
+  "本项目已在 GitHub 上开源，点击查看": "This project is open source on GitHub — click to see it"
 }

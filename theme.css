@@ -20,6 +20,7 @@
 
   /* —— 语义色 —— */
   --success: #2f9068;
+  --success-solid: #27775a;
   --success-strong: #21734f;
   --success-soft: #ecf7f1;
   --success-line: #c6e5d4;
@@ -116,6 +117,7 @@
   --brand-line: #1e4c5c;
   --brand-ring: #2bb8e03d;
   --success: #4cc38a;
+  --success-solid: #1f684d;
   --success-strong: #7ad6a8;
   --success-soft: #11291f;
   --success-line: #1e4736;
@@ -161,6 +163,7 @@
     --brand-line: #1e4c5c;
     --brand-ring: #2bb8e03d;
     --success: #4cc38a;
+  --success-solid: #1f684d;
     --success-strong: #7ad6a8;
     --success-soft: #11291f;
     --success-line: #1e4736;

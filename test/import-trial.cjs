@@ -5,7 +5,7 @@
  * **只读**：不会改写任何文件，也不会写临时副本。
  *
  * 用法：
- *   node test/import-trial.cjs "C:\Users\Maxwell\Desktop\本地收藏夹" [条数，默认 3]
+ *   node test/import-trial.cjs "<你的收藏根目录>" [条数，默认 3]
  */
 const fs = require("node:fs");
 const path = require("node:path");
@@ -19,7 +19,7 @@ const STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数"
 const root = process.argv[2];
 const limit = Math.max(1, Number(process.argv[3]) || 3);
 if (!root) {
-  console.error('用法：node test/import-trial.cjs "C:\\Users\\Maxwell\\Desktop\\本地收藏夹" [条数]');
+  console.error('用法：node test/import-trial.cjs "D:\\path\\to\\收藏根目录" [条数]');
   process.exit(1);
 }
 if (!fs.existsSync(root)) {

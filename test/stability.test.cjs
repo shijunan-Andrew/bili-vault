@@ -197,7 +197,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "4.5.1");
+  assert.equal(manifest.version, "4.5.2");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
@@ -833,6 +833,67 @@ test("the dark theme only redefines tokens, and both triggers agree", () => {
   assert.match(css, /::-webkit-scrollbar-thumb \{[^}]*background: var\(--scroll-thumb\)/);
 });
 
+test("the open-source banner is green, scrolling and closable", () => {
+  const html = readProjectFile("library.html");
+  const css = readProjectFile("library.css");
+  const library = readProjectFile("library.js");
+  for (const id of ["githubBanner", "githubBannerLink", "dismissGithubBanner"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
+  }
+  // 两段一模一样的文字才能无缝循环
+  assert.equal([...html.matchAll(/class="banner-run"/g)].length, 2, "跑马灯要有两段相同文字");
+  assert.match(css, /@keyframes banner-scroll \{[^\n]*translateX\(-50%\)/);
+  assert.match(css, /\.banner-scroll \{[^}]*animation: banner-scroll/);
+  // 悬停暂停，方便点
+  assert.match(css, /\.banner-track:hover \.banner-scroll \{ animation-play-state: paused; \}/);
+  // 绿色底
+  assert.match(css, /\.github-banner \{[^}]*var\(--success-solid\)/);
+  // 链接新窗口打开且带 rel 保护
+  const anchorTag = (html.match(/<a id="githubBannerLink"[^>]*>/) || [""])[0];
+  assert.match(anchorTag, /target="_blank"/);
+  assert.match(anchorTag, /rel="noopener noreferrer"/);
+  // 仓库地址只有一处，方便开源后替换
+  assert.match(library, /const PROJECT_REPO_URL = "https:\/\/github\.com\/[^"]+";/);
+  assert.equal([...library.matchAll(/const PROJECT_REPO_URL/g)].length, 1, "仓库地址只应定义一处");
+  // 关闭后记住
+  assert.match(library, /githubBannerDismissed/);
+  assert.match(library, /document\.documentElement\.classList\.add\("banner-visible"\)/);
+  assert.match(library, /document\.documentElement\.classList\.remove\("banner-visible"\)/);
+  // 横幅出现时侧栏与主区要一起下移，否则会被压住
+  assert.match(css, /\.sidebar \{ top: var\(--banner-h\); \}/);
+  assert.match(css, /\.main-area \{ padding-top: var\(--banner-h\); \}/);
+});
+
+test("solid buttons put white text on a readable green", () => {
+  const theme = readProjectFile("theme.css");
+  const light = Object.fromEntries([...theme.match(/:root \{([\s\S]*?)\n\}/)[1].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+  const dark = Object.assign({}, light, Object.fromEntries([...theme.match(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/)[1].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()])));
+  // --success 在深色主题里是浅绿，白字压上去只有 2.2；实心按钮必须用 --success-solid
+  for (const [mode, table] of [["浅色", light], ["深色", dark]]) {
+    const ratio = contrastRatio("#ffffff", table["--success-solid"]);
+    assert.ok(ratio >= 4.5, `${mode}的 --success-solid 上白字对比度只有 ${ratio.toFixed(2)}`);
+  }
+  for (const cssFile of ["library.css", "download.css"]) {
+    const css = readProjectFile(cssFile);
+    // 不允许再出现「白字 + var(--success)」的组合
+    for (const match of css.matchAll(/\{([^}]*)\}/g)) {
+      const block = match[1];
+      if (/color:\s*#fff/.test(block) && /background:\s*var\(--success\)/.test(block)) {
+        assert.fail(`${cssFile} 里有白字压在 --success 上：${block.trim().replace(/\s+/g, " ").slice(0, 70)}`);
+      }
+    }
+  }
+});
+
+test("batch manage is green and its status refresh is yellow", () => {
+  const html = readProjectFile("library.html");
+  const css = readProjectFile("library.css");
+  assert.match(html, /<button id="batchManage" class="button button-success"/);
+  assert.match(html, /<button id="updateSelected" class="button button-warning"/);
+  assert.match(css, /\.button-success \{[^}]*var\(--success-solid\)/);
+  // 黄色按钮走软底 + 深色文字，两套主题下都清楚
+  assert.match(css, /\.button-warning \{[^}]*color: var\(--warning\)[^}]*background: var\(--warning-soft\)/);
+});
 test("create-collection sits under the last collection", () => {
   const html = readProjectFile("library.html");
   const css = readProjectFile("library.css");
@@ -1323,8 +1384,11 @@ test("every design token referenced by a page actually exists", () => {
   const problems = [];
   for (const file of ["library.css", "download.css", "popup.css", "theme.css"]) {
     const css = readProjectFile(file);
+    // 页面自己也可以定义布局用的局部变量（例如横幅的 --banner-h），
+    // 只要它在本文件里定义过就行；真正的设计令牌仍然必须来自 theme.css。
+    const localDefined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]));
     for (const match of css.matchAll(/var\((--[a-z0-9-]+)/g)) {
-      if (!defined.has(match[1])) problems.push(`${file} 用了未定义的令牌 ${match[1]}`);
+      if (!defined.has(match[1]) && !localDefined.has(match[1])) problems.push(`${file} 用了未定义的令牌 ${match[1]}`);
     }
   }
   // JS 里动态拼过 var(--x) 的也要算上

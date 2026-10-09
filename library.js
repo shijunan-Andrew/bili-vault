@@ -33,6 +33,9 @@ const viewGridButton = document.getElementById("viewGrid");
 const viewListButton = document.getElementById("viewList");
 
 const safetyNotice = document.getElementById("safetyNotice");
+const githubBanner = document.getElementById("githubBanner");
+const githubBannerLink = document.getElementById("githubBannerLink");
+const dismissGithubBannerButton = document.getElementById("dismissGithubBanner");
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
@@ -944,6 +947,31 @@ async function runStatusRefresh() {
     statusConfirmCancel.disabled = false;
     if (detailButton) detailButton.disabled = false;
   }
+}
+/* ---------------- 4.5.2：GitHub 开源横幅 ---------------- */
+
+// 正式开源后只改这一处
+const PROJECT_REPO_URL = "https://github.com/shijunan-Andrew/bili-vault";
+
+async function restoreGithubBanner() {
+  if (!githubBanner) return;
+  let dismissed = false;
+  try {
+    const saved = await chrome.storage.local.get("githubBannerDismissed");
+    dismissed = saved?.githubBannerDismissed === true;
+  } catch (_) {}
+  if (dismissed) return;
+  githubBannerLink.href = PROJECT_REPO_URL;
+  githubBanner.hidden = false;
+  // 侧栏/顶栏/主区靠这个 class 一起下移，见 library.css 的 --banner-h
+  document.documentElement.classList.add("banner-visible");
+}
+
+function dismissGithubBanner() {
+  if (!githubBanner) return;
+  githubBanner.hidden = true;
+  document.documentElement.classList.remove("banner-visible");
+  chrome.storage.local.set({ githubBannerDismissed: true }).catch(() => {});
 }
 /* ---------------- 使用须知（4.4.1：可折叠，但不允许永久关闭） ---------------- */
 // 以前用 safetyNoticeDismissed 记住“不再显示”，4.4.1 起必须常驻，
@@ -2083,6 +2111,7 @@ deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRe
   statusConfirm.addEventListener("cancel", (event) => { if (statusRefreshInProgress) event.preventDefault(); });
 searchInput.addEventListener("input", () => { resetPaging(); renderVideos(); });
 sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
+dismissGithubBannerButton?.addEventListener("click", dismissGithubBanner);
 
 /* ---------------- 4.5.1：主题与语言悬浮球 ---------------- */
 
@@ -2251,7 +2280,8 @@ BcaI18n.init().catch(() => {}).then(() => Promise.all([
   restoreCollectionOrder().catch(() => { collectionOrder = []; }),
   restoreViewSettings(),
   restoreImportHint(),
-  clearLegacySafetyDismissed()
+  clearLegacySafetyDismissed(),
+  restoreGithubBanner()
 ])).finally(() => {
   applyViewMode();
   restoreLastRoot();
