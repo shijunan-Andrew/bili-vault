@@ -2362,6 +2362,142 @@ test("失效判据三个来源缺一不可", () => {
     "importAttrIsInvalid 必须判「非 0」");
 });
 
+/* ------------------------- V1.1.35 显示失效原因 ------------------------- */
+
+test("失效原因：attr → 文案映射（真跑）", () => {
+  const { importAttrReason } = loadBackgroundFunctions(["importAttrReason"], ["IMPORT_ATTR_LABELS"]);
+  // 0 是「有效」：必须返回空串。归档端靠「空串就不写这一行」保证有效视频的 视频信息.txt 一个字节不变
+  assert.equal(importAttrReason(0), "", "0 是有效视频，没有原因可说");
+  assert.equal(importAttrReason(undefined), "", "缺字段");
+  assert.equal(importAttrReason(null), "");
+  assert.equal(importAttrReason(""), "");
+  assert.equal(importAttrReason("0"), "", "字符串形态的 0 也是有效");
+  // 表里的 6 个取值逐个对文案
+  assert.equal(importAttrReason(1), "其他");
+  assert.equal(importAttrReason(2), "版权原因", "★ 2 是偶数 —— 按位判最低位的写法会漏掉它");
+  assert.equal(importAttrReason(3), "违规内容");
+  assert.equal(importAttrReason(5), "视频已失效");
+  assert.equal(importAttrReason(9), "UP主自行删除", "真机上最常见的失效取值");
+  assert.equal(importAttrReason(11), "已锁定");
+  assert.equal(importAttrReason("9"), "UP主自行删除", "字符串形态也要认");
+  // 表外的取值要有兜底，且不能退化成两种错误形态：
+  //   ① 空串 —— 界面会当成「老存档没写原因」，把「原因(7)」显示成「已失效」，线索全丢
+  //   ② 「其他」—— 那是 attr=1 的确切含义，冒充它等于撒谎
+  const fallback = importAttrReason(7);
+  assert.ok(fallback, "未知 attr 不能返回空串");
+  assert.notEqual(fallback, "其他", "未知取值不许冒充 attr=1 的「其他」");
+  assert.match(fallback, /7/, "兜底文案要带上原始取值");
+});
+
+test("失效原因写进 视频信息.txt：失效才写，有效一个字都不加（真跑）", () => {
+  // 依赖一起加载：buildInfo 内部用 format*/importIsPlaceholder，importIsPlaceholder 用 importClean
+  const { buildInfo } = loadBackgroundFunctions(
+    ["buildInfo", "importIsPlaceholder", "importClean", "importAttrReason",
+      "formatDateTime", "formatChineseDateTime", "formatDuration", "formatPublishDate", "localDateParts"],
+    ["IMPORT_STAT_KEYS", "IMPORT_STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES", "IMPORT_ATTR_LABELS"]
+  );
+  const savedAt = new Date("2026-10-10T12:00:00");
+  const metadata = {
+    imported: true, title: "已失效视频", url: "未知", bvid: "未知", aid: "", description: "未知",
+    upName: "账号已注销", upMid: "未知", upFans: "未知", category: "未知", duration: 0, pubdate: 0,
+    tags: [], stats: {}, recoverySummary: "未能找回资料", invalid: true, attr: 9
+  };
+  const build = (extra) => buildInfo({ metadata: { ...metadata, ...extra }, favoriteAt: savedAt.getTime() }, "沙雕动画", savedAt);
+
+  const invalid = build({});
+  assert.match(invalid, /^失效原因：UP主自行删除$/m, "失效视频必须写下原因");
+  // 位置：紧跟在「恢复情况」之后，人扫一眼就看得到
+  const lines = invalid.split("\n");
+  assert.equal(lines[lines.findIndex((l) => l.startsWith("恢复情况：")) + 1], "失效原因：UP主自行删除", "「失效原因」要跟在「恢复情况」后面");
+
+  // 有效视频：一个字节都不多 —— 这次改动不会污染任何现有归档
+  const valid = build({ invalid: false, attr: 0 });
+  assert.equal(/失效原因/.test(valid), false, "有效视频不该出现「失效原因」这一行");
+  assert.match(valid, /^视频状态：正常$/m);
+
+  // attr 缺失（老数据）或接口没给：不写空行，界面按「已失效」兜底
+  assert.equal(/失效原因/.test(build({ attr: undefined })), false, "attr 缺失时不写空行");
+  assert.equal(/失效原因/.test(build({ attr: 0 })), false, "接口说失效但 attr=0 时也不写");
+
+  // 接口将来新增枚举值：原样写下来，不吞掉
+  assert.match(build({ attr: 7 }), /^失效原因：原因\(7\)$/m, "未知 attr 要原样落到存档里");
+});
+
+test("失效原因的全链路：接口 attr → importMetadata → 视频信息.txt（真跑）", () => {
+  // 这条盯的是一个很容易漏的接缝：buildInfo 读的是 metadata.attr，而 metadata 是
+  // importMetadata 现造的**另一个对象**。只在 buildInfo 里写逻辑、忘了在 importMetadata
+  // 里带上 attr 的话，原因永远只停在内存里，txt 里一行都不会有（而且不会有任何报错）。
+  const { importMetadata, buildInfo } = loadBackgroundFunctions(
+    ["importMetadata", "buildInfo", "importUsefulTitle", "importIsInvalidTitle", "importClean",
+      "importBvToAid", "importAidToBv", "importAttrReason", "importIsPlaceholder",
+      "formatDateTime", "formatChineseDateTime", "formatDuration", "formatPublishDate", "localDateParts"],
+    ["IMPORT_INVALID_TITLES", "IMPORT_BV_TABLE", "IMPORT_ATTR_LABELS", "IMPORT_STAT_KEYS", "IMPORT_STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES"]
+  );
+  const item = {
+    title: "已失效视频", bvid: "", aid: "", cover: "", description: "未知", author: "账号已注销",
+    authorMid: "", upFans: "", stats: {}, category: "", duration: 0, pubdate: 0, tags: [],
+    recoverySources: [], isInvalid: true, attr: 9
+  };
+  const savedAt = new Date("2026-10-10T12:00:00");
+  const metadata = importMetadata(item, null);
+  assert.equal(metadata.invalid, true);
+  assert.equal(metadata.attr, 9, "importMetadata 没把 attr 带到归档写入端");
+  const text = buildInfo({ metadata, favoriteAt: savedAt.getTime() }, "沙雕动画", savedAt);
+  assert.match(text, /^失效原因：UP主自行删除$/m, "全链路走完，原因没落进 视频信息.txt");
+  // 有效视频走同一条链路：attr=0，一行都不该多
+  const validText = buildInfo({
+    metadata: importMetadata({ ...item, isInvalid: false, attr: 0, title: "【哆啦A梦】国语版" }, null),
+    favoriteAt: savedAt.getTime()
+  }, "哆啦a梦", savedAt);
+  assert.equal(/失效原因/.test(validText), false, "有效视频被写进了「失效原因」");
+});
+
+test("失效原因映射表不许退回错写法（静态回归）", () => {
+  const src = readProjectFile("background.js");
+  const line = src.split("\n").find((l) => l.includes("const IMPORT_ATTR_LABELS ="));
+  assert.ok(line, "找不到 IMPORT_ATTR_LABELS 映射表");
+  for (const [code, label] of [[1, "其他"], [2, "版权原因"], [3, "违规内容"], [5, "视频已失效"], [9, "UP主自行删除"], [11, "已锁定"]]) {
+    assert.match(line, new RegExp(`\\b${code}: "${label}"`), `映射表少了 ${code}: ${label}`);
+  }
+  // ★ 单拎出来说一遍：2 是偶数，是最容易被人当成「不是失效」而漏掉的一项
+  assert.match(line, /\b2: "版权原因"/, "版权原因（attr=2）必须留在表里");
+  // 反向断言：前两版连续栽在按位判和等值判上，不许退回
+  //   attr & 1 → attr=2（版权原因）被误判成有效
+  //   attr === 1 → attr=9（UP主自行删除）整类漏掉，实测 22 条
+  assert.equal(/attr\s*&\s*1/.test(src), false, "不许按位判最低位 —— attr=2 会被当成有效");
+  assert.equal(/attr\s*===\s*1/.test(src), false, "不许用 === 1 判 attr，它是枚举不是布尔");
+  // 未知取值必须走兜底，不许 return IMPORT_ATTR_LABELS[code] 直接漏出 undefined
+  assert.match(src, /IMPORT_ATTR_LABELS\[code\] \|\| `原因\(\$\{code\}\)`/, "未知 attr 要有兜底文案");
+});
+
+test("收藏库把失效原因读回来并显示（静态回归）", () => {
+  const library = readProjectFile("library.js");
+  // 1) 从 视频信息.txt 读回来。键就是中文原文；老存档没有这一行时 field() 给空串，不是「未知」
+  assert.match(library, /invalidReason: invalidReasonText\(field\(info, "失效原因"\)\)/,
+    "没有把「失效原因」从存档读回来（或没走 invalidReasonText 兜底）");
+  // 2) 映射：六条 case 都要在，且 key 必须是字面量（t() 的 key 是拼接/变量的话词典必然漏条目）
+  for (const label of ["其他", "版权原因", "违规内容", "视频已失效", "UP主自行删除", "已锁定"]) {
+    assert.ok(library.includes(`case "${label}": return BcaI18n.t("${label}");`), `invalidReasonText 少了「${label}」`);
+  }
+
+  // 3) 卡片副标题：有效视频走原来的 UP 主名；失效视频改说原因，没原因就只说「已失效」
+  const at = library.indexOf('card.querySelector(".card-up").textContent');
+  assert.ok(at > 0, "找不到卡片副标题那一行");
+  const card = library.slice(at, at + 300);
+  assert.match(card, /video\.isInvalid/, "卡片副标题没有按失效与否分流");
+  assert.match(card, /video\.invalidReason \?/, "失效且知道原因时要显示原因");
+  assert.match(card, /BcaI18n\.t\("已失效"\)/, "失效要显示「已失效」");
+  assert.match(card, /video\.upName \|\| video\.bvid/, "有效视频必须保持原来的 UP 主名");
+  assert.equal(/未知/.test(card), false, "老存档不许显示「未知」");
+
+  // 4) 详情面板：只在失效时多一行「失效原因」，值缺失时兜底成「已失效」
+  const detailLine = library.split("\n").find((l) => l.includes('addField(rows, BcaI18n.t("失效原因")'));
+  assert.ok(detailLine, "详情面板没有加「失效原因」这一行");
+  assert.match(detailLine, /if \(video\.isInvalid\)/, "「失效原因」只该在失效视频的详情里出现");
+  assert.match(detailLine, /video\.invalidReason \|\| BcaI18n\.t\("已失效"\)/, "老存档要兜底成「已失效」，不是「未知」");
+  assert.equal(/未知/.test(detailLine), false, "详情面板也不许把没写原因显示成「未知」");
+});
+
 test("失效视频不许覆盖本地已有的记录", () => {
   const src = readProjectFile("background.js");
   // 在"已存在"的分支里，失效条目必须先被丢弃再谈刷新

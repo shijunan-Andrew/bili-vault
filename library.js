@@ -278,6 +278,25 @@ function realField(info, key) {
   return value && !BcaArchiveCore.isPlaceholderValue(value) ? value : "";
 }
 
+// 存档里的「失效原因」→ 界面文案。返回空串表示这条记录没写原因（老存档，或「更新视频状态」
+// 自己标的失效）——调用方按「已失效」兜底，绝不能显示「未知」：「未知」等于什么都没说，
+// 而「已失效」至少是确定的事实。
+// 按值 switch 而不是查表：BcaI18n.t() 的 key 必须是字面量（测试会扫），切语言后每次渲染现翻。
+function invalidReasonText(reason) {
+  const text = String(reason || "").trim();
+  if (!text) return "";
+  switch (text) {
+    case "其他": return BcaI18n.t("其他");
+    case "版权原因": return BcaI18n.t("版权原因");
+    case "违规内容": return BcaI18n.t("违规内容");
+    case "视频已失效": return BcaI18n.t("视频已失效");
+    case "UP主自行删除": return BcaI18n.t("UP主自行删除");
+    case "已锁定": return BcaI18n.t("已锁定");
+    // 表外的值（将来 B 站新增枚举）原样显示，不吞掉、也不冒充「其他」
+    default: return text;
+  }
+}
+
 /* ---------------- 4.2：互动数据与分享文案 ---------------- */
 
 // 「【互动数据】播放量：73798」这类字段名 → video.stats 的键
@@ -561,6 +580,8 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
     downloadCollectionName: downloadState.collectionName,
     downloadDirectoryHandle: downloadState.handle,
     isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
+    // 老存档没有「失效原因」这一行，读回来是空串，不是「未知」
+    invalidReason: invalidReasonText(field(info, "失效原因")),
     upName,
     upMid: field(info, "UP主UID"),
     upHome: field(info, "UP主主页"),
@@ -1080,7 +1101,11 @@ function renderVideos() {
       viewsBadge.hidden = false;
     }
     card.querySelector(".card-title").innerHTML = highlightMatches(video.title, query);
-    card.querySelector(".card-up").textContent = video.upName || video.bvid || BcaI18n.t("本地收藏视频");
+    // 失效视频的副标题位置改说原因：有原因就「已失效 · UP主自行删除」，
+    // 老存档没写原因就只显示「已失效」。有效视频一个字都不变。
+    card.querySelector(".card-up").textContent = video.isInvalid
+      ? (video.invalidReason ? `${BcaI18n.t("已失效")} · ${video.invalidReason}` : BcaI18n.t("已失效"))
+      : (video.upName || video.bvid || BcaI18n.t("本地收藏视频"));
     // 4.6：卡片上显示相对时间，完整时间放到 title 上（详情面板保持原样）
     const dateText = relativeTime(video.favoriteAt);
     const dateCell = card.querySelector(".card-date");
@@ -2019,6 +2044,8 @@ function openDetail(video, restoreTo, options = {}) {
   const rows = [];
   addField(rows, BcaI18n.t("收藏时间"), video.favoriteAt);
   addField(rows, BcaI18n.t("信息保存于"), video.savedAt);
+  // 失效视频多一行原因；老归档没写这一行时显示「已失效」，不能显示「未知」
+  if (video.isInvalid) addField(rows, BcaI18n.t("失效原因"), video.invalidReason || BcaI18n.t("已失效"));
   // 粉丝数按原值显示（例如“粉丝 12345”），不套用统计卡片的万/亿缩写
   addField(rows, BcaI18n.t("UP 主"), video.upName, video.upFans ? `<span class="detail-up-fans">${escapeHtml(BcaI18n.t("粉丝"))} <span class="tnum">${escapeHtml(video.upFans)}</span></span>` : "");
   addField(rows, BcaI18n.t("UP 主 UID"), video.upMid);

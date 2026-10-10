@@ -308,6 +308,10 @@ function buildInfo(data, folderName, savedAt) {
   if (metadata.imported) {
     lines.splice(6, 0, `视频状态：${metadata.invalid ? "已失效视频（已尝试恢复）" : "正常"}`);
     lines.splice(7, 0, `恢复情况：${metadata.recoverySummary || "未知"}`);
+    // 失效原因**只在确实失效时**写，有效视频一个字节都不动（老存档的文件不会被这次改动污染）。
+    // 老存档没有这一行，读回时按「已失效」兜底显示，绝不能显示「未知」。
+    const attrReason = metadata.invalid ? importAttrReason(metadata.attr) : "";
+    if (attrReason) lines.splice(8, 0, `失效原因：${attrReason}`);
   }
   return lines.join("\n");
 }
@@ -560,6 +564,10 @@ function saveFavoriteInOrder(data) {
 
 const IMPORT_INVALID_TITLES = new Set(["已失效视频", "该视频已失效"]);
 const IMPORT_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
+// attr → 「失效原因」文案。0 是「有效」，不在表里（importAttrReason 返回空串，调用方据此不写这一行）。
+// 表外的取值**不猜成「其他」**——「其他」是 attr=1 的确切含义，把「版权原因」显示成「其他」
+// 等于撒谎；宁可原样写出枚举值，至少还留着线索。
+const IMPORT_ATTR_LABELS = { 1: "其他", 2: "版权原因", 3: "违规内容", 5: "视频已失效", 9: "UP主自行删除", 11: "已锁定" };
 
 function importClean(value) { return String(value ?? "").replace(/\s+/g, " ").trim(); }
 function importIsInvalidTitle(value) { return IMPORT_INVALID_TITLES.has(importClean(value)); }
@@ -569,6 +577,10 @@ function importIsInvalidTitle(value) { return IMPORT_INVALID_TITLES.has(importCl
 // 实测 250 条有效视频 attr 全为 0，32 条失效视频 attr 全非 0（只有 1 和 9 两种），一一对应。
 // 注意：1 和 9 都是奇数纯属巧合，别当位标志去判最低位 —— 那样 attr=2（版权原因）会漏判。
 function importAttrIsInvalid(value) { return Number(value || 0) !== 0; }
+// 一行写完是**故意的**：test 的 loadBackgroundFunctions 是按 `^}` 抠函数体的，
+// 这里插一个多行函数会改变相邻函数被抠出来的边界，把 IMPORT_ATTR_LABELS 卷进两段代码里，
+// 触发 "Identifier 'IMPORT_ATTR_LABELS' has already been declared"。
+function importAttrReason(value) { const code = Number(value || 0); return code ? (IMPORT_ATTR_LABELS[code] || `原因(${code})`) : ""; }
 function importUsefulTitle(value) { const text = importClean(value); return !!text && !importIsInvalidTitle(text) && text !== "该合集已失效"; }
 function importBvidFromUrl(value) { return importClean(value).match(/\b(BV[0-9A-Za-z]{10})\b/)?.[1] || ""; }
 function importAidKey(value) { return importClean(value).replace(/^av/i, ""); }
@@ -2106,6 +2118,9 @@ function importMetadata(item, cover) {
     tags: item.tags.length ? item.tags : ["未知"],
     imported: true,
     invalid: item.isInvalid,
+    // 「失效原因」要靠它才写得进 视频信息.txt：buildInfo 读的是 metadata.attr，
+    // 而 metadata 是这个函数现造的 —— 不在这里带一手，原因就永远只停在内存里。
+    attr: Number(item.attr || 0),
     recoverySummary: item.isInvalid
       ? (sources.length ? `已从${sources.join("、")}找回部分资料（${recoveredFields} 项）` : "未能找回资料，缺失项以“未知”标记")
       : (sources.length ? `收藏夹资料 + ${sources.join("、")}` : "收藏夹资料")
