@@ -201,7 +201,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "1.1.34");
+  assert.equal(manifest.version, "1.1.35");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
