@@ -2076,6 +2076,21 @@ function importWithinRecentDays(items, recentDays, now = Date.now()) {
   });
 }
 
+/* 这一页是不是整页都早于时间窗起点（用于「最近 N 天」提前收工）。
+   只看拿到收藏时间的条目；一条时间都读不到就返回 false，宁可多翻一页。 */
+function importPageEntirelyBefore(items, cutoffMs) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length || !cutoffMs) return false;
+  let seen = 0;
+  for (const item of list) {
+    const at = favoriteTimeMs(item?.favoriteAt);
+    if (!at) return false;
+    if (at >= cutoffMs) return false;
+    seen += 1;
+  }
+  return seen > 0;
+}
+
 function importIdentifierKeys(item) {
   const normalizedBvid = String(item.bvid || "").trim();
   const normalizedAid = String(item.aid || "").trim().replace(/^av/i, "");
@@ -2225,6 +2240,18 @@ async function importBiliFavorites(data, tabId = null) {
       // 4.9.1：是否读到了自然末尾（本页不满一页，或接口明说没有下一页）。
       // 只有"没读到末尾"才可能是真缺口——见下面 missingCount 处的说明。
       let sawLastPage = false;
+      // V1.1.6：「最近 N 天」提前收工。
+      // 列表是按 order=mtime（收藏时间）倒序返回的（见 fetchImportFavoritePage），
+      // 所以一旦某页里【最新】的条目都早于窗口起点，后面的只会更早，没必要再翻。
+      // 上一版是先拉全 71 页再过滤 —— 请求量跟全量导入一模一样，
+      // 「只同步最近 3 天」在服务端看来毫无区别，用户连跑几次就触发了风控。
+      // 要求连续两页都整页早于窗口，容忍个别顺序错乱的条目：
+      // 早停错了会漏掉新视频，那比多翻几页严重得多。
+      const windowCutoff = Math.max(0, Number(data?.recentDays) || 0) > 0
+        ? Date.now() - Math.max(0, Number(data?.recentDays) || 0) * 86400000
+        : 0;
+      let olderPagesSeen = 0;
+      let windowStoppedEarly = false;
       for (let page = 2; page <= maxPages; page += 1) {
         await importWaitIfPaused();
         await keepServiceWorkerAlive("page");
@@ -2234,6 +2261,12 @@ async function importBiliFavorites(data, tabId = null) {
           consecutivePageFailures = 0;
           if (result.hasMore === false || result.items.length < IMPORT_FAVORITE_PAGE_SIZE) sawLastPage = true;
           publishImportRun({ journal, cursor: { folder: folder.title, page } });
+          if (windowCutoff && importPageEntirelyBefore(result.items, windowCutoff)) {
+            olderPagesSeen += 1;
+            if (olderPagesSeen >= 2) { windowStoppedEarly = true; sawLastPage = true; break; }
+          } else {
+            olderPagesSeen = 0;
+          }
           if (!result.items.length || (!expectedTotal && !result.hasMore)) { pageLoopStoppedEarly = true; break; }
         } catch (error) {
           importRethrowIfAbort(error);
@@ -2249,7 +2282,9 @@ async function importBiliFavorites(data, tabId = null) {
           }
           continue;
         }
-        if (page % 4 === 0) await importDelay(150);
+        // V1.1.6：以前是 4 页连发再停 150ms（约 4 请求/秒）。真机上跑几次就触发了风控，
+        // 改成每页之间都停一下 —— 71 页从约 18 秒变成约 30 秒，代价很小，稳得多。
+        await importDelay(IMPORT_PAGE_DELAY_MS);
       }
       // V1.1.4：「开始更新」只处理最近 N 天收藏的条目。
       // 经常用手机刷到就收藏的用户，为了同步这几天的新增去跑一次 39 分钟的全量没有意义。
@@ -2260,6 +2295,9 @@ async function importBiliFavorites(data, tabId = null) {
       if (recentDays > 0) {
         folderNotes.push(`「${folder.title}」按最近 ${recentDays} 天过滤：线上 ${allItems.length} 条里命中 ${scopedItems.length} 条。`);
         folderLog.push(`限定最近 ${recentDays} 天：${allItems.length} 条中命中 ${scopedItems.length} 条，其余未处理。`);
+        folderLog.push(windowStoppedEarly
+          ? "（列表按收藏时间倒序返回，翻到整页都早于窗口起点后提前收工，分页请求数远少于全量导入。）"
+          : "（本次翻完了全部分页，没有提前收工。）");
         // 命中 0 条时把收藏时间的范围也写出来 —— 上一版正是因为单位搞错导致全被过滤掉，
         // 而报告只写"命中 0 条"，看不出是"确实没有"还是"判据写错了"。
         if (!scopedItems.length && allItems.length) {
@@ -2669,6 +2707,11 @@ const DIFF_REPORT_DIR = "002同步报告";
 // 第 1 页失败时的重试次数。只影响"整个收藏夹读不读得到"，不影响分页节奏。
 const IMPORT_FIRST_PAGE_ATTEMPTS = 3;
 
+// 翻页之间的间隔。以前是每 4 页才停 150ms（约 4 请求/秒），
+// 71 页的收藏夹连跑几次就把风控招来了。现在每页都停 ——
+// 71 页从约 18 秒变成约 30 秒，换来的是不再被限流。
+const IMPORT_PAGE_DELAY_MS = 220;
+
 // 从 视频信息.txt 原文取「视频状态」行。归档里写的是「正常」或「已失效视频（已尝试恢复）」。
 function localRecordIsInvalid(text) {
   const status = String(text || "").match(/^视频状态：(.+)$/m)?.[1]?.trim() || "";
@@ -2787,7 +2830,8 @@ async function fetchFavoriteListOnly(folder, tabId, onProgress) {
       failedPages += 1;
       if (consecutiveFailures >= IMPORT_MAX_CONSECUTIVE_PAGE_FAILURES) break;
     }
-    if (page % 4 === 0) await importDelay(150);
+    // 与导入同一节奏，见 IMPORT_PAGE_DELAY_MS 的说明
+    await importDelay(IMPORT_PAGE_DELAY_MS);
   }
   return { items, expectedTotal, sawLastPage, failedPages };
 }

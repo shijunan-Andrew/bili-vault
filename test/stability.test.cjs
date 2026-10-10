@@ -2281,6 +2281,27 @@ test("最近 N 天过滤：边界与单位", () => {
   assert.equal(importWithinRecentDays(null, 3, now).length, 0);
 });
 
+test("提前收工：整页都早于窗口才算数", () => {
+  const { importPageEntirelyBefore } = loadBackgroundFunctions(["favoriteTimeMs", "importPageEntirelyBefore"]);
+  const now = 1761613600000;
+  const cutoff = now - 3 * 86400000;
+  const sec = (ms) => Math.floor(ms / 1000);
+
+  // 整页都早于窗口 → 可以停
+  assert.equal(importPageEntirelyBefore([{ favoriteAt: sec(now - 10 * 86400000) }], cutoff), true);
+  // 有一条还在窗口内 → 不能停
+  assert.equal(importPageEntirelyBefore(
+    [{ favoriteAt: sec(now - 10 * 86400000) }, { favoriteAt: sec(now - 86400000) }], cutoff), false);
+  // 有一条读不到时间 → 不能停（宁可多翻一页）
+  assert.equal(importPageEntirelyBefore(
+    [{ favoriteAt: sec(now - 10 * 86400000) }, { favoriteAt: 0 }], cutoff), false);
+  // 空页 / 没有窗口 → 不能停
+  assert.equal(importPageEntirelyBefore([], cutoff), false);
+  assert.equal(importPageEntirelyBefore([{ favoriteAt: sec(now - 10 * 86400000) }], 0), false);
+  // 正好卡在窗口边界上（毫秒相等）→ 不能停，边界要算"窗口内"
+  assert.equal(importPageEntirelyBefore([{ favoriteAt: sec(cutoff) }], cutoff), false);
+});
+
 test("最近 N 天过滤：读不到收藏时间的条目要保留", () => {
   // 注意要把依赖一起加载：加载器只抽列出来的函数，
   // importWithinRecentDays 内部调用 favoriteTimeMs，不一起抽出来就会 ReferenceError。
