@@ -2239,7 +2239,11 @@ async function importBiliFavorites(data, tabId = null) {
   // 4.4.1：失效视频恢复默认开启（它需要伪造成官方 APP 客户端请求 APP 接口，
   // 是合规上最勉强的一环，因此保留开关让用户能关掉；只有明确存成 false 才关闭）
   const settings = await chrome.storage.local.get("recoverInvalidVideos").catch(() => ({}));
-  const recoverInvalidVideos = settings?.recoverInvalidVideos !== false;
+  // V1.1.24：默认关闭。这个开关会去手机端收藏夹翻最多 120 页找失效视频的原始标题，
+  // 而失效视频基本不在那儿 —— 注定白跑，还让每次导入多等 1~2 分钟。
+  // 失效状态与「未能找回资料」本来就由收藏夹列表接口给出，不依赖它。
+  // 注意：必须与 popup.js 的默认值保持一致，否则界面显示不勾、后台却当成开启。
+  const recoverInvalidVideos = settings?.recoverInvalidVideos === true;
   const journal = createImportJournal();
   importRateLimitStreak = 0;
   publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "", interrupted: false, rateLimited: false }, true);

@@ -247,15 +247,22 @@ test("the import asks Bilibili slowly instead of in bursts", () => {
   assert.ok(concurrency / (delay / 1000) <= 2, `每秒请求数不应超过 2，当前 ${(concurrency / (delay / 1000)).toFixed(2)}`);
 });
 
-test("invalid-video recovery through the APP API is on by default but still switchable", () => {
+test("invalid-video recovery through the APP API is off by default but still switchable", () => {
   const background = readProjectFile("background.js");
   const popup = readProjectFile("popup.js");
   const html = readProjectFile("popup.html");
-  // 4.4.1：默认开启，只有明确存成 false 才关闭
-  assert.match(background, /const recoverInvalidVideos = settings\?\.recoverInvalidVideos !== false/);
-  assert.match(popup, /recoverInvalidCheckbox\.checked = saved\?\.recoverInvalidVideos !== false/);
-  // 弹窗里的复选框默认勾选
-  assert.match(html, /<input id="recoverInvalid" type="checkbox" checked>/);
+  // V1.1.24：默认关闭，只有明确存成 true 才开启。
+  // 这个功能会去手机端收藏夹翻最多 120 页找失效视频的原始标题，而失效视频基本不在那儿，
+  // 注定白跑还让导入多等 1~2 分钟；失效信息本来就不依赖它。
+  assert.match(background, /const recoverInvalidVideos = settings\?\.recoverInvalidVideos === true/);
+  assert.match(popup, /recoverInvalidCheckbox\.checked = saved\?\.recoverInvalidVideos === true/);
+  assert.match(popup, /recoverInvalidCheckbox\.checked = false/, "兜底默认值也必须是关");
+  // 弹窗里的复选框默认不勾
+  assert.match(html, /<input id="recoverInvalid" type="checkbox">/);
+  assert.equal(/<input id="recoverInvalid" type="checkbox" checked>/.test(html), false,
+    "复选框又变回默认勾选了");
+  // 两处默认值必须一致：只改一处会导致界面显示不勾、后台却当成开启
+  assert.match(html, /id="recoverInvalid" type="checkbox">/, "HTML 的默认值没跟上");
   assert.match(popup, /recoverInvalidVideos: recoverInvalidCheckbox\.checked/);
   // 恢复流程仍然必须被开关包住，用户能关掉
   const gateIndex = background.indexOf("if (recoverInvalidVideos) {");
