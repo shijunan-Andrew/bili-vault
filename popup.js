@@ -134,9 +134,11 @@ async function sendImportControl(action) {
 async function restoreRecoverInvalid() {
   try {
     const saved = await chrome.storage.local.get("recoverInvalidVideos");
-    recoverInvalidCheckbox.checked = saved?.recoverInvalidVideos !== false;
+    // 默认关闭：这个功能会去手机端收藏夹翻最多 120 页找失效视频的原始标题，
+    // 而失效视频基本不在那儿 —— 每次导入白等 1~2 分钟。失效信息不靠它。
+    recoverInvalidCheckbox.checked = saved?.recoverInvalidVideos === true;
   } catch (_) {
-    recoverInvalidCheckbox.checked = true;
+    recoverInvalidCheckbox.checked = false;
   }
 }
 
