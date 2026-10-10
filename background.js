@@ -2147,6 +2147,25 @@ function importPageEntirelyBefore(items, cutoffMs) {
   return seen > 0;
 }
 
+/* 这条解析结果够不够格覆盖本地已有的记录。
+
+   为什么不能直接用 importUsefulTitle：
+     · 上面的流程里有这么一句
+         if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
+       标题不可用时会被**换成「未知」**，而「未知」是"非空、且不在已知失效标题名单里"，
+       于是 importUsefulTitle("未知") 返回 true —— 守卫反而认为"信息可用"，把它放过去。
+     · 真机上的完整链条：
+         标题不可用 → item.title = "未知" → 守卫放行 → refreshImportedRecord
+         → importMetadata → buildInfo 整篇重建 → 本地标题被写成「未知」
+       V1.1.20 只挡 isInvalid、V1.1.21 改用 importUsefulTitle，两次都栽在同一个地方。
+
+   所以这里明确把「未知」判成不可信：**占位符不是数据**。 */
+function importItemIsTrustworthy(item) {
+  if (item?.isInvalid) return false;
+  const title = importClean(item?.title);
+  return !!title && title !== "未知" && importUsefulTitle(title);
+}
+
 function importIdentifierKeys(item) {
   const normalizedBvid = String(item.bvid || "").trim();
   const normalizedAid = String(item.aid || "").trim().replace(/^av/i, "");
@@ -2429,10 +2448,11 @@ async function importBiliFavorites(data, tabId = null) {
         // 把它的 item.title 改成了「未知」—— 然后这条"未知"就把本地完好的标题覆盖了。
         // V1.1.20 只挡了 item.isInvalid，正好漏掉这一条，用户复现后才发现。
         //
-        // 所以放宽成：失效 **或** 标题不可用，都不许覆盖已有记录。
+        // 所以判据交给 importItemIsTrustworthy：失效、标题空、标题是「未知」，
+        // 三种都算不可信（见那个函数的注释 —— 前两版就是在这里连栽两次的）。
         // 本地没有的（pendingItems 那条分支）不受影响 —— 该存还是要存。
         // 想用降级信息覆盖，只有手动点「更新视频状态」那一条路。
-        if (item.isInvalid || !importUsefulTitle(item.title)) {
+        if (!importItemIsTrustworthy(item)) {
           protectedCount += 1;
           continue;
         }

@@ -2301,19 +2301,38 @@ test("「更新视频状态」发现失效时，只改状态，不动其它内�
   assert.match(invalidBranch, /视频状态：.*失效/, "没有跳过「已经标记过失效」的记录");
 });
 
+test("importItemIsTrustworthy：占位符不算数据（真跑）", () => {
+  // 依赖要一起加载：importUsefulTitle 内部用 IMPORT_INVALID_TITLES 这个常量
+  const { importItemIsTrustworthy, importClean, importUsefulTitle, importIsInvalidTitle } =
+    loadBackgroundFunctions(["importItemIsTrustworthy", "importClean", "importUsefulTitle", "importIsInvalidTitle"], ["IMPORT_INVALID_TITLES"]);
+  // 前两版守卫依赖的谓词，对照用
+  assert.equal(importUsefulTitle("未知"), true, "前提变了：importUsefulTitle 现在认为「未知」不可用，本测试可放宽");
+  assert.equal(importIsInvalidTitle("未知"), false);
+
+  // 唯一被信任的情形：标题是真实标题
+  assert.equal(importItemIsTrustworthy({ title: "【哆啦A梦】国语版 800集全 4K修复" }), true);
+  // 三种不可信：失效、占位「未知」、空标题
+  assert.equal(importItemIsTrustworthy({ title: "【哆啦A梦】", isInvalid: true }), false, "失效条目不可信");
+  assert.equal(importItemIsTrustworthy({ title: "未知" }), false, "「未知」是占位符，不是数据");
+  assert.equal(importItemIsTrustworthy({ title: "" }), false, "空标题不可信");
+  assert.equal(importItemIsTrustworthy({ title: "   " }), false, "只有空白也不可信");
+  assert.equal(importItemIsTrustworthy({ title: "已失效视频" }), false);
+  assert.equal(importItemIsTrustworthy(null), false);
+  assert.equal(importItemIsTrustworthy({}), false);
+});
+
 test("失效视频不许覆盖本地已有的记录", () => {
   const src = readProjectFile("background.js");
   // 在"已存在"的分支里，失效条目必须先被丢弃再谈刷新
   const at = src.indexOf("skipped += 1;");
   assert.ok(at > 0, "找不到已存在条目的处理分支");
-  const branch = src.slice(at, at + 1400);
-  // V1.1.21：判据不能只看 item.isInvalid。
-  // 真机上那条视频的 media.is_invalid 并不是 true —— 接口返回的标题既不是
-  // 已知占位、也不是可用标题，于是被改成了「未知」，再拿去刷新就覆盖了本地标题。
-  assert.match(branch, /if \(item\.isInvalid \|\| !importUsefulTitle\(item\.title\)\) \{[\s\S]{0,120}continue;/,
-    "降级条目没有被挡在刷新之前 —— 只判 isInvalid 会漏掉「标题取不到」那一类");
-  assert.equal(/if \(item\.isInvalid\) \{/.test(branch), false,
-    "判据退回了只看 isInvalid —— 那正是真机上漏掉的那一类");
+  const branch = src.slice(at, at + 1600);
+  assert.match(branch, /if \(!importItemIsTrustworthy\(item\)\) \{[\s\S]{0,120}continue;/,
+    "降级条目没有被挡在刷新之前");
+  // 前两版分别栽在 item.isInvalid 和 importUsefulTitle 上，不许退回那两种写法
+  assert.equal(/if \(item\.isInvalid\) \{/.test(branch), false, "判据退回了只看 isInvalid");
+  assert.equal(/!importUsefulTitle\(item\.title\)\) \{/.test(branch), false,
+    "判据退回了 importUsefulTitle —— 「未知」能骗过它，那正是真机上漏掉的那一类");
   assert.match(src, /protectedCount \+= 1/, "没有统计被保留的降级条目");
   // 本地没有的失效条目仍然要正常写入（pendingItems 那条分支不受影响）
   assert.match(src, /pendingItems\.push\(item\)/, "本地没有的条目仍然要写入");
