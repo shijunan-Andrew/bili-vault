@@ -2217,7 +2217,13 @@ function sendImportProgress(text) {
 
 async function importBiliFavorites(data, tabId = null) {
   const selectedIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
-  const reportLines = ["B站收藏夹本地导入报告", ERROR_REPORT_NOTICE, `开始时间：${formatChineseDateTime(new Date(), true)}`];
+  // 报告里必须写明**产生它的插件版本**。
+  // 排查一个"改了却没生效"的问题时，最耗时的就是分不清"代码不对"和"跑的还是旧代码" ——
+  // 真机上为此来回折腾了三轮。有了这一行，看一眼就知道。
+  const reportVersion = (() => {
+    try { return chrome.runtime.getManifest().version; } catch (_) { return "未知"; }
+  })();
+  const reportLines = ["B站收藏夹本地导入报告", `插件版本：${reportVersion}`, ERROR_REPORT_NOTICE, `开始时间：${formatChineseDateTime(new Date(), true)}`];
   // 4.9.1：中止时要把"当前这一轮收藏夹"还没渲染的日志补进报告。
   // folderLog 原本只在每轮循环末尾渲染，而风控是在保存阶段抛出的、抛在渲染之前，
   // 用户于是只看到一个没有解释的「失败：N」。取消分支不写报告，所以只需在这里补。
@@ -2461,9 +2467,11 @@ async function importBiliFavorites(data, tabId = null) {
         // 文本判据说"完整"时才发生，正常路径不多付 IO。
         if (record && await importRecordNeedsRefresh(collection, record)) refreshTargets.push({ item, record });
       }
+      // 无论有没有拦到都记一行：这一行能证明"守卫确实跑过了"。
+      // 上一轮的报告里连备注都没有，我分不清是"守卫没生效"还是"根本没走到这里"。
+      folderLog.push(`信息可信度检查：匹配到本地已有记录 ${skipped} 条，其中 ${protectedCount} 条解析结果不可信（失效/标题取不到），已保留原记录。`);
       if (protectedCount > 0) {
         folderNotes.push(`「${folder.title}」有 ${protectedCount} 条解析结果不可用（已失效或标题取不到），本地已有备份，按规则保留了原记录、没有被覆盖。`);
-        folderLog.push(`降级条目：${protectedCount} 条本地已有备份，已保留原记录（降级信息只用于本地没有的新条目）。`);
       }
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
 
