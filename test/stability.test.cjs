@@ -2265,6 +2265,19 @@ test("默认档位是「较低」，且大收藏夹配快档要再提醒一次",
   assert.match(readProjectFile("popup.html"), /id="riskyWarnDialog"/, "风险提醒弹窗不存在");
 });
 
+test("完成弹窗只弹一次（点掉之后再打开插件不该重放）", () => {
+  const src = readProjectFile("background.js");
+  // 摘要落盘时要带上"还没提示过"
+  assert.match(src, /acknowledged: false/, "摘要里没有「已提示」标记");
+
+  const popup = readProjectFile("popup.js");
+  // 恢复时只有没提示过才弹
+  assert.match(popup, /if \(!state\.summary\.acknowledged\)/, "恢复结果时没有判断「已提示」，弹窗会重放");
+  // 点掉之后要把标记写回去
+  assert.match(popup, /summary: \{ \.\.\.state\.summary, acknowledged: true \}/, "点掉弹窗后没有回写标记");
+  assert.match(popup, /doneDialogClose[\s\S]{0,400}acknowledged: true/, "回写标记没有绑在「知道了」上");
+});
+
 test("进度区按操作类型显示，差异对比不给暂停/取消", () => {
   const popup = readProjectFile("popup.js");
   // 三种操作的标题必须是字面量调用（提取器要扫得到）

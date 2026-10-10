@@ -3184,6 +3184,10 @@ async function diffBiliFavoritesInner(data, tabId = null) {
     text: "",
     at: Date.now(),
     summary: {
+      // 结果会留在 storage 里供弹窗恢复；这个标记表示"完成弹窗还没给用户看过"。
+      // 用户点掉弹窗后由 popup 置为 true —— 否则每次打开插件都会重放一遍
+      // （真机上就是这样：点「知道了」再打开，弹窗又出来了）。
+      acknowledged: false,
       reportPath,
       folders: diffs.map((d) => ({
         folderTitle: d.folderTitle, remoteFetched: d.remoteFetched, localTotal: d.localTotal,

@@ -737,7 +737,18 @@ document.getElementById("riskyWarnGo").addEventListener("click", () => {
   if (riskyConfirmResolve) riskyConfirmResolve(true);
   riskyConfirmResolve = null;
 });
-document.getElementById("doneDialogClose").addEventListener("click", () => doneDialog.close());
+document.getElementById("doneDialogClose").addEventListener("click", () => {
+  doneDialog.close();
+  // 标记"这次结果已经提示过了"，否则下次打开插件弹窗会重放（导入没有落盘摘要，
+  // 这一步对它是空操作）
+  chrome.storage.local.get("diffState").then((saved) => {
+    const state = saved?.diffState;
+    if (!state?.summary || state.summary.acknowledged) return;
+    return chrome.storage.local.set({
+      diffState: { ...state, summary: { ...state.summary, acknowledged: true } }
+    });
+  }).catch(() => {});
+});
 // 与「开始导入」「开始更新」保持一致：点一下先弹确认框，再点一次才真的开始
 function openDiffConfirm() {
   if (importBusy) return;
@@ -892,12 +903,15 @@ async function boot() {
       return;
     }
     if (state.summary) {
+      // 结果面板每次都恢复（还可以再看），但完成弹窗只弹一次 ——
+      // 点过「知道了」之后再打开插件不该又冒出来
       renderDiffResult({ diffs: state.summary.folders, reportPath: state.summary.reportPath });
-      // 跑完之后才切回来的情况：结果要弹一下，不能只在「最近状态」里留一行
-      const folders = state.summary.folders || [];
-      const total = (key) => folders.reduce((n, f) => n + (Number(f[key]) || 0), 0);
-      showDoneDialog(BcaI18n.t("对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
-        { added: total("added"), removed: total("removed"), invalid: total("newlyInvalid"), recovered: total("recovered") }));
+      if (!state.summary.acknowledged) {
+        const folders = state.summary.folders || [];
+        const total = (key) => folders.reduce((n, f) => n + (Number(f[key]) || 0), 0);
+        showDoneDialog(BcaI18n.t("对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
+          { added: total("added"), removed: total("removed"), invalid: total("newlyInvalid"), recovered: total("recovered") }));
+      }
     }
   }).catch(() => {});
   chrome.storage.local.get("requestSpeed").then((saved) => {
