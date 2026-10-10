@@ -311,7 +311,7 @@ function setLastResultText(value) {
 }
 
 /* V1.1.3：点「开始导入」先弹确认框。
-   导入是逐条解析 + 写盘的慢操作（2800 条约 30 分钟），误点代价很高，所以先问一句。 */
+   导入是逐条解析 + 写盘的慢操作（1000 条约 10 分钟），误点代价很高，所以先问一句。 */
 function openImportConfirm() {
   if (importBusy) return;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
@@ -373,7 +373,7 @@ function renderDiffResult(response) {
     line.className = "diff-line";
     const name = document.createElement("strong");
     name.textContent = `「${diff.folderTitle}」`;
-    // 光看「新增 2720」看不出所以然，所以把两边的条数一起摆出来
+    // 光看「新增 1000」看不出所以然，所以把两边的条数一起摆出来
     line.append(name, document.createTextNode(
       BcaI18n.t("线上 {remote} / 本地 {local}：新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}",
         { remote: diff.remoteFetched || 0, local: diff.localTotal || 0,
@@ -397,7 +397,7 @@ function renderDiffResult(response) {
 }
 
 /* V1.1.4：「开始更新」——只同步最近 N 天新收藏的视频。
-   经常用手机刷到就收藏的用户，为这几天的新增跑一次全量导入（2800 条约 30 分钟）没有意义。
+   经常用手机刷到就收藏的用户，为这几天的新增跑一次全量导入（1000 条约 10 分钟）没有意义。
    过滤在后台按收藏时间做，这里只负责让用户选时间窗。 */
 /* 估算这次要发多少次请求，让用户自己决定值不值得。
    README「使用须知」第一条就是"请求过密可能触发风控"，但在此之前界面从不告诉用户
