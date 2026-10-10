@@ -106,6 +106,19 @@ if ($dirty.Count -gt 0) {
 }
 Say "  [$([char]0x2713)] 干净" $C_GREEN
 
+# Chrome 拒绝加载任何以 _ 开头的文件/目录（"Filenames starting with \"_\" are reserved"）。
+# 排查用的临时脚本如果留在扩展根目录，插件就直接加载不了 —— 真机上发生过一次。
+# 更麻烦的是 .gitignore 里有 _*.cjs，git status 看不见它，上面那个净树检查会漏掉，
+# 所以这里用文件系统直接查，不看 git。
+$reserved = @(Get-ChildItem -LiteralPath $PSScriptRoot -Force -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -like '_*' })
+if ($reserved.Count) {
+  Say "  扩展根目录里有 $($reserved.Count) 个 _ 开头的条目，Chrome 会拒绝加载整个插件：" $C_RED
+  $reserved | ForEach-Object { Say "    $($_.Name)" $C_RED }
+  Say "  排查脚本请写到扩展目录之外，或改掉命名。" $C_YELLOW
+  Die "发布中止：先清掉这些文件。"
+}
+
 # ───────── 2. 代理（这一步不过就什么都不动） ─────────
 Say "`n【2/6】检查代理" $C_DIM
 $portOpen = Test-NetConnection -ComputerName '127.0.0.1' -Port $ProxyPort -InformationLevel Quiet -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
