@@ -65,8 +65,8 @@
       <div class="speed-row">
         <span id="speedLabel" class="speed-label" data-i18n="请求速度">请求速度</span>
         <div id="speedGroup" class="segmented speed-segmented" role="group" data-i18n-aria="请求速度" aria-label="请求速度">
-          <button type="button" data-speed-value="lower" aria-pressed="false" data-i18n="较低">较低</button>
-          <button type="button" data-speed-value="standard" aria-pressed="true" data-i18n="标准">标准</button>
+          <button type="button" data-speed-value="lower" aria-pressed="true" data-i18n="较低">较低</button>
+          <button type="button" data-speed-value="standard" aria-pressed="false" data-i18n="标准">标准</button>
           <button type="button" data-speed-value="higher" aria-pressed="false" data-i18n="较高">较高</button>
           <button type="button" data-speed-value="high" aria-pressed="false" data-i18n="高">高</button>
         </div>
@@ -177,6 +177,25 @@
       </div>
     </div>
   </main>
+  <dialog id="riskyWarnDialog" class="popup-dialog" aria-labelledby="riskyWarnTitle">
+    <h2 id="riskyWarnTitle" data-i18n="建议改用「较低」档位">建议改用「较低」档位</h2>
+    <p id="riskyWarnText" class="popup-dialog-warning"></p>
+    <p class="muted" data-i18n="「较高」「高」档配上大收藏夹，是最容易触发风控的组合。换成「较低」会分批停顿，慢一些但安全得多。">「较高」「高」档配上大收藏夹，是最容易触发风控的组合。换成「较低」会分批停顿，慢一些但安全得多。</p>
+    <div class="popup-dialog-actions">
+      <button id="riskyWarnCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="riskyWarnLower" class="primary" type="button" data-i18n="改用「较低」">改用「较低」</button>
+      <button id="riskyWarnGo" class="secondary speed-warn-go" type="button" data-i18n="照当前档位继续">照当前档位继续</button>
+    </div>
+  </dialog>
+
+  <dialog id="doneDialog" class="popup-dialog" aria-labelledby="doneDialogTitle">
+    <h2 id="doneDialogTitle" data-i18n="已完成">已完成</h2>
+    <p id="doneDialogText" class="muted"></p>
+    <div class="popup-dialog-actions">
+      <button id="doneDialogClose" class="primary" type="button" data-i18n="知道了">知道了</button>
+    </div>
+  </dialog>
+
   <dialog id="speedWarnDialog" class="popup-dialog" aria-labelledby="speedWarnTitle">
     <h2 id="speedWarnTitle" data-i18n="这个速度有风控风险">这个速度有风控风险</h2>
     <p class="popup-dialog-warning" data-i18n="此模式可能会有风控风险，请不要一次勾选太多收藏夹，勾选内容的总量尽量在 500 条以下。如果需要导入大容量收藏夹，请选择「较低」模式。">此模式可能会有风控风险，请不要一次勾选太多收藏夹，勾选内容的总量尽量在 500 条以下。如果需要导入大容量收藏夹，请选择「较低」模式。</p>

@@ -654,5 +654,10 @@
   "分批读取：每读 8 次停 6 秒，最接近人翻页的节奏。大收藏夹建议用这个。": "Batched: pauses 6 seconds after every 8 requests, closest to how a person browses. Recommended for large collections.",
   "默认。每次请求间隔 0.8 秒，与详情抓取同一节奏。": "Default. 0.8s between requests, the same pace as detail fetching.",
   "每次请求间隔 0.4 秒。请控制单次勾选的总量。": "0.4s between requests. Keep the total per run modest.",
-  "每次请求间隔 0.2 秒。风控风险明显，只建议对小收藏夹做小批量操作。": "0.2s between requests. Clearly risky — only for small batches on small collections."
+  "每次请求间隔 0.2 秒。风控风险明显，只建议对小收藏夹做小批量操作。": "0.2s between requests. Clearly risky — only for small batches on small collections.",
+  "建议改用「较低」档位": "Consider the 「Lower」 speed",
+  "当前是「{speed}」档，而勾选内容共约 {total} 条。建议改用「较低」档位再开始。": "You are on 「{speed}」 while about {total} items are selected. Switching to 「Lower」 first is recommended.",
+  "「较高」「高」档配上大收藏夹，是最容易触发风控的组合。换成「较低」会分批停顿，慢一些但安全得多。": "「Higher」 or 「High」 combined with a large collection is the combination most likely to trigger rate limiting. 「Lower」 adds pauses between batches — slower, but far safer.",
+  "改用「较低」": "Use 「Lower」",
+  "照当前档位继续": "Continue on this speed"
 }

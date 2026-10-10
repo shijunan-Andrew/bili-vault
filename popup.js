@@ -21,6 +21,10 @@ const updateRecentDetail = document.getElementById("updateRecentDetail");
 const speedGroup = document.getElementById("speedGroup");
 const speedHint = document.getElementById("speedHint");
 const speedWarnDialog = document.getElementById("speedWarnDialog");
+const riskyWarnDialog = document.getElementById("riskyWarnDialog");
+const riskyWarnText = document.getElementById("riskyWarnText");
+const doneDialog = document.getElementById("doneDialog");
+const doneDialogText = document.getElementById("doneDialogText");
 const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
 const reportPath = document.getElementById("reportPath");
@@ -229,7 +233,7 @@ function speedHintFor(value) {
   if (value === "high") return BcaI18n.t("每次请求间隔 0.2 秒。风控风险明显，只建议对小收藏夹做小批量操作。");
   return "";
 }
-let currentSpeed = "standard";
+let currentSpeed = "lower";   // 与 background.js 的 DEFAULT_REQUEST_SPEED 一致
 let pendingSpeed = "";
 
 function renderSpeed() {
@@ -313,8 +317,10 @@ async function startDiff() {
     renderDiffResult(response);
     const diffs = Array.isArray(response.diffs) ? response.diffs : [];
     const sum = (key) => diffs.reduce((n, d) => n + (d[key]?.length || 0), 0);
-    importStatus.textContent = BcaI18n.t("对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
+    const diffDone = BcaI18n.t("对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
       { added: sum("added"), removed: sum("removed"), invalid: sum("newlyInvalid"), recovered: sum("recovered") });
+    importStatus.textContent = diffDone;
+    showDoneDialog(diffDone);
     if (response.reportPath) importStatus.textContent += " " + BcaI18n.t("报告：{path}", { path: response.reportPath });
   } catch (error) {
     importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("对比差异失败。");
@@ -333,6 +339,10 @@ function renderDiffResult(response) {
     const line = document.createElement("p");
     line.className = "diff-line";
     const name = document.createElement("strong");
+    // 恢复自 storage 的摘要里，四个差异项是数字不是数组 —— 两种形状都要认
+    const count = (value) => Array.isArray(value) ? value.length : (Number(value) || 0);
+    diff = { ...diff, added: count(diff.added), removed: count(diff.removed),
+      newlyInvalid: count(diff.newlyInvalid), recovered: count(diff.recovered) };
     name.textContent = `「${diff.folderTitle}」`;
     // 光看「新增 2720」看不出所以然，所以把两边的条数一起摆出来
     line.append(name, document.createTextNode(
@@ -371,6 +381,45 @@ function estimateListRequests() {
     return sum + Math.max(1, Math.ceil(count / 40));
   }, 0);
   return { folders: checked.length, requests: total };
+}
+
+/* 动手前的第二次把关：档位偏快 + 勾选总量偏大时再劝一次。
+   单看某一项都不算危险（快档跑小收藏夹、低档跑大收藏夹都还行），
+   但"快档 × 大收藏夹"正好是最容易触发风控的组合。 */
+const RISKY_TOTAL_ITEMS = 500;
+const SPEED_LABELS = { lower: "较低", standard: "标准", higher: "较高", high: "高" };
+let riskyConfirmResolve = null;
+
+function selectedItemTotal() {
+  return [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].reduce((sum, input) => {
+    const folder = importFolders.find((item) => String(item.id) === String(input.value));
+    return sum + (Number(folder?.count) || 0);
+  }, 0);
+}
+
+// 需要提醒时返回说明文字，否则返回空串
+function riskySpeedWarning() {
+  if (!REQUEST_SPEED_RISKY.has(currentSpeed)) return "";
+  const total = selectedItemTotal();
+  if (total <= RISKY_TOTAL_ITEMS) return "";
+  return BcaI18n.t("当前是「{speed}」档，而勾选内容共约 {total} 条。建议改用「较低」档位再开始。",
+    { speed: SPEED_LABELS[currentSpeed] || "", total });
+}
+
+// 三个入口共用：需要提醒就弹窗等用户选，返回 true 表示可以继续
+function confirmRiskySpeed() {
+  const warning = riskySpeedWarning();
+  if (!warning) return Promise.resolve(true);
+  riskyWarnText.textContent = warning;
+  riskyWarnDialog.showModal();
+  return new Promise((resolve) => { riskyConfirmResolve = resolve; });
+}
+
+/* 完成提示弹窗。
+   以前只在「最近状态」里写一行小字，勾了很多收藏夹、跑了很久之后很容易看漏。 */
+function showDoneDialog(text) {
+  doneDialogText.textContent = text;
+  doneDialog.showModal();
 }
 
 function requestEstimateText() {
@@ -418,7 +467,9 @@ async function startImport(options = {}) {
     }
     if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("导入失败。"));
     importStatus.classList.remove("error");
-    importStatus.textContent = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入/更新完成：新导入 {imported} 个，更新 {refreshed} 个。", { imported: response.imported || 0, refreshed: response.refreshed || 0 });
+    const doneText = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入/更新完成：新导入 {imported} 个，更新 {refreshed} 个。", { imported: response.imported || 0, refreshed: response.refreshed || 0 });
+    importStatus.textContent = doneText;
+    showDoneDialog(doneText);
     if (response.reportPath) importStatus.textContent += ` ${BcaI18n.t("错误报告：{path}", { path: response.reportPath })}`;
   } catch (error) {
     importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("导入失败。");
@@ -635,14 +686,35 @@ document.getElementById("updateRecentGo").addEventListener("click", () => {
   const picked = updateRecentDialog.querySelector('input[name="updateRange"]:checked');
   const days = Number(picked?.value) || 3;
   updateRecentDialog.close();
-  startImport({ recentDays: days });
+  confirmRiskySpeed().then((ok) => { if (ok) startImport({ recentDays: days }); });
 });
 document.getElementById("importConfirmCancel").addEventListener("click", () => importConfirm.close());
-document.getElementById("importConfirmGo").addEventListener("click", () => {
+document.getElementById("importConfirmGo").addEventListener("click", async () => {
   importConfirm.close();
+  if (!await confirmRiskySpeed()) return;
   startImport();
 });
-diffFoldersButton.addEventListener("click", startDiff);
+document.getElementById("riskyWarnCancel").addEventListener("click", () => {
+  riskyWarnDialog.close();
+  if (riskyConfirmResolve) riskyConfirmResolve(false);
+  riskyConfirmResolve = null;
+});
+document.getElementById("riskyWarnLower").addEventListener("click", () => {
+  riskyWarnDialog.close();
+  applySpeed("lower");
+  if (riskyConfirmResolve) riskyConfirmResolve(true);
+  riskyConfirmResolve = null;
+});
+document.getElementById("riskyWarnGo").addEventListener("click", () => {
+  riskyWarnDialog.close();
+  if (riskyConfirmResolve) riskyConfirmResolve(true);
+  riskyConfirmResolve = null;
+});
+document.getElementById("doneDialogClose").addEventListener("click", () => doneDialog.close());
+// 三个入口都要过这一关：开始导入、开始更新、先看差异
+diffFoldersButton.addEventListener("click", () => {
+  confirmRiskySpeed().then((ok) => { if (ok) startDiff(); });
+});
 pauseImportButton.addEventListener("click", async () => {
   pauseImportButton.disabled = true;
   try {
@@ -769,8 +841,21 @@ async function boot() {
   });
   // 读回上次选择的速度（与 background.js 共用同一份 storage.local）。
   // 用 then 而不是 await —— 这块初始化代码不在 async 函数里。
+  // 差异对比的结果存在 storage 里 —— 上次切走弹窗、这次回来要能接着看到
+  chrome.storage.local.get("diffState").then((saved) => {
+    const state = saved?.diffState;
+    if (!state) return;
+    if (state.running) {
+      importProgressTitle.textContent = BcaI18n.t("正在对比差异");
+      importProgressText.textContent = state.text || BcaI18n.t("正在读取 B 站收藏夹列表…");
+      importBusy = true;
+      updateImportSelection();
+      return;
+    }
+    if (state.summary) renderDiffResult({ diffs: state.summary.folders, reportPath: state.summary.reportPath });
+  }).catch(() => {});
   chrome.storage.local.get("requestSpeed").then((saved) => {
-    currentSpeed = REQUEST_SPEED_ORDER.includes(saved?.requestSpeed) ? saved.requestSpeed : "standard";
+    currentSpeed = REQUEST_SPEED_ORDER.includes(saved?.requestSpeed) ? saved.requestSpeed : "lower";
     renderSpeed();
   }).catch(() => renderSpeed());
   /* ---------------- 4.8：顶部开源横幅 ---------------- */

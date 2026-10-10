@@ -2807,7 +2807,9 @@ const REQUEST_SPEEDS = {
   higher:   { intervalMs: 400,  batchSize: 0, pauseMs: 0 },
   high:     { intervalMs: 200,  batchSize: 0, pauseMs: 0 }
 };
-const DEFAULT_REQUEST_SPEED = "standard";
+// 默认「较低」：大收藏夹是常态，而"较低"是唯一带分批停顿、真正安全的档位。
+// 「标准」仍然是可选项，但不再是开箱即用的值 —— 让安全的那一档成为默认。
+const DEFAULT_REQUEST_SPEED = "lower";
 // 「标准」档的间隔。测试与文档引用它，实际节奏由 REQUEST_SPEEDS 决定
 const BILI_MIN_REQUEST_INTERVAL_MS = REQUEST_SPEEDS[DEFAULT_REQUEST_SPEED].intervalMs;
 
@@ -3085,7 +3087,26 @@ async function persistDiffReport(text) {
   }
 }
 
+let diffStatePublishAt = 0;
+
+function publishDiffState(patch) {
+  const next = { ...diffState, ...patch };
+  diffState = next;
+  chrome.storage.local.set({ diffState: next }).catch(() => {});
+}
+
+function publishDiffProgress(text) {
+  // 进度刷新限流，别把 storage 写爆
+  const now = Date.now();
+  if (now - diffStatePublishAt < 500) return;
+  diffStatePublishAt = now;
+  publishDiffState({ running: true, text });
+}
+
+let diffState = { running: false, text: "", summary: null, at: 0 };
+
 function sendDiffProgress(text) {
+  publishDiffProgress(text);
   chrome.runtime.sendMessage({ type: "bca-diff-progress", text }, () => { void chrome.runtime.lastError; });
 }
 
@@ -3120,6 +3141,16 @@ async function resolveDiffUid(uid, tabId) {
 }
 
 async function diffBiliFavorites(data, tabId = null) {
+  publishDiffState({ running: true, text: BcaI18n.t("正在读取 B 站收藏夹列表…"), summary: null, at: Date.now() });
+  try {
+    return await diffBiliFavoritesInner(data, tabId);
+  } catch (error) {
+    publishDiffState({ running: false, text: "", at: Date.now(), summary: null });
+    throw error;
+  }
+}
+
+async function diffBiliFavoritesInner(data, tabId = null) {
   const folderIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
   const resolved = await resolveDiffUid(data?.uid, tabId);
   const folders = await listBiliFavoriteFolders(resolved.uid, resolved.tabId);
@@ -3147,6 +3178,21 @@ async function diffBiliFavorites(data, tabId = null) {
   const report = buildDiffReportText(diffs, formatChineseDateTime(new Date(), true));
   // 写文件失败不影响结果展示，reportPath 会是空串
   const reportPath = data?.writeReport === false ? "" : await persistDiffReport(report);
+  // 只留摘要：完整列表在报告文件里，界面上本来也只显示摘要
+  publishDiffState({
+    running: false,
+    text: "",
+    at: Date.now(),
+    summary: {
+      reportPath,
+      folders: diffs.map((d) => ({
+        folderTitle: d.folderTitle, remoteFetched: d.remoteFetched, localTotal: d.localTotal,
+        collectionExists: d.collectionExists, incomplete: d.incomplete,
+        added: d.added.length, removed: d.removed.length,
+        newlyInvalid: d.newlyInvalid.length, recovered: d.recovered.length
+      }))
+    }
+  });
   return { ok: true, diffs, report, reportPath };
 }
 

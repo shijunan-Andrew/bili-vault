@@ -2247,6 +2247,37 @@ test("用 <label> 当容器的组件，display 必须压得过 .editor-dialog la
      2. 翻页间隔不低于全局下限
      3. 打 B 站接口的裸 fetch 必须登记在白名单里 —— 新增的必须走限速器 */
 
+test("默认档位是「较低」，且大收藏夹配快档要再提醒一次", () => {
+  const src = readProjectFile("background.js");
+  assert.match(src, /const DEFAULT_REQUEST_SPEED = "lower"/,
+    "默认档位不是「较低」——大收藏夹是常态，「较低」是唯一带分批停顿的档位");
+
+  const popup = readProjectFile("popup.js");
+  // 弹窗的兜底也要跟着改，否则读不到设置时会退回旧默认值
+  assert.match(popup, /currentSpeed = "lower"/, "弹窗的默认档位没跟着改成「较低」");
+
+  // 档位偏快 + 总量偏大 → 动手前再拦一次
+  assert.match(popup, /const RISKY_TOTAL_ITEMS = 500/, "没有「总量阈值」这个判断");
+  assert.match(popup, /function riskySpeedWarning\(\)/, "没有档位风险判断函数");
+  assert.match(popup, /function confirmRiskySpeed\(\)/, "没有共用的前置检查");
+  const entries = (popup.match(/await confirmRiskySpeed\(\)|confirmRiskySpeed\(\)\.then/g) || []).length;
+  assert.ok(entries >= 3, `只有 ${entries} 个入口调用了风险提醒，导入/更新/差异三个都要`);
+  assert.match(readProjectFile("popup.html"), /id="riskyWarnDialog"/, "风险提醒弹窗不存在");
+});
+
+test("差异对比的状态要落盘（切走弹窗再回来不能看起来断了）", () => {
+  const src = readProjectFile("background.js");
+  assert.match(src, /function publishDiffState\(/, "差异状态没有落盘函数");
+  assert.match(src, /chrome\.storage\.local\.set\(\{ diffState/, "没有把差异状态写进 storage");
+  // 结果只存摘要：完整列表在报告文件里，界面本来也只显示摘要
+  assert.match(src, /summary: \{/, "没有保存结果摘要");
+  assert.match(src, /folderTitle: d\.folderTitle/, "摘要里没有各收藏夹的数字");
+
+  const popup = readProjectFile("popup.js");
+  assert.match(popup, /chrome\.storage\.local\.get\("diffState"\)/, "弹窗打开时没有恢复差异状态");
+  assert.match(popup, /state\.running/, "没有区分「还在跑」和「跑完了」");
+});
+
 test("收藏夹列表要有短时缓存（差异对比与导入读的是同一份）", () => {
   const src = readProjectFile("background.js");
   const ttl = Number(src.match(/IMPORT_LIST_CACHE_TTL_MS = ([\d\s*]+);/)?.[1].replace(/\s/g, "").split("*").reduce((a, b) => a * Number(b), 1) || 0);
