@@ -2187,7 +2187,9 @@ async function openDownloadDirectory(video) {
       const help = BcaI18n.t("若尚未安装本地目录打开助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后完全重启 Chrome 即可生效，不需要重新加载插件。");
       setDownloadPathNote(lines.join("\n"), true, help);
       // 失败要让用户真的看到 —— 底部 toast 一闪就没了
-      showResultDialog(BcaI18n.t("无法打开本地视频目录"), lines.join("\n"), "error");
+      // 弹窗里只放安装指引：错误详情、路径、"复制路径"那句话都会占满弹窗，
+      // 而用户真正要照做的是安装这一步。其余信息仍在详情页的说明区。
+      showResultDialog(BcaI18n.t("无法打开本地视频目录"), help, "error");
   }
 }
 
