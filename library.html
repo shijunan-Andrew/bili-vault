@@ -253,6 +253,16 @@
     </div>
   </dialog>
 
+  <dialog id="diffRiskyDialog" class="editor-dialog" aria-labelledby="diffRiskyTitle">
+    <div class="editor-heading"><span class="editor-heading-icon" data-icon="alert"></span><h2 id="diffRiskyTitle" data-i18n="建议先改用「较低」档位">建议先改用「较低」档位</h2></div>
+    <p id="diffRiskyText" class="editor-hint"></p>
+    <p class="editor-hint" data-i18n="档位是全局设置，可以在插件弹窗的「请求速度」里改。「较低」会分批停顿，慢一些但安全得多。">档位是全局设置，可以在插件弹窗的「请求速度」里改。「较低」会分批停顿，慢一些但安全得多。</p>
+    <div class="editor-actions">
+      <button id="diffRiskyCancel" class="button button-quiet" type="button" data-i18n="取消">取消</button>
+      <button id="diffRiskyGo" class="button button-primary" type="button" data-i18n="照当前档位继续">照当前档位继续</button>
+    </div>
+  </dialog>
+
   <dialog id="diffConfirm" class="editor-dialog" aria-labelledby="diffConfirmTitle">
     <div class="editor-heading"><span class="editor-heading-icon" data-icon="refresh"></span><h2 id="diffConfirmTitle" data-i18n="与 B 站对比">与 B 站对比</h2></div>
     <p id="diffConfirmDetail" class="editor-hint"></p>

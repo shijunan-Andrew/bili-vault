@@ -659,5 +659,10 @@
   "当前是「{speed}」档，而勾选内容共约 {total} 条。建议改用「较低」档位再开始。": "You are on 「{speed}」 while about {total} items are selected. Switching to 「Lower」 first is recommended.",
   "「较高」「高」档配上大收藏夹，是最容易触发风控的组合。换成「较低」会分批停顿，慢一些但安全得多。": "「Higher」 or 「High」 combined with a large collection is the combination most likely to trigger rate limiting. 「Lower」 adds pauses between batches — slower, but far safer.",
   "改用「较低」": "Use 「Lower」",
-  "照当前档位继续": "Continue on this speed"
+  "照当前档位继续": "Continue on this speed",
+  "建议先改用「较低」档位": "Consider switching to 「Lower」 first",
+  "当前是「{speed}」档，而这个收藏夹有约 {total} 条。建议先到插件弹窗里改用「较低」档位。": "You are on 「{speed}」 and this collection has about {total} items. Switching to 「Lower」 in the popup first is recommended.",
+  "档位是全局设置，可以在插件弹窗的「请求速度」里改。「较低」会分批停顿，慢一些但安全得多。": "The speed is a global setting; change it under 「Request speed」 in the popup. 「Lower」 adds pauses between batches — slower, but far safer.",
+  "正在更新收藏夹": "Updating collections",
+  "更新已暂停": "Update paused"
 }

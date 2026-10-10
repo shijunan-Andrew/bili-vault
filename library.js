@@ -22,6 +22,8 @@ const diffDialogStatus = document.getElementById("diffDialogStatus");
 const diffDialogBody = document.getElementById("diffDialogBody");
 const diffConfirm = document.getElementById("diffConfirm");
 const diffConfirmDetail = document.getElementById("diffConfirmDetail");
+const diffRiskyDialog = document.getElementById("diffRiskyDialog");
+const diffRiskyText = document.getElementById("diffRiskyText");
 const welcomeChoose = document.getElementById("welcomeChoose");
 const welcome = document.getElementById("welcome");
 const welcomeCopy = document.querySelector(".welcome-copy");
@@ -2930,6 +2932,38 @@ function syncDetailDownloadAction() {
    （收藏库拿不到远程 media_id）。 */
 // V1.1.3：点按钮先弹确认框，确认后才真的开始对比。
 // （V1.1.0~V1.1.2 这里漏了 addEventListener，按钮点了完全没反应。）
+/* 收藏库这边同样要防"快档 × 大收藏夹"。
+   档位是全局的（存在 storage.local），但收藏库拿不到线上的确切条数，
+   所以用本地该收藏夹的条数做代理 —— 数量级够用来判断风险了。 */
+const RISKY_TOTAL_ITEMS = 500;
+const RISKY_SPEEDS = new Set(["higher", "high"]);
+let diffRiskyResolve = null;
+
+async function confirmLibraryRiskySpeed() {
+  const saved = await chrome.storage.local.get("requestSpeed").catch(() => null);
+  const speed = RISKY_SPEEDS.has(saved?.requestSpeed) ? saved.requestSpeed : "";
+  if (!speed) return true;
+  const collection = collections.find((item) => item.name === selectedCollection);
+  const total = collection?.videos?.length || 0;
+  if (total <= RISKY_TOTAL_ITEMS) return true;
+  const label = speed === "high" ? "高" : "较高";
+  diffRiskyText.textContent = BcaI18n.t("当前是「{speed}」档，而这个收藏夹有约 {total} 条。建议先到插件弹窗里改用「较低」档位。",
+    { speed: label, total });
+  diffRiskyDialog.showModal();
+  return new Promise((resolve) => { diffRiskyResolve = resolve; });
+}
+
+document.getElementById("diffRiskyCancel").addEventListener("click", () => {
+  diffRiskyDialog.close();
+  if (diffRiskyResolve) diffRiskyResolve(false);
+  diffRiskyResolve = null;
+});
+document.getElementById("diffRiskyGo").addEventListener("click", () => {
+  diffRiskyDialog.close();
+  if (diffRiskyResolve) diffRiskyResolve(true);
+  diffRiskyResolve = null;
+});
+
 diffLibraryButton.addEventListener("click", () => {
   if (selectedCollection === "*") {
     showToast(BcaI18n.t("请先在左侧选择一个收藏夹，再与 B 站对比。"));
@@ -2942,8 +2976,9 @@ document.getElementById("diffConfirmCancel").addEventListener("click", () => dif
 // 结果对话框的「关闭」按钮。V1.1.0 加这个对话框时同样漏了绑定 ——
 // 和 diffLibraryButton 是同一个错误，所以测试里加了一条专门查"对话框里的按钮有没有被引用"。
 document.getElementById("diffDialogClose").addEventListener("click", () => diffDialog.close());
-document.getElementById("diffConfirmGo").addEventListener("click", () => {
+document.getElementById("diffConfirmGo").addEventListener("click", async () => {
   diffConfirm.close();
+  if (!await confirmLibraryRiskySpeed()) return;
   diffWithBilibili();
 });
 

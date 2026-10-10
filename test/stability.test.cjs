@@ -2265,6 +2265,26 @@ test("默认档位是「较低」，且大收藏夹配快档要再提醒一次",
   assert.match(readProjectFile("popup.html"), /id="riskyWarnDialog"/, "风险提醒弹窗不存在");
 });
 
+test("进度区按操作类型显示，差异对比不给暂停/取消", () => {
+  const popup = readProjectFile("popup.js");
+  // 三种操作的标题必须是字面量调用（提取器要扫得到）
+  for (const label of ["正在导入收藏夹", "正在更新收藏夹", "正在对比差异", "导入已暂停", "更新已暂停"]) {
+    assert.ok(popup.includes(`BcaI18n.t("${label}")`), `「${label}」没有写成字面量调用，翻译会静默缺失`);
+  }
+  // 对比是只读短任务，按钮要整个藏起来 —— 以前照搬导入那套，点了没用
+  assert.match(popup, /importControl\.hidden = !importBusy \|\| isDiff/,
+    "差异对比时没有隐藏暂停/取消按钮");
+  assert.match(popup, /activeOperation = "diff"/, "差异对比没有标记操作类型");
+  assert.match(popup, /activeOperation = options\.recentDays \? "update" : "import"/,
+    "更新与导入没有区分文案");
+
+  // 收藏库那边也要过同一道风险检查
+  const library = readProjectFile("library.js");
+  assert.match(library, /confirmLibraryRiskySpeed/, "收藏库的「与 B 站对比」没有档位风险检查");
+  assert.match(library, /RISKY_SPEEDS = new Set\(\["higher", "high"\]\)/, "收藏库的风险档位集合不对");
+  assert.match(readProjectFile("library.html"), /id="diffRiskyDialog"/, "收藏库的风险提醒弹窗不存在");
+});
+
 test("差异对比的状态要落盘（切走弹窗再回来不能看起来断了）", () => {
   const src = readProjectFile("background.js");
   assert.match(src, /function publishDiffState\(/, "差异状态没有落盘函数");

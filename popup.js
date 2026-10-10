@@ -81,11 +81,30 @@ function displayVersion(raw) {
   return `V${version}`;
 }
 
+/* 当前在跑哪种操作。进度区的标题和按钮都按它来 ——
+   「差异对比」没有暂停/取消（它是只读的短任务），
+   以前会把导入那套按钮照搬过来，点了也没用。 */
+let activeOperation = "import";
+
+// 必须写成一串字面量调用：项目约定 t() 的键必须是字面量，
+// 用 OPERATION_TITLES[x] 这种取值提取器扫不到，翻译会静默缺失（这个坑踩过两次了）。
+function operationTitle(operation, paused) {
+  if (paused) {
+    if (operation === "update") return BcaI18n.t("更新已暂停");
+    return BcaI18n.t("导入已暂停");
+  }
+  if (operation === "diff") return BcaI18n.t("正在对比差异");
+  if (operation === "update") return BcaI18n.t("正在更新收藏夹");
+  return BcaI18n.t("正在导入收藏夹");
+}
+
 function renderImportControl() {
-  importControl.hidden = !importBusy;
-  importControlHint.hidden = !importBusy || cancelArmed;
-  importProgressView.classList.toggle("paused", importPaused);
-  importProgressTitle.textContent = importPaused ? BcaI18n.t("导入已暂停") : BcaI18n.t("正在导入收藏夹");
+  const isDiff = activeOperation === "diff";
+  // 对比是只读的短任务，没有暂停/取消的概念 —— 按钮整个不显示
+  importControl.hidden = !importBusy || isDiff;
+  importControlHint.hidden = !importBusy || isDiff || cancelArmed;
+  importProgressView.classList.toggle("paused", importPaused && !isDiff);
+  importProgressTitle.textContent = operationTitle(activeOperation, importPaused && !isDiff);
   pauseImportButton.textContent = importPaused ? BcaI18n.t("继续导入") : BcaI18n.t("暂停导入");
   if (!cancelArmed) {
     cancelImportButton.textContent = BcaI18n.t("取消导入");
@@ -304,13 +323,13 @@ async function startDiff() {
     return;
   }
   importBusy = true;
+  activeOperation = "diff";
   importStatus.textContent = "";
   importStatus.classList.remove("error");
   diffResult.hidden = true;
-  importProgressTitle.textContent = BcaI18n.t("正在对比差异");
   // 差异对比要读完整列表，动手前把请求量告诉用户
   importProgressText.textContent = requestEstimateText() || BcaI18n.t("正在读取 B 站收藏夹列表…");
-  updateImportSelection();
+  updateImportSelection();   // 标题由 renderImportControl 按 activeOperation 设置
   try {
     const response = await chrome.runtime.sendMessage({ type: "bca-fav-diff", data: { folderIds } });
     if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("对比差异失败。"));
@@ -439,6 +458,7 @@ function openUpdateRecent() {
 
 async function startImport(options = {}) {
   if (importBusy) return;
+  activeOperation = options.recentDays ? "update" : "import";
   const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   if (!folderIds.length) return;
   if (!rootHandle) {
@@ -846,13 +866,20 @@ async function boot() {
     const state = saved?.diffState;
     if (!state) return;
     if (state.running) {
-      importProgressTitle.textContent = BcaI18n.t("正在对比差异");
+      activeOperation = "diff";
       importProgressText.textContent = state.text || BcaI18n.t("正在读取 B 站收藏夹列表…");
       importBusy = true;
       updateImportSelection();
       return;
     }
-    if (state.summary) renderDiffResult({ diffs: state.summary.folders, reportPath: state.summary.reportPath });
+    if (state.summary) {
+      renderDiffResult({ diffs: state.summary.folders, reportPath: state.summary.reportPath });
+      // 跑完之后才切回来的情况：结果要弹一下，不能只在「最近状态」里留一行
+      const folders = state.summary.folders || [];
+      const total = (key) => folders.reduce((n, f) => n + (Number(f[key]) || 0), 0);
+      showDoneDialog(BcaI18n.t("对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
+        { added: total("added"), removed: total("removed"), invalid: total("newlyInvalid"), recovered: total("recovered") }));
+    }
   }).catch(() => {});
   chrome.storage.local.get("requestSpeed").then((saved) => {
     currentSpeed = REQUEST_SPEED_ORDER.includes(saved?.requestSpeed) ? saved.requestSpeed : "lower";
