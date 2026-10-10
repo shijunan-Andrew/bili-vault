@@ -2845,8 +2845,15 @@ async function diffBiliFavorites(data, tabId = null) {
   const folderIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
   const resolved = await resolveDiffUid(data?.uid, tabId);
   const folders = await listBiliFavoriteFolders(resolved.uid, resolved.tabId);
-  const picked = folderIds.size ? folders.filter((folder) => folderIds.has(String(folder.id))) : folders;
-  if (!picked.length) throw new Error("没有选中任何收藏夹。");
+  // 收藏库（独立扩展页）手上只有本地收藏夹名，没有远程 media_id，所以也支持按名字匹配。
+  // 本地目录名与 B 站收藏夹名本来就要求一致（导入就是按名字建目录的）。
+  const titles = new Set((Array.isArray(data?.folderTitles) ? data.folderTitles : []).map(String));
+  const picked = folderIds.size
+    ? folders.filter((folder) => folderIds.has(String(folder.id)))
+    : titles.size
+      ? folders.filter((folder) => titles.has(folder.title))
+      : folders;
+  if (!picked.length) throw new Error("没有找到要对比的收藏夹。如果本地收藏夹改过名，请先在 B 站核对名称。");
 
   const root = await getRootHandle();
   if (!root) throw new Error("还没有设置本地保存位置，无法与本地对比。");

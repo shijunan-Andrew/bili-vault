@@ -1159,3 +1159,62 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   .video-grid { grid-template-columns: 1fr; }
   .page-heading h1 { font-size: var(--fs-lg); }
 }
+
+/* V1.1.0：与 B 站对比。以下都是新类，不覆盖任何既有选择器。 */
+.diff-dialog {
+  max-width: 720px;
+}
+
+.diff-body {
+  max-height: 52vh;
+  margin-top: var(--sp-3);
+  overflow-y: auto;
+}
+
+.diff-summary {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink);
+  font-size: var(--fs-md);
+  line-height: 1.7;
+}
+
+.diff-warning {
+  margin: 0 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+
+.diff-group {
+  margin-bottom: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.diff-group summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.diff-list {
+  margin: var(--sp-2) 0 0;
+  padding-left: 1.2em;
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: 1.7;
+}
+
+.diff-more {
+  color: var(--muted);
+  list-style: none;
+  margin-left: -1.2em;
+}
+
+.diff-path {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  word-break: break-all;
+}

@@ -16,6 +16,10 @@ const storageUsage = document.getElementById("storageUsage");
 const statusDot = document.querySelector(".status-dot");
 const chooseRoot = document.getElementById("chooseRoot");
 const refreshLibraryButton = document.getElementById("refreshLibrary");
+const diffLibraryButton = document.getElementById("diffLibrary");
+const diffDialog = document.getElementById("diffDialog");
+const diffDialogStatus = document.getElementById("diffDialogStatus");
+const diffDialogBody = document.getElementById("diffDialogBody");
 const welcomeChoose = document.getElementById("welcomeChoose");
 const welcome = document.getElementById("welcome");
 const welcomeCopy = document.querySelector(".welcome-copy");
@@ -2893,6 +2897,7 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   setDynamicText(rootLabel, handle.name);
   statusDot.classList.add("ready");
   refreshLibraryButton.disabled = false;
+  diffLibraryButton.disabled = false;
   // 扫描期间的「正在读取 N/M…」在这里收尾，换成缓存命中统计与读取失败清单
   refreshScanNotice();
   welcome.hidden = true;
@@ -2916,6 +2921,101 @@ function syncDetailDownloadAction() {
   const copyButton = detailContent.querySelector(".copy-download-path");
   if (copyButton) copyButton.hidden = !hasDownloadFiles;
   if (!hasDownloadFiles) setDownloadPathNote("");
+}
+
+/* V1.1.0：与 B 站对比当前选中的收藏夹。
+   与插件弹窗里的「先看差异」走同一条后台消息，只是这里用本地收藏夹名去匹配远程收藏夹
+   （收藏库拿不到远程 media_id）。 */
+async function diffWithBilibili() {
+  if (selectedCollection === "*") {
+    showToast(BcaI18n.t("请先在左侧选择一个收藏夹，再与 B 站对比。"));
+    return;
+  }
+  diffDialog.showModal();
+  diffDialogBody.replaceChildren();
+  diffDialogStatus.hidden = false;
+  diffDialogStatus.textContent = BcaI18n.t("正在读取 B 站收藏夹列表…");
+  diffLibraryButton.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "bca-fav-diff",
+      data: { folderTitles: [selectedCollection] }
+    });
+    if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("对比差异失败。"));
+    renderDiffDialog(response);
+  } catch (error) {
+    diffDialogStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("对比差异失败。");
+  } finally {
+    diffLibraryButton.disabled = false;
+  }
+}
+
+function renderDiffDialog(response) {
+  const diffs = Array.isArray(response?.diffs) ? response.diffs : [];
+  diffDialogBody.replaceChildren();
+  // 全程 textContent，不碰 innerHTML —— 收藏夹名与视频标题都是用户数据
+  for (const diff of diffs) {
+    const sum = document.createElement("p");
+    sum.className = "diff-summary";
+    sum.textContent = BcaI18n.t(
+      "「{name}」线上 {remote} 条／本地 {local} 条：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
+      { name: diff.folderTitle, remote: diff.remoteFetched, local: diff.localTotal,
+        added: diff.added?.length || 0, removed: diff.removed?.length || 0,
+        invalid: diff.newlyInvalid?.length || 0, recovered: diff.recovered?.length || 0 });
+    diffDialogBody.append(sum);
+
+    if (diff.incomplete) {
+      const warn = document.createElement("p");
+      warn.className = "diff-warning";
+      warn.textContent = BcaI18n.t("本次读取可能不完整，结果仅供参考。");
+      diffDialogBody.append(warn);
+    }
+
+    const groups = [
+      [BcaI18n.t("新增（线上有、本地没有）"), diff.added, (x) => x.title || BcaI18n.t("(无标题)")],
+      [BcaI18n.t("线上已移除（本地有、线上没有了）"), diff.removed, (x) => x.title || x.directory],
+      [BcaI18n.t("新失效（本地还是正常，线上已失效）"), diff.newlyInvalid, (x) => x.title || x.directory],
+      [BcaI18n.t("已恢复（本地标记失效，线上正常了）"), diff.recovered, (x) => x.title || x.directory]
+    ];
+    let any = false;
+    for (const [title, items, render] of groups) {
+      if (!items?.length) continue;
+      any = true;
+      const details = document.createElement("details");
+      details.className = "diff-group";
+      const summary = document.createElement("summary");
+      summary.textContent = `${title} ${items.length}`;
+      details.append(summary);
+      const list = document.createElement("ul");
+      list.className = "diff-list";
+      for (const item of items.slice(0, 200)) {
+        const li = document.createElement("li");
+        li.textContent = render(item);
+        list.append(li);
+      }
+      if (items.length > 200) {
+        const more = document.createElement("li");
+        more.className = "diff-more";
+        more.textContent = BcaI18n.t("…还有 {count} 条，完整列表见报告文件。", { count: items.length - 200 });
+        list.append(more);
+      }
+      details.append(list);
+      diffDialogBody.append(details);
+    }
+    if (!any) {
+      const same = document.createElement("p");
+      same.className = "diff-summary";
+      same.textContent = BcaI18n.t("四项差异都是 0 —— 本地与线上完全一致。");
+      diffDialogBody.append(same);
+    }
+    if (response.reportPath) {
+      const path = document.createElement("p");
+      path.className = "diff-path";
+      path.textContent = BcaI18n.t("报告：{path}", { path: response.reportPath });
+      diffDialogBody.append(path);
+    }
+  }
+  diffDialogStatus.hidden = true;
 }
 
 async function refreshDownloadStatuses() {

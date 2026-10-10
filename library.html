@@ -60,7 +60,8 @@
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel" data-i18n="尚未选择目录">尚未选择目录</span></div>
           <div class="usage-label"><span data-i18n="本地收藏夹占用：">本地收藏夹占用：</span><b id="storageUsage" class="tnum">—</b></div>
-          <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录" data-i18n-title="重新读取本地收藏目录"><span data-icon="refresh"></span><span data-i18n="刷新">刷新</span></button>
+          <button id="diffLibrary" class="button button-quiet" type="button" disabled data-i18n="与 B 站对比" data-i18n-title="只对比收藏夹列表，不抓取每条视频的详情，很快完成">与 B 站对比</button>
+    <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录" data-i18n-title="重新读取本地收藏目录"><span data-icon="refresh"></span><span data-i18n="刷新">刷新</span></button>
           <button id="chooseRoot" class="button button-primary"><span class="choose-root-icon" data-icon="plus"></span><span data-busy-label="idle" data-i18n="选择收藏根目录">选择收藏根目录</span><span data-busy-label="reading" data-i18n="正在读取…" hidden>正在读取…</span><span data-busy-label="refreshing" data-i18n="正在刷新…" hidden>正在刷新…</span><span data-busy-label="connecting" data-i18n="正在连接上次目录…" hidden>正在连接上次目录…</span><span data-busy-label="loading-last" data-i18n="正在读取上次目录…" hidden>正在读取上次目录…</span></button>
         </div>
       </header>
@@ -249,6 +250,16 @@
     <div class="editor-actions">
       <button id="markDownloadedCancel" class="button button-quiet" type="button" data-i18n="取消">取消</button>
       <button id="markDownloadedGo" class="button button-primary" type="button" data-i18n="新建文件夹并标记">新建文件夹并标记</button>
+    </div>
+  </dialog>
+
+  <dialog id="diffDialog" class="editor-dialog diff-dialog" aria-labelledby="diffDialogTitle">
+    <div class="editor-heading"><span class="editor-heading-icon" data-icon="refresh"></span><h2 id="diffDialogTitle" data-i18n="与 B 站对比">与 B 站对比</h2></div>
+    <p class="editor-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情，所以很快（2800 条约 1~2 分钟）。完整列表会写进归档根目录的 002同步报告 文件夹。">只对比收藏夹列表，不抓取每条视频的详情，所以很快（2800 条约 1~2 分钟）。完整列表会写进归档根目录的 002同步报告 文件夹。</p>
+    <p id="diffDialogStatus" class="dialog-progress" role="status"></p>
+    <div id="diffDialogBody" class="diff-body"></div>
+    <div class="editor-actions">
+      <button id="diffDialogClose" class="button button-quiet" type="button" data-i18n="关闭">关闭</button>
     </div>
   </dialog>
 

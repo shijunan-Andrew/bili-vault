@@ -612,5 +612,19 @@
   "只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。": "Only the favourites list is compared — not each video's details. About 1–2 minutes for 2,800 items, versus 30+ minutes for a full import, so it is worth a look first.",
   "对比差异需要知道你的 B 站 UID。请先打开一次自己的 B 站收藏夹页面。": "Comparing needs your Bilibili UID. Open your own favourites page once first.",
   "没有选中任何收藏夹。": "No collection is selected.",
-  "还没有设置本地保存位置，无法与本地对比。": "No local save location is set, so there is nothing to compare against."
+  "还没有设置本地保存位置，无法与本地对比。": "No local save location is set, so there is nothing to compare against.",
+  "与 B 站对比": "Compare with Bilibili",
+  "只对比收藏夹列表，不抓取每条视频的详情，很快完成": "Only the favourites list is compared, not each video's details — it finishes quickly",
+  "只对比收藏夹列表，不抓取每条视频的详情，所以很快（2800 条约 1~2 分钟）。完整列表会写进归档根目录的 002同步报告 文件夹。": "Only the favourites list is compared, not each video's details, so it is quick (about 1–2 minutes for 2,800 items). The full list is written to the 002同步报告 folder under the archive root.",
+  "请先在左侧选择一个收藏夹，再与 B 站对比。": "Select a collection on the left first, then compare with Bilibili.",
+  "「{name}」线上 {remote} 条／本地 {local} 条：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。": "「{name}」 — {remote} on Bilibili / {local} local: {added} new, {removed} no longer on Bilibili, {invalid} newly unavailable, {recovered} available again.",
+  "本次读取可能不完整，结果仅供参考。": "This read may be incomplete — treat the result as a rough guide.",
+  "新增（线上有、本地没有）": "New (on Bilibili but not local)",
+  "线上已移除（本地有、线上没有了）": "Gone from Bilibili (local only)",
+  "新失效（本地还是正常，线上已失效）": "Newly unavailable (local still says fine)",
+  "已恢复（本地标记失效，线上正常了）": "Available again (local had it as unavailable)",
+  "(无标题)": "(untitled)",
+  "…还有 {count} 条，完整列表见报告文件。": "…and {count} more — see the report file for the full list.",
+  "四项差异都是 0 —— 本地与线上完全一致。": "All four counts are zero — local and Bilibili match exactly.",
+  "没有找到要对比的收藏夹。如果本地收藏夹改过名，请先在 B 站核对名称。": "No matching collection was found. If you renamed the local folder, check the name on Bilibili first."
 }
