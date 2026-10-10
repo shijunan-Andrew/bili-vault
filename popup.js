@@ -610,7 +610,7 @@ async function refreshStatus() {
   reauthorizeButton.hidden = !canRecover;
   permissionHint.hidden = !canRecover;
   if (canRecover) {
-    reauthorizeButton.textContent = status.pendingFavorite ? BcaI18n.t("重新授权并补存刚才的视频") : BcaI18n.t("重新授权保存位置");
+    reauthorizeButton.textContent = status.pendingFavorite ? BcaI18n.t("重新授权并补存刚才的视频") : BcaI18n.t("重新授权收藏根目录");
     // permissionNotice 里已经是可直接显示的文案
     permissionHint.textContent = permissionNotice || (status.pendingFavorite
       ? BcaI18n.t("点击后按 Chrome 提示允许访问，插件会接着保存这条视频。")
@@ -642,7 +642,7 @@ chooseButton.addEventListener("click", async () => {
     }
   } finally {
     chooseButton.disabled = false;
-    chooseButton.textContent = BcaI18n.t("选择保存文件夹");
+    chooseButton.textContent = BcaI18n.t("选择收藏根目录");
   }
 });
 

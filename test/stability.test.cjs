@@ -2984,3 +2984,42 @@ test("标记为已下载成功后，不许再抛错把成功提示覆盖成失�
   assert.equal(findOpen([], "a"), null, "详情没开时不该重画");
 });
 
+test("弹窗和收藏库对同一个根目录用同一套叫法（静态回归）", () => {
+  const popupHtml = readProjectFile("popup.html");
+  const popupJs = readProjectFile("popup.js");
+  const libraryHtml = readProjectFile("library.html");
+  const background = readProjectFile("background.js");
+
+  // 代码里只有一个根目录：同一个 IndexedDB 库、同一个表、同一个键 rootHandle。
+  // 以前弹窗叫它「本地保存位置」、收藏库叫它「收藏根目录」，用户以为是两个地方，
+  // 于是在收藏库里选的目录被当成"另一处"，实际把弹窗那次选择覆盖了。
+  for (const file of ["popup.js", "library.js", "background.js", "download.js"]) {
+    const src = readProjectFile(file);
+    assert.match(src, /const DB_NAME = "bili-fav-archiver";/, `${file} 应当用同一个 IndexedDB`);
+    assert.match(src, /const DB_STORE = "settings";/, `${file} 应当用同一个 store`);
+  }
+  assert.match(readProjectFile("library.js"), /put\(handle, "rootHandle"\)/);
+  assert.match(background, /\.get\("rootHandle"\)/);
+
+  // 弹窗那一格必须和收藏库叫同一个名字
+  assert.match(libraryHtml, /data-i18n="选择收藏根目录"/, "收藏库的按钮文案是基准");
+  assert.match(popupHtml, /data-i18n="本地收藏根目录"/);
+  assert.match(popupHtml, /data-i18n="选择收藏根目录"/);
+  assert.match(popupHtml, /data-i18n="重新授权收藏根目录"/);
+  assert.match(popupJs, /BcaI18n\.t\("选择收藏根目录"\)/);
+  assert.match(popupJs, /BcaI18n\.t\("重新授权收藏根目录"\)/);
+
+  // 旧叫法不许回来
+  assert.doesNotMatch(popupHtml, /本地保存位置/, "「本地保存位置」是旧叫法，会让人以为是另一处目录");
+  assert.doesNotMatch(popupHtml, /选择保存文件夹/, "「选择保存文件夹」是旧叫法");
+  assert.doesNotMatch(popupJs, /重新授权保存位置/);
+  assert.doesNotMatch(background, /“重新授权保存位置”/, "报错里让用户点的按钮名必须和界面一致");
+
+  // 必须明说和收藏库是同一个位置，否则光改名还是会有歧义
+  assert.match(
+    popupHtml,
+    /和收藏库左上角「选择收藏根目录」是同一个位置/,
+    "弹窗要写清这里选的就是收藏库的根目录"
+  );
+});
+

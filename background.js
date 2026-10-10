@@ -188,7 +188,7 @@ function formatPublishDate(value) {
 async function ensureWritePermission(handle) {
   const permission = await handle.queryPermission({ mode: "readwrite" });
   if (permission !== "granted") {
-    throw new Error("所选文件夹的写入授权已失效。请点击插件图标中的“重新授权保存位置”，允许访问后重试。 ");
+    throw new Error("所选文件夹的写入授权已失效。请点击插件图标中的“重新授权收藏根目录”，允许访问后重试。 ");
   }
 }
 
