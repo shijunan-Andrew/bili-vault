@@ -2236,6 +2236,61 @@ test("用 <label> 当容器的组件，display 必须压得过 .editor-dialog la
   assert.deepEqual(problems, [], problems.join("\n"));
 });
 
+/* ------------------------- V1.1.6：出网限速是硬约束 -------------------------
+
+   README 的「使用须知」第一条就是"请勿滥用 …… 请求过密可能触发风控"。
+   但 V1.1.6 之前这个约定只靠"每个调用点自己记得加延迟"，
+   于是「最近 N 天」先拉全 71 页再过滤，把开发者本人扫进了风控。
+
+   现在限速放在唯一的出网口 biliImportApiGet() 里。这条测试守三件事：
+     1. 全局最小间隔没有被调小
+     2. 翻页间隔不低于全局下限
+     3. 打 B 站接口的裸 fetch 必须登记在白名单里 —— 新增的必须走限速器 */
+
+test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
+  const src = readProjectFile("background.js");
+
+  const min = Number(src.match(/BILI_MIN_REQUEST_INTERVAL_MS = (\d+)/)?.[1] || 0);
+  assert.ok(min >= 250, `全局最小间隔只有 ${min}ms —— 太激进，降下来之前先想清楚风控的代价`);
+
+  const page = Number(src.match(/IMPORT_PAGE_DELAY_MS = (\d+)/)?.[1] || 0);
+  assert.ok(page >= min, `翻页间隔 ${page}ms 低于全局下限 ${min}ms`);
+
+  // 唯一的出网口必须在发请求之前排队
+  const apiGetAt = src.indexOf("async function biliImportApiGet");
+  assert.ok(apiGetAt > 0, "找不到 biliImportApiGet");
+  const apiGetBody = src.slice(apiGetAt, src.indexOf("\n}\n", apiGetAt));
+  assert.match(apiGetBody, /await biliThrottleWait\(\)/, "biliImportApiGet 没有接限速器");
+
+  // 高频路径必须经过它
+  for (const name of ["fetchVideoDetail", "fetchImportFavoritePage"]) {
+    const at = src.indexOf(`function ${name}(`);
+    assert.ok(at > 0, `找不到 ${name}`);
+    const body = src.slice(at, src.indexOf("\n}\n", at));
+    assert.match(body, /biliImportApiGet\(/, `${name} 没走 biliImportApiGet —— 高频路径必须受限速器管`);
+  }
+
+  // 白名单：低频调用、CDN 图片、或下载媒体流（用户主动、单次）。
+  // 新增裸 fetch 必须来这里登记 —— 这是"忘了加限速"的唯一防线。
+  //   biliImportApiGet        —— 限速器所在的唯一出网口
+  //   fetchManualVideoMetadata —— 手动添加单个视频，用户点一次才发
+  //   getDownloadWbiKey / biliDownloadApi —— 下载链路，用户主动触发
+  //   loadCoverPng            —— 封面图走图片 CDN（credentials: omit），
+  //                              且被详情循环的 IMPORT_DETAIL_DELAY_MS 带着走，不会快
+  const allowlist = ["biliImportApiGet", "fetchManualVideoMetadata", "getDownloadWbiKey", "biliDownloadApi", "loadCoverPng"];
+  const offenders = [];
+  let current = "(顶层)";
+  for (const line of src.split("\n")) {
+    const declared = line.match(/^(?:async )?function (\w+)/);
+    if (declared) current = declared[1];
+    if (/await fetch\(/.test(line) && !/locales\//.test(line) && !allowlist.includes(current)) {
+      offenders.push(`${current} (第 ${src.slice(0, src.indexOf(line)).split("\n").length} 行)`);
+    }
+  }
+  assert.deepEqual([...new Set(offenders)], [],
+    `这些地方有裸 fetch 打 B 站接口，请改成 biliImportApiGet，或确认安全后登记到白名单：\n${[...new Set(offenders)].join("\n")}`);
+});
+
 /* ------------------------- V1.1.4：增量更新的时间窗口 -------------------------
 
    真机事故：V1.1.4 第一版的「最近 N 天」过滤拿 Date.now()（毫秒）去比

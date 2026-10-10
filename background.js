@@ -651,6 +651,8 @@ function biliImportPageApiGet(tabId, url, timeoutMs) {
 }
 
 async function biliImportApiGet(path, params = {}, timeoutMs = 15000, tabId = null) {
+  // 唯一的出网口 —— 所有 B 站请求都在这里排队限速，见 biliThrottleWait 的说明
+  await biliThrottleWait();
   const url = new URL(path, "https://api.bilibili.com");
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
@@ -2711,6 +2713,33 @@ const IMPORT_FIRST_PAGE_ATTEMPTS = 3;
 // 71 页的收藏夹连跑几次就把风控招来了。现在每页都停 ——
 // 71 页从约 18 秒变成约 30 秒，换来的是不再被限流。
 const IMPORT_PAGE_DELAY_MS = 220;
+
+/* ---------- 全局出网限速（所有 B 站接口调用都必须过这里） ----------
+
+   README 的「使用须知」第一条就是：
+     「请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，
+       导致 IP 或账号被临时限制。请分批、低速使用。」
+
+   但在 V1.1.6 之前，这个约定只靠**每个调用点自己记得加延迟** ——
+   于是一个新写的功能（「最近 N 天」先拉全 71 页再过滤）就把用户扫进了风控，
+   停了好一会儿没法继续开发。靠人记的规则迟早会被忘掉。
+
+   所以把限速放进**唯一的出网口** biliImportApiGet() 里：
+   不管谁调用、调用多少次，两次请求之间都至少隔 BILI_MIN_REQUEST_INTERVAL_MS。
+   新增功能即使完全不写延迟，也不可能快过这个下限。
+
+   修改这个常量前先想清楚：它同时决定了"最快能多快"和"多久会被限流"。 */
+const BILI_MIN_REQUEST_INTERVAL_MS = 320;
+let biliRequestSlotAt = 0;
+
+// 预约一个不早于"上次预约 + 最小间隔"的时间点再往下走。
+// 先占坑再等待，所以并发调用也会被排成有间隔的一串，而不是同时冲出去。
+async function biliThrottleWait() {
+  const slot = Math.max(Date.now(), biliRequestSlotAt + BILI_MIN_REQUEST_INTERVAL_MS);
+  biliRequestSlotAt = slot;
+  const wait = slot - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+}
 
 // 从 视频信息.txt 原文取「视频状态」行。归档里写的是「正常」或「已失效视频（已尝试恢复）」。
 function localRecordIsInvalid(text) {

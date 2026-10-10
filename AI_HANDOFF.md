@@ -626,7 +626,20 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
 5. **不得引入远程代码或 npm 依赖**：无 `eval`、无 `new Function`、无动态插标签；MV3 默认严格 CSP。
 6. **扩展页不得对网页开放**：不要重新添加 `web_accessible_resources`；需要从内容脚本打开扩展页时，走 `bca-open-library` 让后台 `chrome.tabs.create`。`library.js` 顶部的 `window.top !== window.self` 防嵌套检查必须保留，且早于任何目录读取。
 7. **错误报告必须带提示行**：`ERROR_REPORT_NOTICE` 常量与 `persistErrorReport()` 的兜底拼接不要删，报告里含本地路径与视频链接。
-8. 改动以上任一项前，先回到这一节确认，并在汇报里说明原因。
+8. **不得绕过出网限速**：所有 B 站接口调用必须走 `biliImportApiGet()`，那里有全局最小间隔（`BILI_MIN_REQUEST_INTERVAL_MS`）。**不要在别处写裸 `fetch` 打 B 站接口，也不要把间隔调小。** README「使用须知」第一条就是“请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制”—— 这不只是给用户看的提示，是**开发时必须遵守的约束**。
+
+   2026-10-10 就因为一个新功能（「最近 N 天」先拉全 71 页再过滤，在服务端看来和全量导入毫无区别）把开发者本人扫进了风控，停了好一阵没法继续测。**加任何会多发请求的功能之前，先算一遍它会产生多少次请求**：
+
+   | 操作 | 请求数 |
+   |---|---|
+   | 读一个收藏夹的列表 | `条数 / 40` 次 |
+   | 抓一条视频详情 | 1 次（限速 1.25 秒/条） |
+
+   算不清就先别写。**“看起来只同步一点点”不等于“请求少”** —— 这正是我犯的错。
+   ```powershell
+   Select-String -LiteralPath background.js -Pattern 'fetch\('   # 除 biliImportApiGet 内部外应为空
+   ```
+9. 改动以上任一项前，先回到这一节确认，并在汇报里说明原因。
 
 
 ## 修改原则
