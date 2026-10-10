@@ -2279,6 +2279,19 @@ test("收藏库的档位风险判断要用线上条数，不能用本地条数",
   assert.match(src, /speed: requestSpeedId/, "没有把当前档位一并返回");
 });
 
+test("失效视频不许覆盖本地已有的记录", () => {
+  const src = readProjectFile("background.js");
+  // 在"已存在"的分支里，失效条目必须先被丢弃再谈刷新
+  const at = src.indexOf("skipped += 1;");
+  assert.ok(at > 0, "找不到已存在条目的处理分支");
+  const branch = src.slice(at, at + 900);
+  assert.match(branch, /if \(item\.isInvalid\) \{[\s\S]{0,120}continue;/,
+    "失效条目没有被挡在刷新之前 —— 它会用「已失效视频」的占位信息覆盖本地完好的记录");
+  assert.match(src, /invalidKept \+= 1/, "没有统计被保留的失效条目");
+  // 本地没有的失效条目仍然要正常写入（pendingItems 那条分支不受影响）
+  assert.match(src, /pendingItems\.push\(item\)/, "本地没有的条目仍然要写入");
+});
+
 test("完成弹窗只弹一次（点掉之后再打开插件不该重放）", () => {
   const src = readProjectFile("background.js");
   // 摘要落盘时要带上"还没提示过"
@@ -2389,7 +2402,10 @@ test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
   assert.match(src, /if \(speed\.batchSize > 0\)/, "限速器没有实现分批停顿");
 
   // 档位必须听用户的：存在 storage 里、并监听变化
-  assert.match(src, /chrome\.storage\.local\.get\("requestSpeed"\)/, "没有读取用户选的档位");
+  // 用 session 而不是 local：关掉浏览器要回到默认的「较低」，不沿用上次的选择
+  assert.match(src, /chrome\.storage\.session\.get\("requestSpeed"\)/, "没有读取用户选的档位");
+  assert.equal(/storage\.local[\s\S]{0,80}requestSpeed/.test(src), false,
+    "档位不该存在 storage.local —— 那样关掉浏览器还会沿用上次的选择");
   assert.match(src, /chrome\.storage\.onChanged\.addListener/, "没有监听档位变化，改了要重启才生效");
 
   // 「较高」与「高」必须先弹提醒（用户明确要求）

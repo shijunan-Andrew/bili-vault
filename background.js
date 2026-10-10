@@ -2411,6 +2411,7 @@ async function importBiliFavorites(data, tabId = null) {
       const existing = await readExistingImportRecords(collection);
       const pendingItems = [];
       const refreshTargets = [];
+      let invalidKept = 0;   // 本地已有备份、因而被丢弃的失效条目数
       for (const item of scopedItems) {
         const keys = importIdentifierKeys(item);
         const matched = keys.find((key) => existing.identifiers.has(key));
@@ -2420,10 +2421,24 @@ async function importBiliFavorites(data, tabId = null) {
           continue;
         }
         skipped += 1;
+        // V1.1.20：解析到的**失效视频**不能覆盖本地已有的记录。
+        // B 站对失效视频只返回「已失效视频」这类占位信息，一旦拿它去刷新，
+        // 用户本地原来完好的标题/简介/标签就被"未知"覆盖了 —— 真机上丢过一次：
+        // 一条收藏得好好的视频失效后，重新导入把它变成了标题「未知」。
+        // 规则：失效 + 本地已有 → 直接丢弃；本地没有才写入（上面 pendingItems 那条分支）。
+        // 想用失效信息覆盖，只有手动点「更新视频状态」那一条路。
+        if (item.isInvalid) {
+          invalidKept += 1;
+          continue;
+        }
         const record = existing.records.get(matched);
         // 4.9：除了文本判据，还要看"目录里有没有封面"（半截目录）。这个查盘只在
         // 文本判据说"完整"时才发生，正常路径不多付 IO。
         if (record && await importRecordNeedsRefresh(collection, record)) refreshTargets.push({ item, record });
+      }
+      if (invalidKept > 0) {
+        folderNotes.push(`「${folder.title}」有 ${invalidKept} 条失效视频本地已有备份，按规则保留了原记录、没有被覆盖。`);
+        folderLog.push(`失效视频：${invalidKept} 条本地已有备份，已保留原记录（失效信息只用于本地没有的新条目）。`);
       }
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
 
@@ -2795,7 +2810,9 @@ const IMPORT_PAGE_DELAY_MS = 220;   // 额外的一层；实际节奏由 BILI_MI
 
    想调快就改这一个数 —— 但改之前先想清楚：
    320ms 那次真机风控，就是"觉得快一点没关系"的代价。 */
-/* 请求速度档位。用户可在插件弹窗里选，存在 chrome.storage.local.requestSpeed。
+/* 请求速度档位。用户可在插件弹窗里选，存在 chrome.storage.session.requestSpeed。
+   用 session 而不是 local：**关掉浏览器就回到默认的「较低」** ——
+   用户要求不要沿用上一次的选择。快档是一次性的决定，不该在不经意间被继承下来。
 
    「较低」是唯一真正像人的一档：不只慢，还会**分批** —— 读 8 次停 6 秒，
    模拟人翻几页、看到感兴趣的内容会停下来。其余三档只是把间隔拉长/缩短。
@@ -2821,11 +2838,11 @@ function applyRequestSpeed(id) {
   requestSpeed = REQUEST_SPEEDS[id];
 }
 // service worker 里不每次请求都读 storage，缓存一份并监听变化
-chrome.storage.local.get("requestSpeed")
+chrome.storage.session.get("requestSpeed")
   .then((saved) => applyRequestSpeed(saved?.requestSpeed || DEFAULT_REQUEST_SPEED))
   .catch(() => {});
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.requestSpeed) applyRequestSpeed(changes.requestSpeed.newValue);
+  if (area === "session" && changes.requestSpeed) applyRequestSpeed(changes.requestSpeed.newValue);
 });
 
 /* 页面代取连续失败多少次之后，本轮就不再尝试它。

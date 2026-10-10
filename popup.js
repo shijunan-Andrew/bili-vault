@@ -272,7 +272,8 @@ function applySpeed(value) {
   if (!REQUEST_SPEED_ORDER.includes(value)) return;
   currentSpeed = value;
   renderSpeed();
-  chrome.storage.local.set({ requestSpeed: value }).catch(() => {});
+  // 写 session：关掉浏览器就失效，下次打开回到默认的「较低」
+  chrome.storage.session.set({ requestSpeed: value }).catch(() => {});
 }
 
 speedGroup.querySelectorAll("button").forEach((button) => {
@@ -914,7 +915,7 @@ async function boot() {
       }
     }
   }).catch(() => {});
-  chrome.storage.local.get("requestSpeed").then((saved) => {
+  chrome.storage.session.get("requestSpeed").then((saved) => {
     currentSpeed = REQUEST_SPEED_ORDER.includes(saved?.requestSpeed) ? saved.requestSpeed : "lower";
     renderSpeed();
   }).catch(() => renderSpeed());

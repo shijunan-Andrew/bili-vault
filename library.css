@@ -1169,6 +1169,16 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 }
 
 /* V1.1.0：与 B 站对比。以下都是新类，不覆盖任何既有选择器。 */
+/* 风控提醒要让人真的看一眼 —— 与插件弹窗里的 .popup-dialog-warning 同一套观感。 */
+.editor-hint-danger {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-sm);
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-weight: 600;
+}
+
 .diff-dialog {
   max-width: 720px;
 }
