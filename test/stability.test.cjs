@@ -18,7 +18,11 @@ function loadBackgroundFunctions(names, constants = []) {
     return match[0];
   });
   const bodies = names.map((name) => {
-    const pattern = new RegExp(`^function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, "m");
+    // 用 .*? 而不是 [^)]*：参数表里可能有嵌套括号（例如默认值写 `now = Date.now()`），
+    // 内层那个 ) 会让 [^)]* 提前收尾、整条正则匹配不上，加载器就报"找不到函数"。
+    // V1.1.4 加 importWithinRecentDays(items, recentDays, now = Date.now()) 时正是栽在这里。
+    // 点号默认不匹配换行，所以不会跨行误匹配。
+    const pattern = new RegExp(`^function ${name}\\(.*?\\) \\{[\\s\\S]*?^\\}`, "m");
     const match = source.match(pattern);
     assert.ok(match, `background.js 中找不到函数 ${name}`);
     return match[0];
@@ -2230,6 +2234,66 @@ test("用 <label> 当容器的组件，display 必须压得过 .editor-dialog la
     if (!/display\s*:/.test(css.slice(open, close))) problems.push(`${cls} 的 .editor-dialog 规则里没写 display`);
   }
   assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+/* ------------------------- V1.1.4：增量更新的时间窗口 -------------------------
+
+   真机事故：V1.1.4 第一版的「最近 N 天」过滤拿 Date.now()（毫秒）去比
+   接口返回的 fav_time（秒），条件永远为假，2720 条一条都没命中，
+   用户看到的是"读取视频 0 / 失败 0"——没有报错，就是什么都没有。
+
+   根因很低级：本文件里已经有两处做过这个换算，写过滤时没去看。
+   所以这两个函数必须真跑测试，而不是靠读源码。 */
+
+test("收藏时间：秒与毫秒都要认", () => {
+  const { favoriteTimeMs } = loadBackgroundFunctions(["favoriteTimeMs"]);
+  const ms = 1761613600000;                       // 2026-10-28 前后
+  assert.equal(favoriteTimeMs(ms), ms, "毫秒原样返回");
+  assert.equal(favoriteTimeMs(Math.floor(ms / 1000)), ms, "秒要乘 1000");
+  assert.equal(favoriteTimeMs(0), 0);
+  assert.equal(favoriteTimeMs(null), 0);
+  assert.equal(favoriteTimeMs(undefined), 0);
+  assert.equal(favoriteTimeMs(""), 0);
+  assert.equal(favoriteTimeMs("abc"), 0);
+  assert.equal(favoriteTimeMs("1761613600"), ms, "字符串形式的秒也要认");
+});
+
+test("最近 N 天过滤：边界与单位", () => {
+  // 注意要把依赖一起加载：加载器只抽列出来的函数，
+  // importWithinRecentDays 内部调用 favoriteTimeMs，不一起抽出来就会 ReferenceError。
+  const { importWithinRecentDays } = loadBackgroundFunctions(["favoriteTimeMs", "importWithinRecentDays"]);
+  const now = 1761613600000;
+  const day = 86400000;
+  const at = (daysAgo) => Math.floor((now - daysAgo * day) / 1000);   // 秒，和接口一致
+
+  const items = [
+    { favoriteAt: at(0.5), title: "半天前" },
+    { favoriteAt: at(3), title: "正好 3 天前" },
+    { favoriteAt: at(5), title: "5 天前" },
+    { favoriteAt: at(30), title: "30 天前" }
+  ];
+
+  assert.deepEqual(importWithinRecentDays(items, 3, now).map((x) => x.title), ["半天前", "正好 3 天前"]);
+  assert.deepEqual(importWithinRecentDays(items, 7, now).map((x) => x.title), ["半天前", "正好 3 天前", "5 天前"]);
+  assert.equal(importWithinRecentDays(items, 15, now).length, 3);
+  assert.equal(importWithinRecentDays(items, 0, now).length, 4, "0 天等于不过滤");
+  assert.equal(importWithinRecentDays(items, -5, now).length, 4, "负数也当不过滤");
+  assert.equal(importWithinRecentDays(null, 3, now).length, 0);
+});
+
+test("最近 N 天过滤：读不到收藏时间的条目要保留", () => {
+  // 注意要把依赖一起加载：加载器只抽列出来的函数，
+  // importWithinRecentDays 内部调用 favoriteTimeMs，不一起抽出来就会 ReferenceError。
+  const { importWithinRecentDays } = loadBackgroundFunctions(["favoriteTimeMs", "importWithinRecentDays"]);
+  const now = 1761613600000;
+  const kept = importWithinRecentDays([
+    { favoriteAt: 0, title: "没有时间" },
+    { favoriteAt: undefined, title: "undefined" },
+    { favoriteAt: null, title: "null" },
+    { favoriteAt: Math.floor((now - 90 * 86400000) / 1000), title: "90 天前" }
+  ], 3, now);
+  // 宁可多处理一条，也不要漏掉读不到时间的记录
+  assert.deepEqual(kept.map((x) => x.title), ["没有时间", "undefined", "null"]);
 });
 
 /* ------------------------- V1.1.0：同步差异报告 -------------------------

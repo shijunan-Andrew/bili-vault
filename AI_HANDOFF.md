@@ -100,7 +100,7 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── uninstall-native-folder-opener.ps1
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
-│   ├── stability.test.cjs        # Node 内置测试（138 项）：静态回归断言 + 并进来的单元测试
+│   ├── stability.test.cjs        # Node 内置测试（141 项）：静态回归断言 + 并进来的单元测试
 │   ├── archive-core.test.cjs     # 59 项真执行单元测试：require archive-core.js 真的调用它
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
@@ -530,7 +530,7 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 **138 项检查**（137 项静态回归 + 1 项把 `test/archive-core.test.cjs` 的 59 项真执行单元测试并进来）。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
+当前包含 **141 项检查**（140 项静态回归 + 1 项把 `test/archive-core.test.cjs` 的 59 项真执行单元测试并进来）。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
 可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。
 
 - **归档与下载匹配**（开头，9 项）：下载队列的收藏夹传递、BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。

@@ -2050,6 +2050,32 @@ function importMetadata(item, cover) {
   };
 }
 
+/* 收藏时间统一成毫秒。
+   B 站列表接口的 fav_time 是【秒】，而项目里其它来源可能是毫秒。
+   本文件已有两处用 `> 1e12 ? x : x * 1000` 做这个判断（见 favoriteTimeMs 的调用方与 buildInfo 那一段），
+   这里抽出来共用 —— V1.1.4 第一版的「最近 N 天」过滤忘了转换，
+   拿 Date.now() 的毫秒去比 fav_time 的秒，条件永远为假，
+   2720 条一条都没命中（真机报告："限定最近 3 天：2720 条中命中 0 条"）。 */
+function favoriteTimeMs(value) {
+  const raw = Number(value) || 0;
+  if (!raw) return 0;
+  return raw > 1e12 ? raw : raw * 1000;
+}
+
+/* 「最近 N 天」过滤。纯函数，方便真跑测试。
+   recentDays 为 0 或负数时不过滤（等同全量）。
+   读不到收藏时间的条目一律保留 —— 宁可多处理一条，也不要漏掉。 */
+function importWithinRecentDays(items, recentDays, now = Date.now()) {
+  const list = Array.isArray(items) ? items : [];
+  const days = Math.max(0, Number(recentDays) || 0);
+  if (!days) return list;
+  const cutoff = now - days * 86400000;
+  return list.filter((item) => {
+    const at = favoriteTimeMs(item?.favoriteAt);
+    return !at || at >= cutoff;
+  });
+}
+
 function importIdentifierKeys(item) {
   const normalizedBvid = String(item.bvid || "").trim();
   const normalizedAid = String(item.aid || "").trim().replace(/^av/i, "");
@@ -2156,13 +2182,35 @@ async function importBiliFavorites(data, tabId = null) {
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderTotal: 0 }, counts: { imported, refreshed, skipped, failed, total } });
 
       importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`);
-      let first;
-      try { first = await fetchImportFavoritePage(folder, 1, tabId); }
-      catch (error) {
-        importRethrowIfAbort(error);
+      // 第 1 页读不到就整轮跳过这个收藏夹，代价太大：一次偶发的 412 会让用户以为功能坏了
+      // （真机上就发生过 —— 错误报告只有一行"读取第 1 页失败"，用户完全无从判断是风控还是 bug）。
+      // 这里退避重试：读超时、连接抖动这类瞬时问题能救回来。
+      // 真正的风控需要更长时间才能恢复，重试救不了，但至少报告里会写明"已重试 3 次"，
+      // 用户能区分"偶发失败"和"被限流了"。
+      let first = null;
+      let firstError = null;
+      for (let attempt = 1; attempt <= IMPORT_FIRST_PAGE_ATTEMPTS; attempt += 1) {
+        try {
+          first = await fetchImportFavoritePage(folder, 1, tabId);
+          firstError = null;
+          break;
+        } catch (error) {
+          importRethrowIfAbort(error);
+          firstError = error;
+          if (attempt < IMPORT_FIRST_PAGE_ATTEMPTS) {
+            importProgress(`「${folder.title}」第 1 页读取失败，第 ${attempt + 1}/${IMPORT_FIRST_PAGE_ATTEMPTS} 次尝试…`);
+            await importDelay(attempt * 1500);
+          }
+        }
+      }
+      if (!first) {
         failed += 1;
         hasIssues = true;
-        reportLines.push("", `收藏夹：${folder.title}`, `读取第 1 页失败：${error.message}`);
+        reportLines.push("", `收藏夹：${folder.title}`,
+          `读取第 1 页失败（已重试 ${IMPORT_FIRST_PAGE_ATTEMPTS} 次）：${firstError?.message || "未知错误"}`);
+        if (importIsRateLimitedError(firstError)) {
+          reportLines.push("这通常是短时间请求过多触发的限流。等几分钟再试；如果反复出现，可以先只用「开始更新」缩小范围。");
+        }
         continue;
       }
       const allItems = [...first.items];
@@ -2208,16 +2256,21 @@ async function importBiliFavorites(data, tabId = null) {
       // 注意：下面的对账（missingCount）仍然按 allItems 算 —— 那问的是"分页有没有读全"，
       // 与"这次要写哪几条"是两件事，混在一起会把过滤掉的数量误报成缺失。
       const recentDays = Math.max(0, Number(data?.recentDays) || 0);
-      let scopedItems = allItems;
+      const scopedItems = importWithinRecentDays(allItems, recentDays);
       if (recentDays > 0) {
-        const cutoff = Date.now() - recentDays * 86400000;
-        // 读不到收藏时间的（接口异常或老数据）宁可多处理一条，也不要漏掉
-        scopedItems = allItems.filter((item) => {
-          const at = Number(item.favoriteAt) || 0;
-          return !at || at >= cutoff;
-        });
         folderNotes.push(`「${folder.title}」按最近 ${recentDays} 天过滤：线上 ${allItems.length} 条里命中 ${scopedItems.length} 条。`);
         folderLog.push(`限定最近 ${recentDays} 天：${allItems.length} 条中命中 ${scopedItems.length} 条，其余未处理。`);
+        // 命中 0 条时把收藏时间的范围也写出来 —— 上一版正是因为单位搞错导致全被过滤掉，
+        // 而报告只写"命中 0 条"，看不出是"确实没有"还是"判据写错了"。
+        if (!scopedItems.length && allItems.length) {
+          const times = allItems.map((item) => favoriteTimeMs(item?.favoriteAt)).filter(Boolean);
+          if (times.length) {
+            const newest = new Date(Math.max(...times));
+            const oldest = new Date(Math.min(...times));
+            folderLog.push(`（线上条目里最新的收藏时间是 ${formatChineseDateTime(newest)}，最早是 ${formatChineseDateTime(oldest)}。`
+              + "如果最新时间也在窗口之外，那命中 0 条就是对的。）");
+          }
+        }
       }
       total += scopedItems.length;
       // 4.9：对账。分页上限（1000 页）或接口异常都可能漏掉尾部，以前没有这一步，
@@ -2612,6 +2665,9 @@ async function getDownloadSubtitles(message) {
    一旦调了它就不再"便宜"，也就失去了存在的意义。 */
 
 const DIFF_REPORT_DIR = "002同步报告";
+
+// 第 1 页失败时的重试次数。只影响"整个收藏夹读不读得到"，不影响分页节奏。
+const IMPORT_FIRST_PAGE_ATTEMPTS = 3;
 
 // 从 视频信息.txt 原文取「视频状态」行。归档里写的是「正常」或「已失效视频（已尝试恢复）」。
 function localRecordIsInvalid(text) {
