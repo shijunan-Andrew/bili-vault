@@ -2327,6 +2327,36 @@ test("importItemIsTrustworthy：占位符不算数据（真跑）", () => {
   assert.equal(importItemIsTrustworthy({}), false);
 });
 
+test("attr 位标志：最低位表示已失效（真跑 + 真数据）", () => {
+  const { importAttrIsInvalid } = loadBackgroundFunctions(["importAttrIsInvalid"]);
+  // 真机数据（2026-10-10 抓自 54 个收藏夹里的「沙雕动画」129 条 +「哆啦a梦」6 条）
+  // 6 条失效视频：5 条 attr=9、1 条 attr=1；其余 122 条有效视频全部 attr=0
+  assert.equal(importAttrIsInvalid(1), true, "哆啦a梦那条失效视频的 attr");
+  assert.equal(importAttrIsInvalid(9), true, "沙雕动画 5 条失效视频的 attr —— 用 === 1 会全部漏掉");
+  assert.equal(importAttrIsInvalid(0), false, "有效视频");
+  // 边界：缺字段 / 空值 / 字符串都要当有效处理，不能误判成失效
+  assert.equal(importAttrIsInvalid(undefined), false);
+  assert.equal(importAttrIsInvalid(null), false);
+  assert.equal(importAttrIsInvalid(""), false);
+  assert.equal(importAttrIsInvalid("0"), false);
+  assert.equal(importAttrIsInvalid("9"), true, "字符串形态也要认");
+  assert.equal(importAttrIsInvalid(2), false, "bit1 不是失效位");
+  assert.equal(importAttrIsInvalid(8), false, "bit3 不是失效位（9 = 8|1，只有 bit0 算失效）");
+});
+
+test("失效判据三个来源缺一不可", () => {
+  const src = readProjectFile("background.js");
+  const line = src.split("\n").find((l) => l.includes("isInvalid: media.is_invalid"));
+  assert.ok(line, "找不到 isInvalid 的判据行");
+  assert.match(line, /media\.is_invalid === true/, "少了接口给的显式字段");
+  assert.match(line, /importAttrIsInvalid\(media\.attr\)/, "少了 attr 位标志兜底");
+  assert.match(line, /importIsInvalidTitle\(title\)/, "少了标题兜底");
+  // 差点写成 attr === 1：那样 5 条 attr=9 的失效视频会被当成有效
+  assert.equal(/attr\s*===\s*1/.test(src), false, "不许用 === 1 判 attr，它是位标志，漏 bit0 以外的组合");
+  assert.match(src, /function importAttrIsInvalid\(value\) \{ return \(Number\(value \|\| 0\) & 1\) === 1; \}/,
+    "importAttrIsInvalid 必须按位与判最低位");
+});
+
 test("失效视频不许覆盖本地已有的记录", () => {
   const src = readProjectFile("background.js");
   // 在"已存在"的分支里，失效条目必须先被丢弃再谈刷新
