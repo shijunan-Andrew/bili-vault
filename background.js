@@ -563,10 +563,12 @@ const IMPORT_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9Rd
 
 function importClean(value) { return String(value ?? "").replace(/\s+/g, " ").trim(); }
 function importIsInvalidTitle(value) { return IMPORT_INVALID_TITLES.has(importClean(value)); }
-// 收藏夹接口的 attr 是位标志，最低位表示已失效。
-// 实测 129 条收藏里 6 条失效视频取值为 1 或 9（都含 bit0），其余 122 条有效视频全为 0。
-// 只认标题的话，B 站一旦改文案就会静默失效；attr 是结构化字段，不随文案变，所以一起判。
-function importAttrIsInvalid(value) { return (Number(value || 0) & 1) === 1; }
+// 收藏夹接口的 attr 是「删除原因」枚举：0 表示有效，非 0 都是失效。
+// 取值表（与 bili-recovery 的 ATTR_LABELS、summary.js 一致）：
+//   1 其他、2 版权原因、3 违规内容、5 视频已失效、9 UP主自行删除、11 已锁定。
+// 实测 250 条有效视频 attr 全为 0，32 条失效视频 attr 全非 0（只有 1 和 9 两种），一一对应。
+// 注意：1 和 9 都是奇数纯属巧合，别当位标志去判最低位 —— 那样 attr=2（版权原因）会漏判。
+function importAttrIsInvalid(value) { return Number(value || 0) !== 0; }
 function importUsefulTitle(value) { const text = importClean(value); return !!text && !importIsInvalidTitle(text) && text !== "该合集已失效"; }
 function importBvidFromUrl(value) { return importClean(value).match(/\b(BV[0-9A-Za-z]{10})\b/)?.[1] || ""; }
 function importAidKey(value) { return importClean(value).replace(/^av/i, ""); }

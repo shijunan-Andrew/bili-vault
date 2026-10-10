@@ -2327,21 +2327,23 @@ test("importItemIsTrustworthy：占位符不算数据（真跑）", () => {
   assert.equal(importItemIsTrustworthy({}), false);
 });
 
-test("attr 位标志：最低位表示已失效（真跑 + 真数据）", () => {
+test("attr 是删除原因枚举：非 0 即失效（真跑 + 真数据）", () => {
   const { importAttrIsInvalid } = loadBackgroundFunctions(["importAttrIsInvalid"]);
-  // 真机数据（2026-10-10 抓自 54 个收藏夹里的「沙雕动画」129 条 +「哆啦a梦」6 条）
-  // 6 条失效视频：5 条 attr=9、1 条 attr=1；其余 122 条有效视频全部 attr=0
-  assert.equal(importAttrIsInvalid(1), true, "哆啦a梦那条失效视频的 attr");
-  assert.equal(importAttrIsInvalid(9), true, "沙雕动画 5 条失效视频的 attr —— 用 === 1 会全部漏掉");
+  // 真机数据（2026-10-10 抓自 3 个收藏夹共 282 条）：
+  // 250 条有效视频 attr 全为 0；32 条失效视频 attr 全非 0（1 和 9 两种取值）
   assert.equal(importAttrIsInvalid(0), false, "有效视频");
-  // 边界：缺字段 / 空值 / 字符串都要当有效处理，不能误判成失效
+  assert.equal(importAttrIsInvalid(1), true, "哆啦a梦、研 里失效视频的取值");
+  assert.equal(importAttrIsInvalid(9), true, "沙雕动画 5 条、研 17 条失效视频的取值");
+  // ★ 这两条是「按位判最低位」写法会漏掉的：2 是偶数，但它是版权原因，同样失效
+  assert.equal(importAttrIsInvalid(2), true, "版权原因 —— & 1 写法会当成有效");
+  assert.equal(importAttrIsInvalid(11), true, "已锁定");
+  assert.equal(importAttrIsInvalid(5), true, "视频已失效");
+  // 边界：缺字段 / 空值 / 字符串
   assert.equal(importAttrIsInvalid(undefined), false);
   assert.equal(importAttrIsInvalid(null), false);
   assert.equal(importAttrIsInvalid(""), false);
   assert.equal(importAttrIsInvalid("0"), false);
   assert.equal(importAttrIsInvalid("9"), true, "字符串形态也要认");
-  assert.equal(importAttrIsInvalid(2), false, "bit1 不是失效位");
-  assert.equal(importAttrIsInvalid(8), false, "bit3 不是失效位（9 = 8|1，只有 bit0 算失效）");
 });
 
 test("失效判据三个来源缺一不可", () => {
@@ -2349,12 +2351,15 @@ test("失效判据三个来源缺一不可", () => {
   const line = src.split("\n").find((l) => l.includes("isInvalid: media.is_invalid"));
   assert.ok(line, "找不到 isInvalid 的判据行");
   assert.match(line, /media\.is_invalid === true/, "少了接口给的显式字段");
-  assert.match(line, /importAttrIsInvalid\(media\.attr\)/, "少了 attr 位标志兜底");
+  assert.match(line, /importAttrIsInvalid\(media\.attr\)/, "少了 attr 兜底");
   assert.match(line, /importIsInvalidTitle\(title\)/, "少了标题兜底");
-  // 差点写成 attr === 1：那样 5 条 attr=9 的失效视频会被当成有效
-  assert.equal(/attr\s*===\s*1/.test(src), false, "不许用 === 1 判 attr，它是位标志，漏 bit0 以外的组合");
-  assert.match(src, /function importAttrIsInvalid\(value\) \{ return \(Number\(value \|\| 0\) & 1\) === 1; \}/,
-    "importAttrIsInvalid 必须按位与判最低位");
+  // 两次差点写错的写法都禁止退回：
+  //   attr === 1 → 漏掉 attr=9（UP主自行删除），实测 22 条
+  //   attr & 1   → 漏掉 attr=2（版权原因）这类偶数值
+  assert.equal(/attr\s*===\s*1/.test(src), false, "不许用 === 1 判 attr，它是枚举不是布尔");
+  assert.equal(/attr\s*&\s*1/.test(src), false, "不许按位判最低位 —— 1 和 9 都是奇数只是巧合");
+  assert.match(src, /function importAttrIsInvalid\(value\) \{ return Number\(value \|\| 0\) !== 0; \}/,
+    "importAttrIsInvalid 必须判「非 0」");
 });
 
 test("失效视频不许覆盖本地已有的记录", () => {
