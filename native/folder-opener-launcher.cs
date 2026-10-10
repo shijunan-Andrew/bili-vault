@@ -130,7 +130,7 @@ internal static class FolderOpenerLauncher
 
             string hostRoot = AppDomain.CurrentDomain.BaseDirectory;
             string script = Path.Combine(hostRoot, "folder-opener-host.ps1");
-            if (!File.Exists(script)) throw new FileNotFoundException("找不到原生助手工作脚本 folder-opener-host.ps1，请重新运行安装脚本。", script);
+            if (!File.Exists(script)) throw new FileNotFoundException("找不到本地目录打开助手工作脚本 folder-opener-host.ps1，请重新运行安装脚本。", script);
 
             string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             string powershell = Path.Combine(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -167,7 +167,7 @@ internal static class FolderOpenerLauncher
 
                 if (forwarded == 0)
                 {
-                    WriteErrorFrame(output, "原生助手没有返回结果（工作进程退出码 " + worker.ExitCode + "），请重新运行安装脚本。");
+                    WriteErrorFrame(output, "本地目录打开助手没有返回结果（工作进程退出码 " + worker.ExitCode + "），请重新运行安装脚本。");
                     return 1;
                 }
                 return worker.ExitCode;

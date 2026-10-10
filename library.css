@@ -1170,6 +1170,16 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 
 /* V1.1.0：与 B 站对比。以下都是新类，不覆盖任何既有选择器。 */
 /* 风控提醒要让人真的看一眼 —— 与插件弹窗里的 .popup-dialog-warning 同一套观感。 */
+/* 结果弹窗失败态：标题和图标用红色；成功态保持默认。 */
+.result-dialog-error .editor-heading h2 {
+  color: var(--danger);
+}
+
+.result-dialog-error .editor-heading-icon {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .editor-hint-danger {
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--danger-line);

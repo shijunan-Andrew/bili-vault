@@ -570,7 +570,7 @@
   "已复制失败清单。": "Failure list copied.",
   "配置已导入。": "Settings imported.",
   "导入配置失败：{message}": "Could not import settings: {message}",
-  "若尚未安装原生助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。": "If the native helper is not installed yet, run install-native-folder-opener.bat from the extension folder and fill in this extension's current ID and download folder (the default is the root folder \\000视频下载); afterwards reload the extension at chrome://extensions and restart Chrome completely.",
+  "若尚未安装本地目录打开助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。": "If the native helper is not installed yet, run install-native-folder-opener.bat from the extension folder and fill in this extension's current ID and download folder (the default is the root folder \\000视频下载); afterwards reload the extension at chrome://extensions and restart Chrome completely.",
   "从 chrome://extensions 导入插件后请不要移动插件文件夹位置，否则可能导致插件失效，需要重新导入。": "After loading the extension from chrome://extensions, do not move its folder — moving it can break the extension, and you would have to load it again.",
   "已下载？点击标记": "Downloaded elsewhere? Mark it",
   "全网搜索该视频": "Search the web for this video",
@@ -671,5 +671,18 @@
   "当前是「{speed}」档，而这个收藏夹线上有 {total} 条。建议先到插件弹窗里改用「较低」档位。": "You are on 「{speed}」 and this collection has {total} items on Bilibili. Switching to 「Lower」 in the popup first is recommended.",
   "通过 B 站 APP 接口去手机端收藏夹碰运气，看能不能找回失效视频的原始标题。失效状态和「未能找回资料」本来就会保存，不开这个也一样。开启会让导入多等 1~2 分钟。": "Uses the Bilibili app API to dig through your mobile favourites on the off-chance of recovering an unavailable video's original title. The unavailable status and 「no data recovered」 are saved either way. Turning this on adds 1–2 minutes to an import.",
   "尝试找回失效视频的部分信息": "Try to recover partial info for unavailable videos",
-  "失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。": "An unavailable video is just a blank placeholder on Bilibili — its title, cover and description are gone. When enabled, the extension searches the app API, Watch Later and watch history to piece the cover and title back together. If nothing is found it records 「unknown」 as usual, and records you already have are never affected."
+  "失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。": "An unavailable video is just a blank placeholder on Bilibili — its title, cover and description are gone. When enabled, the extension searches the app API, Watch Later and watch history to piece the cover and title back together. If nothing is found it records 「unknown」 as usual, and records you already have are never affected.",
+  "无法打开本地视频目录": "Could not open the local video folder",
+  "已打开本地视频目录": "Local video folder opened",
+  "已在文件资源管理器中定位到：{path}": "Opened File Explorer at: {path}",
+  "已标记为已下载": "Marked as downloaded",
+  "标记失败": "Could not mark it",
+  "移动或复制完成": "Move or copy finished",
+  "移动或复制部分完成": "Move or copy partly finished",
+  "整理失败": "Organising failed",
+  "已删除本地收藏夹": "Local collection deleted",
+  "“{name}”": "「{name}」",
+  "本地归档文件已删除。": "The local archive files have been deleted.",
+  "若尚未安装本地目录打开助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后完全重启 Chrome 即可生效，不需要重新加载插件。": "If the local-folder opener is not installed yet, run install-native-folder-opener.bat from the extension folder and fill in this extension's current ID and download folder (defaults to \\000视频下载 under the root). A full Chrome restart is enough — no need to reload the extension.",
+  "文件夹：{name}": "Folder: {name}"
 }

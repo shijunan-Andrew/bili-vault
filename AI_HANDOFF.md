@@ -24,7 +24,7 @@
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
-- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（例如 `bili-vault-beta4.9` → `bili-vault`，或 V1.0.0 那次从 `b-vault-V1.0.0` 改名）ID 就会变，安装原生助手时必须填入新 ID。**所以尽量不要改这个目录的名字。**
+- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（例如 `bili-vault-beta4.9` → `bili-vault`，或 V1.0.0 那次从 `b-vault-V1.0.0` 改名）ID 就会变，安装本地目录打开助手时必须填入新 ID。**所以尽量不要改这个目录的名字。**
 
 ## 功能概览
 
@@ -76,7 +76,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 ## 目录结构
 
 ```text
-bili-vault/                       # 仓库根即扩展目录；改名会改变扩展 ID，必须重装原生助手
+bili-vault/                       # 仓库根即扩展目录；改名会改变扩展 ID，必须重装本地目录打开助手
 ├── .git/                         # 36 个版本的完整历史（tag: beta1.0 … beta4.9、V1.0.0）
 ├── .gitignore / .gitattributes   # 忽略本地归档；换行策略（.bat/.ps1/.cs 钉死 CRLF）
 ├── manifest.json                 # MV3 权限、后台 worker、内容脚本注册
@@ -110,7 +110,7 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 └── AI_HANDOFF.md                 # 本文件
 ```
 
-4.0 删除了 `download-folder.html/js/css`（3.2 之后就被原生助手取代，全项目零引用）。4.3 起 `library.html` **不再**作为 web_accessible resource 暴露，改由后台 `chrome.tabs.create` 打开。
+4.0 删除了 `download-folder.html/js/css`（3.2 之后就被本地目录打开助手取代，全项目零引用）。4.3 起 `library.html` **不再**作为 web_accessible resource 暴露，改由后台 `chrome.tabs.create` 打开。
 
 ## 界面与设计系统（4.0 起必须遵守）
 
@@ -587,7 +587,7 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
 3. 检查每个 HTML 的本地 JS/CSS 引用存在，确认 `library.html` 和 `download.html` 在业务脚本之前加载 `archive-core.js`。
 4. 若改动 PowerShell，使用 PowerShell Parser 解析所有 `.ps1`，不要仅靠运行安装脚本验证。注意本机执行策略禁止直接运行 `.ps1`，要用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …`。
 5. 读取 `manifest.json`、`settings.json` 一类 UTF-8 文件时显式指定编码，PowerShell 5.1 的 `Get-Content` 默认按 ANSI 读取，中文会乱码。
-6. 改动原生助手时，重新运行安装脚本（沙箱验证可加 `-SkipRegistry -HostRoot <临时目录>`）并执行 `test-native-folder-opener.ps1`，它会真正按帧协议调用编译出的启动器。
+6. 改动本地目录打开助手时，重新运行安装脚本（沙箱验证可加 `-SkipRegistry -HostRoot <临时目录>`）并执行 `test-native-folder-opener.ps1`，它会真正按帧协议调用编译出的启动器。
 7. 有条件时在 Chrome 加载扩展，登录 B 站验证收藏、导入、下载、暂停/取消、移动/删除和徽标状态。Node 检查不能替代真实 B 站登录/API 测试。
 
 ## 已知限制与历史背景
@@ -596,7 +596,7 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
 - 失效视频只有在 B 站的 APP 收藏、稍后再看、观看历史或其他资料源中仍有记录时才可能恢复；无法找回时缺失字段用“未知”。
 - Native Messaging 仅用于 Windows 资源管理器打开目录。它的清单不允许 `args`，`path` 必须是无参数可执行文件；没有安装或设置不正确时，网页不能直接启动 Explorer，详情页必须保留“复制视频目录路径”这类退路提示。
 - 用户曾报告收藏成功但本地归档失败，并看到 B 站收藏弹窗提示 `The next() called multiple times`。另一次控制台网络错误指向 Kaspersky 浏览器组件的 `gc.kis.v2.scr.kaspersky-labs.com`。后者不是本项目域名；判断归因前需在禁用相关第三方扩展的环境中复现。不要把这类外部错误直接归为本扩展故障。
-- 3.8 修复的两个原生助手缺陷都是运行时问题，Node 静态检查发现不了：一个是 Chrome 静默忽略清单 `args`，一个是 PowerShell 5.1 的默认 ANSI 读取。改动这一块必须跑 `test-native-folder-opener.ps1`，不能只做语法检查。
+- 3.8 修复的两个本地目录打开助手缺陷都是运行时问题，Node 静态检查发现不了：一个是 Chrome 静默忽略清单 `args`，一个是 PowerShell 5.1 的默认 ANSI 读取。改动这一块必须跑 `test-native-folder-opener.ps1`，不能只做语法检查。
 - 待确认（尚未定性）：`content.js` 在 MV3 隔离世界中读取页面变量 `window.__INITIAL_STATE__`，而清单未声明 `world: "MAIN"`，该变量很可能始终读不到，元数据实际走 DOM/meta 回退，自动归档的“分区/视频时长/视频发布时间/标签”容易落成“未知”。需要用一份真实的 `视频信息.txt` 核对后再决定是否改用其他采集方式。
 - **归档数据本身的完整度**（4.1 实测用户档案 333 条记录）：只有 75 条（22.5%）有标签、142 条（42.6%）有简介，150 条（45%）两者都没有。根因是导入流程里 `normalizeImportMedia()` 把 `tags` 硬编码为 `[]`，且只有失效视频会去抓资料。4.1 负责把这些数据正确地显示出来，**4.2 负责在导入/更新时把它们抓全**——对已有档案执行一次「导入或更新」，缺失的标签、发布时间、粉丝数与互动数据都会被补上。
 - **一个已证实的数据错误**：`蜡笔小新/2026年10月09日01时19分50秒` 的归档里 `UP主UID` 写成了 `1515305135`，而接口返回的真实 `owner.mid` 是 `87795103`。抽查另外 4 条记录都是对的，怀疑是收藏夹接口在个别条目上返回了错误的 `upper`。4.2 因为改从 `/x/web-interface/view` 取 UP 主信息，执行一次更新即可修正这类记录。
@@ -662,7 +662,7 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
 7. **在对话框里用 `<label>` 当布局容器时，选择器必须带 `.editor-dialog` 前缀。** `library.css` 有一条 `.editor-dialog label { display: block; ... }`，特异性是 (0,1,1)，会盖掉任何单类选择器 (0,1,0) 的 `display: grid/flex` —— 表现是"勾选框和图标在上、名称和数量在下"的错位。V1.1.0 的「移动或复制」踩过一次（当时用 `!important` 顶了 margin/color/font-size/font-weight，**偏偏漏了 display**），同一个坑还埋着 `videoDialog` 里的 `target-checkbox-option`。测试里有一条专门盯这个，改这些组件的选择器前先看它。
 8. **加了按钮或对话框，立刻把事件绑定写上，并跑测试确认。** 这个项目在这上面栽过两次，都是用户点下去发现没反应才暴露的：V1.1.0 的「与 B 站对比」只写了按钮没写 `addEventListener`；V1.1.3 的对比结果对话框又漏了「关闭」。现在 `test/stability.test.cjs` 里有一条兜底：**凡是 `<dialog>` 里的 `<button id="x">`，`x` 必须在对应 JS 里出现过**（`getElementById` 或 `x.addEventListener` 都算），完全没出现就判定没人管它。新增对话框按钮后跑一遍测试即可。
 9. 界面改动遵守上文“界面与设计系统”的六条约定；改完跑 `node test/stability.test.cjs`，它会拦住字号回退、字符图标复活和页面漏引 theme.css/icons.js。
-10. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
+10. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完本地目录打开助手要重新编译并跑自检脚本。
    **注意：通用的文本编辑工具会静默去掉 BOM。** 2026-10-10 改 `release.ps1` 时就发生过一次——编辑后前 3 字节从 `239,187,191` 变成了 `60,35,10`。**用工具改完任何 `.ps1` / `.cs` 之后，都要重新确认 BOM 还在**，否则 PowerShell 5.1 解析中文会出错：
    ```powershell
    $b = [System.IO.File]::ReadAllBytes('release.ps1'); $b[0..2]

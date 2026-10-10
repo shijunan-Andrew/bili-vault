@@ -44,7 +44,7 @@ New-Item -ItemType Directory -Path $HostRoot -Force | Out-Null
 
 # 1) 工作脚本：真正执行目录校验和打开动作的 PowerShell 部分。
 $sourceScript = Join-Path $PSScriptRoot "native\$workerName"
-if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) { throw "找不到原生助手工作脚本：$sourceScript" }
+if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) { throw "找不到本地目录打开助手工作脚本：$sourceScript" }
 Copy-Item -LiteralPath $sourceScript -Destination (Join-Path $HostRoot $workerName) -Force
 
 # 2) 宿主启动器：Chrome 的原生消息清单不支持 args 字段，path 必须指向一个

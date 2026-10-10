@@ -24,6 +24,10 @@ const diffDialogBody = document.getElementById("diffDialogBody");
 const diffConfirm = document.getElementById("diffConfirm");
 const diffConfirmDetail = document.getElementById("diffConfirmDetail");
 const diffRiskyDialog = document.getElementById("diffRiskyDialog");
+const resultDialog = document.getElementById("resultDialog");
+const resultDialogTitle = document.getElementById("resultDialogTitle");
+const resultDialogText = document.getElementById("resultDialogText");
+const resultDialogIcon = document.getElementById("resultDialogIcon");
 const diffRiskyText = document.getElementById("diffRiskyText");
 const welcomeChoose = document.getElementById("welcomeChoose");
 const welcome = document.getElementById("welcome");
@@ -2090,7 +2094,7 @@ function openDetail(video, restoreTo, options = {}) {
 
 const NATIVE_HOST_NAME = "com.bcatch.folder_opener";
 
-// 原生助手（宿主启动器）以 Native Messaging 帧协议应答。失败时它会回一条
+// 本地目录打开助手（宿主启动器）以 Native Messaging 帧协议应答。失败时它会回一条
 // { ok: false, message } 的响应，这里把 message 原样带出去，避免只看到
 // Chrome 的 “native host has exited” 而不知道真正原因。
 function nativeHostRequest(message) {
@@ -2118,7 +2122,7 @@ function detailVideo() {
   return allVideos().find((video) => video.id === detailContent.dataset.videoId) || null;
 }
 
-// 4.7：help 是一句放在最顶上并加粗的说明（原生助手未安装时的操作步骤）
+// 4.7：help 是一句放在最顶上并加粗的说明（本地目录打开助手未安装时的操作步骤）
 function setDownloadPathNote(text, isError = false, help = "") {
   const note = detailContent.querySelector(".download-path-note");
   if (!note) return;
@@ -2141,7 +2145,7 @@ function downloadPathParts(video) {
   };
 }
 
-// 优先向原生助手要真实绝对路径；助手不可用时退回相对路径，
+// 优先向本地目录打开助手要真实绝对路径；助手不可用时退回相对路径，
 // 这样即使没装助手也能手动在资源管理器里打开。
 async function resolveDownloadPath(video) {
   const { collection, directory } = downloadPathParts(video);
@@ -2150,7 +2154,7 @@ async function resolveDownloadPath(video) {
     const response = await nativeHostRequest({ action: "resolve-directory", collectionName: collection, directoryName: directory });
     if (response.targetPath) return { path: response.targetPath, source: "host" };
   } catch (_) {}
-  // 4.8.2：没装原生助手时，用用户手填的下载根目录拼出绝对路径。
+  // 4.8.2：没装本地目录打开助手时，用用户手填的下载根目录拼出绝对路径。
   // File System Access API 出于隐私考虑不暴露绝对路径，manifest 里也没有 downloads 权限，
   // 所以没有这个设置就只能给相对路径。
   const manualRoot = await readDownloadRootPath();
@@ -2167,7 +2171,9 @@ async function openDownloadDirectory(video) {
   try {
     const response = await nativeHostRequest({ action: "open-directory", collectionName: collection, directoryName: directory });
     setDownloadPathNote(response.targetPath ? BcaI18n.t("已打开：{path}", { path: response.targetPath }) : "");
-    showToast(BcaI18n.t("已在文件资源管理器中打开视频目录。"));
+    showResultDialog(BcaI18n.t("已打开本地视频目录"),
+      response.targetPath ? BcaI18n.t("已在文件资源管理器中定位到：{path}", { path: response.targetPath })
+        : BcaI18n.t("已在文件资源管理器中打开视频目录。"), "ok");
   } catch (error) {
     const fallback = await resolveDownloadPath(video).catch(() => ({ path: "", source: "none" }));
     const lines = [BcaI18n.t("无法打开本地视频目录：{message}", { message: error.message })];
@@ -2178,9 +2184,10 @@ async function openDownloadDirectory(video) {
     }
     lines.push(BcaI18n.t("可以点击上面的“复制视频目录路径”手动在资源管理器地址栏粘贴打开。"));
       // 4.7：安装步骤放到最顶上并加粗——这才是用户真正要照做的一步
-      const help = BcaI18n.t("若尚未安装原生助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后需要在 chrome://extensions 重新加载插件并完全重启 Chrome。");
+      const help = BcaI18n.t("若尚未安装本地目录打开助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后完全重启 Chrome 即可生效，不需要重新加载插件。");
       setDownloadPathNote(lines.join("\n"), true, help);
-    showToast(BcaI18n.t("无法打开本地视频目录，详情见视频详情页。"));
+      // 失败要让用户真的看到 —— 底部 toast 一闪就没了
+      showResultDialog(BcaI18n.t("无法打开本地视频目录"), lines.join("\n"), "error");
   }
 }
 
@@ -2391,13 +2398,14 @@ async function runMarkDownloaded() {
   try {
     const { directoryName } = await markVideoDownloaded(markDownloadedVideo);
     markDownloadedDialog.close();
-    showToast(BcaI18n.t("已标记为已下载，文件夹：{name}", { name: directoryName }));
+    showResultDialog(BcaI18n.t("已标记为已下载"), BcaI18n.t("文件夹：{name}", { name: directoryName }), "ok");
     // 只有「已下载」这个筛选值会参与选项池的计算，其它筛选值下池子不受影响
     if (videoFilter === "downloaded") refreshVideoFilterOptions();
     renderVideos();
     if (currentDetailVideo && currentDetailVideo.id === markDownloadedVideo.id) openDetail(markDownloadedVideo);
   } catch (error) {
     markDownloadedStatus.textContent = BcaI18n.t("标记失败：{message}", { message: error.message });
+    showResultDialog(BcaI18n.t("标记失败"), error.message, "error");
   } finally {
     markDownloadedBusy = false;
     markDownloadedGo.disabled = false;
@@ -2406,7 +2414,7 @@ async function runMarkDownloaded() {
 
 /* ---------------- 4.8.2：手填的下载根目录绝对路径 ----------------
 
-   没装原生助手时，绝对路径没有别的来源。用户在下载页填一次，
+   没装本地目录打开助手时，绝对路径没有别的来源。用户在下载页填一次，
    这里读出来拼路径，复制到的就是能直接粘进资源管理器的完整路径。 */
 
 async function readDownloadRootPath() {
@@ -2597,6 +2605,9 @@ function openCollectionActionDialog(videos, source) {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.value = collection.name;
+    // 默认勾选「原收藏夹」——勾上 = 保留原件并复制，取消 = 移动。
+    // 复制是更安全的那个（移动会把原件从原收藏夹里拿走），所以默认选它。
+    checkbox.checked = sourceCollections.has(collection.name);
     checkbox.addEventListener("change", updateCollectionActionSelection);
     const icon = document.createElement("span");
     icon.className = "collection-action-icon";
@@ -2683,9 +2694,11 @@ async function confirmCollectionAction() {
     if (alreadyThere) messages.push(BcaI18n.t("{count} 个视频已在所选收藏夹中", { count: alreadyThere }));
     if (downloadCleanupWarnings.length) messages.push(BcaI18n.t("下载文件已复制，但有 {count} 个旧目录未能清理", { count: downloadCleanupWarnings.length }));
     if (failures.length) messages.push(BcaI18n.t("{count} 个失败，仍保留选中：{first}", { count: failures.length, first: failures[0] }));
-    showToast(messages.join("；") || BcaI18n.t("没有需要整理的视频。原视频已保留。"));
+    const summary = messages.join("；") || BcaI18n.t("没有需要整理的视频。原视频已保留。");
+    showResultDialog(failures.length ? BcaI18n.t("移动或复制部分完成") : BcaI18n.t("移动或复制完成"), summary,
+      failures.length ? "error" : "ok");
   } catch (error) {
-    showToast(BcaI18n.t("整理失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }));
+    showResultDialog(BcaI18n.t("整理失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
   } finally {
     confirmCollectionActionButton.dataset.busy = "false";
     confirmCollectionActionButton.textContent = BcaI18n.t("确认");
@@ -2749,23 +2762,38 @@ async function confirmPendingDelete() {
     closeDetail();
     await displayRoot(rootHandle, selectedCollection);
     if (action.type === "collection") {
-      showToast(BcaI18n.t("已删除本地收藏夹“{name}”", { name: action.collection.name }) + downloadCleanupSuffix(downloadCleanupFailures.length));
+      showResultDialog(BcaI18n.t("已删除本地收藏夹"), BcaI18n.t("“{name}”", { name: action.collection.name }) + downloadCleanupSuffix(downloadCleanupFailures.length), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       showToast(batchResult.failures.length
         ? BcaI18n.t("已删除 {deleted} 个，{failed} 个失败并保留选中。{first}", { deleted: batchResult.deleted, failed: batchResult.failures.length, first: batchResult.failures[0] })
         : BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }) + downloadCleanupSuffix(downloadCleanupFailures.length));
     } else {
-      showToast(BcaI18n.t("已删除本地归档") + downloadCleanupSuffix(downloadCleanupFailures.length));
+      showResultDialog(BcaI18n.t("已删除本地归档"), BcaI18n.t("本地归档文件已删除。") + downloadCleanupSuffix(downloadCleanupFailures.length), "ok");
     }
   } catch (error) {
-    showToast(BcaI18n.t("删除失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }));
+    showResultDialog(BcaI18n.t("删除失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
   } finally {
     deleteInProgress = false;
     cancelDeleteButton.disabled = false;
     confirmDeleteButton.disabled = false;
     confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : BcaI18n.t("删除本地文件");
   }
+}
+
+/* 整理类操作的结果弹窗。
+   这几件事（已下载标记 / 移动复制 / 删除 / 打开本地目录）失败时代价很大，
+   而底部 toast 一闪就没了，用户经常看不到 —— 改成必须点掉的弹窗。
+   kind: "ok" 成功、"error" 失败。 */
+function showResultDialog(title, text, kind = "ok") {
+  if (!resultDialog) return;
+  // 标题由调用方用 BcaI18n.t("字面量") 传进来 —— 这里不能再包一层 t()，
+  // 那会把变量当键（项目约定键必须是字面量，这个坑已经踩过好几次）
+  resultDialogTitle.textContent = title;
+  resultDialogText.textContent = String(text ?? "");
+  resultDialogIcon.setAttribute("data-icon", kind === "ok" ? "check" : "alert");
+  resultDialog.classList.toggle("result-dialog-error", kind !== "ok");
+  resultDialog.showModal();
 }
 
 function showToast(message) {
@@ -2985,6 +3013,7 @@ diffLibraryButton.addEventListener("click", () => {
   diffConfirmDetail.textContent = BcaI18n.t("将对比「{name}」与 B 站上的同名收藏夹。", { name: selectedCollection });
   diffConfirm.showModal();
 });
+document.getElementById("resultDialogClose").addEventListener("click", () => resultDialog.close());
 document.getElementById("diffConfirmCancel").addEventListener("click", () => diffConfirm.close());
 // 结果对话框的「关闭」按钮。V1.1.0 加这个对话框时同样漏了绑定 ——
 // 和 diffLibraryButton 是同一个错误，所以测试里加了一条专门查"对话框里的按钮有没有被引用"。

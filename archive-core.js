@@ -101,7 +101,7 @@
     return String(value || "").trim().replace(/^[\\/]+/, "").replace(/[\\/]+$/, "");
   }
 
-  // 下载目录相对路径：“收藏夹\视频目录”。用于原生助手不可用时的手动打开提示。
+  // 下载目录相对路径：“收藏夹\视频目录”。用于本地目录打开助手不可用时的手动打开提示。
   function downloadPathLabel(collectionName, directoryName) {
     return [normalizePathSegment(collectionName), normalizePathSegment(directoryName)].filter(Boolean).join("\\");
   }

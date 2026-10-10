@@ -79,7 +79,7 @@ function Send-NativeRequest([hashtable]$Payload) {
     if ($offset -ne 4) {
       $stderrText = $process.StandardError.ReadToEnd()
       $process.WaitForExit()
-      throw "原生助手没有返回结果（退出码 $($process.ExitCode)）。$stderrText"
+      throw "本地目录打开助手没有返回结果（退出码 $($process.ExitCode)）。$stderrText"
     }
     $length = [System.BitConverter]::ToUInt32($headerBuffer, 0)
     $bodyBuffer = New-Object byte[] $length

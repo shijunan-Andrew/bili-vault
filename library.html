@@ -255,6 +255,17 @@
     </div>
   </dialog>
 
+  <!-- 整理类操作（已下载 / 移动复制 / 删除 / 打开本地目录）的结果提示。
+       以前只用底部 toast，一闪就没了 —— 失败时用户很容易错过，
+       而这几件事恰恰是"做错了代价很大"的。 -->
+  <dialog id="resultDialog" class="editor-dialog" aria-labelledby="resultDialogTitle">
+    <div class="editor-heading"><span id="resultDialogIcon" class="editor-heading-icon" data-icon="alert"></span><h2 id="resultDialogTitle"></h2></div>
+    <p id="resultDialogText" class="editor-hint"></p>
+    <div class="editor-actions">
+      <button id="resultDialogClose" class="button button-primary" type="button" data-i18n="知道了">知道了</button>
+    </div>
+  </dialog>
+
   <dialog id="diffRiskyDialog" class="editor-dialog" aria-labelledby="diffRiskyTitle">
     <div class="editor-heading"><span class="editor-heading-icon" data-icon="alert"></span><h2 id="diffRiskyTitle" data-i18n="建议先改用「较低」档位">建议先改用「较低」档位</h2></div>
     <p id="diffRiskyText" class="editor-hint editor-hint-danger"></p>
