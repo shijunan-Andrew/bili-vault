@@ -2270,7 +2270,7 @@ test("收藏库的档位风险判断要用线上条数，不能用本地条数",
   // 必须是问后台要线上条数 —— 用本地条数做代理，本地为空时是 0，
   // 快档跑 700 多条也不会提醒（真机上就是这么漏掉的）
   assert.match(library, /type: "bca-fav-counts"/, "收藏库没有查线上条数");
-  assert.match(library, /response\.counts\?\[selectedCollection\]/, "没有用后台返回的条数");
+  assert.match(library, /response\.counts\?\.\[selectedCollection\]/, "没有用后台返回的条数");
   assert.match(library, /RISKY_SPEEDS\.has\(response\.speed\)/, "档位要用后台的真实值，不能用本地缓存的");
 
   const src = readProjectFile("background.js");
