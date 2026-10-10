@@ -28,6 +28,7 @@ const resultDialog = document.getElementById("resultDialog");
 const resultDialogTitle = document.getElementById("resultDialogTitle");
 const resultDialogText = document.getElementById("resultDialogText");
 const resultDialogIcon = document.getElementById("resultDialogIcon");
+const resultDialogTutorial = document.getElementById("resultDialogTutorial");
 const diffRiskyText = document.getElementById("diffRiskyText");
 const welcomeChoose = document.getElementById("welcomeChoose");
 const welcome = document.getElementById("welcome");
@@ -2189,7 +2190,7 @@ async function openDownloadDirectory(video) {
       // 失败要让用户真的看到 —— 底部 toast 一闪就没了
       // 弹窗里只放安装指引：错误详情、路径、"复制路径"那句话都会占满弹窗，
       // 而用户真正要照做的是安装这一步。其余信息仍在详情页的说明区。
-      showResultDialog(BcaI18n.t("无法打开本地视频目录"), help, "error");
+      showResultDialog(BcaI18n.t("无法打开本地视频目录"), help, "error", { tutorial: true });
   }
 }
 
@@ -2787,8 +2788,11 @@ async function confirmPendingDelete() {
    这几件事（已下载标记 / 移动复制 / 删除 / 打开本地目录）失败时代价很大，
    而底部 toast 一闪就没了，用户经常看不到 —— 改成必须点掉的弹窗。
    kind: "ok" 成功、"error" 失败。 */
-function showResultDialog(title, text, kind = "ok") {
+function showResultDialog(title, text, kind = "ok", options = {}) {
   if (!resultDialog) return;
+  // 教程按钮只在需要"照着做一串步骤"的失败场景出现（目前是打开本地目录失败）。
+  // 平时不显示，免得把普通的结果提示撑出多余的选择。
+  resultDialogTutorial.hidden = !options.tutorial;
   // 标题由调用方用 BcaI18n.t("字面量") 传进来 —— 这里不能再包一层 t()，
   // 那会把变量当键（项目约定键必须是字面量，这个坑已经踩过好几次）
   resultDialogTitle.textContent = title;
@@ -3014,6 +3018,11 @@ diffLibraryButton.addEventListener("click", () => {
   }
   diffConfirmDetail.textContent = BcaI18n.t("将对比「{name}」与 B 站上的同名收藏夹。", { name: selectedCollection });
   diffConfirm.showModal();
+});
+document.getElementById("resultDialogTutorial").addEventListener("click", () => {
+  // 扩展页面可以直接被扩展自己打开，不需要 web_accessible_resources
+  chrome.tabs.create({ url: chrome.runtime.getURL("tutorial.html") });
+  resultDialog.close();
 });
 document.getElementById("resultDialogClose").addEventListener("click", () => resultDialog.close());
 document.getElementById("diffConfirmCancel").addEventListener("click", () => diffConfirm.close());

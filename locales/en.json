@@ -684,5 +684,6 @@
   "“{name}”": "「{name}」",
   "本地归档文件已删除。": "The local archive files have been deleted.",
   "若尚未安装本地目录打开助手，请运行插件目录中的 install-native-folder-opener.bat，填入本插件当前的扩展程序 ID 和下载目录（默认为根目录\\000视频下载）；安装后完全重启 Chrome 即可生效，不需要重新加载插件。": "If the local-folder opener is not installed yet, run install-native-folder-opener.bat from the extension folder and fill in this extension's current ID and download folder (defaults to \\000视频下载 under the root). A full Chrome restart is enough — no need to reload the extension.",
-  "文件夹：{name}": "Folder: {name}"
+  "文件夹：{name}": "Folder: {name}",
+  "看不懂？查看教程": "Not sure how? See the guide"
 }

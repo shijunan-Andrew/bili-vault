@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>本地目录打开助手 · 安装教程</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  body { margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--ink); font: 15px/1.7 var(--font-sans); }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 28px; }
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps > li { counter-increment: step; margin: 0 0 28px; padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+  ol.steps > li::before { content: "第 " counter(step) " 步"; display: block; margin-bottom: 8px; color: var(--accent); font-weight: 700; font-size: 13px; letter-spacing: .04em; }
+  .what { font-weight: 600; margin: 0 0 10px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+  code { padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); font-size: 13px; }
+  /* 界面示意图：用纯 CSS 画，不放真实截图 —— 真实截图里会有用户名、路径、扩展 ID */
+  .shot { margin: 12px 0 0; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; font-size: 13px; }
+  .shot-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--surface-soft); border-bottom: 1px solid var(--line); color: var(--muted); }
+  .shot-body { padding: 12px; background: var(--surface); }
+  .row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; }
+  .row + .row { margin-top: 2px; }
+  .row.mark { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+  .addr { flex: 1; padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); font-family: var(--font-sans); font-size: 12px; }
+  .tag { padding: 2px 8px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; }
+  .note { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--accent-line); border-radius: var(--r-sm); background: var(--accent-soft); }
+  .done { padding: 3px 8px; border-radius: 4px; background: var(--success-soft); color: var(--success); font-weight: 600; }
+  .actions { margin-top: 32px; display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>本地目录打开助手 · 安装教程</h1>
+  <p class="lead">装好之后，收藏库里的「打开本地视频目录」就能直接在文件资源管理器里定位到视频文件夹。<strong>总共五步，装一次就行。</strong></p>
+
+  <ol class="steps">
+    <li>
+      <p class="what">双击插件目录里的 <code>install-native-folder-opener.bat</code></p>
+      <p class="hint">就在你加载插件时选的那个文件夹里，和 <code>manifest.json</code> 放在一起。</p>
+      <div class="shot">
+        <div class="shot-bar">← → ↑ &nbsp; bili-vault</div>
+        <div class="shot-body">
+          <div class="row mark"><span>📄</span><span>install-native-folder-opener.bat</span><span style="margin-left:auto;color:var(--muted)">Windows 批处理文件</span></div>
+          <div class="row"><span>📄</span><span>manifest.json</span><span style="margin-left:auto;color:var(--muted)">JSON 文件</span></div>
+          <div class="row"><span>📄</span><span>library.html</span><span style="margin-left:auto;color:var(--muted)">Chrome HTML</span></div>
+        </div>
+      </div>
+    </li>
+
+    <li>
+      <p class="what">在弹出的窗口里，粘贴扩展程序 ID</p>
+      <p class="hint">先去 <code>chrome://extensions</code>，找到「哔哩藏库」，把插件介绍<strong>下方那串 ID</strong> 复制下来，粘贴到黑窗口里按回车。</p>
+      <div class="shot">
+        <div class="shot-bar">chrome://extensions</div>
+        <div class="shot-body">
+          <div class="row"><span class="tag">哔</span><span><strong>哔哩藏库</strong><br><span style="color:var(--muted)">把 B 站收藏夹备份本地…</span></span></div>
+          <div class="row mark"><span>ID：</span><span class="addr" style="font-family:var(--font-sans)">●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●</span></div>
+        </div>
+      </div>
+    </li>
+
+    <li>
+      <p class="what">再粘贴视频下载目录的绝对路径</p>
+      <p class="hint">打开你的视频下载文件夹（默认是收藏根目录下的 <code>000视频下载</code>），在文件资源管理器<strong>上方的地址栏点一下</strong>，把里面的完整地址复制过来，粘贴到黑窗口里按回车。</p>
+      <div class="shot">
+        <div class="shot-bar">← → ↑ ↻ &nbsp; 000视频下载</div>
+        <div class="shot-body">
+          <div class="row mark"><span class="addr">D:\本地收藏夹\000视频下载</span></div>
+        </div>
+      </div>
+    </li>
+
+    <li>
+      <p class="what">看到「安装完成」就成功了</p>
+      <p class="hint">窗口里会列出扩展程序 ID、宿主启动器、原生消息清单和下载目录。看到这几行就说明写进去了。</p>
+      <div class="shot">
+        <div class="shot-bar">C:\WINDOWS\system32\cmd.exe</div>
+        <div class="shot-body">
+          <div class="row"><span class="done">安装完成。</span></div>
+          <div class="row"><span style="color:var(--muted)">扩展程序 ID：●●●●●●●●…</span></div>
+          <div class="row"><span style="color:var(--muted)">下载目录：D:\本地收藏夹\000视频下载</span></div>
+        </div>
+      </div>
+    </li>
+
+    <li>
+      <p class="what">完全退出 Chrome，再重新打开</p>
+      <p class="hint">关掉<strong>所有</strong> Chrome 窗口（必要时在任务管理器里结束 <code>chrome.exe</code>），然后重新打开。</p>
+      <div class="note"><strong>不需要重新加载插件</strong> —— 完全重启 Chrome 就够了。重启后回到收藏库，点「打开本地视频目录」试试。</div>
+    </li>
+  </ol>
+
+  <div class="actions">
+    <button id="tutorialClose" class="button button-primary" type="button">知道了，去试试</button>
+  </div>
+</div>
+<script src="tutorial.js"></script>
+</body>
+</html>
