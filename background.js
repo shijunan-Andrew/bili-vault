@@ -3300,6 +3300,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ ok: true, importState }));
     return true;
   }
+  if (message?.type === "bca-fav-counts") {
+    // 只取收藏夹列表的条数，不读任何视频 —— 让界面在动手前能准确判断风险
+    (async () => {
+      const resolved = await resolveDiffUid(message?.uid, sender?.tab?.id ?? null);
+      const folders = await listBiliFavoriteFolders(resolved.uid, resolved.tabId);
+      const wanted = new Set((Array.isArray(message?.titles) ? message.titles : []).map(String));
+      const picked = wanted.size ? folders.filter((folder) => wanted.has(folder.title)) : folders;
+      const counts = {};
+      for (const folder of picked) counts[folder.title] = Number(folder.count) || 0;
+      return { ok: true, counts, speed: requestSpeedId };
+    })()
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "读取收藏夹条数失败。" }));
+    return true;
+  }
   if (message?.type === "bca-fav-diff") {
     // V1.1.0：只拉收藏夹列表做差异对比，不抓详情，所以很快。
     // 弹窗与收藏库都用这一条消息（收藏库拿不到 uid，见 resolveDiffUid）。

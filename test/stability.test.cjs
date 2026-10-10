@@ -2265,6 +2265,20 @@ test("默认档位是「较低」，且大收藏夹配快档要再提醒一次",
   assert.match(readProjectFile("popup.html"), /id="riskyWarnDialog"/, "风险提醒弹窗不存在");
 });
 
+test("收藏库的档位风险判断要用线上条数，不能用本地条数", () => {
+  const library = readProjectFile("library.js");
+  // 必须是问后台要线上条数 —— 用本地条数做代理，本地为空时是 0，
+  // 快档跑 700 多条也不会提醒（真机上就是这么漏掉的）
+  assert.match(library, /type: "bca-fav-counts"/, "收藏库没有查线上条数");
+  assert.match(library, /response\.counts\?\[selectedCollection\]/, "没有用后台返回的条数");
+  assert.match(library, /RISKY_SPEEDS\.has\(response\.speed\)/, "档位要用后台的真实值，不能用本地缓存的");
+
+  const src = readProjectFile("background.js");
+  assert.match(src, /message\?\.type === "bca-fav-counts"/, "后台没有这个查询入口");
+  assert.match(src, /counts\[folder\.title\] = Number\(folder\.count\)/, "没有返回各收藏夹的条数");
+  assert.match(src, /speed: requestSpeedId/, "没有把当前档位一并返回");
+});
+
 test("完成弹窗只弹一次（点掉之后再打开插件不该重放）", () => {
   const src = readProjectFile("background.js");
   // 摘要落盘时要带上"还没提示过"

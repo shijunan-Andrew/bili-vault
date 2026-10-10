@@ -2940,14 +2940,24 @@ const RISKY_SPEEDS = new Set(["higher", "high"]);
 let diffRiskyResolve = null;
 
 async function confirmLibraryRiskySpeed() {
-  const saved = await chrome.storage.local.get("requestSpeed").catch(() => null);
-  const speed = RISKY_SPEEDS.has(saved?.requestSpeed) ? saved.requestSpeed : "";
-  if (!speed) return true;
-  const collection = collections.find((item) => item.name === selectedCollection);
-  const total = collection?.videos?.length || 0;
-  if (total <= RISKY_TOTAL_ITEMS) return true;
+  // 必须问后台要**线上**的条数。以前用本地条数做代理，本地为空时是 0，
+  // 快档跑 700 多条也不会提醒 —— 真机上就是这么漏掉的。
+  // 这个查询只读收藏夹列表，通常 1~2 次请求。
+  let total = 0;
+  let speed = "";
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "bca-fav-counts",
+      data: { titles: [selectedCollection] }
+    });
+    if (response?.ok) {
+      total = Number(response.counts?.[selectedCollection]) || 0;
+      speed = RISKY_SPEEDS.has(response.speed) ? response.speed : "";
+    }
+  } catch (_) { /* 查不到就不拦，但不能因此假装查过了 */ }
+  if (!speed || total <= RISKY_TOTAL_ITEMS) return true;
   const label = speed === "high" ? "高" : "较高";
-  diffRiskyText.textContent = BcaI18n.t("当前是「{speed}」档，而这个收藏夹有约 {total} 条。建议先到插件弹窗里改用「较低」档位。",
+  diffRiskyText.textContent = BcaI18n.t("当前是「{speed}」档，而这个收藏夹线上有 {total} 条。建议先到插件弹窗里改用「较低」档位。",
     { speed: label, total });
   diffRiskyDialog.showModal();
   return new Promise((resolve) => { diffRiskyResolve = resolve; });
