@@ -28,7 +28,7 @@
   "报告暂存在插件中，可下载到本地。": "The report is stored in the extension and can be downloaded.",
   "本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。": "This extension is not an official Bilibili tool. Using it may violate the Bilibili Terms of Service (section 4.3.15 and others). Assess the risk to your account yourself.",
   "本插件自带的下载器并不稳定：受 B 站接口限制，部分清晰度、字幕、弹幕可能取不到。如果有大批量下载需求，建议改用其他工具，例如 <a href=\"https://github.com/leiurayer/downkyi\" target=\"_blank\" rel=\"noopener noreferrer\">DownKyi</a>。": "The built-in downloader is unstable: Bilibili API limits mean some resolutions, subtitles, and danmaku may be unavailable. For bulk downloads, use another tool such as <a href=\"https://github.com/leiurayer/downkyi\" target=\"_blank\" rel=\"noopener noreferrer\">DownKyi</a>.",
-  "本地收藏根目录": "Local library root",
+  "本地收藏根目录": "Local Library root",
   "本地报告：{path}": "Local report: {path}",
   "本地归档": "Local archive",
   "本地视频": "Local video",
