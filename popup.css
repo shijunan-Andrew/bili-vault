@@ -269,3 +269,46 @@ button:disabled { cursor: wait; opacity: .6; }
 .foot-right { display: flex; align-items: center; gap: var(--sp-2); }
 /* 4.5.1：语言切换已移出页脚（顶部 .segmented 承担），这里只留版本号 */
 .popup-version { color: var(--faint); font-size: var(--fs-sm); }
+
+/* V1.1.0：先看差异。以下都是新类，不覆盖任何既有选择器。 */
+.diff-button {
+  width: 100%;
+  margin-top: var(--sp-2);
+}
+
+.diff-hint {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.diff-result {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.diff-line {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: 1.7;
+}
+
+.diff-line + .diff-line {
+  margin-top: var(--sp-1);
+}
+
+.diff-line strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.diff-warn {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}

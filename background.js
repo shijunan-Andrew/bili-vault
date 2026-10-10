@@ -382,7 +382,7 @@ async function addManualVideo(data) {
   let metadata = {};
   try {
     if (!collectionNames.length) throw new Error("请至少选择一个目标收藏夹。");
-    if (collectionNames.some((name) => safeSegment(name) !== name || ["错误报告", "001错误报告", "000视频下载"].includes(name))) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
+    if (collectionNames.some((name) => safeSegment(name) !== name || ["错误报告", "001错误报告", "002同步报告", "000视频下载"].includes(name))) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
     const root = await getRootHandle();
     if (!root) throw new Error("尚未设置本地收藏根目录，请先选择收藏根目录。");
     await ensureWritePermission(root);
@@ -2147,7 +2147,7 @@ async function importBiliFavorites(data, tabId = null) {
       const folderLog = [];
     activeFolderTitle = folder.title;
     activeFolderLog = folderLog;
-      if (["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(safeSegment(folder.title))) {
+      if (["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载"].includes(safeSegment(folder.title))) {
         failed += 1;
         hasIssues = true;
         reportLines.push("", `收藏夹：${folder.title}`, "收藏夹名称与插件保留目录冲突，已跳过。请先在 B 站重命名该收藏夹后重试。");
@@ -2584,6 +2584,287 @@ async function getDownloadSubtitles(message) {
   }
 }
 
+/* ---------- V1.1.0：线上与本地的差异报告 ----------
+
+   动机：导入会静默跳过已存在的记录，用户看不到 B 站那边变了什么；
+   而"再跑一次导入"对 2799 条的收藏夹要 39 分钟，代价太高。
+
+   **关键：差异只需要列表接口，绝不调详情接口。**
+   列表是 40 条/请求，详情是 1.25 条/秒。2799 条约 70 次请求（1~2 分钟），
+   而全量导入要 39 分钟 —— 相差 20 倍以上。
+   这个功能成立的前提就是这一条：**任何情况下都不要在这里调 fetchVideoDetail**，
+   一旦调了它就不再"便宜"，也就失去了存在的意义。 */
+
+const DIFF_REPORT_DIR = "002同步报告";
+
+// 从 视频信息.txt 原文取「视频状态」行。归档里写的是「正常」或「已失效视频（已尝试恢复）」。
+function localRecordIsInvalid(text) {
+  const status = String(text || "").match(/^视频状态：(.+)$/m)?.[1]?.trim() || "";
+  return status.includes("失效");
+}
+
+function localRecordTitle(text) {
+  return String(text || "").match(/^视频标题：(.+)$/m)?.[1]?.trim() || "";
+}
+
+// readExistingImportRecords 返回的是「标识符 → 记录」，同一条记录会同时有 bvid 与 aid
+// 两个键。这里按目录名归并回「一条记录 + 它的全部键」，否则删除项会被算重。
+function groupLocalImportRecords(existing) {
+  const byDirectory = new Map();
+  for (const [key, record] of existing?.records || []) {
+    if (!record?.directory) continue;
+    if (!byDirectory.has(record.directory)) byDirectory.set(record.directory, { record, keys: [] });
+    byDirectory.get(record.directory).keys.push(key);
+  }
+  return [...byDirectory.values()].map(({ record, keys }) => ({
+    directory: record.directory,
+    title: localRecordTitle(record.text) || record.directory,
+    invalid: localRecordIsInvalid(record.text),
+    keys
+  }));
+}
+
+/* 纯函数：给「线上条目」与「本地记录」，算出四项差异。
+   刻意不碰 DOM、不碰 chrome API、不发请求 —— 这样 test/stability.test.cjs 的
+   loadBackgroundFunctions 能把它抽出来真跑，而不是只能正则匹配源码。
+
+   入参形状：
+     remoteItems : [{ bvid, aid, title, invalid, keys: ["bvid:..","aid:.."] }]
+     localRecords: [{ directory, title, invalid, keys: [...] }] */
+function computeFavoriteDiff(remoteItems, localRecords) {
+  const remote = Array.isArray(remoteItems) ? remoteItems : [];
+  const local = Array.isArray(localRecords) ? localRecords : [];
+
+  // 用 Map 而不是每轮 find，2799 条时是 O(n) 与 O(n²) 的差别
+  const remoteByKey = new Map();
+  for (const item of remote) {
+    for (const key of item.keys || []) if (!remoteByKey.has(key)) remoteByKey.set(key, item);
+  }
+  const localKeys = new Set();
+  for (const record of local) for (const key of record.keys || []) localKeys.add(key);
+
+  const added = [];
+  for (const item of remote) {
+    if (!(item.keys || []).some((key) => localKeys.has(key))) {
+      added.push({ bvid: item.bvid || "", aid: item.aid || "", title: item.title || "", invalid: item.invalid === true });
+    }
+  }
+
+  const removed = [];
+  const newlyInvalid = [];
+  const recovered = [];
+  let unchanged = 0;
+  for (const record of local) {
+    const match = (record.keys || []).map((key) => remoteByKey.get(key)).find(Boolean);
+    if (!match) {
+      removed.push({ directory: record.directory || "", title: record.title || "" });
+      continue;
+    }
+    // 本地失效、线上正常 = 视频回来了（少见但真实存在）；反之是新失效
+    if (match.invalid === true && !record.invalid) {
+      newlyInvalid.push({ directory: record.directory || "", title: record.title || "", bvid: match.bvid || "" });
+    } else if (match.invalid !== true && record.invalid) {
+      recovered.push({ directory: record.directory || "", title: record.title || "", bvid: match.bvid || "" });
+    } else {
+      unchanged += 1;
+    }
+  }
+
+  return { added, removed, newlyInvalid, recovered, unchanged };
+}
+
+// 把一条线上条目转成纯函数要的形状
+function diffRemoteEntry(item) {
+  return {
+    bvid: item?.bvid || "",
+    aid: item?.aid || "",
+    title: item?.title || "",
+    invalid: item?.isInvalid === true,
+    keys: importIdentifierKeys(item || {})
+  };
+}
+
+/* 只拉列表，不抓详情。返回 {items, expectedTotal, sawLastPage, failedPages}。
+   分页策略与导入保持一致，但不参与导入的暂停/取消状态机（它很短，跑完就完）。 */
+async function fetchFavoriteListOnly(folder, tabId, onProgress) {
+  const first = await fetchImportFavoritePage(folder, 1, tabId);
+  const items = [...first.items];
+  const expectedTotal = Number(first.total) || 0;
+  const pageLimit = expectedTotal
+    ? Math.ceil(expectedTotal / IMPORT_FAVORITE_PAGE_SIZE)
+    : (first.hasMore || first.items.length === IMPORT_FAVORITE_PAGE_SIZE ? IMPORT_MAX_PAGES : 1);
+  const maxPages = Math.min(Math.max(pageLimit, 1), IMPORT_MAX_PAGES);
+  let sawLastPage = first.items.length < IMPORT_FAVORITE_PAGE_SIZE;
+  let failedPages = 0;
+  let consecutiveFailures = 0;
+  onProgress?.({ folder: folder.title, page: 1, maxPages, count: items.length });
+
+  for (let page = 2; page <= maxPages; page += 1) {
+    await keepServiceWorkerAlive("diff");
+    try {
+      const result = await fetchImportFavoritePage(folder, page, tabId);
+      items.push(...result.items);
+      consecutiveFailures = 0;
+      if (result.hasMore === false || result.items.length < IMPORT_FAVORITE_PAGE_SIZE) sawLastPage = true;
+      onProgress?.({ folder: folder.title, page, maxPages, count: items.length });
+      if (!result.items.length) break;
+    } catch (error) {
+      importRethrowIfAbort(error);
+      // 与导入同一策略：单页失败跳过去继续，连续多页失败才停
+      consecutiveFailures += 1;
+      failedPages += 1;
+      if (consecutiveFailures >= IMPORT_MAX_CONSECUTIVE_PAGE_FAILURES) break;
+    }
+    if (page % 4 === 0) await importDelay(150);
+  }
+  return { items, expectedTotal, sawLastPage, failedPages };
+}
+
+async function diffFavoriteCollection(root, folder, tabId, onProgress) {
+  const list = await fetchFavoriteListOnly(folder, tabId, onProgress);
+
+  const collectionName = safeSegment(folder.title);
+  let existing = { identifiers: new Set(), records: new Map() };
+  let collectionExists = true;
+  try {
+    const collection = await root.getDirectoryHandle(collectionName);
+    existing = await readExistingImportRecords(collection);
+  } catch (error) {
+    if (error?.name !== "NotFoundError") throw error;
+    collectionExists = false;
+  }
+
+  const localRecords = groupLocalImportRecords(existing);
+  const diff = computeFavoriteDiff(list.items.map(diffRemoteEntry), localRecords);
+  return {
+    folderId: folder.id,
+    folderTitle: folder.title,
+    collectionName,
+    collectionExists,
+    remoteTotal: list.expectedTotal || list.items.length,
+    remoteFetched: list.items.length,
+    localTotal: localRecords.length,
+    // 没读到自然末尾、或有页失败 → 结果可能不全，报告里要说清楚
+    incomplete: !list.sawLastPage || list.failedPages > 0,
+    failedPages: list.failedPages,
+    ...diff
+  };
+}
+
+/* 报告正文。纯函数，只有拼字符串。 */
+function buildDiffReportText(diffs, generatedAt) {
+  const list = Array.isArray(diffs) ? diffs : [];
+  const sum = (key) => list.reduce((total, diff) => total + (diff[key]?.length || 0), 0);
+  const lines = [
+    "B站收藏夹同步差异报告",
+    ERROR_REPORT_NOTICE,
+    `生成时间：${generatedAt}`,
+    "",
+    "说明：本报告只对比「收藏夹列表」，不抓取每条视频的详情，所以很快（2800 条约 1~2 分钟）。",
+    "「线上已移除」= 本地有、但 B 站收藏夹列表里已经没有了（通常是你在 B 站取消了收藏）。",
+    "B 站收藏夹里的占位空槽既不在线上列表、也不在本地，所以不会出现在这里。",
+    "",
+    `本次对比了 ${list.length} 个收藏夹：新增 ${sum("added")}、线上已移除 ${sum("removed")}、新失效 ${sum("newlyInvalid")}、恢复 ${sum("recovered")}。`
+  ];
+
+  for (const diff of list) {
+    lines.push("", "─".repeat(40), `收藏夹：${diff.folderTitle}`);
+    lines.push(`线上 ${diff.remoteTotal} 条（实际读到 ${diff.remoteFetched} 条）／本地 ${diff.localTotal} 条`);
+    if (diff.incomplete) {
+      lines.push(`⚠ 本次读取可能不完整${diff.failedPages ? `（有 ${diff.failedPages} 页失败）` : "（没读到最后一页）"}，下面的差异请酌情参考。`);
+    }
+    if (!diff.collectionExists) lines.push("本地没有同名收藏夹，因此本地全部算作「新增」。");
+
+    const section = (title, items, render) => {
+      if (!items.length) return;
+      lines.push("", `【${title}】${items.length} 条`);
+      for (const item of items.slice(0, 500)) lines.push(`  ${render(item)}`);
+      if (items.length > 500) lines.push(`  …还有 ${items.length - 500} 条，未全部列出`);
+    };
+    section("新增（线上有、本地没有）", diff.added, (x) => `${x.title || "(无标题)"}${x.invalid ? "［已失效］" : ""}${x.bvid ? `  https://www.bilibili.com/video/${x.bvid}/` : ""}`);
+    section("线上已移除（本地有、线上没有了）", diff.removed, (x) => `${x.title || "(无标题)"}  [${x.directory}]`);
+    section("新失效（本地还是正常，线上已失效）", diff.newlyInvalid, (x) => `${x.title || "(无标题)"}  [${x.directory}]`);
+    section("已恢复（本地标记失效，线上正常了）", diff.recovered, (x) => `${x.title || "(无标题)"}  [${x.directory}]`);
+    if (!diff.added.length && !diff.removed.length && !diff.newlyInvalid.length && !diff.recovered.length) {
+      lines.push("", "四项差异都是 0 —— 本地与线上完全一致。");
+    }
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+// 写进 002同步报告/。失败不抛错，返回空串由调用方处理。
+async function persistDiffReport(text) {
+  try {
+    const root = await getRootHandle();
+    if (!root || await root.queryPermission({ mode: "readwrite" }) !== "granted") return "";
+    const directory = await root.getDirectoryHandle(DIFF_REPORT_DIR, { create: true });
+    const filename = `${timestampFolder(new Date())}_${Date.now()}_同步差异报告.txt`;
+    await writeFile(directory, filename, text);
+    return `${root.name}/${DIFF_REPORT_DIR}/${filename}`;
+  } catch (_) {
+    return "";
+  }
+}
+
+function sendDiffProgress(text) {
+  chrome.runtime.sendMessage({ type: "bca-diff-progress", text }, () => { void chrome.runtime.lastError; });
+}
+
+/* 差异对比需要一个 B 站 UID（收藏夹列表接口按 up_mid 取）。
+   弹窗在收藏夹页上，能直接拿到；收藏库（独立扩展页）拿不到，所以：
+     1) 调用方给了 uid → 用它，并记下来
+     2) 没给 → 找一个已打开的收藏夹页，连 uid 带 tabId 一起用（页面代取更稳）
+     3) 还没有 → 用上次记下的 uid，走后台直连
+     4) 都没有 → 明确告诉用户先打开一次收藏夹页 */
+async function resolveDiffUid(uid, tabId) {
+  const given = importClean(uid);
+  if (/^\d+$/.test(given)) {
+    await chrome.storage.local.set({ lastImportUid: given });
+    return { uid: given, tabId };
+  }
+  // manifest 里没有 tabs 权限，这个查询可能直接抛错或返回没有 url 的标签页；
+  // 都当成"找不到"处理，退回下面用缓存 uid 走后台直连。
+  try {
+    const tabs = await chrome.tabs.query({ url: "https://space.bilibili.com/*/favlist*" });
+    for (const tab of tabs) {
+      const found = String(tab?.url || "").match(/^https:\/\/space\.bilibili\.com\/(\d+)\/favlist/)?.[1] || "";
+      if (found) {
+        await chrome.storage.local.set({ lastImportUid: found });
+        return { uid: found, tabId: tab.id ?? null };
+      }
+    }
+  } catch (_) { /* 没有 tabs 权限，正常情况，走缓存 */ }
+  const saved = await chrome.storage.local.get("lastImportUid");
+  const cached = importClean(saved?.lastImportUid);
+  if (/^\d+$/.test(cached)) return { uid: cached, tabId: null };
+  throw new Error("对比差异需要知道你的 B 站 UID。请先打开一次自己的 B 站收藏夹页面。");
+}
+
+async function diffBiliFavorites(data, tabId = null) {
+  const folderIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
+  const resolved = await resolveDiffUid(data?.uid, tabId);
+  const folders = await listBiliFavoriteFolders(resolved.uid, resolved.tabId);
+  const picked = folderIds.size ? folders.filter((folder) => folderIds.has(String(folder.id))) : folders;
+  if (!picked.length) throw new Error("没有选中任何收藏夹。");
+
+  const root = await getRootHandle();
+  if (!root) throw new Error("还没有设置本地保存位置，无法与本地对比。");
+
+  const diffs = [];
+  for (const folder of picked) {
+    sendDiffProgress(`正在对比「${folder.title}」…`);
+    diffs.push(await diffFavoriteCollection(root, folder, resolved.tabId, (progress) => {
+      sendDiffProgress(`正在对比「${progress.folder}」：第 ${progress.page}/${progress.maxPages} 页，已读到 ${progress.count} 条`);
+    }));
+  }
+
+  const report = buildDiffReportText(diffs, formatChineseDateTime(new Date(), true));
+  // 写文件失败不影响结果展示，reportPath 会是空串
+  const reportPath = data?.writeReport === false ? "" : await persistDiffReport(report);
+  return { ok: true, diffs, report, reportPath };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "bca-download-parse") {
     getDownloadVideo(message.identifier).then((video) => sendResponse({ ok: true, video })).catch((error) => sendResponse({ ok: false, message: error?.message || "视频解析失败。" }));
@@ -2684,7 +2965,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ ok: true, importState }));
     return true;
   }
+  if (message?.type === "bca-fav-diff") {
+    // V1.1.0：只拉收藏夹列表做差异对比，不抓详情，所以很快。
+    // 弹窗与收藏库都用这一条消息（收藏库拿不到 uid，见 resolveDiffUid）。
+    diffBiliFavorites(message.data || message, sender?.tab?.id ?? null)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "对比差异失败。" }));
+    return true;
+  }
   if (message?.type === "list-bili-favorite-folders") {
+    // 顺手记住 UID：收藏库（独立扩展页）没有 B 站标签页，对比差异时要靠这份缓存
+    if (/^\d+$/.test(String(message.uid || ""))) chrome.storage.local.set({ lastImportUid: String(message.uid) });
     listBiliFavoriteFolders(message.uid, sender?.tab?.id ?? null).then((folders) => sendResponse({ ok: true, folders }))
       .catch((error) => sendResponse({ ok: false, message: error?.message || "读取收藏夹失败。" }));
     return true;

@@ -633,7 +633,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   // 目录列表本身每次重新枚举，缓存只省文件读取，所以新增/删除目录一定反映得出来
   const collections = [];
   for await (const collectionEntry of handle.values()) {
-    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "视频下载", "000视频下载"].includes(collectionEntry.name)) continue;
+    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载"].includes(collectionEntry.name)) continue;
     collections.push(collectionEntry);
   }
   for (const collectionEntry of collections) {
@@ -2776,7 +2776,7 @@ function validateCollectionName(rawName) {
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
     throw new Error(BcaI18n.t("这个名称是 Windows 保留名称，请换一个名称。"));
   }
-  if (["错误报告", "001错误报告", "000视频下载", "视频下载"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
+  if (["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
   return name;
 }
 

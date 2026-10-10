@@ -29,6 +29,8 @@ const importFolderList = document.getElementById("importFolderList");
 const importCard = document.getElementById("importCard");
 const importStatus = document.getElementById("importStatus");
 const startImportButton = document.getElementById("startImport");
+const diffFoldersButton = document.getElementById("diffFolders");
+const diffResult = document.getElementById("diffResult");
 const refreshImportFoldersButton = document.getElementById("refreshImportFolders");
 const selectAllImportFoldersButton = document.getElementById("selectAllImportFolders");
 const clearImportFoldersButton = document.getElementById("clearImportFolders");
@@ -170,6 +172,8 @@ function updateImportSelection() {
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
   importSelectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: selected });
   startImportButton.disabled = importBusy || selected === 0;
+  diffFoldersButton.disabled = importBusy || selected === 0;
+  diffFoldersButton.textContent = selected ? BcaI18n.t("先看差异（{count} 个）", { count: selected }) : BcaI18n.t("先看差异");
   startImportButton.textContent = selected ? BcaI18n.t("开始导入（{count} 个收藏夹）", { count: selected }) : BcaI18n.t("开始导入");
   renderImportControl();
 }
@@ -196,6 +200,67 @@ async function loadImportFolders() {
     refreshImportFoldersButton.disabled = false;
     updateImportSelection();
   }
+}
+
+/* V1.1.0：先看差异。
+   只对比收藏夹列表（40 条/请求），不抓详情（1.25 条/秒）—— 这是它能"1~2 分钟出结果"的唯一原因。
+   完整列表（可能几百条）写进 归档根目录/002同步报告/，弹窗里只显示摘要。 */
+async function startDiff() {
+  if (importBusy) return;
+  const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+  if (!folderIds.length) return;
+  if (!rootHandle) {
+    importStatus.textContent = BcaI18n.t("请先选择本地保存文件夹。");
+    importStatus.classList.add("error");
+    return;
+  }
+  importBusy = true;
+  importStatus.textContent = "";
+  importStatus.classList.remove("error");
+  diffResult.hidden = true;
+  importProgressTitle.textContent = BcaI18n.t("正在对比差异");
+  importProgressText.textContent = BcaI18n.t("正在读取 B 站收藏夹列表…");
+  updateImportSelection();
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "bca-fav-diff", data: { folderIds } });
+    if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("对比差异失败。"));
+    renderDiffResult(response);
+    const diffs = Array.isArray(response.diffs) ? response.diffs : [];
+    const sum = (key) => diffs.reduce((n, d) => n + (d[key]?.length || 0), 0);
+    importStatus.textContent = BcaI18n.t("对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
+      { added: sum("added"), removed: sum("removed"), invalid: sum("newlyInvalid"), recovered: sum("recovered") });
+    if (response.reportPath) importStatus.textContent += " " + BcaI18n.t("报告：{path}", { path: response.reportPath });
+  } catch (error) {
+    importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("对比差异失败。");
+    importStatus.classList.add("error");
+  } finally {
+    importBusy = false;
+    updateImportSelection();
+  }
+}
+
+function renderDiffResult(response) {
+  const diffs = Array.isArray(response?.diffs) ? response.diffs : [];
+  diffResult.replaceChildren();
+  // 全部用 textContent 拼，不碰 innerHTML —— 收藏夹名与视频标题都是用户数据
+  for (const diff of diffs) {
+    const line = document.createElement("p");
+    line.className = "diff-line";
+    const name = document.createElement("strong");
+    name.textContent = `「${diff.folderTitle}」`;
+    line.append(name, document.createTextNode(
+      BcaI18n.t("新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}",
+        { added: diff.added?.length || 0, removed: diff.removed?.length || 0,
+          invalid: diff.newlyInvalid?.length || 0, recovered: diff.recovered?.length || 0 })));
+    if (diff.incomplete) {
+      const warn = document.createElement("small");
+      warn.className = "diff-warn";
+      warn.textContent = BcaI18n.t("本次读取可能不完整，结果仅供参考");
+      line.append(warn);
+    }
+    diffResult.append(line);
+  }
+  diffResult.hidden = diffs.length === 0;
 }
 
 async function startImport() {
@@ -437,6 +502,7 @@ downloadButton.addEventListener("click", () => {
 
 refreshImportFoldersButton.addEventListener("click", loadImportFolders);
 startImportButton.addEventListener("click", startImport);
+diffFoldersButton.addEventListener("click", startDiff);
 pauseImportButton.addEventListener("click", async () => {
   pauseImportButton.disabled = true;
   try {
@@ -482,6 +548,7 @@ clearImportFoldersButton.addEventListener("click", () => {
 });
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "bca-diff-progress") { importProgressText.textContent = message.text || ""; return; }
   if (message?.type !== "bca-import-progress") return;
   importProgressText.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在导入…");
 });

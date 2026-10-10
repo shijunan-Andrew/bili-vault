@@ -116,7 +116,10 @@
               <span><span data-i18n="尝试恢复失效视频">尝试恢复失效视频</span><small data-i18n="通过 B 站 APP 接口补全已失效视频的资料；不需要时可以取消勾选">通过 B 站 APP 接口补全已失效视频的资料；不需要时可以取消勾选</small></span>
             </label>
             <button id="startImport" class="primary" type="button" data-i18n="开始导入" disabled>开始导入</button>
+            <button id="diffFolders" class="secondary diff-button" type="button" data-i18n="先看差异" disabled>先看差异</button>
+            <p class="diff-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。">只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。</p>
           </div>
+          <div id="diffResult" class="diff-result" hidden></div>
           <div id="importProgressView" class="import-progress-view" hidden>
             <span class="progress-spinner" aria-hidden="true"></span>
             <div><strong id="importProgressTitle" data-i18n="正在导入收藏夹">正在导入收藏夹</strong><p id="importProgressText" data-i18n="正在准备…">正在准备…</p></div>

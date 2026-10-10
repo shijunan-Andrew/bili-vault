@@ -599,5 +599,18 @@
   "无法创建默认下载文件夹 000视频下载，请检查保存文件夹的写入权限。": "Could not create the default download folder 000视频下载. Please check write permission for the save folder.",
   "UP 主主页": "Creator page",
   "打开 UP 主主页": "Open the creator's page",
-  "B 站没有提供有效的下载地址。": "Bilibili did not provide a usable download URL."
+  "B 站没有提供有效的下载地址。": "Bilibili did not provide a usable download URL.",
+  "先看差异": "Check differences",
+  "先看差异（{count} 个）": "Check differences ({count})",
+  "正在对比差异": "Comparing with Bilibili",
+  "正在读取 B 站收藏夹列表…": "Reading the Bilibili favourites list…",
+  "对比差异失败。": "The comparison failed.",
+  "对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。": "Comparison finished: {added} new, {removed} no longer on Bilibili, {invalid} newly unavailable, {recovered} available again.",
+  "报告：{path}": "Report: {path}",
+  "新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}": "{added} new / {removed} gone / {invalid} newly unavailable / {recovered} back",
+  "本次读取可能不完整，结果仅供参考": "This read may be incomplete — treat the result as a rough guide",
+  "只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。": "Only the favourites list is compared — not each video's details. About 1–2 minutes for 2,800 items, versus 30+ minutes for a full import, so it is worth a look first.",
+  "对比差异需要知道你的 B 站 UID。请先打开一次自己的 B 站收藏夹页面。": "Comparing needs your Bilibili UID. Open your own favourites page once first.",
+  "没有选中任何收藏夹。": "No collection is selected.",
+  "还没有设置本地保存位置，无法与本地对比。": "No local save location is set, so there is nothing to compare against."
 }

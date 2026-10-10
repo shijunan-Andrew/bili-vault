@@ -2153,6 +2153,136 @@ test("every design token referenced by a page actually exists", () => {
   assert.deepEqual([...new Set(problems)], [], `发现未定义的设计令牌：\n${[...new Set(problems)].join("\n")}`);
 });
 
+/* ------------------------- V1.1.0：同步差异报告 -------------------------
+
+   核心是纯函数 computeFavoriteDiff，从 background.js 里抽出来真跑。
+   这里要守住的最重要一条：**差异只比较列表，绝不抓详情** ——
+   一旦有人往里加 fetchVideoDetail，这个功能就从"1~2 分钟"变成"39 分钟"，
+   失去存在意义。下面有断言直接查这一条。 */
+
+test("同步差异：四项差异都算对", () => {
+  const { computeFavoriteDiff } = loadBackgroundFunctions(["computeFavoriteDiff"]);
+  const entry = (bvid, title, invalid) => ({ bvid, keys: [`bvid:${bvid}`, `aid:${bvid.slice(2)}`], title, invalid });
+  const record = (directory, title, invalid, bvid) => ({ directory, title, invalid, keys: [`bvid:${bvid}`, `aid:${bvid.slice(2)}`] });
+
+  const diff = computeFavoriteDiff(
+    [entry("BV1", "两边都有", false), entry("BV2", "只有线上有", false),
+     entry("BV3", "刚变成失效", true), entry("BV4", "又活过来了", false),
+     entry("BV5", "线上失效且本地没有", true)],
+    [record("d1", "两边都有", false, "BV1"), record("d3", "刚变成失效", false, "BV3"),
+     record("d4", "又活过来了", true, "BV4"), record("d6", "本地才有", false, "BV6"),
+     record("d7", "本地才有且已失效", true, "BV7")]
+  );
+
+  assert.deepEqual(diff.added.map((x) => x.bvid), ["BV2", "BV5"]);
+  assert.equal(diff.added[1].invalid, true, "线上就失效的新增项要带上标记");
+  assert.deepEqual(diff.removed.map((x) => x.directory), ["d6", "d7"]);
+  assert.deepEqual(diff.newlyInvalid.map((x) => x.bvid), ["BV3"]);
+  assert.deepEqual(diff.recovered.map((x) => x.bvid), ["BV4"]);
+  assert.equal(diff.unchanged, 1);
+});
+
+test("同步差异：同一记录有 bvid 与 aid 两个键，只能算一项", () => {
+  const { computeFavoriteDiff } = loadBackgroundFunctions(["computeFavoriteDiff"]);
+  const diff = computeFavoriteDiff([], [{ directory: "d", title: "t", invalid: false, keys: ["bvid:BV1", "aid:1"] }]);
+  assert.equal(diff.removed.length, 1, "不能因为有两个键就算成两条");
+});
+
+test("同步差异：只要任一键匹配上就不算新增/已移除", () => {
+  const { computeFavoriteDiff } = loadBackgroundFunctions(["computeFavoriteDiff"]);
+  const diff = computeFavoriteDiff(
+    [{ bvid: "BV1", keys: ["bvid:BV1", "aid:1"], title: "t", invalid: false }],
+    [{ directory: "d", title: "t", keys: ["aid:1"], invalid: false }]
+  );
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
+  assert.equal(diff.unchanged, 1);
+});
+
+test("同步差异：空输入不炸", () => {
+  const { computeFavoriteDiff } = loadBackgroundFunctions(["computeFavoriteDiff"]);
+  for (const [r, l] of [[[], []], [null, null], [undefined, undefined]]) {
+    const diff = computeFavoriteDiff(r, l);
+    assert.deepEqual([diff.added, diff.removed, diff.newlyInvalid, diff.recovered], [[], [], [], []]);
+    assert.equal(diff.unchanged, 0);
+  }
+  assert.equal(computeFavoriteDiff([], [{ directory: "d", keys: ["bvid:BV1"] }]).removed.length, 1);
+  assert.equal(computeFavoriteDiff([{ bvid: "BV1", keys: ["bvid:BV1"] }], []).added.length, 1);
+});
+
+test("同步差异：本地记录的状态解析", () => {
+  const { localRecordIsInvalid, localRecordTitle, groupLocalImportRecords } =
+    loadBackgroundFunctions(["localRecordIsInvalid", "localRecordTitle", "groupLocalImportRecords"]);
+
+  assert.equal(localRecordIsInvalid("视频状态：正常"), false);
+  assert.equal(localRecordIsInvalid("视频状态：已失效视频"), true);
+  assert.equal(localRecordIsInvalid("视频状态：已失效视频（已尝试恢复）"), true);
+  assert.equal(localRecordIsInvalid("没有这一行"), false, "读不到状态时按正常处理，不要误报成失效");
+  assert.equal(localRecordIsInvalid(null), false);
+
+  assert.equal(localRecordTitle("视频标题：示例"), "示例");
+  assert.equal(localRecordTitle("视频标题："), "");
+  assert.equal(localRecordTitle(null), "");
+
+  const records = new Map([
+    ["bvid:BV1", { directory: "d1", text: "视频标题：甲\n视频状态：正常" }],
+    ["aid:1", { directory: "d1", text: "视频标题：甲\n视频状态：正常" }],
+    ["bvid:BV2", { directory: "d2", text: "视频标题：乙\n视频状态：已失效视频" }]
+  ]);
+  const grouped = groupLocalImportRecords({ records });
+  assert.equal(grouped.length, 2, "同一个目录的两个键要并成一条");
+  assert.deepEqual(grouped.map((x) => x.directory).sort(), ["d1", "d2"]);
+  assert.equal(grouped.find((x) => x.directory === "d2").invalid, true);
+  assert.equal(grouped.find((x) => x.directory === "d2").title, "乙");
+  assert.deepEqual(groupLocalImportRecords(null), []);
+});
+
+test("同步差异报告的正文包含该有的段落", () => {
+  const { buildDiffReportText } = loadBackgroundFunctions(["buildDiffReportText"], ["ERROR_REPORT_NOTICE"]);
+  const diff = {
+    folderTitle: "测试收藏夹", collectionName: "测试收藏夹", collectionExists: true,
+    remoteTotal: 10, remoteFetched: 9, localTotal: 8, incomplete: true, failedPages: 1,
+    added: [{ bvid: "BV1", title: "新增的", invalid: false }],
+    removed: [{ directory: "d1", title: "没了" }],
+    newlyInvalid: [{ directory: "d2", title: "刚失效", bvid: "BV2" }],
+    recovered: [], unchanged: 5
+  };
+  const text = buildDiffReportText([diff], "2026-10-10 12:00:00");
+
+  assert.ok(text.includes("B站收藏夹同步差异报告"));
+  assert.ok(text.includes("2026-10-10 12:00:00"));
+  assert.ok(text.includes("收藏夹：测试收藏夹"));
+  assert.ok(text.includes("新增的"));
+  assert.ok(text.includes("没了"));
+  assert.ok(text.includes("刚失效"));
+  assert.ok(text.includes("本次读取可能不完整"), "页面失败时必须说明结果可能不全");
+  assert.ok(text.includes("占位空槽"), "要解释清楚空槽不会被算成差异");
+  assert.equal(text.includes("【已恢复"), false, "空的分类不打印标题");
+});
+
+test("同步差异：四项都是 0 时给出明确结论，而不是一片空白", () => {
+  const { buildDiffReportText } = loadBackgroundFunctions(["buildDiffReportText"], ["ERROR_REPORT_NOTICE"]);
+  const text = buildDiffReportText([{
+    folderTitle: "一致的", collectionExists: true, remoteTotal: 3, remoteFetched: 3,
+    localTotal: 3, incomplete: false, failedPages: 0,
+    added: [], removed: [], newlyInvalid: [], recovered: [], unchanged: 3
+  }], "t");
+  assert.ok(text.includes("完全一致"));
+});
+
+test("同步差异绝不抓详情（否则就从 2 分钟变成 39 分钟）", () => {
+  const source = readProjectFile("background.js");
+  const start = source.indexOf("async function fetchFavoriteListOnly");
+  const end = source.indexOf("async function diffBiliFavorites");
+  assert.ok(start > 0 && end > start, "找不到差异引擎那一段");
+  const block = source.slice(start, end);
+  assert.equal(/fetchVideoDetail|fetchImportDetails|enrichImportedInvalidVideos/.test(block), false,
+    "差异引擎里出现了详情请求 —— 那会让它从 1~2 分钟变成 39 分钟");
+  for (const file of ["library.js", "background.js"]) {
+    assert.match(readProjectFile(file), /"002同步报告"/, `${file} 里没有 002同步报告`);
+  }
+});
+
 /* ------------------------- archive-core 的真执行单元测试 -------------------------
 
    上面这一整个文件都是「读文件 + 正则断言」——它证明的是「源码里有没有这行字」，
