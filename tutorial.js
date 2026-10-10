@@ -2,7 +2,8 @@
 /* 教程页的关窗按钮。
    这个页面可能由扩展自己打开（chrome.tabs.create），也可能是用户手输地址进来的；
    前者能 window.close()，后者不能 —— 所以两者都兜一下，失败就退回收藏库。 */
-const closeButton = document.getElementById("tutorialClose");
+// 教程页与使用说明页共用这个脚本，两页的按钮 id 不同
+const closeButton = document.getElementById("tutorialClose") || document.getElementById("guideClose");
 
 if (closeButton) {
   closeButton.addEventListener("click", () => {

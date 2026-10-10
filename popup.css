@@ -84,6 +84,16 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .toggle-switch.off { background: var(--ghost); }
 .toggle-switch.off span { left: 3px; }
 
+/* 「使用说明」是次要入口，放在标题行下方一行，不与主出口抢位置 */
+.guide-link {
+  display: inline-block;
+  margin: 0 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+.guide-link:hover { color: var(--accent); text-decoration: underline; }
+
 .library-link {
   /* 位置在标题行右侧（弹窗里最主要的出口，压在开关下面反而像次级操作）。
      所以按"标题行里的一个胶囊按钮"来排，不再占满一整行。 */

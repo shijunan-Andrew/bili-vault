@@ -1180,6 +1180,27 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
   background: var(--danger-soft);
 }
 
+/* 左下角的「使用说明」浮标，和主题 / 语言那两个圆钮排在一起 */
+.guide-fab {
+  position: fixed;
+  left: 20px;
+  bottom: 152px;
+  z-index: 30;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--accent-line);
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.guide-fab:hover { border-color: var(--accent); background: var(--accent-soft); }
+
 .editor-hint-danger {
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--danger-line);

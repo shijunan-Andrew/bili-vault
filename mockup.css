@@ -1,0 +1,171 @@
+/* 界面示意图的共用样式（教程页 tutorial.html 与使用说明页 guide.html 共用）。
+   按 AI_HANDOFF 修改原则第 12 条：示意图要按真实截图的细节画，不省标题栏、
+   导航箭头、命令栏、搜索框、侧边栏、列头、按钮行、开关、角标这些东西。
+
+   Windows 界面自己一套颜色 —— 不跟随扩展主题。真实截图里这些窗口在深色
+   主题下依然是浅色的，跟随主题反而不像。唯一的例外是黑底终端，它本来就是黑的。
+   示例路径里一律写 <你的用户名>、ID 一律用圆点遮住（公开仓库不放个人信息）。 */
+
+:root {
+  --win-bg: #f3f3f3;
+  --win-line: #d7d7d7;
+  --win-ink: #1b1b1b;
+  --win-muted: #6b6b6b;
+  --win-field: #ffffff;
+  --win-chrome: #e9e9e9;
+  --cmd-bg: #0c0c0c;
+  --cmd-ink: #cccccc;
+  --cmd-dim: #8a8a8a;
+  --win-mark: #e8443a;
+  --win-accent: #0a63c9;
+}
+
+/* ── 通用窗口外框：模仿 Windows 11 的圆角标题栏 ── */
+.win { margin: 12px 0 0; border: 1px solid var(--win-line); border-radius: 8px; overflow: hidden;
+       background: var(--win-bg); color: var(--win-ink); font-size: 12.5px; line-height: 1.5;
+       box-shadow: 0 6px 18px rgb(0 0 0 / .12); }
+.win-title { display: flex; align-items: center; gap: 7px; padding: 6px 8px 6px 10px; background: var(--win-chrome); border-bottom: 1px solid var(--win-line); }
+.win-title .ico { width: 15px; height: 15px; flex: none; }
+.win-title .tab { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 6px 6px 0 0; background: var(--win-bg); font-size: 12px; }
+.win-title .spacer { flex: 1; }
+.win-title .btn { width: 26px; height: 18px; display: grid; place-items: center; color: var(--win-muted); }
+
+/* ── 资源管理器 ── */
+.ex-nav { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--win-line); }
+.ex-nav .arrow { padding: 3px 7px; border-radius: 4px; color: var(--win-muted); }
+.ex-nav .arrow.on { color: var(--win-ink); }
+.ex-addr { display: flex; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--win-line); }
+.ex-addr .path { flex: 1; padding: 5px 10px; border: 1.5px solid var(--win-accent); border-radius: 4px; background: var(--win-field);
+                 font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+.ex-addr .search { width: 200px; padding: 5px 10px; border: 1px solid var(--win-line); border-radius: 4px; background: var(--win-field); color: var(--win-muted); }
+.ex-cmd { display: flex; align-items: center; gap: 2px; padding: 5px 10px; border-bottom: 1px solid var(--win-line); flex-wrap: wrap; }
+.ex-cmd span { padding: 3px 9px; border-radius: 4px; }
+.ex-cmd span.on { background: #dcdcdc; }
+.ex-cmd .grow { flex: 1; }
+.ex-body { display: flex; min-height: 108px; }
+.ex-side { width: 172px; flex: none; padding: 8px 6px; border-right: 1px solid var(--win-line); background: #fafafa; }
+.ex-side div { padding: 4px 10px; border-radius: 4px; }
+.ex-side div.on { background: #e2e2e2; }
+.ex-side .sub { padding-left: 28px; color: var(--win-muted); }
+.ex-list { flex: 1; padding: 8px 0; }
+.ex-list .head { display: flex; padding: 2px 12px 6px; border-bottom: 1px solid var(--win-line); color: var(--win-muted); }
+.ex-list .head b { font-weight: 400; color: var(--win-ink); }
+.ex-list .empty { padding: 22px 12px; text-align: center; color: var(--win-muted); }
+.col-name { width: 46%; } .col-date { width: 22%; } .col-type { width: 18%; } .col-size { width: 14%; }
+.ex-row { display: flex; padding: 4px 12px; align-items: center; }
+.ex-row.mark { background: #cce4ff; box-shadow: inset 0 0 0 1.5px var(--win-accent); }
+
+/* ── chrome://extensions 的扩展卡片 ── */
+.ext-page { background: #fff; }
+.ext-toolbar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid #e4e4e4; }
+.ext-toolbar .title { font-size: 15px; font-weight: 500; }
+.ext-dev { margin-left: auto; padding: 5px 12px; border: 1px solid #c8c8c8; border-radius: 4px; background: #fff; }
+.ext-card { display: flex; gap: 14px; padding: 16px; }
+.ext-logo { width: 44px; height: 44px; flex: none; border-radius: 10px; background: #2b2b2b; color: #fff;
+            display: grid; place-items: center; font-weight: 700; font-size: 19px; position: relative; }
+.ext-logo::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: 50%;
+                   background: #ff5c35; border: 2px solid #fff; }
+.ext-main { flex: 1; min-width: 0; }
+.ext-name { font-size: 15px; font-weight: 600; }
+.ext-ver { font-weight: 400; color: var(--win-muted); }
+.ext-desc { margin: 6px 0 8px; color: #3c3c3c; }
+.ext-id { display: flex; align-items: center; gap: 6px; }
+.ext-id .val { padding: 3px 8px; border: 1.5px solid var(--win-mark); border-radius: 3px; background: #fff;
+               font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+.ext-view { margin-top: 6px; color: var(--win-muted); }
+.ext-view a { color: var(--win-accent); }
+.ext-actions { display: flex; align-items: center; gap: 8px; padding: 0 16px 14px 74px; }
+.ext-actions .b { padding: 6px 16px; border: 1px solid #c8c8c8; border-radius: 16px; background: #fff; }
+.ext-actions .spacer { flex: 1; }
+.ext-toggle { width: 34px; height: 20px; border-radius: 999px; background: var(--win-accent); position: relative; }
+.ext-toggle::after { content: ""; position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+
+/* ── 黑底终端 ── */
+.cmd { margin: 12px 0 0; border: 1px solid #2a2a2a; border-radius: 8px; overflow: hidden; box-shadow: 0 6px 18px rgb(0 0 0 / .3); }
+.cmd-title { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: #1f1f1f; color: #d0d0d0; font-size: 12px; }
+.cmd-title .spacer { flex: 1; }
+.cmd-title .btn { color: #9a9a9a; padding: 0 6px; }
+.cmd-body { padding: 10px 12px 16px; background: var(--cmd-bg); color: var(--cmd-ink);
+            font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-all; }
+.cmd-body .in { border: 1.5px solid var(--win-mark); border-radius: 2px; padding: 0 2px; }
+.cmd-body .ok { color: #16c60c; }
+.cmd-body .dim { color: var(--cmd-dim); }
+.cmd-body .cursor { display: inline-block; width: 7px; height: 13px; background: var(--cmd-ink); vertical-align: -2px; }
+
+/* ── 插件弹窗示意（比真实弹窗略窄，只画结构） ── */
+.pop { margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.pop-row { display: flex; align-items: center; gap: 10px; }
+.pop-logo { width: 34px; height: 34px; flex: none; border-radius: 9px; background: var(--brand); color: #fff;
+            display: grid; place-items: center; font-weight: 700; }
+.pop h4 { margin: 0; font-size: 15px; }
+.pop .sub { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+.pop .pill { margin-left: auto; padding: 5px 12px; border: 1px solid var(--success-line); border-radius: var(--r-pill);
+             background: var(--success-soft); color: var(--success-strong); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.pop .seg { margin-top: 10px; display: flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.pop .seg span { flex: 1; padding: 7px 0; text-align: center; font-size: 13px; color: var(--muted); }
+.pop .seg span.on { background: var(--surface); color: var(--ink); font-weight: 700; box-shadow: var(--shadow-sm); }
+.pop .card { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); }
+.pop .card b { font-size: 13.5px; }
+.pop .card small { display: block; margin-top: 2px; color: var(--muted); }
+.pop .switch { margin-left: auto; width: 38px; height: 22px; border-radius: 999px; background: var(--accent); position: relative; flex: none; }
+.pop .switch::after { content: ""; position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+.pop .note { margin-top: 8px; color: var(--muted); font-size: 12.5px; }
+.pop .danger { color: var(--danger); font-weight: 600; }
+.pop .annot { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft);
+              color: var(--accent); font-size: 12px; font-weight: 700; }
+
+/* ── 收藏库示意 ── */
+.lib { margin: 12px 0 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
+.lib-top { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.lib-top .crumb { color: var(--muted); }
+.lib-top .crumb b { color: var(--ink); }
+.lib-top .spacer { flex: 1; }
+.lib-top .btn { padding: 5px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 12.5px; }
+.lib-top .btn.primary { border-color: transparent; background: var(--accent); color: #fff; }
+.lib-main { display: flex; min-height: 150px; }
+.lib-side { width: 178px; flex: none; padding: 10px; border-right: 1px solid var(--line); background: var(--surface-soft); font-size: 12.5px; }
+.lib-side div { padding: 6px 9px; border-radius: var(--r-xs); color: var(--muted); }
+.lib-side div.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.lib-side div .n { float: right; }
+.lib-grid { flex: 1; padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.lib-card { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; background: var(--surface); }
+.lib-thumb { height: 58px; background: linear-gradient(135deg, var(--surface-soft), var(--line)); position: relative; }
+.lib-thumb .badge { position: absolute; left: 6px; top: 6px; padding: 1px 7px; border-radius: 4px; background: var(--danger); color: #fff; font-size: 11px; }
+.lib-thumb .ch { position: absolute; left: 6px; bottom: 6px; padding: 1px 7px; border-radius: 4px; background: rgb(0 0 0 / .62); color: #fff; font-size: 11px; }
+.lib-card p { margin: 7px 8px 4px; font-size: 12.5px; line-height: 1.45; }
+.lib-card small { display: block; margin: 0 8px 8px; color: var(--muted); font-size: 11.5px; }
+.lib-card.isbad p { color: var(--danger); font-weight: 700; }
+.lib-batch { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 12.5px; }
+.lib-batch .spacer { flex: 1; }
+.lib-batch .btn { padding: 5px 11px; border-radius: var(--r-sm); font-size: 12.5px; border: 1px solid var(--line); background: var(--surface); }
+.lib-batch .btn.warn { background: var(--warning-soft); border-color: var(--warning-line); }
+.lib-batch .btn.green { background: var(--success-soft); border-color: var(--success-line); }
+.lib-batch .btn.blue { background: var(--accent-soft); border-color: var(--accent-line); }
+.lib-batch .btn.red { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+
+/* ── 收藏库详情面板示意 ── */
+.detail { margin: 12px 0 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); font-size: 13px; }
+.detail-head { display: flex; gap: 12px; padding: 14px; border-bottom: 1px solid var(--line); }
+.detail-head .cover { width: 108px; height: 68px; flex: none; border-radius: var(--r-sm); background: linear-gradient(135deg, var(--surface-soft), var(--line)); }
+.detail-head h4 { margin: 0 0 6px; font-size: 14px; line-height: 1.4; }
+.detail-head .kv { color: var(--muted); font-size: 12.5px; }
+.detail-body { padding: 12px 14px 16px; }
+.detail-body .group { margin-bottom: 14px; }
+.detail-body .group > b { display: block; margin-bottom: 7px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.detail-body .act { display: block; width: 100%; margin-bottom: 7px; padding: 9px 0; border: 1px solid var(--line);
+                    border-radius: var(--r-sm); text-align: center; font-size: 13px; font-weight: 600; }
+.detail-body .act.green { background: var(--success-soft); border-color: var(--success-line); color: var(--success-strong); }
+.detail-body .act.blue { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.detail-body .act.red { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.detail-body .act.quiet { background: var(--surface-soft); color: var(--muted); }
+.detail-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+/* ── 主题 / 语言浮标 ── */
+.floats { display: flex; gap: 26px; align-items: flex-start; margin-top: 12px; }
+.float-item { text-align: center; }
+.float-btn { width: 46px; height: 46px; margin: 0 auto; border-radius: 50%; border: 1px solid var(--accent-line);
+             background: var(--surface); color: var(--accent); display: grid; place-items: center; font-size: 19px; box-shadow: var(--shadow-md); }
+.float-item p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.float-menu { margin-top: 8px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-md); text-align: left; }
+.float-menu div { padding: 6px 10px; border-radius: var(--r-xs); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.float-menu div.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }

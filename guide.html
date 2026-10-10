@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>哔哩藏库 · 使用说明</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="mockup.css">
+<style>
+  body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font: 15px/1.75 var(--font-sans); }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 28px 20px 72px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 26px; }
+  h2 { font-size: 18px; margin: 40px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h2:first-of-type { border-top: 0; padding-top: 0; }
+  h3 { font-size: 15px; margin: 22px 0 8px; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  code { padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); font-size: 13px; }
+  .muted { color: var(--muted); }
+  .callout { margin: 14px 0; padding: 13px 16px; border: 1px solid var(--accent-line); border-radius: var(--r-sm); background: var(--accent-soft); }
+  .callout.warn { border-color: var(--danger-line); background: var(--danger-soft); }
+  .callout.ok { border-color: var(--success-line); background: var(--success-soft); }
+  .callout > b:first-child { display: block; margin-bottom: 5px; }
+  .callout.warn > b:first-child { color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+  th, td { padding: 9px 11px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { background: var(--surface-soft); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .steps { counter-reset: s; list-style: none; padding: 0; }
+  .steps > li { counter-increment: s; position: relative; margin: 0 0 22px; padding: 16px 18px 16px 56px;
+                border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+  .steps > li::before { content: counter(s); position: absolute; left: 16px; top: 15px; width: 26px; height: 26px;
+                        border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px;
+                        display: grid; place-items: center; }
+  .steps > li > b { display: block; margin-bottom: 4px; }
+  .faq { margin: 0; }
+  .faq dt { margin-top: 18px; font-weight: 600; }
+  .faq dd { margin: 5px 0 0; color: var(--muted); }
+  .toc { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; margin: 0 0 8px; padding: 14px 18px;
+         border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: 13.5px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .end { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>哔哩藏库 · 使用说明</h1>
+  <p class="lead">把 B 站收藏夹备份到本地，之后即使视频失效、被删、UP 主注销，你手里那份资料还在。</p>
+
+  <nav class="toc">
+    <a href="#what">一、这个插件做了什么</a>
+    <a href="#speed">六、请求速度怎么选（重点）</a>
+    <a href="#first">二、第一次用：三步</a>
+    <a href="#library">七、收藏库里能做什么</a>
+    <a href="#auto">三、平时不用管</a>
+    <a href="#invalid">八、失效视频怎么处理（重点）</a>
+    <a href="#update">四、补旧收藏：开始更新</a>
+    <a href="#download">九、下载功能</a>
+    <a href="#diff">五、B 站上删了什么：先看差异</a>
+    <a href="#faq">十、常见问题与使用边界</a>
+  </nav>
+
+  <h2 id="what">一、这个插件做了什么</h2>
+
+  <p>你在 B 站收藏一个视频时，插件会把这条视频的<strong>资料</strong>存到你自己电脑上的一个文件夹里：标题、BV 号、UP 主、封面、简介、标签、播放量、收藏时间……全部写成普通文件，不依赖这个插件也能打开看。</p>
+
+  <p>它做两件事：</p>
+  <ul>
+    <li><strong>自动归档</strong>：以后每次收藏成功，自动保存资料（默认开启）。</li>
+    <li><strong>批量导入 / 更新</strong>：把已有的收藏夹整理进本地，或者只补最近几天新增的。</li>
+  </ul>
+
+  <div class="callout">
+    <b>它只读取，不改动你的账号</b>
+    插件不会取消收藏、不会点赞、不会发评论，也不会修改任何 B 站上的数据。本地删掉东西也完全不影响 B 站。
+  </div>
+
+  <div class="pop">
+    <div class="pop-row">
+      <div class="pop-logo">B</div>
+      <div>
+        <h4>哔哩藏库</h4>
+        <p class="sub">自动归档视频，也可批量导入收藏夹</p>
+      </div>
+      <span class="pill">打开本地收藏库 ↗</span>
+    </div>
+    <div class="seg"><span class="on">跟随系统</span><span>白天</span><span>夜晚</span></div>
+    <div class="seg"><span class="on">简体中文</span><span>繁體中文</span><span>English</span></div>
+    <div class="card">
+      <b>请求速度</b>
+      <div class="seg"><span class="on">较低</span><span>标准</span><span>较高</span><span>高</span></div>
+      <p class="note">分批读取：每读 8 次停 6 秒，最接近人翻页的节奏。大收藏夹建议用这个。</p>
+    </div>
+    <div class="card">
+      <div class="pop-row"><div><b>自动归档已开启</b><small>收藏成功后自动保存视频资料</small></div><span class="switch"></span></div>
+    </div>
+    <div class="card">
+      <b>本地保存位置</b>
+      <small class="danger">尚未选择文件夹</small>
+      <div class="pop-row" style="margin-top:8px"><span class="btn primary" style="flex:1;text-align:center;padding:9px;border-radius:var(--r-sm);background:var(--accent);color:#fff">选择保存文件夹</span></div>
+      <p class="note">选择一次后会记住路径，并按收藏夹名称和时间创建子目录。</p>
+    </div>
+  </div>
+
+  <h2 id="first">二、第一次用：三步</h2>
+
+  <ol class="steps">
+    <li>
+      <b>选择保存文件夹</b>
+      <p class="muted">弹窗里点「选择保存文件夹」，挑一个位置（比如 <code>D:\本地收藏夹</code>）。插件会在这个目录下按收藏夹名建子目录。</p>
+      <div class="pop">
+        <div class="card" style="margin-top:0">
+          <b>本地保存位置</b>
+          <small style="color:var(--success-strong)">D:\本地收藏夹</small>
+          <div class="pop-row" style="margin-top:8px"><span class="btn primary" style="flex:1;text-align:center;padding:9px;border-radius:var(--r-sm);background:var(--accent);color:#fff">重新选择</span></div>
+        </div>
+      </div>
+      <p class="muted">选好后这个目录里会自动生成 <code>000视频下载</code>、<code>001错误报告</code>、<code>002同步报告</code> 等固定文件夹。</p>
+    </li>
+    <li>
+      <b>展开「导入或更新」，勾选要导入的收藏夹</b>
+      <p class="muted">列表会显示每个收藏夹的条数，右上角写着「已选 N 个 · 共 M 条视频」。</p>
+      <div class="pop">
+        <div class="card" style="margin-top:0">
+          <div class="pop-row"><b>导入或更新</b><span class="annot" style="margin-left:auto">把 B 站收藏夹整理到本地资料库</span></div>
+          <div class="pop-row" style="margin-top:10px"><b style="font-size:13px">收藏夹列表</b><span class="note" style="margin-left:auto;font-weight:700;color:var(--ink)">已选 2 个 · 共 1000 条视频</span></div>
+          <div class="card" style="margin-top:8px">
+            <div class="pop-row"><span>☐</span><span>默认收藏夹</span><span class="note" style="margin-left:auto">980 个</span></div>
+            <div class="pop-row"><span>☑</span><span>哆啦a梦</span><span class="note" style="margin-left:auto">6 个</span></div>
+            <div class="pop-row"><span>☑</span><span>蜡笔小新</span><span class="note" style="margin-left:auto">14 个</span></div>
+          </div>
+          <p class="note">请勿一次选择过多收藏夹。频繁请求 B 站接口可能触发风控，导致 IP 暂时受限。</p>
+        </div>
+      </div>
+    </li>
+    <li>
+      <b>点「开始导入」</b>
+      <p class="muted">会先弹一个确认框，再点一次才真正开始。导入是逐条解析每个视频再写入本地，条数多时要等一会儿（<strong>1000 条约 10 分钟以上</strong>）。中途可以暂停或取消。</p>
+      <div class="pop">
+        <div class="card" style="margin-top:0">
+          <div class="pop-row"><span style="width:22px;height:22px;border:3px solid var(--accent-soft);border-top-color:var(--accent);border-radius:50%"></span><div><b>正在导入收藏夹</b><small>正在读取「哆啦a梦」的视频资料：2/6</small></div></div>
+          <div class="pop-row" style="margin-top:10px;gap:8px">
+            <span style="flex:1;text-align:center;padding:8px;border:1px solid var(--line);border-radius:var(--r-sm);font-weight:600">暂停导入</span>
+            <span style="flex:1;text-align:center;padding:8px;border:1px solid var(--line);border-radius:var(--r-sm);font-weight:600">取消导入</span>
+          </div>
+          <p class="note">取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。</p>
+        </div>
+      </div>
+    </li>
+  </ol>
+
+  <h2 id="auto">三、平时不用管</h2>
+  <p>「自动归档」默认开启：你以后在 B 站<strong>收藏成功</strong>的那一刻，插件就把这条视频的资料存好了，不需要任何操作。</p>
+  <p class="muted">它只对「新收藏」生效 —— 已经收藏过的旧视频不会因此被补上，那些要靠第四节。</p>
+
+  <h2 id="update">四、补旧收藏：开始更新</h2>
+  <p>「开始更新」是给这种情形用的：你最近用手机刷到就收藏了十几条，想同步到本地，但<strong>不想为这十几条去跑一次全量导入</strong>。</p>
+  <div class="pop">
+    <div class="card" style="margin-top:0">
+      <b>开始更新</b>
+      <p class="note">只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。</p>
+    </div>
+  </div>
+  <p>它靠一个前提工作：B 站的收藏夹列表接口是<strong>按收藏时间倒序</strong>返回的。所以从最新一页往后读，一旦某页里最新的条目都早于你设定的天数，后面的只会更早 —— <strong>插件就直接收工了</strong>，通常只要一两次请求。</p>
+
+  <h2 id="diff">五、B 站上删了什么：先看差异</h2>
+  <p>「先看差异」不抓视频详情，只读收藏夹列表，所以很快。它回答三个问题：</p>
+  <ul>
+    <li><strong>新增</strong>：线上有、本地没有</li>
+    <li><strong>线上已移除</strong>：本地有、线上没了（你取消收藏了，或者视频被删了）</li>
+    <li><strong>新失效 / 已恢复</strong>：视频状态变了</li>
+  </ul>
+  <div class="pop">
+    <div class="card" style="margin-top:0">
+      <b>先看差异</b>
+      <p class="note">只对比收藏夹列表，不抓取每条视频的详情：1000 条约 1 分钟。导入本身要 10 分钟以上，所以建议先看一眼变了什么。</p>
+    </div>
+  </div>
+  <div class="callout">
+    <b>为什么它只要一分钟，导入却要十几分钟</b>
+    差异只读「清单」（一次 40 条），不多问；导入要为<strong>每一条</strong>单独请求一次详情接口，而每条之间有硬性的间隔下限。读清单和读详情是两种完全不同的开销。
+  </div>
+
+  <h2 id="speed">六、请求速度怎么选</h2>
+  <p>插件代替你向 B 站发请求。请求太密会触发风控，可能让你的 IP 或账号被临时限制 —— <strong>所以档位不是一个"快慢偏好"，而是一个安全设置。</strong></p>
+
+  <div class="pop">
+    <div class="card" style="margin-top:0">
+      <b>较低</b>
+      <div class="seg"><span class="on">较低</span><span>标准</span><span>较高</span><span>高</span></div>
+      <p class="note">分批读取：每读 8 次停 6 秒，最接近人翻页的节奏。大收藏夹建议用这个。</p>
+    </div>
+    <div class="card">
+      <b>标准（默认）</b>
+      <div class="seg"><span>较低</span><span class="on">标准</span><span>较高</span><span>高</span></div>
+      <p class="note">默认。每次请求间隔 0.8 秒，与详情抓取同一节奏。</p>
+    </div>
+    <div class="card">
+      <b>较高</b>
+      <div class="seg"><span>较低</span><span>标准</span><span class="on">较高</span><span>高</span></div>
+      <p class="note danger">每次请求间隔 0.4 秒。请控制单次勾选的总量。</p>
+    </div>
+    <div class="card">
+      <b>高</b>
+      <div class="seg"><span>较低</span><span>标准</span><span>较高</span><span class="on">高</span></div>
+      <p class="note danger">每次请求间隔 0.2 秒。风控风险明显，只建议对小收藏夹做小批量操作。</p>
+    </div>
+  </div>
+
+  <h3>代价对照（以 1000 条为例）</h3>
+  <table>
+    <tr><th>档位</th><th>每次请求间隔</th><th class="num">读 1000 条清单</th><th class="num">导入 1000 条（含详情）</th></tr>
+    <tr><td><strong>较低</strong>（最稳）</td><td>1.2 秒 + 每 8 次停 6 秒</td><td class="num">约 1 分钟</td><td class="num">约 32 分钟</td></tr>
+    <tr><td><strong>标准</strong>（默认）</td><td>0.8 秒</td><td class="num">约 25 秒</td><td class="num">约 13 分钟</td></tr>
+    <tr><td><strong>较高</strong></td><td>0.4 秒</td><td class="num">约 13 秒</td><td class="num">约 13 分钟</td></tr>
+    <tr><td><strong>高</strong></td><td>0.2 秒</td><td class="num">约 7 秒</td><td class="num">约 13 分钟</td></tr>
+  </table>
+
+  <div class="callout warn">
+    <b>后两行的导入时间是故意一样的</b>
+    详情抓取有<strong>独立的间隔下限</strong>，不受档位影响。也就是说选「较高」或「高」，导入一条都不会变快，<strong>却真的增加了风控风险</strong>。它们只让「读清单」和「看差异」快一点。
+  </div>
+
+  <div class="callout">
+    <b>怎么选</b>
+    <ul style="margin:6px 0 0">
+      <li><strong>第一次导入大收藏夹</strong> → 用「较低」，分批停顿最像人翻页。</li>
+      <li><strong>日常补几条</strong> → 「标准」就够。</li>
+      <li><strong>较高 / 高</strong> → 只在你确认收藏夹很小、而且只想看差异时用。切过去会先弹一次提醒。</li>
+    </ul>
+  </div>
+
+  <div class="callout warn">
+    <b>被风控了会怎样</b>
+    插件会<strong>立即停止</strong>，并告诉你等多久再试。它不会硬撑着把剩下的请求发完 —— 那只会让限制时间更长。此时不要反复重试，等一段时间再继续。
+  </div>
+
+  <h2 id="library">七、收藏库里能做什么</h2>
+  <p>点弹窗右上角的「打开本地收藏库」进入。它是一个读你本地文件夹的网页，不联网也能用。</p>
+
+  <div class="lib">
+    <div class="lib-top">
+      <span class="crumb">_测试归档 / <b>全部收藏</b></span>
+      <span class="spacer"></span>
+      <span class="muted" style="font-size:12.5px">本地收藏夹占用：4.45 MB</span>
+      <span class="btn">与 B 站对比</span>
+      <span class="btn">↻ 刷新</span>
+      <span class="btn primary">＋ 选择收藏根目录</span>
+    </div>
+    <div class="lib-main">
+      <div class="lib-side">
+        <div class="on">▦ 全部收藏 <span class="n">324</span></div>
+        <div>▤ 7days <span class="n">15</span></div>
+        <div>▤ 蜡笔小新 <span class="n">4</span></div>
+        <div>▤ 默认收藏夹 <span class="n">21</span></div>
+        <div>▤ 沙雕动画 <span class="n">128</span></div>
+        <div>▤ 游戏解说 <span class="n">7</span></div>
+        <div style="margin-top:10px;border:1px dashed var(--line);text-align:center">＋ 新建收藏夹</div>
+      </div>
+      <div class="lib-grid">
+        <div class="lib-card"><div class="lib-thumb"><span class="ch">游戏解说</span></div><p>末日丧尸大爆发！我在白天搜刮物资装备…</p><small>喵心GG · 今天</small></div>
+        <div class="lib-card"><div class="lib-thumb"><span class="ch">蜡笔小新</span></div><p>今天野原家吃喷香喷香的松茸饭哦！</p><small>小新要蘸酱 · 今天</small></div>
+        <div class="lib-card isbad"><div class="lib-thumb"><span class="badge">已失效</span><span class="ch">沙雕动画</span></div><p>未知</p><small>账号已注销 · 3 个月前</small></div>
+      </div>
+    </div>
+    <div class="lib-batch">
+      <b>已选 0 个</b><span class="muted">全选当前结果</span><span class="muted">完成</span>
+      <span class="spacer"></span>
+      <span class="btn warn">↻ 更新视频状态</span>
+      <span class="btn green">↓ 下载</span>
+      <span class="btn blue">⇄ 移动或复制</span>
+      <span class="btn red">🗑 删除</span>
+    </div>
+  </div>
+
+  <h3>单个视频的详情面板</h3>
+  <div class="detail">
+    <div class="detail-head">
+      <div class="cover"></div>
+      <div>
+        <h4>末日丧尸大爆发！我在白天搜刮物资装备，晚上负重训练等级技能！</h4>
+        <p class="kv">BV 号：BV1WvYV6aEzB &nbsp;·&nbsp; 游戏解说 &nbsp;·&nbsp; 喵心GG</p>
+      </div>
+    </div>
+    <div class="detail-body">
+      <div class="group">
+        <b>本地视频</b>
+        <span class="act green">↓ 下载视频</span>
+        <span class="act quiet">✓ 已下载？点击标记</span>
+      </div>
+      <div class="group">
+        <b>本地收藏管理</b>
+        <span class="act blue">⇄ 移动或复制</span>
+        <span class="act red">🗑 删除本地归档</span>
+        <p class="detail-note">这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。</p>
+      </div>
+      <div class="group">
+        <b>视频状态</b>
+        <span class="act quiet" style="margin-bottom:5px">↻ 更新视频状态</span>
+        <p class="detail-note">重新解析播放量、点赞、UP 主粉丝数等会变化的数值，<strong>只覆盖这些数值，不改动标题、简介和标签</strong>。</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>左下角两个浮标</h3>
+  <div class="floats">
+    <div class="float-item">
+      <div class="float-btn">🖥</div>
+      <p>主题</p>
+      <div class="float-menu"><div class="on">☀ 跟随系统 ✓</div><div>☀ 白天</div><div>☾ 夜晚</div></div>
+    </div>
+    <div class="float-item">
+      <div class="float-btn">🌐</div>
+      <p>语言</p>
+      <div class="float-menu"><div class="on">🌐 简体中文 ✓</div><div>🌐 繁體中文</div><div>🌐 English</div></div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <b>批量操作</b>
+    在卡片上勾选若干视频，底部会出现那条蓝色工具条：<strong>更新视频状态 / 下载 / 移动或复制 / 删除</strong>。一次最多处理 80 条，超出的部分完成后可以再点一次继续。
+  </div>
+
+  <h2 id="invalid">八、失效视频怎么处理</h2>
+
+  <p>视频失效后，B 站不会删掉它在收藏夹里的位置，而是换成一张<strong>空白占位图</strong> —— 标题、封面、简介全都没了，只剩下「已失效视频」几个字。如果你不备份，过一段时间连"我曾经收藏过这个"都查不到。</p>
+
+  <div class="callout warn">
+    <b>先把两个概念分开，它们经常被混为一谈</b>
+    <table style="margin:8px 0 0;background:var(--surface)">
+      <tr><th>说法</th><th>意思</th><th>能不能做到</th></tr>
+      <tr><td><strong>找回部分信息</strong></td><td>从别处把封面、标题等<strong>拼凑回来</strong>，让本地记录不至于只剩「未知」</td><td style="color:var(--success-strong);font-weight:700">能</td></tr>
+      <tr><td>恢复成正常状态</td><td>让视频重新可以播放</td><td style="color:var(--danger);font-weight:700">一般做不到</td></tr>
+    </table>
+  </div>
+
+  <p>插件做的是<strong>前者</strong>。导入面板里那个开关叫「尝试找回失效视频的部分信息」，就是这个意思：</p>
+
+  <div class="pop">
+    <div class="card" style="margin-top:0">
+      <div class="pop-row"><span>☑</span><div><b>尝试找回失效视频的部分信息</b>
+        <small>失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。</small>
+      </div></div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th>开关</th><th>失效视频在本地长什么样</th></tr>
+    <tr><td>关闭</td><td>标题「未知」、封面是占位图 —— 至少你知道<strong>这里曾经有一条</strong>，BV 号还在</td></tr>
+    <tr><td>开启</td><td>尽力找回封面和标题 —— 真机上确实能救回一部分</td></tr>
+  </table>
+
+  <div class="callout ok">
+    <b>一条重要的保护规则</b>
+    导入或更新时，如果解析到的结果<strong>不如本地已有的记录</strong>（失效、标题取不到、标题是「未知」），插件<strong>会丢弃它、绝不覆盖</strong>。「未知」是占位符，不是数据。<br>
+    想用失效信息去覆盖已有记录，只有<strong>手动点「更新视频状态」</strong>那一条路 —— 而它也只改视频状态，不动标题、简介和标签。
+  </div>
+
+  <h2 id="download">九、下载功能</h2>
+  <p>在视频详情里点「下载视频」，会打开一个独立页面。它把视频本体（以及你勾选的其它内容）存进本地下载目录。</p>
+
+  <div class="pop">
+    <div class="card" style="margin-top:0">
+      <b>视频队列</b>
+      <small>从收藏库打开的视频会自动加入；也可以粘贴 BV 号、av 号或视频网址。</small>
+      <div class="pop-row" style="margin-top:8px">
+        <span style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r-sm);color:var(--muted)">粘贴 B 站视频网址、BV 号或 av 号</span>
+        <span style="padding:7px 12px;border:1px solid var(--line);border-radius:var(--r-sm);font-weight:600">解析并添加</span>
+      </div>
+    </div>
+    <div class="card">
+      <b>下载设置</b>
+      <small>这些选项对所有视频生效。</small>
+      <div style="margin-top:8px;font-size:12.5px;color:var(--muted)">
+        保存位置：本地收藏根目录 / 000视频下载（默认）<br>
+        视频清晰度 · 文件格式 · 视频编码偏好 · 音频音质
+      </div>
+    </div>
+    <div class="card">
+      <b>要保存的内容</b>
+      <div style="margin-top:8px;font-size:12.5px;color:var(--muted)">☑ 视频 &nbsp; ☑ 音频 &nbsp; ☐ 弹幕 &nbsp; ☐ 字幕</div>
+    </div>
+  </div>
+
+  <p class="muted">下载的请求同样走插件的限速器，所以档位设置对它一样有意义。文件按 <code>收藏夹名\标题 - BV号\</code> 存放，和归档目录一一对应。</p>
+
+  <h2 id="faq">十、常见问题与使用边界</h2>
+
+  <dl class="faq">
+    <dt>导入 1000 条要多久？</dt>
+    <dd>「标准」档约 13 分钟，「较低」档约 32 分钟。条数越多时间线性增长，因为每条视频都要单独请求一次详情。</dd>
+
+    <dt>怎么知道被风控了？</dt>
+    <dd>插件会立即中止，并给出等待提示；错误报告里也会写明。此时<strong>不要反复重试</strong>，等一段时间再继续。</dd>
+
+    <dt>会动我的 B 站账号吗？</dt>
+    <dd>不会。插件只读取收藏夹和视频信息，不取消收藏、不点赞、不评论、不修改任何数据。</dd>
+
+    <dt>本地删了会影响 B 站吗？</dt>
+    <dd>不会。本地文件和 B 站账户完全独立，删除本地归档不影响线上收藏。</dd>
+
+    <dt>换电脑怎么迁移？</dt>
+    <dd>把整个保存文件夹拷过去，在新电脑上重新选择这个文件夹即可。目录结构是普通文件夹，不依赖插件。</dd>
+
+    <dt>失效视频能找回来吗？</dt>
+    <dd>能找回<strong>一部分信息</strong>（封面、标题），但视频本身一般无法恢复播放。详见第八节。</dd>
+
+    <dt>为什么有些封面显示"暂不可恢复"？</dt>
+    <dd>那是失效视频的占位图。留着它，记录才能在收藏库里显示出来，不会看起来像丢了一条。</dd>
+
+    <dt>进度条停着不动，是卡住了吗？</dt>
+    <dd>可能是在等限速间隔，也可能在读取下一页。真正的卡死插件会提示；实在不放心可以直接关掉弹窗再打开，进度会接着显示。</dd>
+  </dl>
+
+  <h3>使用边界</h3>
+  <ul>
+    <li><strong>请勿滥用</strong>：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。<strong>请分批、低速使用。</strong></li>
+    <li>插件不提供任何绕过 B 站权限或付费限制的能力，也不下载你没有权限观看的内容。</li>
+    <li>所有数据存在你自己的电脑上，插件不上传任何内容，也没有自己的服务器。</li>
+    <li>请遵守 B 站的服务条款，以及你所在地区关于个人备份的法律规定。</li>
+  </ul>
+
+  <div class="end">
+    <button id="guideClose" class="button button-primary" type="button" style="padding:10px 26px;border:0;border-radius:var(--r-sm);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer">知道了</button>
+  </div>
+</div>
+<script src="tutorial.js"></script>
+</body>
+</html>

@@ -685,5 +685,6 @@
   "只对比收藏夹列表，不抓取每条视频的详情：1000 条约 1 分钟。导入本身要 10 分钟以上，所以建议先看一眼变了什么。": "Only the favourites list is compared — not each video's details. About about a minute for 1,000 items, versus 30+ minutes for a full import, so it is worth a look first.",
   "只对比收藏夹列表，不抓取每条视频的详情，所以很快（1000 条约 1 分钟）。完整列表会写进归档根目录的 002同步报告 文件夹。": "Only the favourites list is compared, not each video's details, so it is quick (about about a minute for 1,000 items). The full list is written to the 002同步报告 folder under the archive root.",
   "导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（1000 条约 10 分钟以上）。中途可以暂停或取消。": "Importing parses and saves every video in the collection one by one; with many records it can take a long time (30+ minutes for 1,000 items). You can pause or cancel at any point.",
-  "只读取 B 站的收藏夹列表，不抓取每条视频的详情，所以很快（1000 条约 1 分钟）。对比过程不会改动任何本地文件。": "Only the Bilibili favourites list is read, not each video's details, so it is quick (about about a minute for 1,000 items). Nothing local is modified."
+  "只读取 B 站的收藏夹列表，不抓取每条视频的详情，所以很快（1000 条约 1 分钟）。对比过程不会改动任何本地文件。": "Only the Bilibili favourites list is read, not each video's details, so it is quick (about about a minute for 1,000 items). Nothing local is modified.",
+  "使用说明": "Guide"
 }
