@@ -110,6 +110,16 @@ Say "  [$([char]0x2713)] 干净" $C_GREEN
 # 排查用的临时脚本如果留在扩展根目录，插件就直接加载不了 —— 真机上发生过一次。
 # 更麻烦的是 .gitignore 里有 _*.cjs，git status 看不见它，上面那个净树检查会漏掉，
 # 所以这里用文件系统直接查，不看 git。
+# 每个 tag 都要有 README 小节 —— 以前靠人记，结果 V1.1.4 到 V1.1.13 之间漏了 9 个版本，
+# git tag 有 16 个而 README 只有 5 个，读文档的人直接失去时间线。
+# 所以让脚本强制：没有 "## V<版本>" 这一节就不许发布。
+$readme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw -Encoding UTF8
+if ($readme -notmatch "(?m)^## V$([regex]::Escape($版本))[：:]") {
+  Say "  README.md 里没有「## V$版本：...」这一节。" $C_RED
+  Say "  每个 tag 都要有 README 小节（纯内部改动也要留一行），否则版本历史会缺环。" $C_YELLOW
+  Die "发布中止：先在 README.md 里补上 V$版本 的小节。"
+}
+
 $reserved = @(Get-ChildItem -LiteralPath $PSScriptRoot -Force -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -like '_*' })
 if ($reserved.Count) {
