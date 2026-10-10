@@ -2296,15 +2296,30 @@ test("请求放大器都有硬预算，不能无限翻页", () => {
 test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
   const src = readProjectFile("background.js");
 
-  const min = Number(src.match(/BILI_MIN_REQUEST_INTERVAL_MS = (\d+)/)?.[1] || 0);
-  assert.ok(min >= 250, `全局最小间隔只有 ${min}ms —— 太激进，降下来之前先想清楚风控的代价`);
+  // 请求速度档位表
+  const intervals = [...src.matchAll(/intervalMs: (\d+)/g)].map((m) => Number(m[1]));
+  assert.ok(intervals.length >= 4, `速度档位只有 ${intervals.length} 档`);
+  const standard = Number(src.match(/standard: \{ intervalMs: (\d+)/)?.[1] || 0);
+  assert.ok(standard >= 250, `默认（标准）档间隔只有 ${standard}ms —— 太激进`);
+  const fastest = Math.min(...intervals);
+  assert.ok(fastest >= 150, `最快的档位是 ${fastest}ms，太快了`);
+  assert.ok(fastest < standard, "「标准」应该不是最快的一档，档位表可能写反了");
 
-  const page = Number(src.match(/IMPORT_PAGE_DELAY_MS = (\d+)/)?.[1] || 0);
-  // 翻页的实际节奏由全局限速器决定（每次 biliImportApiGet 都要领一张门票），
-  // IMPORT_PAGE_DELAY_MS 只是额外的一层，两者取大。
-  // 别把它写成 page >= min —— 220 < 320 并不代表有问题，限速器已经兜住了。
-  const effectivePageInterval = Math.max(page, min);
-  assert.ok(effectivePageInterval >= 250, `翻页的实际间隔只有 ${effectivePageInterval}ms，太激进`);
+  // 「较低」必须是真的"分批"，而不只是把间隔拉长 —— 用户要的是更接近人的模式
+  assert.match(src, /lower:\s*\{ intervalMs: \d+, batchSize: [1-9]\d*, pauseMs: [1-9]\d* \}/,
+    "「较低」档没有分批停顿（batchSize/pauseMs 都是 0），那只是慢一点的「标准」");
+  assert.match(src, /if \(speed\.batchSize > 0\)/, "限速器没有实现分批停顿");
+
+  // 档位必须听用户的：存在 storage 里、并监听变化
+  assert.match(src, /chrome\.storage\.local\.get\("requestSpeed"\)/, "没有读取用户选的档位");
+  assert.match(src, /chrome\.storage\.onChanged\.addListener/, "没有监听档位变化，改了要重启才生效");
+
+  // 「较高」与「高」必须先弹提醒（用户明确要求）
+  const popup = readProjectFile("popup.js");
+  assert.match(popup, /REQUEST_SPEED_RISKY = new Set\(\["higher", "high"\]\)/, "快速档位没有标记为有风险");
+  assert.match(popup, /speedWarnDialog\.showModal\(\)/, "切到快速档位时没有弹提醒");
+  assert.match(readProjectFile("popup.html"), /id="speedWarnDialog"/, "提醒弹窗不存在");
+  assert.match(readProjectFile("popup.html"), /500 条以下/, "提醒文案里没有「控制总量」的提示");
 
   // 唯一的出网口必须在发请求之前排队
   const apiGetAt = src.indexOf("async function biliImportApiGet");

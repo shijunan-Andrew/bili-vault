@@ -61,6 +61,17 @@
         <button type="button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>
         <button type="button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
       </div>
+      <!-- 使用须知第一条讲的就是请求速度。默认「标准」；切到「较高」或「高」必须先过提醒弹窗。 -->
+      <div class="speed-row">
+        <span id="speedLabel" class="speed-label" data-i18n="请求速度">请求速度</span>
+        <div id="speedGroup" class="segmented speed-segmented" role="group" data-i18n-aria="请求速度" aria-label="请求速度">
+          <button type="button" data-speed-value="lower" aria-pressed="false" data-i18n="较低">较低</button>
+          <button type="button" data-speed-value="standard" aria-pressed="true" data-i18n="标准">标准</button>
+          <button type="button" data-speed-value="higher" aria-pressed="false" data-i18n="较高">较高</button>
+          <button type="button" data-speed-value="high" aria-pressed="false" data-i18n="高">高</button>
+        </div>
+        <p id="speedHint" class="speed-hint" role="status"></p>
+      </div>
     </section>
 
     <section class="card feature-card">
@@ -166,6 +177,14 @@
       </div>
     </div>
   </main>
+  <dialog id="speedWarnDialog" class="popup-dialog" aria-labelledby="speedWarnTitle">
+    <h2 id="speedWarnTitle" data-i18n="这个速度有风控风险">这个速度有风控风险</h2>
+    <p class="popup-dialog-warning" data-i18n="此模式可能会有风控风险，请不要一次勾选太多收藏夹，勾选内容的总量尽量在 500 条以下。如果需要导入大容量收藏夹，请选择「较低」模式。">此模式可能会有风控风险，请不要一次勾选太多收藏夹，勾选内容的总量尽量在 500 条以下。如果需要导入大容量收藏夹，请选择「较低」模式。</p>
+    <div class="popup-dialog-actions">
+      <button id="speedWarnCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="speedWarnGo" class="primary" type="button" data-i18n="我知道了，仍然使用">我知道了，仍然使用</button>
+    </div>
+  </dialog>
   <dialog id="updateRecentDialog" class="popup-dialog" aria-labelledby="updateRecentTitle">
     <h2 id="updateRecentTitle" data-i18n="开始更新">开始更新</h2>
     <p id="updateRecentDetail" class="muted"></p>

@@ -2795,7 +2795,36 @@ const IMPORT_PAGE_DELAY_MS = 220;   // 额外的一层；实际节奏由 BILI_MI
 
    想调快就改这一个数 —— 但改之前先想清楚：
    320ms 那次真机风控，就是"觉得快一点没关系"的代价。 */
-const BILI_MIN_REQUEST_INTERVAL_MS = 800;
+/* 请求速度档位。用户可在插件弹窗里选，存在 chrome.storage.local.requestSpeed。
+
+   「较低」是唯一真正像人的一档：不只慢，还会**分批** —— 读 8 次停 6 秒，
+   模拟人翻几页、看到感兴趣的内容会停下来。其余三档只是把间隔拉长/缩短。
+
+   数值直接决定被风控的概率。改之前先读 AI_HANDOFF 合规红线第 8 条。 */
+const REQUEST_SPEEDS = {
+  lower:    { intervalMs: 1200, batchSize: 8, pauseMs: 6000 },
+  standard: { intervalMs: 800,  batchSize: 0, pauseMs: 0 },
+  higher:   { intervalMs: 400,  batchSize: 0, pauseMs: 0 },
+  high:     { intervalMs: 200,  batchSize: 0, pauseMs: 0 }
+};
+const DEFAULT_REQUEST_SPEED = "standard";
+// 「标准」档的间隔。测试与文档引用它，实际节奏由 REQUEST_SPEEDS 决定
+const BILI_MIN_REQUEST_INTERVAL_MS = REQUEST_SPEEDS[DEFAULT_REQUEST_SPEED].intervalMs;
+
+let requestSpeed = REQUEST_SPEEDS[DEFAULT_REQUEST_SPEED];
+let requestSpeedId = DEFAULT_REQUEST_SPEED;
+function applyRequestSpeed(id) {
+  if (!REQUEST_SPEEDS[id]) return;
+  requestSpeedId = id;
+  requestSpeed = REQUEST_SPEEDS[id];
+}
+// service worker 里不每次请求都读 storage，缓存一份并监听变化
+chrome.storage.local.get("requestSpeed")
+  .then((saved) => applyRequestSpeed(saved?.requestSpeed || DEFAULT_REQUEST_SPEED))
+  .catch(() => {});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.requestSpeed) applyRequestSpeed(changes.requestSpeed.newValue);
+});
 
 /* 页面代取连续失败多少次之后，本轮就不再尝试它。
 
@@ -2816,14 +2845,24 @@ const IMPORT_RECOVERY_MAX_REQUESTS = 120;
 const IMPORT_RECOVERY_MAX_PASSES = 2;
 const IMPORT_HISTORY_MAX_REQUESTS = 40;
 let biliRequestSlotAt = 0;
+let biliRequestCount = 0;
 
 // 预约一个不早于"上次预约 + 最小间隔"的时间点再往下走。
 // 先占坑再等待，所以并发调用也会被排成有间隔的一串，而不是同时冲出去。
 async function biliThrottleWait() {
-  const slot = Math.max(Date.now(), biliRequestSlotAt + BILI_MIN_REQUEST_INTERVAL_MS);
+  const speed = requestSpeed;
+  const slot = Math.max(Date.now(), biliRequestSlotAt + speed.intervalMs);
   biliRequestSlotAt = slot;
   const wait = slot - Date.now();
   if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  // 分批档位：每读 batchSize 次停 pauseMs —— 模拟人翻几页、停下来看一会儿
+  if (speed.batchSize > 0) {
+    biliRequestCount += 1;
+    if (biliRequestCount % speed.batchSize === 0) {
+      biliRequestSlotAt = Date.now() + speed.pauseMs;
+      await new Promise((resolve) => setTimeout(resolve, speed.pauseMs));
+    }
+  }
 }
 
 // 从 视频信息.txt 原文取「视频状态」行。归档里写的是「正常」或「已失效视频（已尝试恢复）」。

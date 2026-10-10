@@ -18,6 +18,9 @@ const importConfirmDetail = document.getElementById("importConfirmDetail");
 const updateRecentButton = document.getElementById("updateRecent");
 const updateRecentDialog = document.getElementById("updateRecentDialog");
 const updateRecentDetail = document.getElementById("updateRecentDetail");
+const speedGroup = document.getElementById("speedGroup");
+const speedHint = document.getElementById("speedHint");
+const speedWarnDialog = document.getElementById("speedWarnDialog");
 const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
 const reportPath = document.getElementById("reportPath");
@@ -212,6 +215,61 @@ async function loadImportFolders() {
 /* V1.1.0：先看差异。
    只对比收藏夹列表（40 条/请求），不抓详情（1.25 条/秒）—— 这是它能"1~2 分钟出结果"的唯一原因。
    完整列表（可能几百条）写进 归档根目录/002同步报告/，弹窗里只显示摘要。 */
+/* 请求速度。
+   与 background.js 的 REQUEST_SPEEDS 一一对应 —— 那边决定实际节奏，这边只负责让用户选。
+   切到「较高」或「高」必须先弹提醒：使用须知第一条就是请求过密会触发风控。 */
+const REQUEST_SPEED_ORDER = ["lower", "standard", "higher", "high"];
+const REQUEST_SPEED_RISKY = new Set(["higher", "high"]);
+// 必须用字面量调用 BcaI18n.t("…")：项目约定键必须是字面量，
+// 否则 i18n-extract 扫不到、翻译会静默缺失（这里第一版就踩了一次）。
+function speedHintFor(value) {
+  if (value === "lower") return BcaI18n.t("分批读取：每读 8 次停 6 秒，最接近人翻页的节奏。大收藏夹建议用这个。");
+  if (value === "standard") return BcaI18n.t("默认。每次请求间隔 0.8 秒，与详情抓取同一节奏。");
+  if (value === "higher") return BcaI18n.t("每次请求间隔 0.4 秒。请控制单次勾选的总量。");
+  if (value === "high") return BcaI18n.t("每次请求间隔 0.2 秒。风控风险明显，只建议对小收藏夹做小批量操作。");
+  return "";
+}
+let currentSpeed = "standard";
+let pendingSpeed = "";
+
+function renderSpeed() {
+  speedGroup.querySelectorAll("button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.speedValue === currentSpeed));
+  });
+  speedHint.textContent = speedHintFor(currentSpeed);
+  speedHint.classList.toggle("danger", REQUEST_SPEED_RISKY.has(currentSpeed));
+}
+
+function applySpeed(value) {
+  if (!REQUEST_SPEED_ORDER.includes(value)) return;
+  currentSpeed = value;
+  renderSpeed();
+  chrome.storage.local.set({ requestSpeed: value }).catch(() => {});
+}
+
+speedGroup.querySelectorAll("button").forEach((button) => {
+  button.addEventListener("click", () => {
+    const value = button.dataset.speedValue;
+    if (value === currentSpeed) return;
+    // 切到更快的档位先提醒；取消就保持原样，不写入
+    if (REQUEST_SPEED_RISKY.has(value)) {
+      pendingSpeed = value;
+      speedWarnDialog.showModal();
+      return;
+    }
+    applySpeed(value);
+  });
+});
+document.getElementById("speedWarnCancel").addEventListener("click", () => {
+  pendingSpeed = "";
+  speedWarnDialog.close();
+});
+document.getElementById("speedWarnGo").addEventListener("click", () => {
+  speedWarnDialog.close();
+  if (pendingSpeed) applySpeed(pendingSpeed);
+  pendingSpeed = "";
+});
+
 /* 折叠摘要只显示首行：完整内容在展开后的 lastResult 里。
    最近状态那一块在导入很多记录后会变得很长，所以整块改成可折叠。 */
 function setLastResultText(value) {
@@ -709,6 +767,12 @@ async function boot() {
   refreshStatus().catch((error) => {
     setLastResultText(error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法读取插件状态。"));
   });
+  // 读回上次选择的速度（与 background.js 共用同一份 storage.local）。
+  // 用 then 而不是 await —— 这块初始化代码不在 async 函数里。
+  chrome.storage.local.get("requestSpeed").then((saved) => {
+    currentSpeed = REQUEST_SPEED_ORDER.includes(saved?.requestSpeed) ? saved.requestSpeed : "standard";
+    renderSpeed();
+  }).catch(() => renderSpeed());
   /* ---------------- 4.8：顶部开源横幅 ---------------- */
 
 // 与 library.js 的 PROJECT_REPO_URL 保持一致

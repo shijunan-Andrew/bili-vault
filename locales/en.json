@@ -642,5 +642,17 @@
   "只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。": "Syncs only videos favourited in the last few days instead of scanning the whole collection. Handy if you often favourite from your phone.",
   "只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。": "Only videos favourited inside the chosen window are handled: missing ones are added and existing ones refreshed. Records outside the window are left untouched.",
   "「{folder}」按最近 {days} 天过滤：线上 {total} 条里命中 {hit} 条。": "「{folder}」 filtered to the last {days} days: {hit} of {total} matched.",
-  "预计要读取 {requests} 次收藏夹列表（{folders} 个收藏夹，每次 40 条）。": "About {requests} favourites-list requests ({folders} collection(s), 40 items each)."
+  "预计要读取 {requests} 次收藏夹列表（{folders} 个收藏夹，每次 40 条）。": "About {requests} favourites-list requests ({folders} collection(s), 40 items each).",
+  "请求速度": "Request speed",
+  "较低": "Lower",
+  "标准": "Standard",
+  "较高": "Higher",
+  "高": "High",
+  "这个速度有风控风险": "This speed carries a risk of rate limiting",
+  "此模式可能会有风控风险，请不要一次勾选太多收藏夹，勾选内容的总量尽量在 500 条以下。如果需要导入大容量收藏夹，请选择「较低」模式。": "This mode may trigger rate limiting. Do not select too many collections at once, and keep the total under about 500 items. For a large collection, choose the 「Lower」 mode.",
+  "我知道了，仍然使用": "Got it, use it anyway",
+  "分批读取：每读 8 次停 6 秒，最接近人翻页的节奏。大收藏夹建议用这个。": "Batched: pauses 6 seconds after every 8 requests, closest to how a person browses. Recommended for large collections.",
+  "默认。每次请求间隔 0.8 秒，与详情抓取同一节奏。": "Default. 0.8s between requests, the same pace as detail fetching.",
+  "每次请求间隔 0.4 秒。请控制单次勾选的总量。": "0.4s between requests. Keep the total per run modest.",
+  "每次请求间隔 0.2 秒。风控风险明显，只建议对小收藏夹做小批量操作。": "0.2s between requests. Clearly risky — only for small batches on small collections."
 }
