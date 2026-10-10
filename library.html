@@ -258,8 +258,6 @@
   <!-- 整理类操作（已下载 / 移动复制 / 删除 / 打开本地目录）的结果提示。
        以前只用底部 toast，一闪就没了 —— 失败时用户很容易错过，
        而这几件事恰恰是"做错了代价很大"的。 -->
-  <a class="guide-fab" href="guide.html" target="_blank" rel="noopener" data-i18n-title="使用说明" title="使用说明" aria-label="使用说明">？</a>
-
   <dialog id="resultDialog" class="editor-dialog" aria-labelledby="resultDialogTitle">
     <div class="editor-heading"><span id="resultDialogIcon" class="editor-heading-icon" data-icon="alert"></span><h2 id="resultDialogTitle"></h2></div>
     <p id="resultDialogText" class="editor-hint"></p>
@@ -330,6 +328,9 @@
 
   <!-- 4.5.1：主题与语言改成右下角的悬浮球，比原来侧栏里的下拉框更好点、也更好看 -->
   <div class="floating-dock">
+    <div class="dock-slot">
+      <a class="dock-ball guide-fab" href="guide.html" target="_blank" rel="noopener" data-i18n-title="使用说明" title="使用说明" aria-label="使用说明"><span class="guide-fab-mark">？</span></a>
+    </div>
     <div class="dock-slot">
       <div id="themeMenu" class="dock-menu" role="menu" hidden></div>
       <button id="themeBall" class="dock-ball" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" aria-label="主题" data-i18n-aria="主题" title="主题" data-i18n-title="主题"><span id="themeBallIcon" data-icon="monitor"></span></button>

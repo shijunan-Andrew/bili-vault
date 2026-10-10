@@ -1181,25 +1181,18 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 }
 
 /* 左下角的「使用说明」浮标，和主题 / 语言那两个圆钮排在一起 */
+/* 「？」和主题/语言球并排成一串浮标（.floating-dock）。原来它是 fixed 钉在左下角，
+   正好压在侧栏「归档文件只在本地管理」那张卡片上。现在复用 .dock-ball 的圆，
+   只把配色换成强调色以区别于主题/语言，并单独处理那个全角问号的居中。 */
 .guide-fab {
-  position: fixed;
-  left: 20px;
-  bottom: 152px;
-  z-index: 30;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  border: 1px solid var(--accent-line);
-  background: var(--surface);
+  border-color: var(--accent-line);
   color: var(--accent);
-  box-shadow: var(--shadow-md);
-  display: grid;
-  place-items: center;
-  font-size: 18px;
-  font-weight: 700;
   text-decoration: none;
 }
-.guide-fab:hover { border-color: var(--accent); background: var(--accent-soft); }
+.guide-fab:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.guide-fab:active { transform: translateY(0) scale(.96); }
+/* 全角「？」自带右侧字边距，直接居中会看着偏左；缩到 .9em 再靠 line-height:1 收掉行高偏移 */
+.guide-fab-mark { font-size: .9em; font-weight: 700; line-height: 1; }
 
 .editor-hint-danger {
   padding: var(--sp-2) var(--sp-3);

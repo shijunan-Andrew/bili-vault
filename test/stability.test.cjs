@@ -1719,6 +1719,34 @@ test("theme and language are floating balls, not sidebar selects", () => {
   assert.match(library, /document\.addEventListener\("click", \(\) => closeDockMenus\(\)\)/);
   assert.match(library, /event\.key === "Escape"/);
 });
+test("「使用说明」的问号跟主题/语言球并成一串，且排在主题球上方（静态回归）", () => {
+  const html = readProjectFile("library.html");
+  const css = readProjectFile("library.css");
+
+  // 它必须在浮标串里面，且夹在 .floating-dock 开头和主题球之间 —— 也就是排在主题球上方
+  const dockAt = html.indexOf('<div class="floating-dock">');
+  const fabAt = html.indexOf("guide-fab");
+  const themeAt = html.indexOf("themeBall");
+  assert.ok(dockAt >= 0, "library.html 里必须有 .floating-dock");
+  assert.ok(fabAt > dockAt, "「？」必须放进 .floating-dock 里，不能自己钉在角落");
+  assert.ok(fabAt < themeAt, "「？」要排在主题球（themeBall）上方");
+  // 它得和另外两个球长得一样：共用 .dock-ball
+  const fabTag = html.slice(html.lastIndexOf("<", fabAt), html.indexOf(">", fabAt) + 1);
+  assert.match(fabTag, /class="dock-ball guide-fab"/);
+  // 问号本体单独一个元素，才能单独调居中
+  assert.match(html, /<span class="guide-fab-mark">？<\/span>/);
+
+  // 不能再自己 fixed 定位 —— 那正是当初压住侧栏卡片的原因
+  const rule = (css.match(/\.guide-fab \{[^}]*\}/) || [""])[0];
+  assert.ok(rule, "library.css 里必须有 .guide-fab 规则");
+  assert.doesNotMatch(rule, /position:\s*fixed/, "「？」不能再自己 fixed 到左下角");
+  assert.doesNotMatch(rule, /left:\s*\d+px/, "位置交给 .floating-dock，不要再写 left");
+
+  // 全角问号的居中处理
+  const mark = (css.match(/\.guide-fab-mark \{[^}]*\}/) || [""])[0];
+  assert.ok(mark, ".guide-fab-mark 规则必须存在，否则问号会偏");
+  assert.match(mark, /line-height:\s*1/, "line-height 不收回 1，问号会因行高偏移而不居中");
+});
 test("the interface language switcher offers three locales", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
