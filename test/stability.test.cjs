@@ -2279,6 +2279,28 @@ test("收藏库的档位风险判断要用线上条数，不能用本地条数",
   assert.match(src, /speed: requestSpeedId/, "没有把当前档位一并返回");
 });
 
+test("「更新视频状态」发现失效时，只改状态，不动其它内容", () => {
+  const src = readProjectFile("background.js");
+  const at = src.indexOf("async function refreshOneArchiveStatus");
+  assert.ok(at > 0, "找不到 refreshOneArchiveStatus");
+  const body = src.slice(at, src.indexOf("\n}\n", at));
+
+  // 失效分支里只能交给 patchVolatileFields 一个 videoStatus —— 多传任何字段
+  // 都会改写本地内容，而"保住完好的内容"是这个项目最核心的约定
+  const invalidBranchAt = body.indexOf("if (invalid) {");
+  assert.ok(invalidBranchAt > 0, "找不到失效分支");
+  const invalidBranch = body.slice(invalidBranchAt, body.indexOf("\n  }", invalidBranchAt));
+  const calls = [...invalidBranch.matchAll(/patchVolatileFields\([^)]*\)/g)];
+  assert.equal(calls.length, 1, `失效分支里调用了 ${calls.length} 次 patchVolatileFields`);
+  assert.match(calls[0][0], /\{ videoStatus:[^}]*\}/,
+    "失效分支传给 patchVolatileFields 的不止 videoStatus —— 那会覆盖本地内容");
+  assert.equal(/title|description|tags|cover|cid/.test(calls[0][0]), false,
+    "失效分支动了标题/简介/标签之类的字段");
+
+  // 已经标记过失效的不再重复改写（重复写只会丢信息）
+  assert.match(invalidBranch, /视频状态：.*失效/, "没有跳过「已经标记过失效」的记录");
+});
+
 test("失效视频不许覆盖本地已有的记录", () => {
   const src = readProjectFile("background.js");
   // 在"已存在"的分支里，失效条目必须先被丢弃再谈刷新
