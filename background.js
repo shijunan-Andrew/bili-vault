@@ -662,16 +662,22 @@ async function biliImportApiGet(path, params = {}, timeoutMs = 15000, tabId = nu
   try {
     let status;
     let payload;
-    if (Number.isInteger(tabId)) {
+    if (Number.isInteger(tabId) && importPageProxyFailures < IMPORT_PAGE_PROXY_FAILURE_LIMIT) {
       try {
         ({ status, payload } = await biliImportPageApiGet(tabId, url.toString(), timeoutMs));
+        importPageProxyFailures = 0;
       } catch (pageError) {
+        importPageProxyFailures += 1;
         // 4.9.1：页面代取失败一律退回后台直连 —— 不要因为消息里有 "HTTP 412" 就断定风控。
         // B 站对「页面上下文」发出的请求本来就会返回 412（响应体不是 JSON，favorites-import.js
         // 会把它转成「B站接口没有返回有效数据（HTTP 412）。」），而退回后台直连通常是成功的。
         // 4.9 曾在这里直接抛风控、不再退回，把原本能成功的导入判成「连续命中风控」而中止整轮
         // —— 实测：同一账号同一时刻，旧版本导入 128 条全部成功，4.9 却在 4 秒内中止。
         // 风控判定只以「后台直连自己的响应」为准（见下面 response.status === 412 那处）。
+        //
+        // 回退本身也是一次真实请求，必须再领一张限速票 ——
+        // 否则"一次调用两张票"会让实际速率翻倍，限速器就形同虚设。
+        await biliThrottleWait();
         const response = await fetch(url.toString(), { credentials: "include", cache: "no-store", signal: controller.signal });
         status = response.status;
         try { payload = await response.json(); }
@@ -901,10 +907,10 @@ function importListCacheWrite(folderId, page, value) {
   importListCache.set(key, { at: Date.now(), pages: new Map([[page, value]]) });
 }
 
-// 导入真正写入之后要作废缓存，否则紧接着的对比会拿旧列表对账
-function importListCacheClear() {
-  importListCache = new Map();
-}
+/* 注意：导入**不需要**作废这个缓存。
+   项目全程只有 GET，导入只写本地磁盘，改不了 B 站那边的收藏夹列表，
+   所以"刚导入完的列表"和缓存里的仍然是同一份。之前真的写盘后清了一次，
+   反而把后面几个收藏夹的缓存也一起清了，缓存等于白加。 */
 
 async function fetchImportFavoritePage(folder, page, tabId = null) {
   const cached = importListCacheRead(folder.id, page);
@@ -937,16 +943,24 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
     return keyedTargets.filter((target) => ![...importMediaKeys(target)].some((key) => recordKeys.has(key)));
   }
 
-  const maxPasses = 4;
+  const maxPasses = IMPORT_RECOVERY_MAX_PASSES;
+  let recoveryRequests = 0;
+  let budgetExhausted = false;
   for (let pass = 1; pass <= maxPasses; pass += 1) {
     let page = 1;
     let passFailed = false;
     for (; page <= 100; page += 1) {
+      if (recoveryRequests >= IMPORT_RECOVERY_MAX_REQUESTS) {
+        budgetExhausted = true;
+        recoveryErrors.push(`APP收藏夹接口：已达到本次恢复的请求上限 ${IMPORT_RECOVERY_MAX_REQUESTS} 次，停止扫描；未找到的失效视频保持原样。`);
+        break;
+      }
       // 4.2：失效视频的跨页扫描也可能很久，这里也要能响应暂停/取消
       await importWaitIfPaused();
       let payload = null;
       let lastError = null;
       for (let attempt = 1; attempt <= 3; attempt += 1) {
+        recoveryRequests += 1;
         try {
           payload = await biliImportApiGet("/x/v3/fav/folder/resources", {
             media_id: folder.id, pn: page, platform: "ios", mobi_app: "iphone", build: 89501100
@@ -976,7 +990,7 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
     }
 
     const missing = missingTargets();
-    if (!missing.length) break;
+    if (!missing.length || budgetExhausted) break;
     if (passFailed) recoveryErrors.push(`APP收藏夹接口：第 ${pass} 轮扫描在第 ${page} 页中断，剩余 ${missing.length} 个失效视频将继续重试。`);
     if (pass < maxPasses) await importDelay(1200);
   }
@@ -987,7 +1001,7 @@ async function fetchImportHistory(wantedBvids, recoveryErrors = [], tabId = null
   const wanted = new Set(wantedBvids.filter(Boolean));
   const found = new Map();
   let cursor = { max: 0, view_at: 0, business: "" };
-  for (let page = 0; page < 80 && wanted.size; page += 1) {
+  for (let page = 0; page < IMPORT_HISTORY_MAX_REQUESTS && wanted.size; page += 1) {
     let data;
     try {
       data = await biliImportApiGet("/x/web-interface/history/cursor", {
@@ -2395,8 +2409,6 @@ async function importBiliFavorites(data, tabId = null) {
       if (!collectionExisted) folderNotes.push(`「${folder.title}」本地没有同名收藏夹，本次按全量导入处理。`);
 
       const existing = await readExistingImportRecords(collection);
-      // 这一轮真的写过盘了，列表缓存作废 —— 否则紧接着的对比会拿旧列表对账
-      importListCacheClear();
       const pendingItems = [];
       const refreshTargets = [];
       for (const item of scopedItems) {
@@ -2772,6 +2784,25 @@ const IMPORT_PAGE_DELAY_MS = 220;
 
    修改这个常量前先想清楚：它同时决定了"最快能多快"和"多久会被限流"。 */
 const BILI_MIN_REQUEST_INTERVAL_MS = 320;
+
+/* 页面代取连续失败多少次之后，本轮就不再尝试它。
+
+   B 站对「页面上下文」发出的请求本来就常常返回 412（见 biliImportApiGet 里的注释），
+   所以每次都先试一遍页面代取，等于**每次请求都发两遍** —— 真机上 412 恰恰是最常见的情况。
+   超过这个次数就只走后台直连，请求量直接减半。service worker 重启后自动复位。 */
+const IMPORT_PAGE_PROXY_FAILURE_LIMIT = 3;
+let importPageProxyFailures = 0;
+
+/* 失效视频恢复（手机端收藏夹扫描）与观看历史的请求预算。
+
+   这两个是项目里最大的请求放大器，而且**默认开启**：
+     · 恢复：原来是 4 轮 × 100 页 × 每页 3 次重试 = 最多 1200 次请求
+     · 历史：最多 80 页
+   配合"页面代取失败会再发一次"，最坏能到 2400 次 —— 一个收藏夹就能把账号送进风控。
+   现在各自有一个硬预算，用完就停，并在报告里写清楚还剩多少没恢复。 */
+const IMPORT_RECOVERY_MAX_REQUESTS = 120;
+const IMPORT_RECOVERY_MAX_PASSES = 2;
+const IMPORT_HISTORY_MAX_REQUESTS = 40;
 let biliRequestSlotAt = 0;
 
 // 预约一个不早于"上次预约 + 最小间隔"的时间点再往下走。

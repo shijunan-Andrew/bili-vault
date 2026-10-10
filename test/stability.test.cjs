@@ -2260,8 +2260,37 @@ test("收藏夹列表要有短时缓存（差异对比与导入读的是同一�
   assert.match(body, /importListCacheRead\(/, "读列表前没有查缓存");
   assert.match(body, /importListCacheWrite\(/, "读到列表后没有写缓存");
 
-  // 真的写过盘之后要作废，否则紧接着的对比会拿旧列表对账
-  assert.match(src, /importListCacheClear\(\)/, "导入写盘后没有作废列表缓存");
+  // 导入**不应该**清缓存：全程只有 GET，导入只写本地，改不了 B 站的列表。
+  // 之前真的清了一次，结果把后面几个收藏夹的缓存也一起清了，缓存等于白加。
+  assert.equal(/importListCacheClear/.test(src), false, "导入不该再清列表缓存，见 importListCacheStore 上方的说明");
+});
+
+test("请求放大器都有硬预算，不能无限翻页", () => {
+  const src = readProjectFile("background.js");
+  const num = (name) => Number(src.match(new RegExp(name + " = (\\d+)"))?.[1] || 0);
+
+  // 失效恢复：原来 4 轮 × 100 页 × 3 次重试 = 最多 1200 次，是项目里最大的放大器
+  const recovery = num("IMPORT_RECOVERY_MAX_REQUESTS");
+  const passes = num("IMPORT_RECOVERY_MAX_PASSES");
+  assert.ok(recovery > 0 && recovery <= 300, `失效恢复的请求预算是 ${recovery}，太大`);
+  assert.ok(passes > 0 && passes <= 3, `失效恢复轮数是 ${passes}，太大`);
+  assert.match(src, /recoveryRequests >= IMPORT_RECOVERY_MAX_REQUESTS/, "恢复循环没有真的检查预算");
+
+  // 观看历史
+  const history = num("IMPORT_HISTORY_MAX_REQUESTS");
+  assert.ok(history > 0 && history <= 80, `观看历史的请求预算是 ${history}，太大`);
+  assert.match(src, /page < IMPORT_HISTORY_MAX_REQUESTS/, "观看历史没有用预算常量");
+
+  // 页面代取：失败几次之后本轮就别再试了，否则每次请求都发两遍
+  const proxyLimit = num("IMPORT_PAGE_PROXY_FAILURE_LIMIT");
+  assert.ok(proxyLimit > 0 && proxyLimit <= 5, `页面代取的失败上限是 ${proxyLimit}`);
+  assert.match(src, /importPageProxyFailures < IMPORT_PAGE_PROXY_FAILURE_LIMIT/, "页面代取没有跳过逻辑");
+
+  // 回退直连也是真实请求，必须再领一张限速票
+  const apiGetAt = src.indexOf("async function biliImportApiGet");
+  const body = src.slice(apiGetAt, src.indexOf("\n}\n", apiGetAt));
+  const tickets = (body.match(/await biliThrottleWait\(\)/g) || []).length;
+  assert.ok(tickets >= 2, `biliImportApiGet 里有 ${tickets} 张限速票，但它最多会发两次请求（页面代取 + 回退）`);
 });
 
 test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
