@@ -635,7 +635,12 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
 2. 先读本文件、`README.md`、相关页面和消息两端，不要只改单侧响应协议。
 3. 保持用户本地文件格式向后兼容，尤其是时间目录、`视频信息.txt` 字段名、`000视频下载`/`001错误报告` 和历史 `未分类收藏` 下载。
 4. 目录删除、移动、覆盖属于数据操作；保持显式确认，复制失败时回滚新建目录，不删除未被明确选中的下载文件。
-5. 界面改动遵守上文“界面与设计系统”的六条约定；改完跑 `node test/stability.test.cjs`，它会拦住字号回退、字符图标复活和页面漏引 theme.css/icons.js。
+5. **改 `release.ps1` 之前先读这条**：PowerShell 5.1 下，**原生命令写到 stderr 的内容会被包装成 ErrorRecord**，配合脚本顶部的 `$ErrorActionPreference = 'Stop'` 会**直接终止脚本 —— 即使那条命令其实成功了**。`git push` 的进度、`node --check` 的语法错误、git 的各种警告全都写 stderr。V1.1.0 发布时就踩了这个：推送明明成功、tag 和 main 都到位了，脚本却报"推送失败"并 `exit 1`。**所以脚本里所有原生命令都必须走 `Invoke-Native`**（它把 stderr 降级成普通字符串），正确性一律靠 `$LASTEXITCODE` 判断。加了新的 git/node 调用后，用这条查有没有漏网的：
+   ```powershell
+   Select-String -LiteralPath release.ps1 -Pattern '& \$Git|& \$Node'   # 除 Invoke-Native 内部外应为空
+   ```
+   这个坑有个便宜的复现方式：`git push` 一个已经推完的分支，git 会往 stderr 写 "Everything up-to-date"。
+6. 界面改动遵守上文“界面与设计系统”的六条约定；改完跑 `node test/stability.test.cjs`，它会拦住字号回退、字符图标复活和页面漏引 theme.css/icons.js。
 6. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
    **注意：通用的文本编辑工具会静默去掉 BOM。** 2026-10-10 改 `release.ps1` 时就发生过一次——编辑后前 3 字节从 `239,187,191` 变成了 `60,35,10`。**用工具改完任何 `.ps1` / `.cs` 之后，都要重新确认 BOM 还在**，否则 PowerShell 5.1 解析中文会出错：
    ```powershell
