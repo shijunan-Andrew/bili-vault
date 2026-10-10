@@ -634,5 +634,12 @@
   "导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（2800 条约 30 分钟以上）。中途可以暂停或取消。": "Importing parses and saves every video in the collection one by one; with many records it can take a long time (30+ minutes for 2,800 items). You can pause or cancel at any point.",
   "将对比「{name}」与 B 站上的同名收藏夹。": "Will compare 「{name}」 against the collection of the same name on Bilibili.",
   "只读取 B 站的收藏夹列表，不抓取每条视频的详情，所以很快（2800 条约 1~2 分钟）。对比过程不会改动任何本地文件。": "Only the Bilibili favourites list is read, not each video's details, so it is quick (about 1–2 minutes for 2,800 items). Nothing local is modified.",
-  "开始对比": "Start comparing"
+  "开始对比": "Start comparing",
+  "最近 3 天": "Last 3 days",
+  "最近 7 天": "Last 7 days",
+  "最近 15 天": "Last 15 days",
+  "将要更新 {count} 个收藏夹。": "About to update {count} collection(s).",
+  "只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。": "Syncs only videos favourited in the last few days instead of scanning the whole collection. Handy if you often favourite from your phone.",
+  "只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。": "Only videos favourited inside the chosen window are handled: missing ones are added and existing ones refreshed. Records outside the window are left untouched.",
+  "「{folder}」按最近 {days} 天过滤：线上 {total} 条里命中 {hit} 条。": "「{folder}」 filtered to the last {days} days: {hit} of {total} matched."
 }

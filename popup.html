@@ -117,6 +117,8 @@
             </label>
             <button id="startImport" class="primary" type="button" data-i18n="开始导入" disabled>开始导入</button>
             <p class="diff-hint" data-i18n="导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（2800 条约 30 分钟以上）。中途可以暂停或取消。">导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（2800 条约 30 分钟以上）。中途可以暂停或取消。</p>
+            <button id="updateRecent" class="secondary diff-button" type="button" data-i18n="开始更新" disabled>开始更新</button>
+            <p class="diff-hint" data-i18n="只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。">只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。</p>
             <button id="diffFolders" class="secondary diff-button" type="button" data-i18n="先看差异" disabled>先看差异</button>
             <p class="diff-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。">只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。</p>
           </div>
@@ -164,6 +166,20 @@
       </div>
     </div>
   </main>
+  <dialog id="updateRecentDialog" class="popup-dialog" aria-labelledby="updateRecentTitle">
+    <h2 id="updateRecentTitle" data-i18n="开始更新">开始更新</h2>
+    <p id="updateRecentDetail" class="muted"></p>
+    <p class="muted" data-i18n="只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。">只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。</p>
+    <div class="update-range-list">
+      <label class="update-range"><input type="radio" name="updateRange" value="3" checked><span data-i18n="最近 3 天">最近 3 天</span></label>
+      <label class="update-range"><input type="radio" name="updateRange" value="7"><span data-i18n="最近 7 天">最近 7 天</span></label>
+      <label class="update-range"><input type="radio" name="updateRange" value="15"><span data-i18n="最近 15 天">最近 15 天</span></label>
+    </div>
+    <div class="popup-dialog-actions">
+      <button id="updateRecentCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="updateRecentGo" class="primary" type="button" data-i18n="开始更新">开始更新</button>
+    </div>
+  </dialog>
   <dialog id="importConfirm" class="popup-dialog" aria-labelledby="importConfirmTitle">
     <h2 id="importConfirmTitle" data-i18n="开始导入？">开始导入？</h2>
     <p id="importConfirmDetail" class="muted"></p>

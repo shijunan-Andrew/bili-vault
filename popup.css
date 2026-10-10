@@ -386,3 +386,36 @@ button:disabled { cursor: wait; opacity: .6; }
   gap: var(--sp-2);
   margin-top: var(--sp-3);
 }
+
+/* V1.1.4：「开始更新」的时间窗选择。新类，不覆盖既有选择器。
+   显式写 display:flex —— popup.css 目前没有 `label` 通配规则，
+   但别的地方（library.css）有过 .editor-dialog label 盖掉 display 的先例，
+   这里写死就不用再担心被继承来的规则影响。 */
+.update-range-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+}
+
+.update-range {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.update-range:hover {
+  background: var(--brand-soft);
+}
+
+.update-range input {
+  margin: 0;
+  accent-color: var(--brand);
+}

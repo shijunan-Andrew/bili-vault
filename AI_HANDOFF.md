@@ -100,7 +100,7 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── uninstall-native-folder-opener.ps1
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
-│   ├── stability.test.cjs        # Node 内置测试（137 项）：静态回归断言 + 并进来的单元测试
+│   ├── stability.test.cjs        # Node 内置测试（138 项）：静态回归断言 + 并进来的单元测试
 │   ├── archive-core.test.cjs     # 59 项真执行单元测试：require archive-core.js 真的调用它
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
@@ -530,7 +530,7 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 **137 项检查**（136 项静态回归 + 1 项把 `test/archive-core.test.cjs` 的 59 项真执行单元测试并进来）。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
+当前包含 **138 项检查**（137 项静态回归 + 1 项把 `test/archive-core.test.cjs` 的 59 项真执行单元测试并进来）。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
 可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。
 
 - **归档与下载匹配**（开头，9 项）：下载队列的收藏夹传递、BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
@@ -641,8 +641,9 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
    ```
    这个坑有个便宜的复现方式：`git push` 一个已经推完的分支，git 会往 stderr 写 "Everything up-to-date"。
 6. **在对话框里用 `<label>` 当布局容器时，选择器必须带 `.editor-dialog` 前缀。** `library.css` 有一条 `.editor-dialog label { display: block; ... }`，特异性是 (0,1,1)，会盖掉任何单类选择器 (0,1,0) 的 `display: grid/flex` —— 表现是"勾选框和图标在上、名称和数量在下"的错位。V1.1.0 的「移动或复制」踩过一次（当时用 `!important` 顶了 margin/color/font-size/font-weight，**偏偏漏了 display**），同一个坑还埋着 `videoDialog` 里的 `target-checkbox-option`。测试里有一条专门盯这个，改这些组件的选择器前先看它。
-7. 界面改动遵守上文“界面与设计系统”的六条约定；改完跑 `node test/stability.test.cjs`，它会拦住字号回退、字符图标复活和页面漏引 theme.css/icons.js。
-8. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
+7. **加了按钮或对话框，立刻把事件绑定写上，并跑测试确认。** 这个项目在这上面栽过两次，都是用户点下去发现没反应才暴露的：V1.1.0 的「与 B 站对比」只写了按钮没写 `addEventListener`；V1.1.3 的对比结果对话框又漏了「关闭」。现在 `test/stability.test.cjs` 里有一条兜底：**凡是 `<dialog>` 里的 `<button id="x">`，`x` 必须在对应 JS 里出现过**（`getElementById` 或 `x.addEventListener` 都算），完全没出现就判定没人管它。新增对话框按钮后跑一遍测试即可。
+8. 界面改动遵守上文“界面与设计系统”的六条约定；改完跑 `node test/stability.test.cjs`，它会拦住字号回退、字符图标复活和页面漏引 theme.css/icons.js。
+9. 原生消息清单绝不添加 `args`；`.ps1` 与 `.cs` 源文件保存为 UTF-8 带 BOM，读取 UTF-8 配置时显式写 `-Encoding UTF8`。改完原生助手要重新编译并跑自检脚本。
    **注意：通用的文本编辑工具会静默去掉 BOM。** 2026-10-10 改 `release.ps1` 时就发生过一次——编辑后前 3 字节从 `239,187,191` 变成了 `60,35,10`。**用工具改完任何 `.ps1` / `.cs` 之后，都要重新确认 BOM 还在**，否则 PowerShell 5.1 解析中文会出错：
    ```powershell
    $b = [System.IO.File]::ReadAllBytes('release.ps1'); $b[0..2]
@@ -650,5 +651,5 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
    $t = [System.IO.File]::ReadAllText($p, [System.Text.Encoding]::UTF8)
    [System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UTF8Encoding($true)))
    ```
-9. 完成后报告改动内容、检查方式和未验证的真实环境行为。
+10. 完成后报告改动内容、检查方式和未验证的真实环境行为。
 

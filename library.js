@@ -2939,6 +2939,9 @@ diffLibraryButton.addEventListener("click", () => {
   diffConfirm.showModal();
 });
 document.getElementById("diffConfirmCancel").addEventListener("click", () => diffConfirm.close());
+// 结果对话框的「关闭」按钮。V1.1.0 加这个对话框时同样漏了绑定 ——
+// 和 diffLibraryButton 是同一个错误，所以测试里加了一条专门查"对话框里的按钮有没有被引用"。
+document.getElementById("diffDialogClose").addEventListener("click", () => diffDialog.close());
 document.getElementById("diffConfirmGo").addEventListener("click", () => {
   diffConfirm.close();
   diffWithBilibili();

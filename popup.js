@@ -15,6 +15,9 @@ const lastResult = document.getElementById("lastResult");
 const lastResultBrief = document.getElementById("lastResultBrief");
 const importConfirm = document.getElementById("importConfirm");
 const importConfirmDetail = document.getElementById("importConfirmDetail");
+const updateRecentButton = document.getElementById("updateRecent");
+const updateRecentDialog = document.getElementById("updateRecentDialog");
+const updateRecentDetail = document.getElementById("updateRecentDetail");
 const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
 const reportPath = document.getElementById("reportPath");
@@ -176,6 +179,7 @@ function updateImportSelection() {
   importSelectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: selected });
   startImportButton.disabled = importBusy || selected === 0;
   diffFoldersButton.disabled = importBusy || selected === 0;
+  updateRecentButton.disabled = importBusy || selected === 0;
   diffFoldersButton.textContent = selected ? BcaI18n.t("先看差异（{count} 个）", { count: selected }) : BcaI18n.t("先看差异");
   startImportButton.textContent = selected ? BcaI18n.t("开始导入（{count} 个收藏夹）", { count: selected }) : BcaI18n.t("开始导入");
   renderImportControl();
@@ -293,7 +297,18 @@ function renderDiffResult(response) {
   diffResult.hidden = diffs.length === 0;
 }
 
-async function startImport() {
+/* V1.1.4：「开始更新」——只同步最近 N 天新收藏的视频。
+   经常用手机刷到就收藏的用户，为这几天的新增跑一次全量导入（2800 条约 30 分钟）没有意义。
+   过滤在后台按收藏时间做，这里只负责让用户选时间窗。 */
+function openUpdateRecent() {
+  if (importBusy) return;
+  const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
+  if (!selected) return;
+  updateRecentDetail.textContent = BcaI18n.t("将要更新 {count} 个收藏夹。", { count: selected });
+  updateRecentDialog.showModal();
+}
+
+async function startImport(options = {}) {
   if (importBusy) return;
   const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   if (!folderIds.length) return;
@@ -313,7 +328,9 @@ async function startImport() {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地保存文件夹的写入权限，请重新选择保存文件夹后重试。"));
     const tab = await queryCurrentTab();
-    const response = await sendTabMessage(tab.id, { type: "bca-import-selected-folders", folderIds });
+    const payload = { type: "bca-import-selected-folders", folderIds };
+    if (options.recentDays) payload.recentDays = options.recentDays;
+    const response = await sendTabMessage(tab.id, payload);
     if (response?.cancelled) {
       importStatus.classList.add("error");
       importStatus.textContent = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入已取消，本次改动已回滚。");
@@ -532,6 +549,14 @@ downloadButton.addEventListener("click", () => {
 
 refreshImportFoldersButton.addEventListener("click", loadImportFolders);
 startImportButton.addEventListener("click", openImportConfirm);
+updateRecentButton.addEventListener("click", openUpdateRecent);
+document.getElementById("updateRecentCancel").addEventListener("click", () => updateRecentDialog.close());
+document.getElementById("updateRecentGo").addEventListener("click", () => {
+  const picked = updateRecentDialog.querySelector('input[name="updateRange"]:checked');
+  const days = Number(picked?.value) || 3;
+  updateRecentDialog.close();
+  startImport({ recentDays: days });
+});
 document.getElementById("importConfirmCancel").addEventListener("click", () => importConfirm.close());
 document.getElementById("importConfirmGo").addEventListener("click", () => {
   importConfirm.close();

@@ -38,7 +38,10 @@
       return true;
     }
     if (message?.type === "bca-import-selected-folders") {
-      chrome.runtime.sendMessage({ type: "import-bili-favorites", uid: pageUid(), folderIds: message.folderIds }, (response) => {
+      // recentDays 只在「开始更新」时带上；不传就是全量导入
+      const payload = { type: "import-bili-favorites", uid: pageUid(), folderIds: message.folderIds };
+      if (message.recentDays) payload.recentDays = message.recentDays;
+      chrome.runtime.sendMessage(payload, (response) => {
         const error = chrome.runtime.lastError;
         sendResponse(error ? { ok: false, message: error.message } : response || { ok: false, message: "导入失败。" });
       });

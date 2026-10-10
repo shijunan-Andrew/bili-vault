@@ -2203,7 +2203,23 @@ async function importBiliFavorites(data, tabId = null) {
         }
         if (page % 4 === 0) await importDelay(150);
       }
-      total += allItems.length;
+      // V1.1.4：「开始更新」只处理最近 N 天收藏的条目。
+      // 经常用手机刷到就收藏的用户，为了同步这几天的新增去跑一次 39 分钟的全量没有意义。
+      // 注意：下面的对账（missingCount）仍然按 allItems 算 —— 那问的是"分页有没有读全"，
+      // 与"这次要写哪几条"是两件事，混在一起会把过滤掉的数量误报成缺失。
+      const recentDays = Math.max(0, Number(data?.recentDays) || 0);
+      let scopedItems = allItems;
+      if (recentDays > 0) {
+        const cutoff = Date.now() - recentDays * 86400000;
+        // 读不到收藏时间的（接口异常或老数据）宁可多处理一条，也不要漏掉
+        scopedItems = allItems.filter((item) => {
+          const at = Number(item.favoriteAt) || 0;
+          return !at || at >= cutoff;
+        });
+        folderNotes.push(`「${folder.title}」按最近 ${recentDays} 天过滤：线上 ${allItems.length} 条里命中 ${scopedItems.length} 条。`);
+        folderLog.push(`限定最近 ${recentDays} 天：${allItems.length} 条中命中 ${scopedItems.length} 条，其余未处理。`);
+      }
+      total += scopedItems.length;
       // 4.9：对账。分页上限（1000 页）或接口异常都可能漏掉尾部，以前没有这一步，
       // 报告会写"读取 40000、新导入 40000、失败 0"，看起来完全成功。缺多少就说多少。
       const missingCount = Math.max(0, expectedTotal - allItems.length);
@@ -2224,7 +2240,7 @@ async function importBiliFavorites(data, tabId = null) {
         coverageNotes.push(`「${folder.title}」接口自报 ${expectedTotal} 条、实际返回 ${allItems.length} 条，差额 ${missingCount} 条`);
       }
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
-      allItems.forEach((item) => {
+      scopedItems.forEach((item) => {
         item.coverCandidates = item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [];
         item.recoverySources = new Set();
         if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
@@ -2248,7 +2264,7 @@ async function importBiliFavorites(data, tabId = null) {
       const existing = await readExistingImportRecords(collection);
       const pendingItems = [];
       const refreshTargets = [];
-      for (const item of allItems) {
+      for (const item of scopedItems) {
         const keys = importIdentifierKeys(item);
         const matched = keys.find((key) => existing.identifiers.has(key));
         if (!matched) {

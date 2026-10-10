@@ -2153,6 +2153,36 @@ test("every design token referenced by a page actually exists", () => {
   assert.deepEqual([...new Set(problems)], [], `发现未定义的设计令牌：\n${[...new Set(problems)].join("\n")}`);
 });
 
+/* ------------------------- V1.1.4：对话框里的按钮必须被绑定 -------------------------
+
+   V1.1.0 给收藏库加了「与 B 站对比」按钮，忘了 addEventListener；
+   V1.1.3 加对比结果对话框，又忘了给「关闭」按钮绑定。同一个文件、同一类错误犯了两次，
+   两次都是用户点下去发现没反应才暴露的。
+
+   这条测试很便宜也很粗：凡是写在 <dialog> 里的 <button id="x">，
+   它的 id 至少要在对应的 JS 里出现过（要么 getElementById、要么 x.addEventListener）。
+   完全没出现 = 铁定没人管它，点了必然没反应。
+   type="submit" 配 <form method="dialog"> 的原生关闭按钮除外。 */
+
+test("对话框里的按钮都有人管（不会点了没反应）", () => {
+  const pairs = [["library.html", "library.js"], ["popup.html", "popup.js"], ["download.html", "download.js"]];
+  const problems = [];
+  for (const [html, js] of pairs) {
+    const markup = readProjectFile(html);
+    const script = readProjectFile(js);
+    for (const dialog of markup.matchAll(/<dialog\b[\s\S]*?<\/dialog>/g)) {
+      const block = dialog[0];
+      const nativeClose = /method\s*=\s*"dialog"/.test(block);
+      if (nativeClose) continue;
+      for (const button of block.matchAll(/<button\b[^>]*\bid="([\w-]+)"/g)) {
+        const id = button[1];
+        if (!script.includes(`"${id}"`)) problems.push(`${html} 的对话框按钮 #${id} 在 ${js} 里从未出现，多半没绑事件`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [], problems.join("\n"));
+});
+
 /* ------------------------- V1.1.3：<label> 容器的 display 陷阱 -------------------------
 
    library.css 里有一条 `.editor-dialog label { display: block; ... }`，特异性是 (0,1,1)。
