@@ -2306,10 +2306,15 @@ test("失效视频不许覆盖本地已有的记录", () => {
   // 在"已存在"的分支里，失效条目必须先被丢弃再谈刷新
   const at = src.indexOf("skipped += 1;");
   assert.ok(at > 0, "找不到已存在条目的处理分支");
-  const branch = src.slice(at, at + 900);
-  assert.match(branch, /if \(item\.isInvalid\) \{[\s\S]{0,120}continue;/,
-    "失效条目没有被挡在刷新之前 —— 它会用「已失效视频」的占位信息覆盖本地完好的记录");
-  assert.match(src, /invalidKept \+= 1/, "没有统计被保留的失效条目");
+  const branch = src.slice(at, at + 1400);
+  // V1.1.21：判据不能只看 item.isInvalid。
+  // 真机上那条视频的 media.is_invalid 并不是 true —— 接口返回的标题既不是
+  // 已知占位、也不是可用标题，于是被改成了「未知」，再拿去刷新就覆盖了本地标题。
+  assert.match(branch, /if \(item\.isInvalid \|\| !importUsefulTitle\(item\.title\)\) \{[\s\S]{0,120}continue;/,
+    "降级条目没有被挡在刷新之前 —— 只判 isInvalid 会漏掉「标题取不到」那一类");
+  assert.equal(/if \(item\.isInvalid\) \{/.test(branch), false,
+    "判据退回了只看 isInvalid —— 那正是真机上漏掉的那一类");
+  assert.match(src, /protectedCount \+= 1/, "没有统计被保留的降级条目");
   // 本地没有的失效条目仍然要正常写入（pendingItems 那条分支不受影响）
   assert.match(src, /pendingItems\.push\(item\)/, "本地没有的条目仍然要写入");
 });

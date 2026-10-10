@@ -2411,7 +2411,7 @@ async function importBiliFavorites(data, tabId = null) {
       const existing = await readExistingImportRecords(collection);
       const pendingItems = [];
       const refreshTargets = [];
-      let invalidKept = 0;   // 本地已有备份、因而被丢弃的失效条目数
+      let protectedCount = 0;   // 本地已有备份、因而被丢弃的降级条目数
       for (const item of scopedItems) {
         const keys = importIdentifierKeys(item);
         const matched = keys.find((key) => existing.identifiers.has(key));
@@ -2421,14 +2421,19 @@ async function importBiliFavorites(data, tabId = null) {
           continue;
         }
         skipped += 1;
-        // V1.1.20：解析到的**失效视频**不能覆盖本地已有的记录。
-        // B 站对失效视频只返回「已失效视频」这类占位信息，一旦拿它去刷新，
-        // 用户本地原来完好的标题/简介/标签就被"未知"覆盖了 —— 真机上丢过一次：
-        // 一条收藏得好好的视频失效后，重新导入把它变成了标题「未知」。
-        // 规则：失效 + 本地已有 → 直接丢弃；本地没有才写入（上面 pendingItems 那条分支）。
-        // 想用失效信息覆盖，只有手动点「更新视频状态」那一条路。
-        if (item.isInvalid) {
-          invalidKept += 1;
+        // **本地已有这条记录时，只有"解析到的信息确实可用"才允许刷新。**
+        //
+        // 判据不能只看 item.isInvalid。真机上那条失效视频的 media.is_invalid 并不是 true：
+        // 接口返回的标题既不是「已失效视频」这类已知占位（不在 IMPORT_INVALID_TITLES 里），
+        // 也不是可用标题，于是上面那句 `if (!item.isInvalid && !importUsefulTitle(...))`
+        // 把它的 item.title 改成了「未知」—— 然后这条"未知"就把本地完好的标题覆盖了。
+        // V1.1.20 只挡了 item.isInvalid，正好漏掉这一条，用户复现后才发现。
+        //
+        // 所以放宽成：失效 **或** 标题不可用，都不许覆盖已有记录。
+        // 本地没有的（pendingItems 那条分支）不受影响 —— 该存还是要存。
+        // 想用降级信息覆盖，只有手动点「更新视频状态」那一条路。
+        if (item.isInvalid || !importUsefulTitle(item.title)) {
+          protectedCount += 1;
           continue;
         }
         const record = existing.records.get(matched);
@@ -2436,9 +2441,9 @@ async function importBiliFavorites(data, tabId = null) {
         // 文本判据说"完整"时才发生，正常路径不多付 IO。
         if (record && await importRecordNeedsRefresh(collection, record)) refreshTargets.push({ item, record });
       }
-      if (invalidKept > 0) {
-        folderNotes.push(`「${folder.title}」有 ${invalidKept} 条失效视频本地已有备份，按规则保留了原记录、没有被覆盖。`);
-        folderLog.push(`失效视频：${invalidKept} 条本地已有备份，已保留原记录（失效信息只用于本地没有的新条目）。`);
+      if (protectedCount > 0) {
+        folderNotes.push(`「${folder.title}」有 ${protectedCount} 条解析结果不可用（已失效或标题取不到），本地已有备份，按规则保留了原记录、没有被覆盖。`);
+        folderLog.push(`降级条目：${protectedCount} 条本地已有备份，已保留原记录（降级信息只用于本地没有的新条目）。`);
       }
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
 
