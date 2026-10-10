@@ -12,6 +12,9 @@ const brandIcon = document.getElementById("brandIcon");
 const reauthorizeButton = document.getElementById("reauthorizeFolder");
 const permissionHint = document.getElementById("permissionHint");
 const lastResult = document.getElementById("lastResult");
+const lastResultBrief = document.getElementById("lastResultBrief");
+const importConfirm = document.getElementById("importConfirm");
+const importConfirmDetail = document.getElementById("importConfirmDetail");
 const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
 const reportPath = document.getElementById("reportPath");
@@ -205,6 +208,25 @@ async function loadImportFolders() {
 /* V1.1.0：先看差异。
    只对比收藏夹列表（40 条/请求），不抓详情（1.25 条/秒）—— 这是它能"1~2 分钟出结果"的唯一原因。
    完整列表（可能几百条）写进 归档根目录/002同步报告/，弹窗里只显示摘要。 */
+/* 折叠摘要只显示首行：完整内容在展开后的 lastResult 里。
+   最近状态那一块在导入很多记录后会变得很长，所以整块改成可折叠。 */
+function setLastResultText(value) {
+  const full = String(value || "");
+  lastResult.textContent = full;
+  const firstLine = full.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] || "";
+  lastResultBrief.textContent = firstLine || BcaI18n.t("暂无保存记录");
+}
+
+/* V1.1.3：点「开始导入」先弹确认框。
+   导入是逐条解析 + 写盘的慢操作（2800 条约 30 分钟），误点代价很高，所以先问一句。 */
+function openImportConfirm() {
+  if (importBusy) return;
+  const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
+  if (!selected) return;
+  importConfirmDetail.textContent = BcaI18n.t("将要导入 {count} 个收藏夹。", { count: selected });
+  importConfirm.showModal();
+}
+
 async function startDiff() {
   if (importBusy) return;
   const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
@@ -382,13 +404,13 @@ async function refreshStatus() {
     // status.lastResult.message 来自 background：首行当摘要，其余行当路径
     const messageLines = String(status.lastResult.message || "").split(/\r?\n/).filter(Boolean);
     const firstLine = messageLines.shift();
-    lastResult.textContent = firstLine || BcaI18n.t("已完成");
+    setLastResultText(firstLine || BcaI18n.t("已完成"));
     const paths = [...String(status.lastResult.path || "").split(/\r?\n/), ...messageLines].filter(Boolean);
     resultPath.textContent = paths.join("\n");
     resultDetailsSummary.textContent = paths.length > 1 ? BcaI18n.t("查看保存位置（{count} 条）", { count: paths.length }) : BcaI18n.t("查看保存位置");
     resultDetails.hidden = paths.length === 0;
   } else {
-    lastResult.textContent = BcaI18n.t("暂无保存记录");
+    setLastResultText(BcaI18n.t("暂无保存记录"));
     resultDetails.hidden = true;
     resultPath.textContent = "";
   }
@@ -473,7 +495,7 @@ reauthorizeButton.addEventListener("click", async () => {
     if (error?.name !== "AbortError") {
       // 存的就是可直接显示的文案（本地兜底已经过 t()）
       permissionNotice = error?.message || BcaI18n.t("重新授权失败。");
-      lastResult.textContent = permissionNotice;
+      setLastResultText(permissionNotice);
       permissionHint.hidden = false;
       permissionHint.textContent = permissionNotice;
     }
@@ -491,7 +513,7 @@ toggleButton.addEventListener("click", async () => {
     await chrome.storage.local.set({ enabled: nextEnabled });
   } catch (error) {
     renderEnabledState(!nextEnabled);
-    lastResult.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法更新插件状态。");
+    setLastResultText(error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法更新插件状态。"));
   } finally {
     toggleButton.disabled = false;
   }
@@ -509,7 +531,12 @@ downloadButton.addEventListener("click", () => {
 });
 
 refreshImportFoldersButton.addEventListener("click", loadImportFolders);
-startImportButton.addEventListener("click", startImport);
+startImportButton.addEventListener("click", openImportConfirm);
+document.getElementById("importConfirmCancel").addEventListener("click", () => importConfirm.close());
+document.getElementById("importConfirmGo").addEventListener("click", () => {
+  importConfirm.close();
+  startImport();
+});
 diffFoldersButton.addEventListener("click", startDiff);
 pauseImportButton.addEventListener("click", async () => {
   pauseImportButton.disabled = true;
@@ -633,7 +660,7 @@ async function boot() {
   restoreRecoverInvalid().catch(() => {});
   loadImportFolders();
   refreshStatus().catch((error) => {
-    lastResult.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法读取插件状态。");
+    setLastResultText(error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法读取插件状态。"));
   });
   /* ---------------- 4.8：顶部开源横幅 ---------------- */
 

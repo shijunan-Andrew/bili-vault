@@ -627,5 +627,12 @@
   "四项差异都是 0 —— 本地与线上完全一致。": "All four counts are zero — local and Bilibili match exactly.",
   "没有找到要对比的收藏夹。如果本地收藏夹改过名，请先在 B 站核对名称。": "No matching collection was found. If you renamed the local folder, check the name on Bilibili first.",
   "本地还没有这个收藏夹，所以全部算作新增。": "This collection does not exist locally yet, so everything counts as new.",
-  "线上 {remote} / 本地 {local}：新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}": "{remote} on Bilibili / {local} local: {added} new / {removed} gone / {invalid} newly unavailable / {recovered} back"
+  "线上 {remote} / 本地 {local}：新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}": "{remote} on Bilibili / {local} local: {added} new / {removed} gone / {invalid} newly unavailable / {recovered} back",
+  "开始导入？": "Start importing?",
+  "将要导入 {count} 个收藏夹。": "About to import {count} collection(s).",
+  "导入会逐条解析收藏夹里的每个视频并写入本地，耗时可能很长。中途可以暂停或取消，取消会回滚本次新建的内容。": "Importing parses and saves every video in the collection one by one, which can take a long time. You can pause or cancel at any point; cancelling rolls back what this run created.",
+  "导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（2800 条约 30 分钟以上）。中途可以暂停或取消。": "Importing parses and saves every video in the collection one by one; with many records it can take a long time (30+ minutes for 2,800 items). You can pause or cancel at any point.",
+  "将对比「{name}」与 B 站上的同名收藏夹。": "Will compare 「{name}」 against the collection of the same name on Bilibili.",
+  "只读取 B 站的收藏夹列表，不抓取每条视频的详情，所以很快（2800 条约 1~2 分钟）。对比过程不会改动任何本地文件。": "Only the Bilibili favourites list is read, not each video's details, so it is quick (about 1–2 minutes for 2,800 items). Nothing local is modified.",
+  "开始对比": "Start comparing"
 }

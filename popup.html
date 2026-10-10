@@ -116,6 +116,7 @@
               <span><span data-i18n="尝试恢复失效视频">尝试恢复失效视频</span><small data-i18n="通过 B 站 APP 接口补全已失效视频的资料；不需要时可以取消勾选">通过 B 站 APP 接口补全已失效视频的资料；不需要时可以取消勾选</small></span>
             </label>
             <button id="startImport" class="primary" type="button" data-i18n="开始导入" disabled>开始导入</button>
+            <p class="diff-hint" data-i18n="导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（2800 条约 30 分钟以上）。中途可以暂停或取消。">导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（2800 条约 30 分钟以上）。中途可以暂停或取消。</p>
             <button id="diffFolders" class="secondary diff-button" type="button" data-i18n="先看差异" disabled>先看差异</button>
             <p class="diff-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。">只对比收藏夹列表，不抓取每条视频的详情：2800 条约 1~2 分钟。导入本身要 30 分钟以上，所以建议先看一眼变了什么。</p>
           </div>
@@ -134,8 +135,11 @@
       </div>
     </details>
 
-    <section class="card status-card">
-      <div class="section-label" data-i18n="最近状态">最近状态</div>
+    <details id="statusCard" class="card status-card">
+      <summary class="status-summary">
+        <span class="section-label" data-i18n="最近状态">最近状态</span>
+        <span id="lastResultBrief" class="status-brief muted" data-i18n="暂无保存记录">暂无保存记录</span>
+      </summary>
       <div id="lastResult" class="muted" data-i18n="暂无保存记录">暂无保存记录</div>
       <details id="resultDetails" class="result-details" hidden>
         <summary id="resultDetailsSummary" data-i18n="查看保存位置">查看保存位置</summary>
@@ -147,7 +151,7 @@
         <div id="reportPath" class="report-path"></div>
         <button id="downloadReport" class="secondary" data-i18n="下载错误报告">下载错误报告</button>
       </div>
-    </section>
+    </details>
 
     <div class="popup-foot">
       <div class="foot-left">
@@ -160,6 +164,15 @@
       </div>
     </div>
   </main>
+  <dialog id="importConfirm" class="popup-dialog" aria-labelledby="importConfirmTitle">
+    <h2 id="importConfirmTitle" data-i18n="开始导入？">开始导入？</h2>
+    <p id="importConfirmDetail" class="muted"></p>
+    <p class="popup-dialog-warning" data-i18n="导入会逐条解析收藏夹里的每个视频并写入本地，耗时可能很长。中途可以暂停或取消，取消会回滚本次新建的内容。">导入会逐条解析收藏夹里的每个视频并写入本地，耗时可能很长。中途可以暂停或取消，取消会回滚本次新建的内容。</p>
+    <div class="popup-dialog-actions">
+      <button id="importConfirmCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="importConfirmGo" class="primary" type="button" data-i18n="开始导入">开始导入</button>
+    </div>
+  </dialog>
   <script src="icons.js"></script>
   <script src="popup.js"></script>
 </body>

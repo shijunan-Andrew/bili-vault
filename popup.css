@@ -312,3 +312,77 @@ button:disabled { cursor: wait; opacity: .6; }
   color: var(--muted);
   font-size: var(--fs-sm);
 }
+
+/* V1.1.3：最近状态改成可折叠 —— 导入很多记录后这一块会变得很长。
+   折叠时用 .status-brief 显示首行摘要。以下都是新类，不覆盖既有选择器。 */
+.status-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.status-summary::-webkit-details-marker {
+  display: none;
+}
+
+.status-summary .section-label {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+
+.status-brief {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-card[open] .status-brief {
+  display: none;
+}
+
+.status-card[open] .status-summary {
+  margin-bottom: var(--sp-2);
+}
+
+/* V1.1.3：导入前的确认框。 */
+.popup-dialog {
+  width: min(320px, calc(100vw - 32px));
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 12px 32px #10182833;
+}
+
+.popup-dialog::backdrop {
+  background: #10182880;
+}
+
+.popup-dialog h2 {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink);
+  font-size: var(--fs-base);
+  font-weight: 700;
+}
+
+.popup-dialog .muted {
+  margin: 0;
+}
+
+.popup-dialog-warning {
+  margin: var(--sp-2) 0 0;
+  color: var(--warning);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.popup-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}

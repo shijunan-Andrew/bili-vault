@@ -2153,6 +2153,55 @@ test("every design token referenced by a page actually exists", () => {
   assert.deepEqual([...new Set(problems)], [], `发现未定义的设计令牌：\n${[...new Set(problems)].join("\n")}`);
 });
 
+/* ------------------------- V1.1.3：<label> 容器的 display 陷阱 -------------------------
+
+   library.css 里有一条 `.editor-dialog label { display: block; ... }`，特异性是 (0,1,1)。
+   凡是拿 <label> 当布局容器（为了点整行就能勾选）的组件，只要选择器只有一个类
+   (0,1,0)，它的 display:grid / display:flex 就会被这条规则盖成 block ——
+   表现是"勾选框和图标在上、名称和数量在下"的错位。
+
+   V1.1.0 的「移动或复制」就踩了这个坑（当时用 !important 顶了 margin/color/
+   font-size/font-weight，偏偏漏了 display），同一个坑还埋着 videoDialog 里的
+   target-checkbox-option。这条测试盯着这一类。 */
+
+test("用 <label> 当容器的组件，display 必须压得过 .editor-dialog label", () => {
+  const css = readProjectFile("library.css");
+  const js = readProjectFile("library.js");
+
+  const dialogLabelRule = css.match(/\.editor-dialog label\s*\{([^}]*)\}/);
+  assert.ok(dialogLabelRule, "找不到 .editor-dialog label 规则，这条测试的前提变了，请重新检查");
+  assert.match(dialogLabelRule[1], /display:\s*block/, ".editor-dialog label 现在不设 display 了，本测试可以放宽");
+
+  // library.js 里所有 createElement("label") 之后设置的 className
+  const lines = js.split("\n");
+  const labelClasses = [];
+  lines.forEach((line, i) => {
+    if (!line.includes('createElement("label")')) return;
+    for (let j = i; j < Math.min(i + 4, lines.length); j += 1) {
+      const m = lines[j].match(/^\s*\w+\.className = "([\w-]+)"/);
+      if (m) { labelClasses.push(m[1]); return; }
+    }
+  });
+  assert.ok(labelClasses.length >= 3, `只找到 ${labelClasses.length} 个 label 容器，解析可能失效了`);
+
+  // 只看会出现在对话框里的：对话框外的不受影响。
+  // 目前 pager-size 在分页器里（不在 .editor-dialog 内），其余两个在对话框里。
+  const inDialog = labelClasses.filter((name) => name !== "pager-size");
+  const problems = [];
+  for (const cls of inDialog) {
+    // 用 indexOf 而不是拼正则 —— 反斜杠转义太容易写错（这里已经写错过一次）
+    const at = css.indexOf(`.editor-dialog .${cls}`);
+    if (at < 0) {
+      problems.push(`${cls} 没有 .editor-dialog 前缀的规则，display 会被 .editor-dialog label 盖成 block`);
+      continue;
+    }
+    const open = css.indexOf("{", at);
+    const close = css.indexOf("}", open);
+    if (!/display\s*:/.test(css.slice(open, close))) problems.push(`${cls} 的 .editor-dialog 规则里没写 display`);
+  }
+  assert.deepEqual(problems, [], problems.join("\n"));
+});
+
 /* ------------------------- V1.1.0：同步差异报告 -------------------------
 
    核心是纯函数 computeFavoriteDiff，从 background.js 里抽出来真跑。

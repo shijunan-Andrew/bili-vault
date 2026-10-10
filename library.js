@@ -20,6 +20,8 @@ const diffLibraryButton = document.getElementById("diffLibrary");
 const diffDialog = document.getElementById("diffDialog");
 const diffDialogStatus = document.getElementById("diffDialogStatus");
 const diffDialogBody = document.getElementById("diffDialogBody");
+const diffConfirm = document.getElementById("diffConfirm");
+const diffConfirmDetail = document.getElementById("diffConfirmDetail");
 const welcomeChoose = document.getElementById("welcomeChoose");
 const welcome = document.getElementById("welcome");
 const welcomeCopy = document.querySelector(".welcome-copy");
@@ -2926,6 +2928,22 @@ function syncDetailDownloadAction() {
 /* V1.1.0：与 B 站对比当前选中的收藏夹。
    与插件弹窗里的「先看差异」走同一条后台消息，只是这里用本地收藏夹名去匹配远程收藏夹
    （收藏库拿不到远程 media_id）。 */
+// V1.1.3：点按钮先弹确认框，确认后才真的开始对比。
+// （V1.1.0~V1.1.2 这里漏了 addEventListener，按钮点了完全没反应。）
+diffLibraryButton.addEventListener("click", () => {
+  if (selectedCollection === "*") {
+    showToast(BcaI18n.t("请先在左侧选择一个收藏夹，再与 B 站对比。"));
+    return;
+  }
+  diffConfirmDetail.textContent = BcaI18n.t("将对比「{name}」与 B 站上的同名收藏夹。", { name: selectedCollection });
+  diffConfirm.showModal();
+});
+document.getElementById("diffConfirmCancel").addEventListener("click", () => diffConfirm.close());
+document.getElementById("diffConfirmGo").addEventListener("click", () => {
+  diffConfirm.close();
+  diffWithBilibili();
+});
+
 async function diffWithBilibili() {
   if (selectedCollection === "*") {
     showToast(BcaI18n.t("请先在左侧选择一个收藏夹，再与 B 站对比。"));

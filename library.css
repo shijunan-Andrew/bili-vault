@@ -1038,7 +1038,9 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 
 .target-checkbox-list { display: grid; max-height: 168px; gap: 2px; overflow: auto; margin: 0 0 var(--sp-4); padding: 6px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); }
 .target-checkbox-list:empty::after { content: "暂无本地收藏夹"; padding: var(--sp-2); color: var(--faint); font-size: var(--fs-sm); }
-.target-checkbox-option { display: flex; align-items: center; min-width: 0; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-xs); color: var(--text); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }
+/* 同上：这个也是 <label>，而且就在 videoDialog（.editor-dialog）里，
+   不加前缀 display:flex 同样会被 .editor-dialog label 盖成 block。 */
+.editor-dialog .target-checkbox-option { display: flex; align-items: center; min-width: 0; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-xs); color: var(--text); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }
 .target-checkbox-option:hover { background: var(--brand-soft); }
 .target-checkbox-option input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--brand); }
 .target-checkbox-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1049,18 +1051,24 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .collection-action-list-tools > div { display: flex; gap: var(--sp-3); }
 .collection-action-list-wrap { max-height: min(46vh, 350px); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); }
 .collection-action-list { display: grid; }
-.collection-action-row {
+/* 注意选择器为什么带 .editor-dialog 前缀：
+   这一行是 <label>，而上面有 `.editor-dialog label { display: block; ... }`（特异性 0,1,1）。
+   单个类选择器 (0,1,0) 压不过它，display 会被改回 block —— 四个格子就退化成上下堆叠，
+   看起来就是"勾选框和图标在上、名称和数量在下"的错位。
+   前缀把它抬到 (0,2,0) 才赢。原来的 margin/color/font-size/font-weight 用 !important
+   硬顶，正是因为撞上了同一个坑；现在特异性够了，那些 !important 一并去掉。 */
+.editor-dialog .collection-action-row {
   display: grid;
   grid-template-columns: 18px 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--sp-3);
   min-height: 52px;
-  margin: 0 !important;
+  margin: 0;
   padding: 0 var(--sp-3);
   border-bottom: 1px solid var(--line-soft);
-  color: var(--text) !important;
-  font-size: var(--fs-base) !important;
-  font-weight: 500 !important;
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 500;
   cursor: pointer;
 }
 .collection-action-row:last-child { border-bottom: 0; }
