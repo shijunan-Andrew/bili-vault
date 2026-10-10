@@ -2432,7 +2432,13 @@ async function runMarkDownloaded() {
     // 只有「已下载」这个筛选值会参与选项池的计算，其它筛选值下池子不受影响
     if (videoFilter === "downloaded") refreshVideoFilterOptions();
     renderVideos();
-    if (currentDetailVideo && currentDetailVideo.id === markDownloadedVideo.id) openDetail(markDownloadedVideo);
+    // 详情面板开着、且正是这条视频时，把它重画一遍让「已下载？」按钮消失。
+    // 这里必须用 detailVideo()（按 detailContent.dataset.videoId 查当前打开的那条），
+    // 曾经写成 currentDetailVideo —— 那个变量根本不存在，于是这行抛 ReferenceError，
+    // 被下面的 catch 当成「标记失败」弹出来。而此刻标记其实已经写完了，
+    // 所以用户看到的是「提示失败、但文件真的建好了」。
+    const openDetailVideo = detailVideo();
+    if (openDetailVideo && openDetailVideo.id === markDownloadedVideo.id) openDetail(markDownloadedVideo);
   } catch (error) {
     markDownloadedStatus.textContent = BcaI18n.t("标记失败：{message}", { message: error.message });
     showResultDialog(BcaI18n.t("标记失败"), error.message, "error");

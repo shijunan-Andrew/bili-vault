@@ -217,6 +217,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 > 最新的在最上面，往下依次变旧。测试版（V1.0.0 之前）的开发历程见后面的「测试版开发」。
 
+## V1.1.37：修「标记为已下载」明明成功却弹「标记失败」
+
+- **现象**：点「已下载？点击标记」，弹窗写「标记失败：`currentDetailVideo is not defined`」，但文件夹确实建好了、文件也在。
+- **根因**：`library.js` 里那行重画详情面板的判断写成 `if (currentDetailVideo && ...)`，**`currentDetailVideo` 这个变量从来没有声明过**。它抛 `ReferenceError` 的位置在 `markVideoDownloaded` **成功返回之后**，而它又被同一个 `catch` 接住，于是那次 `showResultDialog(..., "error")` 把前面刚弹出的成功提示**覆盖**成了失败。所以「干完了 + 报失败」同时成立。
+- **修法**：改用项目里本来就有的 `detailVideo()`（按 `detailContent.dataset.videoId` 查当前详情面板打开的那条）。
+- **教训**：`try` 块里只要有一行在"副作用已经完成"之后执行，那行的任何异常都会被误报成整件事失败。同一段里已经有 `refreshVideoFilterOptions()` / `renderVideos()` 了，多这一行、错这一个名字，代价就是用户以为白干了。
+
 ## V1.1.36：使用说明的「？」挪进右下角浮标串
 
 界面小调整。原来那个问号是用 `position: fixed` 钉在左下角的，正好压在侧栏「归档文件只在本地管理」那张卡片上；而且全角问号自带字边距、又受行高影响，看着没居中。现在它并进右下角主题/语言那串浮标里、排在主题球上方，三个球共用同一套样式，问号本体单独用一个 `span` 收掉居中问题。

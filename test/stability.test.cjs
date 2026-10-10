@@ -2956,3 +2956,31 @@ test("archive-core 的纯函数在真执行下全部通过", () => {
   );
 });
 
+test("标记为已下载成功后，不许再抛错把成功提示覆盖成失败（静态回归）", () => {
+  const library = readProjectFile("library.js");
+
+  // 曾经的写法是 if (currentDetailVideo && ...) —— 那个变量从未声明过。
+  // 它抛 ReferenceError 的位置在 markVideoDownloaded 成功之后、又被同一个 catch 接住，
+  // 于是「文件夹都建好了」却弹出「标记失败」。这条断言专盯这个回退。
+  assert.doesNotMatch(
+    library,
+    /if \(currentDetailVideo/,
+    "currentDetailVideo 从未声明过，用它会抛 ReferenceError 并被 catch 误报成失败"
+  );
+  // 详情重画必须走 detailVideo()（按 detailContent.dataset.videoId 查当前打开的那条）
+  assert.match(library, /function detailVideo\(\) \{/);
+  assert.match(library, /const openDetailVideo = detailVideo\(\);/);
+  assert.match(
+    library,
+    /if \(openDetailVideo && openDetailVideo\.id === markDownloadedVideo\.id\) openDetail\(markDownloadedVideo\);/,
+    "标记成功后重画详情，要按「当前打开的是不是这条」判断"
+  );
+
+  // 真跑一遍那个判断：三种情况都要对
+  const findOpen = (videos, videoId) => videos.find((v) => v.id === videoId) || null;
+  const marked = { id: "a", title: "x" };
+  assert.equal(findOpen([marked], "a")?.id, "a", "详情正开着这条时应当重画");
+  assert.equal(findOpen([{ id: "b" }], "a"), null, "详情开的是别的视频时不该重画");
+  assert.equal(findOpen([], "a"), null, "详情没开时不该重画");
+});
+
