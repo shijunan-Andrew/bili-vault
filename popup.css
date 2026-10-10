@@ -373,11 +373,25 @@ button:disabled { cursor: wait; opacity: .6; }
   margin: 0;
 }
 
+/* 风控提醒要让用户真的看一眼，所以用红色 + 加粗 + 淡红底块，
+   而不是原来那种和正文差不多的小字。
+   注意：导入确认框与更新对话框也用这个类，红色对它们同样合适。 */
 .popup-dialog-warning {
-  margin: var(--sp-2) 0 0;
-  color: var(--warning);
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-sm);
+  color: var(--danger);
+  background: var(--danger-soft);
   font-size: var(--fs-sm);
-  line-height: 1.6;
+  font-weight: 600;
+  line-height: 1.7;
+}
+
+/* 白底次要按钮在弹窗里要保证边界清楚（弹窗本身也是白底） */
+.speed-warn-go {
+  border-color: var(--line);
+  background: var(--surface);
 }
 
 .popup-dialog-actions {
