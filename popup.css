@@ -85,26 +85,30 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .toggle-switch.off span { left: 3px; }
 
 .library-link {
+  /* 位置在标题行右侧（弹窗里最主要的出口，压在开关下面反而像次级操作）。
+     所以按"标题行里的一个胶囊按钮"来排，不再占满一整行。 */
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  min-height: 48px;
-  margin-bottom: var(--sp-2);
-  padding: var(--sp-2) var(--sp-4);
+  gap: var(--sp-1);
+  flex: none;
+  margin-left: auto;
+  padding: 7px var(--sp-3);
   border: 1px solid var(--success-line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-pill);
   color: var(--success-strong);
   /* 绿色渐变与阴影全部走令牌，深色下由 --success-soft / --success-line 换成墨绿 */
   background: linear-gradient(135deg, var(--success-soft), var(--success-line));
-  box-shadow: var(--shadow-md);
-  font-size: var(--fs-md);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--fs-sm);
   font-weight: 700;
+  white-space: nowrap;
   text-decoration: none;
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .library-link:hover { border-color: var(--success); color: var(--success-strong); background: var(--success-line); transform: translateY(-1px); }
-.library-link .icon { font-size: var(--fs-lg); }
+.library-link .icon { font-size: var(--fs-md); }
+/* 标题块可压缩：窄语言（English）下副标题先换行，也不把按钮挤出可视区 */
+.brand-text { min-width: 0; }
 
 .folder-card, .status-card { padding: var(--sp-4); }
 .status-card { margin-top: var(--sp-2); }
