@@ -35,6 +35,21 @@ $C_YELLOW = "$([char]27)[33m"; $C_DIM = "$([char]27)[2m"
 function Say($msg, $color = $C_RESET) { Write-Host "$color$msg$C_RESET" }
 function Die($msg) { Say "`n[$([char]0x2716)] $msg" $C_RED; exit 1 }
 
+# PowerShell 5.1 的坑：原生命令写到 stderr 的内容会被包装成 ErrorRecord，
+# 配合上面的 $ErrorActionPreference='Stop' 会直接终止脚本 —— **即使命令其实成功了**。
+# git push 的进度、node --check 的语法错误、git 的各种警告都写 stderr，
+# 所以这里统一包一层，把 stderr 降级成普通字符串；正确性一律靠 $LASTEXITCODE 判断。
+function Invoke-Native {
+  param([string]$Exe, [string[]]$Arguments)
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    return ,@(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" })
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+}
+
 # ───────── 找 git 与 node（都不依赖终端 PATH 已刷新） ─────────
 function Find-Exe {
   param([string]$Name, [string[]]$Candidates, [string]$LocalHint)
@@ -79,7 +94,7 @@ Say "  node: $Node" $C_DIM
 
 # ───────── 1. 工作区必须干净 ─────────
 Say "`n【1/6】检查工作区" $C_DIM
-$dirty = @(& $Git status --porcelain)
+$dirty = Invoke-Native $Git @('status', '--porcelain')
 if ($dirty.Count -gt 0) {
   Say "  工作区有未提交的改动：" $C_YELLOW
   $dirty | ForEach-Object { Say "    $_" $C_YELLOW }
@@ -97,7 +112,7 @@ if (-not $portOpen) {
   exit 1
 }
 Say "  端口 $ProxyPort 已开放，测试能否到达 GitHub…" $C_DIM
-$probe = & $Git @GitArgs ls-remote --heads origin 2>&1
+$probe = Invoke-Native $Git ($GitArgs + @('ls-remote', '--heads', 'origin'))
 if ($LASTEXITCODE -ne 0) {
   Say "  代理开着，但到 GitHub 不通：" $C_YELLOW
   $probe | Select-Object -First 3 | ForEach-Object { Say "    $_" $C_YELLOW }
@@ -119,7 +134,7 @@ function Set-FileText($path, $from, $to, $label) {
   Say "  [$([char]0x2713)] $label" $C_GREEN
 }
 
-$rollback = { & $Git checkout -- manifest.json 'test/stability.test.cjs' library.html 2>$null }
+$rollback = { Invoke-Native $Git @('checkout', '--', 'manifest.json', 'test/stability.test.cjs', 'library.html') | Out-Null }
 try {
   Set-FileText 'manifest.json' "`"version`": `"$oldVersion`"" "`"version`": `"$版本`"" 'manifest.json'
   Set-FileText 'test/stability.test.cjs' "assert.equal(manifest.version, `"$oldVersion`");" "assert.equal(manifest.version, `"$版本`");" 'test/stability.test.cjs'
@@ -136,21 +151,21 @@ $failed = $false
 Say "  语法检查…" $C_DIM
 $jsFiles = @(Get-ChildItem -Recurse -File -Include *.js, *.cjs | Where-Object { $_.FullName -notlike '*\.git\*' })
 foreach ($f in $jsFiles) {
-  & $Node --check $f.FullName 2>&1 | Out-Null
+  Invoke-Native $Node @('--check', $f.FullName) | Out-Null
   if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] $($f.Name) 语法错误" $C_RED; $failed = $true }
 }
 if (-not $failed) { Say "    [$([char]0x2713)] $($jsFiles.Count) 个 JS 文件全部通过" $C_GREEN }
 
 Say "  回归测试（静态断言）…" $C_DIM
-& $Node test/stability.test.cjs 2>&1 | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
+Invoke-Native $Node @('test/stability.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
 if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 测试未全过" $C_RED; $failed = $true }
 
 Say "  纯函数单元测试（真执行 archive-core.js）…" $C_DIM
-& $Node test/archive-core.test.cjs 2>&1 | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
+Invoke-Native $Node @('test/archive-core.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
 if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 单元测试未全过" $C_RED; $failed = $true }
 
 Say "  词典覆盖…" $C_DIM
-$i18nOut = & $Node test/i18n-extract.cjs --check 2>&1
+$i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }
 if ($i18nOut -match '缺 [1-9]') { Say "    [$([char]0x2716)] 有词条缺翻译" $C_RED; $failed = $true }
 
@@ -188,13 +203,13 @@ if (-not $Yes) {
 Say "`n【6/6】提交与推送" $C_DIM
 $msgFile = Join-Path $env:TEMP 'bv-release-msg.txt'
 [System.IO.File]::WriteAllText($msgFile, $msg, $utf8NoBom)
-& $Git add -A
-& $Git commit -q -F $msgFile
+Invoke-Native $Git @('add', '-A') | Out-Null
+Invoke-Native $Git @('commit', '-q', '-F', $msgFile) | Out-Null
 Remove-Item -LiteralPath $msgFile -Force -ErrorAction SilentlyContinue
-& $Git tag -f $Tag | Out-Null
+Invoke-Native $Git @('tag', '-f', $Tag) | Out-Null
 Say "  [$([char]0x2713)] 已提交并打 tag $Tag" $C_GREEN
 
-$pushOut = & $Git @GitArgs push origin main --tags 2>&1
+$pushOut = Invoke-Native $Git ($GitArgs + @('push', 'origin', 'main', '--tags'))
 if ($LASTEXITCODE -ne 0) {
   Say "  [$([char]0x2716)] 推送失败：" $C_RED
   $pushOut | Select-Object -First 5 | ForEach-Object { Say "    $_" $C_RED }
@@ -203,9 +218,9 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 
-$localSha = (& $Git rev-parse --short main).Trim()
-& $Git @GitArgs fetch origin --quiet 2>$null
-$remoteSha = (& $Git rev-parse --short origin/main).Trim()
+$localSha = (Invoke-Native $Git @('rev-parse', '--short', 'main')) -join ""
+Invoke-Native $Git ($GitArgs + @('fetch', 'origin', '--quiet')) | Out-Null
+$remoteSha = (Invoke-Native $Git @('rev-parse', '--short', 'origin/main')) -join ""
 Say "`n[$([char]0x2714)] 发布完成：$Tag" $C_GREEN
 Say "  本地 main $localSha / 远程 main $remoteSha"
 Say "  https://github.com/shijunan-Andrew/bili-vault/releases/tag/$Tag" $C_DIM
