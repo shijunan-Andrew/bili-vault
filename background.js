@@ -2239,11 +2239,11 @@ async function importBiliFavorites(data, tabId = null) {
   // 4.4.1：失效视频恢复默认开启（它需要伪造成官方 APP 客户端请求 APP 接口，
   // 是合规上最勉强的一环，因此保留开关让用户能关掉；只有明确存成 false 才关闭）
   const settings = await chrome.storage.local.get("recoverInvalidVideos").catch(() => ({}));
-  // V1.1.24：默认关闭。这个开关会去手机端收藏夹翻最多 120 页找失效视频的原始标题，
-  // 而失效视频基本不在那儿 —— 注定白跑，还让每次导入多等 1~2 分钟。
-  // 失效状态与「未能找回资料」本来就由收藏夹列表接口给出，不依赖它。
-  // 注意：必须与 popup.js 的默认值保持一致，否则界面显示不勾、后台却当成开启。
-  const recoverInvalidVideos = settings?.recoverInvalidVideos === true;
+  // 默认开启：这个开关会去 APP 接口 / 稍后再看 / 观看历史里**拼凑失效视频的信息**
+  // （封面、标题等），真机上确实找得回来。
+  // 注意别和"把失效视频恢复成正常状态"混为一谈 —— 那是另一回事，一般也做不到。
+  // 必须与 popup.js 的默认值保持一致，否则界面显示与实际行为会不一致。
+  const recoverInvalidVideos = settings?.recoverInvalidVideos !== false;
   const journal = createImportJournal();
   importRateLimitStreak = 0;
   publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "", interrupted: false, rateLimited: false }, true);
@@ -3385,7 +3385,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "import-bili-favorites") {
-    importBiliFavoritesInOrder(message.data || message, sender?.tab?.id ?? null).then(sendResponse).catch(async (error) => {
+    importBiliFavoritesInOrder(message.data || message, sender?.tab?.id ?? null).then((result) => {
+      // 落盘一份完成提示：导入要跑几分钟，用户多半已经切走页面、弹窗也关了，
+      // 只在 sendMessage 回调里弹的话这次提示就永远看不到了。
+      if (result?.ok !== false) {
+        const text = result?.message || `导入/更新完成：新导入 ${result?.imported || 0} 个，更新 ${result?.refreshed || 0} 个。`;
+        chrome.storage.local.set({ importDone: { text, acknowledged: false, at: Date.now() } }).catch(() => {});
+      }
+      sendResponse(result);
+    }).catch(async (error) => {
       const folders = Array.isArray(message.folderIds) ? message.folderIds.map((id) => ({ id, name: id })) : [];
       const saved = await logError(error, { folders });
       await chrome.storage.local.set({ lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });

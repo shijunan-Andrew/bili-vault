@@ -134,11 +134,11 @@ async function sendImportControl(action) {
 async function restoreRecoverInvalid() {
   try {
     const saved = await chrome.storage.local.get("recoverInvalidVideos");
-    // 默认关闭：这个功能会去手机端收藏夹翻最多 120 页找失效视频的原始标题，
-    // 而失效视频基本不在那儿 —— 每次导入白等 1~2 分钟。失效信息不靠它。
-    recoverInvalidCheckbox.checked = saved?.recoverInvalidVideos === true;
+    // 默认开启：它确实能把失效视频的封面和标题拼回来（真机上验证过）。
+    // 注意别和"把失效视频恢复成正常状态"混为一谈 —— 那是另一回事，也一般做不到。
+    recoverInvalidCheckbox.checked = saved?.recoverInvalidVideos !== false;
   } catch (_) {
-    recoverInvalidCheckbox.checked = false;
+    recoverInvalidCheckbox.checked = true;
   }
 }
 
@@ -742,8 +742,12 @@ document.getElementById("riskyWarnGo").addEventListener("click", () => {
 });
 document.getElementById("doneDialogClose").addEventListener("click", () => {
   doneDialog.close();
-  // 标记"这次结果已经提示过了"，否则下次打开插件弹窗会重放（导入没有落盘摘要，
-  // 这一步对它是空操作）
+  // 两类完成提示都标记"已提示过"，否则下次打开插件会重放
+  chrome.storage.local.get("importDone").then((saved) => {
+    const done = saved?.importDone;
+    if (!done || done.acknowledged) return;
+    return chrome.storage.local.set({ importDone: { ...done, acknowledged: true } });
+  }).catch(() => {});
   chrome.storage.local.get("diffState").then((saved) => {
     const state = saved?.diffState;
     if (!state?.summary || state.summary.acknowledged) return;
@@ -894,6 +898,14 @@ async function boot() {
   });
   // 读回上次选择的速度（与 background.js 共用同一份 storage.local）。
   // 用 then 而不是 await —— 这块初始化代码不在 async 函数里。
+  // 导入/更新的完成提示也要补弹：导入跑几分钟，弹窗早关了，不补就永远看不到
+  chrome.storage.local.get("importDone").then((saved) => {
+    const done = saved?.importDone;
+    if (!done || done.acknowledged || !done.text) return;
+    // 直接显示：这段文案在后台写入时就已经是最终文字（后台没有 i18n），
+    // 而且 BcaI18n.t() 的键必须是字面量 —— 传变量会让"键必须是字面量"那条测试失败（已踩过四次）
+    showDoneDialog(done.text);
+  }).catch(() => {});
   // 差异对比的结果存在 storage 里 —— 上次切走弹窗、这次回来要能接着看到
   chrome.storage.local.get("diffState").then((saved) => {
     const state = saved?.diffState;

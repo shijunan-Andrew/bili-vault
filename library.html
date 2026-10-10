@@ -56,7 +56,9 @@
 
     <main class="main-area">
       <header class="topbar">
-        <div class="breadcrumb"><span data-i18n="本地资料">本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection" data-i18n="全部收藏">全部收藏</strong></div>
+        <!-- 面包屑第一段显示**真实的根目录名**（与右上角 rootLabel 同源），
+             写死的「本地资料」看不出数据到底存在哪个盘哪个文件夹。 -->
+        <div class="breadcrumb"><span id="breadcrumbRoot" data-i18n="本地资料">本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection" data-i18n="全部收藏">全部收藏</strong></div>
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel" data-i18n="尚未选择目录">尚未选择目录</span></div>
           <div class="usage-label"><span data-i18n="本地收藏夹占用：">本地收藏夹占用：</span><b id="storageUsage" class="tnum">—</b></div>

@@ -247,22 +247,21 @@ test("the import asks Bilibili slowly instead of in bursts", () => {
   assert.ok(concurrency / (delay / 1000) <= 2, `每秒请求数不应超过 2，当前 ${(concurrency / (delay / 1000)).toFixed(2)}`);
 });
 
-test("invalid-video recovery through the APP API is off by default but still switchable", () => {
+test("invalid-video recovery through the APP API is on by default but still switchable", () => {
   const background = readProjectFile("background.js");
   const popup = readProjectFile("popup.js");
   const html = readProjectFile("popup.html");
-  // V1.1.24：默认关闭，只有明确存成 true 才开启。
-  // 这个功能会去手机端收藏夹翻最多 120 页找失效视频的原始标题，而失效视频基本不在那儿，
-  // 注定白跑还让导入多等 1~2 分钟；失效信息本来就不依赖它。
-  assert.match(background, /const recoverInvalidVideos = settings\?\.recoverInvalidVideos === true/);
-  assert.match(popup, /recoverInvalidCheckbox\.checked = saved\?\.recoverInvalidVideos === true/);
-  assert.match(popup, /recoverInvalidCheckbox\.checked = false/, "兜底默认值也必须是关");
-  // 弹窗里的复选框默认不勾
-  assert.match(html, /<input id="recoverInvalid" type="checkbox">/);
-  assert.equal(/<input id="recoverInvalid" type="checkbox" checked>/.test(html), false,
-    "复选框又变回默认勾选了");
-  // 两处默认值必须一致：只改一处会导致界面显示不勾、后台却当成开启
-  assert.match(html, /id="recoverInvalid" type="checkbox">/, "HTML 的默认值没跟上");
+  // 默认开启。注意这个开关的语义（用户 2026-10-10 澄清过，别搞混）：
+  //   它做的是「从 APP 接口 / 稍后再看 / 观看历史里**拼凑失效视频的信息**（封面、标题）」
+  //   不是「把失效视频恢复成正常状态」—— 后者一般做不到，用户说的"不用增加恢复功能"指的是后者。
+  // 真机上验证过它有效（封面和标题确实能找回来），所以默认开启。
+  assert.match(background, /const recoverInvalidVideos = settings\?\.recoverInvalidVideos !== false/);
+  assert.match(popup, /recoverInvalidCheckbox\.checked = saved\?\.recoverInvalidVideos !== false/);
+  assert.match(popup, /recoverInvalidCheckbox\.checked = true/, "兜底默认值必须是开");
+  // 弹窗里的复选框默认勾选
+  assert.match(html, /<input id="recoverInvalid" type="checkbox" checked>/);
+  // 界面文字要能区分这两种概念，别写成"恢复失效视频"
+  assert.match(html, /尝试找回失效视频的部分信息/, "开关名字要避免和「恢复成正常状态」混淆");
   assert.match(popup, /recoverInvalidVideos: recoverInvalidCheckbox\.checked/);
   // 恢复流程仍然必须被开关包住，用户能关掉
   const gateIndex = background.indexOf("if (recoverInvalidVideos) {");

@@ -669,5 +669,7 @@
   "将要对比 {count} 个收藏夹。": "About to compare {count} collection(s).",
   "只读取 B 站的收藏夹列表，不抓取每条视频的详情。对比过程不会改动任何本地文件。": "Only the Bilibili favourites list is read, not each video's details. Nothing local is modified.",
   "当前是「{speed}」档，而这个收藏夹线上有 {total} 条。建议先到插件弹窗里改用「较低」档位。": "You are on 「{speed}」 and this collection has {total} items on Bilibili. Switching to 「Lower」 in the popup first is recommended.",
-  "通过 B 站 APP 接口去手机端收藏夹碰运气，看能不能找回失效视频的原始标题。失效状态和「未能找回资料」本来就会保存，不开这个也一样。开启会让导入多等 1~2 分钟。": "Uses the Bilibili app API to dig through your mobile favourites on the off-chance of recovering an unavailable video's original title. The unavailable status and 「no data recovered」 are saved either way. Turning this on adds 1–2 minutes to an import."
+  "通过 B 站 APP 接口去手机端收藏夹碰运气，看能不能找回失效视频的原始标题。失效状态和「未能找回资料」本来就会保存，不开这个也一样。开启会让导入多等 1~2 分钟。": "Uses the Bilibili app API to dig through your mobile favourites on the off-chance of recovering an unavailable video's original title. The unavailable status and 「no data recovered」 are saved either way. Turning this on adds 1–2 minutes to an import.",
+  "尝试找回失效视频的部分信息": "Try to recover partial info for unavailable videos",
+  "失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。": "An unavailable video is just a blank placeholder on Bilibili — its title, cover and description are gone. When enabled, the extension searches the app API, Watch Later and watch history to piece the cover and title back together. If nothing is found it records 「unknown」 as usual, and records you already have are never affected."
 }

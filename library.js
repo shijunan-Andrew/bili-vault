@@ -12,6 +12,7 @@ if (window.top !== window.self) {
 const collectionList = document.getElementById("collectionList");
 const collectionTotal = document.getElementById("collectionTotal");
 const rootLabel = document.getElementById("rootLabel");
+const breadcrumbRoot = document.getElementById("breadcrumbRoot");
 const storageUsage = document.getElementById("storageUsage");
 const statusDot = document.querySelector(".status-dot");
 const chooseRoot = document.getElementById("chooseRoot");
@@ -2899,6 +2900,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   for (const id of selectedVideoIds) if (!existingVideoIds.has(id)) selectedVideoIds.delete(id);
   selectedCollection = collectionToSelect === "*" || result.collections.some((collection) => collection.name === collectionToSelect) ? collectionToSelect : "*";
   setDynamicText(rootLabel, handle.name);
+    // 面包屑第一段也显示真实根目录名 —— 写死的「本地资料」看不出数据存在哪个文件夹
+    if (breadcrumbRoot) setDynamicText(breadcrumbRoot, handle.name);
   statusDot.classList.add("ready");
   refreshLibraryButton.disabled = false;
   diffLibraryButton.disabled = false;
@@ -3187,6 +3190,8 @@ async function restoreLastRoot() {
     if (!handle) return;
     rootHandle = handle;
     setDynamicText(rootLabel, handle.name);
+    // 面包屑第一段也显示真实根目录名 —— 写死的「本地资料」看不出数据存在哪个文件夹
+    if (breadcrumbRoot) setDynamicText(breadcrumbRoot, handle.name);
     setDynamicText(welcomeCopy, BcaI18n.t("已找到上次选择的目录“{name}”。正在检查访问权限。", { name: handle.name }));
     const permission = await handle.queryPermission({ mode: "read" });
     if (permission === "granted") {
