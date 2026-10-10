@@ -641,5 +641,6 @@
   "将要更新 {count} 个收藏夹。": "About to update {count} collection(s).",
   "只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。": "Syncs only videos favourited in the last few days instead of scanning the whole collection. Handy if you often favourite from your phone.",
   "只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。": "Only videos favourited inside the chosen window are handled: missing ones are added and existing ones refreshed. Records outside the window are left untouched.",
-  "「{folder}」按最近 {days} 天过滤：线上 {total} 条里命中 {hit} 条。": "「{folder}」 filtered to the last {days} days: {hit} of {total} matched."
+  "「{folder}」按最近 {days} 天过滤：线上 {total} 条里命中 {hit} 条。": "「{folder}」 filtered to the last {days} days: {hit} of {total} matched.",
+  "预计要读取 {requests} 次收藏夹列表（{folders} 个收藏夹，每次 40 条）。": "About {requests} favourites-list requests ({folders} collection(s), 40 items each)."
 }

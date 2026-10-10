@@ -2247,6 +2247,23 @@ test("用 <label> 当容器的组件，display 必须压得过 .editor-dialog la
      2. 翻页间隔不低于全局下限
      3. 打 B 站接口的裸 fetch 必须登记在白名单里 —— 新增的必须走限速器 */
 
+test("收藏夹列表要有短时缓存（差异对比与导入读的是同一份）", () => {
+  const src = readProjectFile("background.js");
+  const ttl = Number(src.match(/IMPORT_LIST_CACHE_TTL_MS = ([\d\s*]+);/)?.[1].replace(/\s/g, "").split("*").reduce((a, b) => a * Number(b), 1) || 0);
+  assert.ok(ttl > 0 && ttl <= 15 * 60 * 1000,
+    `列表缓存 TTL 是 ${ttl}ms —— 太长会拿到过期列表，没有缓存则"先看差异再导入"要读两遍`);
+
+  // fetchImportFavoritePage 必须查缓存、写缓存
+  const at = src.indexOf("async function fetchImportFavoritePage");
+  assert.ok(at > 0, "找不到 fetchImportFavoritePage");
+  const body = src.slice(at, src.indexOf("\n}\n", at));
+  assert.match(body, /importListCacheRead\(/, "读列表前没有查缓存");
+  assert.match(body, /importListCacheWrite\(/, "读到列表后没有写缓存");
+
+  // 真的写过盘之后要作废，否则紧接着的对比会拿旧列表对账
+  assert.match(src, /importListCacheClear\(\)/, "导入写盘后没有作废列表缓存");
+});
+
 test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
   const src = readProjectFile("background.js");
 

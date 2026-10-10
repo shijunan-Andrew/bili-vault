@@ -870,16 +870,56 @@ function mergeRecoveredValue(item, candidate, source) {
   }
 }
 
+/* 收藏夹列表缓存。
+
+   典型用法是"先看差异 → 再更新/导入"，两次读的是同一份列表：
+   默认收藏夹 2804 条 → 每次 71 个请求。缓存 5 分钟能把这一对从 142 次降到 71 次，
+   而列表内容在几分钟内基本不会变。
+
+   只缓存**列表**，不缓存详情 —— 详情是真正耗时的部分（1.25 秒/条），
+   而且详情本来就要求拿到最新数据。 */
+const IMPORT_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
+let importListCache = new Map();
+
+function importListCacheRead(folderId, page) {
+  const entry = importListCache.get(String(folderId));
+  if (!entry) return null;
+  if (Date.now() - entry.at > IMPORT_LIST_CACHE_TTL_MS) {
+    importListCache.delete(String(folderId));
+    return null;
+  }
+  return entry.pages.get(page) || null;
+}
+
+function importListCacheWrite(folderId, page, value) {
+  const key = String(folderId);
+  const entry = importListCache.get(key);
+  if (entry && Date.now() - entry.at <= IMPORT_LIST_CACHE_TTL_MS) {
+    entry.pages.set(page, value);
+    return;
+  }
+  importListCache.set(key, { at: Date.now(), pages: new Map([[page, value]]) });
+}
+
+// 导入真正写入之后要作废缓存，否则紧接着的对比会拿旧列表对账
+function importListCacheClear() {
+  importListCache = new Map();
+}
+
 async function fetchImportFavoritePage(folder, page, tabId = null) {
+  const cached = importListCacheRead(folder.id, page);
+  if (cached) return cached;
   const data = await biliImportApiGet("/x/v3/fav/resource/list", {
     media_id: folder.id, pn: page, ps: IMPORT_FAVORITE_PAGE_SIZE, keyword: "", order: "mtime", type: 0, tid: 0, platform: "web"
   }, 15000, tabId);
   const medias = Array.isArray(data.medias) ? data.medias : [];
-  return {
+  const result = {
     items: medias.map((media) => normalizeImportMedia(media, folder)),
     total: Number(data.info?.media_count || data.media_count || data.total || 0),
     hasMore: data.has_more === undefined ? (page * IMPORT_FAVORITE_PAGE_SIZE < Number(data.info?.media_count || data.media_count || data.total || 0)) : !!data.has_more
   };
+  importListCacheWrite(folder.id, page, result);
+  return result;
 }
 
 async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId = null) {
@@ -2355,6 +2395,8 @@ async function importBiliFavorites(data, tabId = null) {
       if (!collectionExisted) folderNotes.push(`「${folder.title}」本地没有同名收藏夹，本次按全量导入处理。`);
 
       const existing = await readExistingImportRecords(collection);
+      // 这一轮真的写过盘了，列表缓存作废 —— 否则紧接着的对比会拿旧列表对账
+      importListCacheClear();
       const pendingItems = [];
       const refreshTargets = [];
       for (const item of scopedItems) {

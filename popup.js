@@ -227,7 +227,8 @@ function openImportConfirm() {
   if (importBusy) return;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
   if (!selected) return;
-  importConfirmDetail.textContent = BcaI18n.t("将要导入 {count} 个收藏夹。", { count: selected });
+  importConfirmDetail.textContent = BcaI18n.t("将要导入 {count} 个收藏夹。", { count: selected })
+    + " " + requestEstimateText();
   importConfirm.showModal();
 }
 
@@ -245,7 +246,8 @@ async function startDiff() {
   importStatus.classList.remove("error");
   diffResult.hidden = true;
   importProgressTitle.textContent = BcaI18n.t("正在对比差异");
-  importProgressText.textContent = BcaI18n.t("正在读取 B 站收藏夹列表…");
+  // 差异对比要读完整列表，动手前把请求量告诉用户
+  importProgressText.textContent = requestEstimateText() || BcaI18n.t("正在读取 B 站收藏夹列表…");
   updateImportSelection();
   try {
     const response = await chrome.runtime.sendMessage({ type: "bca-fav-diff", data: { folderIds } });
@@ -300,11 +302,31 @@ function renderDiffResult(response) {
 /* V1.1.4：「开始更新」——只同步最近 N 天新收藏的视频。
    经常用手机刷到就收藏的用户，为这几天的新增跑一次全量导入（2800 条约 30 分钟）没有意义。
    过滤在后台按收藏时间做，这里只负责让用户选时间窗。 */
+/* 估算这次要发多少次请求，让用户自己决定值不值得。
+   README「使用须知」第一条就是"请求过密可能触发风控"，但在此之前界面从不告诉用户
+   一次操作要发多少次 —— 用户没法判断。列表按 40 条一次请求算。 */
+function estimateListRequests() {
+  const checked = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')];
+  const total = checked.reduce((sum, input) => {
+    const folder = importFolders.find((item) => String(item.id) === String(input.value));
+    const count = Number(folder?.count) || 0;
+    return sum + Math.max(1, Math.ceil(count / 40));
+  }, 0);
+  return { folders: checked.length, requests: total };
+}
+
+function requestEstimateText() {
+  const { folders, requests } = estimateListRequests();
+  if (!requests) return "";
+  return BcaI18n.t("预计要读取 {requests} 次收藏夹列表（{folders} 个收藏夹，每次 40 条）。", { requests, folders });
+}
+
 function openUpdateRecent() {
   if (importBusy) return;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
   if (!selected) return;
-  updateRecentDetail.textContent = BcaI18n.t("将要更新 {count} 个收藏夹。", { count: selected });
+  updateRecentDetail.textContent = BcaI18n.t("将要更新 {count} 个收藏夹。", { count: selected })
+    + " " + requestEstimateText();
   updateRecentDialog.showModal();
 }
 
