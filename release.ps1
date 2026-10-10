@@ -116,7 +116,9 @@ Say "  [$([char]0x2713)] 干净" $C_GREEN
 $readme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw -Encoding UTF8
 if ($readme -notmatch "(?m)^## V$([regex]::Escape($版本))[：:]") {
   Say "  README.md 里没有「## V$版本：...」这一节。" $C_RED
-  Say "  每个 tag 都要有 README 小节（纯内部改动也要留一行），否则版本历史会缺环。" $C_YELLOW
+  Say "  打了 tag 就必须有 README 小节，否则版本历史会缺环。" $C_YELLOW
+  Say "  写多少看改动大小：bug 修复/新功能写清楚，界面微调一行带过即可。" $C_YELLOW
+  Say "  不值得单独发版的改动就别发版 —— 直接提交、不打 tag。" $C_YELLOW
   Die "发布中止：先在 README.md 里补上 V$版本 的小节。"
 }
 
