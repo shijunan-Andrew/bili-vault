@@ -5,28 +5,106 @@
 <title>本地目录打开助手 · 安装教程</title>
 <link rel="stylesheet" href="theme.css">
 <style>
+  :root {
+    /* Windows 界面自己的一套颜色 —— 不跟随扩展主题。
+       真实截图就是这样：深色主题下这些窗口依然是浅色的。
+       只有黑底终端例外，它本来就是黑的。 */
+    --win-bg: #f3f3f3;
+    --win-line: #d7d7d7;
+    --win-ink: #1b1b1b;
+    --win-muted: #6b6b6b;
+    --win-field: #ffffff;
+    --win-chrome: #e9e9e9;
+    --cmd-bg: #0c0c0c;
+    --cmd-ink: #cccccc;
+    --cmd-dim: #8a8a8a;
+    --mark: #e8443a;
+  }
+
   body { margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--ink); font: 15px/1.7 var(--font-sans); }
-  .wrap { max-width: 780px; margin: 0 auto; }
+  .wrap { max-width: 860px; margin: 0 auto; }
   h1 { font-size: 22px; margin: 0 0 6px; }
   .lead { color: var(--muted); margin: 0 0 28px; }
   ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
-  ol.steps > li { counter-increment: step; margin: 0 0 28px; padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+  ol.steps > li { counter-increment: step; margin: 0 0 30px; padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
   ol.steps > li::before { content: "第 " counter(step) " 步"; display: block; margin-bottom: 8px; color: var(--accent); font-weight: 700; font-size: 13px; letter-spacing: .04em; }
   .what { font-weight: 600; margin: 0 0 10px; }
   .hint { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
   code { padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); font-size: 13px; }
-  /* 界面示意图：用纯 CSS 画，不放真实截图 —— 真实截图里会有用户名、路径、扩展 ID */
-  .shot { margin: 12px 0 0; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; font-size: 13px; }
-  .shot-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--surface-soft); border-bottom: 1px solid var(--line); color: var(--muted); }
-  .shot-body { padding: 12px; background: var(--surface); }
-  .row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 5px; }
-  .row + .row { margin-top: 2px; }
-  .row.mark { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
-  .addr { flex: 1; padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); font-family: var(--font-sans); font-size: 12px; }
-  .tag { padding: 2px 8px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; }
   .note { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--accent-line); border-radius: var(--r-sm); background: var(--accent-soft); }
-  .done { padding: 3px 8px; border-radius: 4px; background: var(--success-soft); color: var(--success); font-weight: 600; }
   .actions { margin-top: 32px; display: flex; justify-content: center; }
+
+  /* ── 通用窗口外框：模仿 Windows 11 的圆角标题栏 ── */
+  .win { margin: 12px 0 0; border: 1px solid var(--win-line); border-radius: 8px; overflow: hidden;
+         background: var(--win-bg); color: var(--win-ink); font-size: 12.5px; line-height: 1.5;
+         box-shadow: 0 6px 18px rgb(0 0 0 / .12); }
+  .win-title { display: flex; align-items: center; gap: 7px; padding: 6px 8px 6px 10px; background: var(--win-chrome); border-bottom: 1px solid var(--win-line); }
+  .win-title .ico { width: 15px; height: 15px; flex: none; }
+  .win-title .tab { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 6px 6px 0 0; background: var(--win-bg); font-size: 12px; }
+  .win-title .spacer { flex: 1; }
+  .win-title .btn { width: 26px; height: 18px; display: grid; place-items: center; color: var(--win-muted); }
+
+  /* ── 资源管理器 ── */
+  .ex-nav { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--win-line); }
+  .ex-nav .arrow { padding: 3px 7px; border-radius: 4px; color: var(--win-muted); }
+  .ex-nav .arrow.on { color: var(--win-ink); }
+  .ex-addr { display: flex; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--win-line); }
+  .ex-addr .path { flex: 1; padding: 5px 10px; border: 1.5px solid #0a63c9; border-radius: 4px; background: var(--win-field);
+                   font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+  .ex-addr .search { width: 200px; padding: 5px 10px; border: 1px solid var(--win-line); border-radius: 4px; background: var(--win-field); color: var(--win-muted); }
+  .ex-cmd { display: flex; align-items: center; gap: 2px; padding: 5px 10px; border-bottom: 1px solid var(--win-line); flex-wrap: wrap; }
+  .ex-cmd span { padding: 3px 9px; border-radius: 4px; }
+  .ex-cmd span.on { background: #dcdcdc; }
+  .ex-cmd .grow { flex: 1; }
+  .ex-body { display: flex; min-height: 108px; }
+  .ex-side { width: 172px; flex: none; padding: 8px 6px; border-right: 1px solid var(--win-line); background: #fafafa; }
+  .ex-side div { padding: 4px 10px; border-radius: 4px; }
+  .ex-side div.on { background: #e2e2e2; }
+  .ex-side .sub { padding-left: 28px; color: var(--win-muted); }
+  .ex-list { flex: 1; padding: 8px 0; }
+  .ex-list .head { display: flex; padding: 2px 12px 6px; border-bottom: 1px solid var(--win-line); color: var(--win-muted); }
+  .ex-list .head b { font-weight: 400; color: var(--win-ink); }
+  .ex-list .empty { padding: 22px 12px; text-align: center; color: var(--win-muted); }
+  .col-name { width: 46%; } .col-date { width: 22%; } .col-type { width: 18%; } .col-size { width: 14%; }
+  .ex-row { display: flex; padding: 4px 12px; align-items: center; }
+  .ex-row.mark { background: #cce4ff; box-shadow: inset 0 0 0 1.5px #0a63c9; }
+
+  /* ── chrome://extensions 的扩展卡片 ── */
+  .ext-page { background: #fff; }
+  .ext-toolbar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid #e4e4e4; }
+  .ext-toolbar .title { font-size: 15px; font-weight: 500; }
+  .ext-dev { margin-left: auto; padding: 5px 12px; border: 1px solid #c8c8c8; border-radius: 4px; background: #fff; }
+  .ext-card { display: flex; gap: 14px; padding: 16px; }
+  .ext-logo { width: 44px; height: 44px; flex: none; border-radius: 10px; background: #2b2b2b; color: #fff;
+              display: grid; place-items: center; font-weight: 700; font-size: 19px; position: relative; }
+  .ext-logo::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: 50%;
+                     background: #ff5c35; border: 2px solid #fff; }
+  .ext-main { flex: 1; min-width: 0; }
+  .ext-name { font-size: 15px; font-weight: 600; }
+  .ext-ver { font-weight: 400; color: var(--win-muted); }
+  .ext-desc { margin: 6px 0 8px; color: #3c3c3c; }
+  .ext-id { display: flex; align-items: center; gap: 6px; }
+  .ext-id .val { padding: 3px 8px; border: 1.5px solid var(--mark); border-radius: 3px; background: #fff;
+                 font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
+  .ext-view { margin-top: 6px; color: var(--win-muted); }
+  .ext-view a { color: #0a63c9; }
+  .ext-actions { display: flex; align-items: center; gap: 8px; padding: 0 16px 14px 74px; }
+  .ext-actions .b { padding: 6px 16px; border: 1px solid #c8c8c8; border-radius: 16px; background: #fff; }
+  .ext-actions .spacer { flex: 1; }
+  .ext-toggle { width: 34px; height: 20px; border-radius: 999px; background: #0a63c9; position: relative; }
+  .ext-toggle::after { content: ""; position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+
+  /* ── 黑底终端 ── */
+  .cmd { margin: 12px 0 0; border: 1px solid #2a2a2a; border-radius: 8px; overflow: hidden; box-shadow: 0 6px 18px rgb(0 0 0 / .3); }
+  .cmd-title { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: #1f1f1f; color: #d0d0d0; font-size: 12px; }
+  .cmd-title .spacer { flex: 1; }
+  .cmd-title .btn { color: #9a9a9a; padding: 0 6px; }
+  .cmd-body { padding: 10px 12px 16px; background: var(--cmd-bg); color: var(--cmd-ink);
+              font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-all; }
+  .cmd-body .in { border: 1.5px solid var(--mark); border-radius: 2px; padding: 0 2px; }
+  .cmd-body .ok { color: #16c60c; }
+  .cmd-body .dim { color: var(--cmd-dim); }
+  .cmd-body .cursor { display: inline-block; width: 7px; height: 13px; background: var(--cmd-ink); vertical-align: -2px; }
 </style>
 </head>
 <body>
@@ -38,49 +116,91 @@
     <li>
       <p class="what">双击插件目录里的 <code>install-native-folder-opener.bat</code></p>
       <p class="hint">就在你加载插件时选的那个文件夹里，和 <code>manifest.json</code> 放在一起。</p>
-      <div class="shot">
-        <div class="shot-bar">← → ↑ &nbsp; bili-vault</div>
-        <div class="shot-body">
-          <div class="row mark"><span>📄</span><span>install-native-folder-opener.bat</span><span style="margin-left:auto;color:var(--muted)">Windows 批处理文件</span></div>
-          <div class="row"><span>📄</span><span>manifest.json</span><span style="margin-left:auto;color:var(--muted)">JSON 文件</span></div>
-          <div class="row"><span>📄</span><span>library.html</span><span style="margin-left:auto;color:var(--muted)">Chrome HTML</span></div>
+      <div class="win">
+        <div class="win-title"><span class="ico">📁</span><span class="tab">bili-vault</span><span class="spacer"></span><span class="btn">—</span><span class="btn">▢</span><span class="btn">✕</span></div>
+        <div class="ex-nav"><span class="arrow on">←</span><span class="arrow">→</span><span class="arrow">↑</span><span class="arrow">↻</span></div>
+        <div class="ex-body" style="border-top:1px solid var(--win-line)">
+          <div class="ex-list">
+            <div class="ex-list head"><b class="col-name">名称</b><span class="col-date">修改日期</span><span class="col-type">类型</span><span class="col-size">大小</span></div>
+            <div class="ex-row mark"><span class="col-name">📄 install-native-folder-opener.bat</span><span class="col-date">2026/10/9 19:55</span><span class="col-type">Windows 批处理文件</span><span class="col-size">1 KB</span></div>
+            <div class="ex-row"><span class="col-name">📄 install-native-folder-opener.ps1</span><span class="col-date">2026/10/10 20:12</span><span class="col-type">Windows PowerShell…</span><span class="col-size">8 KB</span></div>
+            <div class="ex-row"><span class="col-name">📄 manifest.json</span><span class="col-date">2026/10/10 20:12</span><span class="col-type">JSON 文件</span><span class="col-size">2 KB</span></div>
+          </div>
         </div>
       </div>
     </li>
 
     <li>
-      <p class="what">在弹出的窗口里，粘贴扩展程序 ID</p>
-      <p class="hint">先去 <code>chrome://extensions</code>，找到「哔哩藏库」，把插件介绍<strong>下方那串 ID</strong> 复制下来，粘贴到黑窗口里按回车。</p>
-      <div class="shot">
-        <div class="shot-bar">chrome://extensions</div>
-        <div class="shot-body">
-          <div class="row"><span class="tag">哔</span><span><strong>哔哩藏库</strong><br><span style="color:var(--muted)">把 B 站收藏夹备份本地…</span></span></div>
-          <div class="row mark"><span>ID：</span><span class="addr" style="font-family:var(--font-sans)">●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●</span></div>
+      <p class="what">在弹出的黑窗口里，粘贴<strong>扩展程序 ID</strong></p>
+      <p class="hint">先去 <code>chrome://extensions</code>，找到「哔哩藏库」，把插件介绍<strong>下方那串 ID</strong> 复制下来（就是红框里的那串），粘贴到黑窗口里按回车。</p>
+      <div class="win ext-page">
+        <div class="ext-toolbar"><span class="title">扩展程序</span><span class="ext-dev">开发者模式</span></div>
+        <div class="ext-card">
+          <div class="ext-logo">哔</div>
+          <div class="ext-main">
+            <div class="ext-name">哔哩藏库 <span class="ext-ver">1.1.28</span></div>
+            <div class="ext-desc">把 B 站收藏夹备份本地。启用后，收藏成功自动保存视频资料到本地，支持已有收藏夹视频的本地归档与失效视频恢复，支持本地收藏夹浏览、搜索…</div>
+            <div class="ext-id"><span>ID：</span><span class="val">●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●</span></div>
+            <div class="ext-view">检查视图：<a>Service Worker</a></div>
+          </div>
         </div>
+        <div class="ext-actions"><span class="b">详情</span><span class="b">移除</span><span class="spacer"></span><span style="color:var(--win-muted)">↻</span><span class="ext-toggle"></span></div>
+      </div>
+      <div class="cmd">
+        <div class="cmd-title"><span>🖥</span><span>C:\WINDOWS\system32\cmd.exe</span><span class="spacer"></span><span class="btn">—</span><span class="btn">▢</span><span class="btn">✕</span></div>
+        <div class="cmd-body">请从 chrome://extensions 复制本插件的扩展程序 ID（在插件介绍下方有一个 ID:xxxxxxxx，把那串复制到这条命令后按回车）：<span class="in">●●●●●●●●…（在这里粘贴）</span></div>
       </div>
     </li>
 
     <li>
-      <p class="what">再粘贴视频下载目录的绝对路径</p>
+      <p class="what">再粘贴<strong>视频下载目录的绝对路径</strong></p>
       <p class="hint">打开你的视频下载文件夹（默认是收藏根目录下的 <code>000视频下载</code>），在文件资源管理器<strong>上方的地址栏点一下</strong>，把里面的完整地址复制过来，粘贴到黑窗口里按回车。</p>
-      <div class="shot">
-        <div class="shot-bar">← → ↑ ↻ &nbsp; 000视频下载</div>
-        <div class="shot-body">
-          <div class="row mark"><span class="addr">D:\本地收藏夹\000视频下载</span></div>
+      <div class="win">
+        <div class="win-title"><span class="ico">📁</span><span class="tab">000视频下载</span><span class="btn">＋</span><span class="spacer"></span><span class="btn">—</span><span class="btn">▢</span><span class="btn">✕</span></div>
+        <div class="ex-nav"><span class="arrow on">←</span><span class="arrow">→</span><span class="arrow">↑</span><span class="arrow">↻</span></div>
+        <div class="ex-addr">
+          <span class="path">D:\本地收藏夹\000视频下载</span>
+          <span class="search">在 000视频下载 中搜索</span>
         </div>
+        <div class="ex-cmd"><span>＋ 新建</span><span>✂</span><span>⧉</span><span>📋</span><span>✎</span><span>🗑</span><span>↕ 排序</span><span>☰ 查看</span><span>…</span><span class="grow"></span><span class="on">▤ 预览</span></div>
+        <div class="ex-body">
+          <div class="ex-side">
+            <div>💻 此电脑</div>
+            <div class="sub">Windows (C:)</div>
+            <div class="sub on">DATA1 (D:)</div>
+          </div>
+          <div class="ex-list">
+            <div class="ex-list head"><b class="col-name">名称</b><span class="col-date">修改日期</span><span class="col-type">类型</span><span class="col-size">大小</span></div>
+            <div class="ex-list empty">此文件夹为空。</div>
+          </div>
+        </div>
+      </div>
+      <div class="cmd">
+        <div class="cmd-title"><span>🖥</span><span>C:\WINDOWS\system32\cmd.exe</span><span class="spacer"></span><span class="btn">—</span><span class="btn">▢</span><span class="btn">✕</span></div>
+        <div class="cmd-body"><span class="dim">请从 chrome://extensions 复制本插件的扩展程序 ID（…）：●●●●●●●●…
+请输入视频下载目录的完整绝对路径（例如 D:\本地收藏夹\000视频下载）：打开你的视频下载文件夹，在文件资源管理器上方的地址栏点一下，把里面的绝对地址复制到这条命令后按回车：</span><span class="in">D:\本地收藏夹\000视频下载</span></div>
       </div>
     </li>
 
     <li>
       <p class="what">看到「安装完成」就成功了</p>
       <p class="hint">窗口里会列出扩展程序 ID、宿主启动器、原生消息清单和下载目录。看到这几行就说明写进去了。</p>
-      <div class="shot">
-        <div class="shot-bar">C:\WINDOWS\system32\cmd.exe</div>
-        <div class="shot-body">
-          <div class="row"><span class="done">安装完成。</span></div>
-          <div class="row"><span style="color:var(--muted)">扩展程序 ID：●●●●●●●●…</span></div>
-          <div class="row"><span style="color:var(--muted)">下载目录：D:\本地收藏夹\000视频下载</span></div>
-        </div>
+      <div class="cmd">
+        <div class="cmd-title"><span>🖥</span><span>C:\WINDOWS\system32\cmd.exe</span><span class="spacer"></span><span class="btn">—</span><span class="btn">▢</span><span class="btn">✕</span></div>
+        <div class="cmd-body"><span class="dim">正在编译宿主启动器…</span>
+
+<span class="ok">安装完成。</span>
+<span class="dim">扩展程序 ID：</span>●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+<span class="dim">宿主启动器：</span>C:\Users\&lt;你的用户名&gt;\AppData\Local\BcaFolderOpener\folder-opener-launcher.exe
+<span class="dim">原生消息清单：</span>C:\Users\&lt;你的用户名&gt;\AppData\Local\BcaFolderOpener\com.bcatch.folder_opener.json
+<span class="dim">下载目录：</span>D:\本地收藏夹\000视频下载
+
+<span class="dim">接下来请按顺序操作：</span>
+<span class="dim">1. 在 chrome://extensions 中重新加载本插件（如果换了插件目录，ID 会变化）。</span>
+<span class="dim">2. 完全退出 Chrome（关闭所有窗口），再重新打开。</span>
+<span class="dim">3. 打开本地收藏库，在视频详情中点击 打开本地视频目录。</span>
+
+<span class="dim">请按任意键继续. . .</span> <span class="cursor"></span></div>
       </div>
     </li>
 
