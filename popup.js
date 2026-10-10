@@ -25,6 +25,8 @@ const riskyWarnDialog = document.getElementById("riskyWarnDialog");
 const riskyWarnText = document.getElementById("riskyWarnText");
 const doneDialog = document.getElementById("doneDialog");
 const doneDialogText = document.getElementById("doneDialogText");
+const diffStartConfirm = document.getElementById("diffStartConfirm");
+const diffStartDetail = document.getElementById("diffStartDetail");
 const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
 const reportPath = document.getElementById("reportPath");
@@ -202,7 +204,10 @@ function updateImportSelection() {
   selectAllImportFoldersButton.disabled = importBusy;
   clearImportFoldersButton.disabled = importBusy;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
-  importSelectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: selected });
+  // 顺带把总量也显示出来 —— 判断"要不要现在跑"时，条数比个数有用得多
+  const totalItems = selectedItemTotal();
+  importSelectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: selected })
+    + (totalItems ? " · " + BcaI18n.t("共 {total} 条视频", { total: totalItems }) : "");
   startImportButton.disabled = importBusy || selected === 0;
   diffFoldersButton.disabled = importBusy || selected === 0;
   updateRecentButton.disabled = importBusy || selected === 0;
@@ -354,14 +359,16 @@ function renderDiffResult(response) {
   const diffs = Array.isArray(response?.diffs) ? response.diffs : [];
   diffResult.replaceChildren();
   // 全部用 textContent 拼，不碰 innerHTML —— 收藏夹名与视频标题都是用户数据
-  for (const diff of diffs) {
+  for (const rawDiff of diffs) {
+    // 恢复自 storage 的摘要里，四个差异项是数字不是数组 —— 两种形状都要认。
+    // 注意用新变量：for...of 的循环变量是 const，直接赋值会抛
+    // "Assignment to constant variable."（真机上就是这么暴露的）。
+    const count = (value) => Array.isArray(value) ? value.length : (Number(value) || 0);
+    const diff = { ...rawDiff, added: count(rawDiff.added), removed: count(rawDiff.removed),
+      newlyInvalid: count(rawDiff.newlyInvalid), recovered: count(rawDiff.recovered) };
     const line = document.createElement("p");
     line.className = "diff-line";
     const name = document.createElement("strong");
-    // 恢复自 storage 的摘要里，四个差异项是数字不是数组 —— 两种形状都要认
-    const count = (value) => Array.isArray(value) ? value.length : (Number(value) || 0);
-    diff = { ...diff, added: count(diff.added), removed: count(diff.removed),
-      newlyInvalid: count(diff.newlyInvalid), recovered: count(diff.recovered) };
     name.textContent = `「${diff.folderTitle}」`;
     // 光看「新增 2720」看不出所以然，所以把两边的条数一起摆出来
     line.append(name, document.createTextNode(
@@ -731,8 +738,20 @@ document.getElementById("riskyWarnGo").addEventListener("click", () => {
   riskyConfirmResolve = null;
 });
 document.getElementById("doneDialogClose").addEventListener("click", () => doneDialog.close());
-// 三个入口都要过这一关：开始导入、开始更新、先看差异
-diffFoldersButton.addEventListener("click", () => {
+// 与「开始导入」「开始更新」保持一致：点一下先弹确认框，再点一次才真的开始
+function openDiffConfirm() {
+  if (importBusy) return;
+  const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
+  if (!selected) return;
+  diffStartDetail.textContent = BcaI18n.t("将要对比 {count} 个收藏夹。", { count: selected })
+    + " " + requestEstimateText();
+  diffStartConfirm.showModal();
+}
+
+diffFoldersButton.addEventListener("click", openDiffConfirm);
+document.getElementById("diffStartCancel").addEventListener("click", () => diffStartConfirm.close());
+document.getElementById("diffStartGo").addEventListener("click", () => {
+  diffStartConfirm.close();
   confirmRiskySpeed().then((ok) => { if (ok) startDiff(); });
 });
 pauseImportButton.addEventListener("click", async () => {

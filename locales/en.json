@@ -664,5 +664,8 @@
   "当前是「{speed}」档，而这个收藏夹有约 {total} 条。建议先到插件弹窗里改用「较低」档位。": "You are on 「{speed}」 and this collection has about {total} items. Switching to 「Lower」 in the popup first is recommended.",
   "档位是全局设置，可以在插件弹窗的「请求速度」里改。「较低」会分批停顿，慢一些但安全得多。": "The speed is a global setting; change it under 「Request speed」 in the popup. 「Lower」 adds pauses between batches — slower, but far safer.",
   "正在更新收藏夹": "Updating collections",
-  "更新已暂停": "Update paused"
+  "更新已暂停": "Update paused",
+  "共 {total} 条视频": "{total} videos total",
+  "将要对比 {count} 个收藏夹。": "About to compare {count} collection(s).",
+  "只读取 B 站的收藏夹列表，不抓取每条视频的详情。对比过程不会改动任何本地文件。": "Only the Bilibili favourites list is read, not each video's details. Nothing local is modified."
 }

@@ -435,6 +435,14 @@ button:disabled { cursor: wait; opacity: .6; }
 }
 
 /* V1.1.11：请求速度。新类，不覆盖既有选择器。 */
+/* 「已选 x 个 · 共 x 条视频」是决定要不要开跑的关键信息，比旁边的小字重要，
+   所以单独放大加粗。 */
+.import-selected-count {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--ink);
+}
+
 .speed-row {
   margin-top: var(--sp-3);
   padding-top: var(--sp-3);
