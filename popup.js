@@ -248,10 +248,18 @@ function renderDiffResult(response) {
     line.className = "diff-line";
     const name = document.createElement("strong");
     name.textContent = `「${diff.folderTitle}」`;
+    // 光看「新增 2720」看不出所以然，所以把两边的条数一起摆出来
     line.append(name, document.createTextNode(
-      BcaI18n.t("新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}",
-        { added: diff.added?.length || 0, removed: diff.removed?.length || 0,
+      BcaI18n.t("线上 {remote} / 本地 {local}：新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}",
+        { remote: diff.remoteFetched || 0, local: diff.localTotal || 0,
+          added: diff.added?.length || 0, removed: diff.removed?.length || 0,
           invalid: diff.newlyInvalid?.length || 0, recovered: diff.recovered?.length || 0 })));
+    if (!diff.collectionExists) {
+      const note = document.createElement("small");
+      note.className = "diff-warn";
+      note.textContent = BcaI18n.t("本地还没有这个收藏夹，所以全部算作新增。");
+      line.append(note);
+    }
     if (diff.incomplete) {
       const warn = document.createElement("small");
       warn.className = "diff-warn";

@@ -2770,6 +2770,15 @@ function buildDiffReportText(diffs, generatedAt) {
   for (const diff of list) {
     lines.push("", "─".repeat(40), `收藏夹：${diff.folderTitle}`);
     lines.push(`线上 ${diff.remoteTotal} 条（实际读到 ${diff.remoteFetched} 条）／本地 ${diff.localTotal} 条`);
+    // 4.9.1 的教训：B 站的 media_count 把"已失效视频"留下的空位也算进总数，
+    // 而列表接口不返回它们的内容。差额是接口口径差异，**不是读取失败** ——
+    // 不写清楚，用户看到 2804 与 2720 只会怀疑漏读了 84 条。
+    // 只有在确实读到自然末尾时才敢这么说（没读全时由下面的 incomplete 分支负责）。
+    const remoteGap = Math.max(0, diff.remoteTotal - diff.remoteFetched);
+    if (remoteGap > 0 && !diff.incomplete) {
+      lines.push(`接口自报 ${diff.remoteTotal} 条、实际返回 ${diff.remoteFetched} 条，差额 ${remoteGap} 条是 B 站的占位空槽`
+        + "（视频被删后在收藏夹里留下的空位，接口不返回它们的内容），不是读取失败。");
+    }
     if (diff.incomplete) {
       lines.push(`⚠ 本次读取可能不完整${diff.failedPages ? `（有 ${diff.failedPages} 页失败）` : "（没读到最后一页）"}，下面的差异请酌情参考。`);
     }

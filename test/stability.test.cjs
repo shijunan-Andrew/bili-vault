@@ -2260,6 +2260,30 @@ test("同步差异报告的正文包含该有的段落", () => {
   assert.equal(text.includes("【已恢复"), false, "空的分类不打印标题");
 });
 
+test("同步差异：接口自报条数与实际读到不符时，报告要解释差额", () => {
+  const { buildDiffReportText } = loadBackgroundFunctions(["buildDiffReportText"], ["ERROR_REPORT_NOTICE"]);
+  const base = {
+    folderTitle: "默认收藏夹", collectionExists: false, localTotal: 0,
+    added: [], removed: [], newlyInvalid: [], recovered: [], unchanged: 0
+  };
+  // 2804 自报、2720 实际 —— 差额是 B 站的占位空槽，不是读取失败。
+  // 4.9.1 就因为没区分这两者，凭空报出过"失败：25"。
+  const read = buildDiffReportText(
+    [{ ...base, remoteTotal: 2804, remoteFetched: 2720, incomplete: false, failedPages: 0 }], "t");
+  assert.ok(read.includes("2804"), "要写出接口自报的总数");
+  assert.ok(read.includes("2720"), "要写出实际读到的条数");
+  assert.ok(read.includes("占位空槽"), "要说明差额是占位空槽，不是读取失败");
+  assert.ok(read.includes("不是读取失败"), "要明确排除读取失败这个可能");
+  // 本地没有同名收藏夹时要说清楚，否则"新增 2720"看不出所以然
+  assert.ok(read.includes("本地没有同名收藏夹"));
+
+  // 反过来：真的没读全时，不能拿"占位空槽"糊弄过去
+  const short = buildDiffReportText(
+    [{ ...base, remoteTotal: 2804, remoteFetched: 500, incomplete: true, failedPages: 3 }], "t");
+  assert.ok(short.includes("可能不完整"), "没读全时必须说结果可能不全");
+  assert.ok(short.includes("3 页失败"), "要写出失败了多少页");
+});
+
 test("同步差异：四项都是 0 时给出明确结论，而不是一片空白", () => {
   const { buildDiffReportText } = loadBackgroundFunctions(["buildDiffReportText"], ["ERROR_REPORT_NOTICE"]);
   const text = buildDiffReportText([{
