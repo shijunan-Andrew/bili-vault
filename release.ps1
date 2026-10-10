@@ -44,7 +44,11 @@ function Invoke-Native {
   $previous = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
-    return ,@(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" })
+    # 注意这里**不能**写 return ,@(...)：逗号会把整个数组当成一个对象输出，
+    # 于是 "Invoke-Native ... | Select-String" 拿到的是一个被拼成一行的字符串，
+    # 永远匹配不到任何行（发布时测试数字整段消失就是这么来的）。
+    # 直接让它流进管道：赋值和 | Select-String 两种用法都对。
+    & $Exe @Arguments 2>&1 | ForEach-Object { "$_" }
   } finally {
     $ErrorActionPreference = $previous
   }
