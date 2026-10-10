@@ -455,7 +455,7 @@ test("the share text splitter pulls the stats out of a real archive description"
 test("update mode only refreshes records that are actually incomplete", () => {
   const { recordNeedsRefresh } = loadBackgroundFunctions(
     ["importClean", "importIsPlaceholder", "recordNeedsRefresh"],
-    ["IMPORT_PLACEHOLDER_VALUES"]
+    ["IMPORT_PLACEHOLDER_VALUES", "COVER_PENDING_LINE"]
   );
   // 4.1 之前的旧档案：没有粉丝数、没有互动数据
   assert.equal(recordNeedsRefresh({ text: PLACEHOLDER_INFO }), true);
@@ -775,8 +775,13 @@ test("the status refresh always asks for confirmation first", () => {
   assert.match(html, /请勿频繁更新：每次更新都会请求 B 站接口/);
   assert.match(library, /function openStatusConfirm\(/);
   assert.match(library, /function runStatusRefresh\(/);
-  // 详情里的按钮不再直接刷新，而是先确认
-  assert.match(library, /\.refresh-status"\)\.addEventListener\("click", \(\) => openStatusConfirm\(\[video\], "detail"\)\)/);
+  // 详情里的按钮不再直接刷新，而是先确认。
+  // V1.2.0：openDetail 补了 null 守卫，元素先取进变量再判空（缺元素时不再抛异常）。
+  assert.match(
+    library,
+    /if \(\w+\) \w+\.addEventListener\("click", \(\) => openStatusConfirm\(\[video\], "detail"\)\)/,
+    "详情里的「更新视频状态」要先弹确认框"
+  );
   assert.equal(/refreshOneVideoStatus/.test(library), false, "旧的无确认刷新入口应已删除");
   // 仍然共用后台的串行队列，请求频率不变
   assert.match(library, /type: "bca-refresh-video-stats"/);
@@ -1218,7 +1223,7 @@ test("the native host folder is pinned under LOCALAPPDATA", () => {
 test("the PowerShell sources keep their BOM", () => {
   // PowerShell 5.1 的 Get-Content 默认按系统 ANSI 读，无 BOM 会把中文路径解坏。
   // .ps1 / .cs 必须带 BOM，其余文件必须不带（带了会让 JSON.parse 直接失败）。
-  const withBom = ["install-native-folder-opener.ps1", "uninstall-native-folder-opener.ps1", "test-native-folder-opener.ps1", "native/folder-opener-host.ps1", "native/folder-opener-launcher.cs"];
+  const withBom = ["release.ps1", "install-native-folder-opener.ps1", "uninstall-native-folder-opener.ps1", "test-native-folder-opener.ps1", "native/folder-opener-host.ps1", "native/folder-opener-launcher.cs"];
   const withoutBom = ["manifest.json", "library.js", "library.html", "library.css", "background.js", "popup.js", "theme.css", "locales/zh-TW.json"];
   const fs = require("node:fs");
   const path = require("node:path");
@@ -2553,7 +2558,14 @@ test("完成弹窗只弹一次（点掉之后再打开插件不该重放）", ()
   assert.match(popup, /if \(!state\.summary\.acknowledged\)/, "恢复结果时没有判断「已提示」，弹窗会重放");
   // 点掉之后要把标记写回去
   assert.match(popup, /summary: \{ \.\.\.state\.summary, acknowledged: true \}/, "点掉弹窗后没有回写标记");
-  assert.match(popup, /doneDialogClose[\s\S]{0,400}acknowledged: true/, "回写标记没有绑在「知道了」上");
+  assert.match(
+    popup,
+    /function dismissDoneDialog\(\)[\s\S]{0,600}?acknowledged: true/,
+    "回写标记没有放在 dismissDoneDialog 里"
+  );
+  // 「知道了」和 Esc 必须走同一条路：只绑 click 的话，Esc 关掉不写标记，下次打开插件又弹一遍
+  assert.match(popup, /getElementById\("doneDialogClose"\)\.addEventListener\("click", dismissDoneDialog\)/);
+  assert.match(popup, /doneDialog\.addEventListener\("cancel", dismissDoneDialog\)/, "Esc 关掉没有回写「已提示」");
 });
 
 test("进度区按操作类型显示，差异对比不给暂停/取消", () => {
@@ -2704,7 +2716,7 @@ test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
 /* ------------------------- V1.1.4：增量更新的时间窗口 -------------------------
 
    真机事故：V1.1.4 第一版的「最近 N 天」过滤拿 Date.now()（毫秒）去比
-   接口返回的 fav_time（秒），条件永远为假，2720 条一条都没命中，
+   接口返回的 fav_time（秒），条件永远为假，上千条一条都没命中，
    用户看到的是"读取视频 0 / 失败 0"——没有报错，就是什么都没有。
 
    根因很低级：本文件里已经有两处做过这个换算，写过滤时没去看。
@@ -2895,20 +2907,20 @@ test("同步差异：接口自报条数与实际读到不符时，报告要解�
     folderTitle: "默认收藏夹", collectionExists: false, localTotal: 0,
     added: [], removed: [], newlyInvalid: [], recovered: [], unchanged: 0
   };
-  // 2804 自报、2720 实际 —— 差额是 B 站的占位空槽，不是读取失败。
+  // 1204 自报、1120 实际 —— 差额是 B 站的占位空槽，不是读取失败。
   // 4.9.1 就因为没区分这两者，凭空报出过"失败：25"。
   const read = buildDiffReportText(
-    [{ ...base, remoteTotal: 2804, remoteFetched: 2720, incomplete: false, failedPages: 0 }], "t");
-  assert.ok(read.includes("2804"), "要写出接口自报的总数");
-  assert.ok(read.includes("2720"), "要写出实际读到的条数");
+    [{ ...base, remoteTotal: 1204, remoteFetched: 1120, incomplete: false, failedPages: 0 }], "t");
+  assert.ok(read.includes("1204"), "要写出接口自报的总数");
+  assert.ok(read.includes("1120"), "要写出实际读到的条数");
   assert.ok(read.includes("占位空槽"), "要说明差额是占位空槽，不是读取失败");
   assert.ok(read.includes("不是读取失败"), "要明确排除读取失败这个可能");
-  // 本地没有同名收藏夹时要说清楚，否则"新增 2720"看不出所以然
+  // 本地没有同名收藏夹时要说清楚，否则"新增 1120"看不出所以然
   assert.ok(read.includes("本地没有同名收藏夹"));
 
   // 反过来：真的没读全时，不能拿"占位空槽"糊弄过去
   const short = buildDiffReportText(
-    [{ ...base, remoteTotal: 2804, remoteFetched: 500, incomplete: true, failedPages: 3 }], "t");
+    [{ ...base, remoteTotal: 1204, remoteFetched: 500, incomplete: true, failedPages: 3 }], "t");
   assert.ok(short.includes("可能不完整"), "没读全时必须说结果可能不全");
   assert.ok(short.includes("3 页失败"), "要写出失败了多少页");
 });
@@ -3002,24 +3014,183 @@ test("弹窗和收藏库对同一个根目录用同一套叫法（静态回归�
   assert.match(background, /\.get\("rootHandle"\)/);
 
   // 弹窗那一格必须和收藏库叫同一个名字
-  assert.match(libraryHtml, /data-i18n="选择收藏根目录"/, "收藏库的按钮文案是基准");
-  assert.match(popupHtml, /data-i18n="本地收藏根目录"/);
-  assert.match(popupHtml, /data-i18n="选择收藏根目录"/);
-  assert.match(popupHtml, /data-i18n="重新授权收藏根目录"/);
-  assert.match(popupJs, /BcaI18n\.t\("选择收藏根目录"\)/);
-  assert.match(popupJs, /BcaI18n\.t\("重新授权收藏根目录"\)/);
+  assert.match(libraryHtml, /data-i18n="选择本地备份文件夹"/, "收藏库的按钮文案是基准");
+  assert.match(popupHtml, /data-i18n="本地备份文件夹"/);
+  assert.match(popupHtml, /data-i18n="选择本地备份文件夹"/);
+  assert.match(popupHtml, /data-i18n="重新授权本地备份文件夹"/);
+  assert.match(popupJs, /BcaI18n\.t\("选择本地备份文件夹"\)/);
+  assert.match(popupJs, /BcaI18n\.t\("重新授权本地备份文件夹"\)/);
 
   // 旧叫法不许回来
   assert.doesNotMatch(popupHtml, /本地保存位置/, "「本地保存位置」是旧叫法，会让人以为是另一处目录");
   assert.doesNotMatch(popupHtml, /选择保存文件夹/, "「选择保存文件夹」是旧叫法");
   assert.doesNotMatch(popupJs, /重新授权保存位置/);
   assert.doesNotMatch(background, /“重新授权保存位置”/, "报错里让用户点的按钮名必须和界面一致");
+  // V1.2.0 起统一叫「本地备份文件夹」；「本地收藏根目录 / 收藏根目录」是上一轮的旧叫法
+  for (const file of ["popup.html", "popup.js", "library.html", "library.js", "background.js", "download.js"]) {
+    assert.doesNotMatch(
+      readProjectFile(file),
+      /收藏根目录/,
+      `${file} 里不该再有「收藏根目录」这个旧叫法`
+    );
+  }
 
   // 必须明说和收藏库是同一个位置，否则光改名还是会有歧义
   assert.match(
     popupHtml,
-    /和收藏库左上角「选择收藏根目录」是同一个位置/,
-    "弹窗要写清这里选的就是收藏库的根目录"
+    /和收藏库右上角「选择本地备份文件夹」是同一个位置/,
+    "弹窗要写清这里选的就是收藏库那个按钮，且位置（顶栏右侧）要说对"
+  );
+});
+
+// ───────── V1.2.0 全库审计修掉的东西，下面这些盯着它们别退回去 ─────────
+
+test("content.js 认 B 站界面文字时，简体和繁體都要认（静态回归）", () => {
+  const src = readProjectFile("content.js");
+
+  // 这里认的是 B 站自己的界面文字，不是扩展的界面语言。B 站可以切成繁體，
+  // 只认简体会让「点收藏自动归档」静默失效：收藏成功了，归档却没触发，
+  // 界面上一点提示都没有。规则是只放宽、不收窄 —— 认不出来的后果是漏判。
+  assert.match(src, /const FAV_DIALOG_TITLE = \/添加到收藏\[夹夾\]\//);
+  assert.match(src, /const CONFIRM_TEXT = \/\^\[确確\]定\$\//);
+  assert.match(src, /仅自己可见\|僅自己可見/, "可见性标签要认繁體");
+  assert.match(src, /所有人可见\|所有人可見/, "可见性标签要认繁體");
+  assert.match(src, /编辑\|編輯\|删除\|刪除/, "行尾的「编辑 / 删除」要认繁體");
+
+  // 不许退回只认简体那一版
+  assert.doesNotMatch(src, /text\.includes\("添加到收藏夹"\)/);
+  assert.doesNotMatch(src, /text === "确定"/);
+  assert.doesNotMatch(src, /\[\(\?:私密\|公开\|仅自己可见\|所有人可见\)\]/);
+});
+
+test("扩展补上了静态图标，四个尺寸的文件都在（静态回归）", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  const expected = { 16: "icon-16.png", 32: "icon-32.png", 48: "icon-48.png", 128: "icon-128.png" };
+
+  // 没有 icons 时，chrome://extensions 和安装提示里显示的是 Chrome 的默认拼图图标。
+  assert.deepEqual(manifest.icons, expected, "manifest.icons 要补齐四个尺寸");
+  assert.deepEqual(manifest.action.default_icon, expected, "工具栏也要有一份静态默认图标");
+
+  // 工具栏图标平时是 background.js 用 OffscreenCanvas 画出来的（开启蓝、关闭灰），
+  // 静态图标只服务于「扩展管理页 / 安装时」那一下。文件必须真的存在、真的能解码，
+  // 否则 Chrome 会直接拒绝加载整个扩展。
+  for (const [size, file] of Object.entries(expected)) {
+    const buf = fs.readFileSync(path.join(projectRoot, file));
+    assert.equal(buf.subarray(1, 4).toString("ascii"), "PNG", `${file} 不是 PNG`);
+    assert.equal(buf.readUInt32BE(16), Number(size), `${file} 的宽度应当是 ${size}`);
+    assert.equal(buf.readUInt32BE(20), Number(size), `${file} 的高度应当是 ${size}`);
+  }
+});
+
+test("删掉的零使用样式不许回来，还在用的也不许跟着删（静态回归）", () => {
+  const theme = readProjectFile("theme.css");
+  assert.doesNotMatch(theme, /\.sr-only\s*\{/, ".sr-only 全仓库零使用，V1.2.0 删了");
+  assert.doesNotMatch(theme, /\.stack\s*\{/, ".stack 全仓库零使用，V1.2.0 删了");
+  // 同一个「通用工具类」块里的这两个是真的在用，别顺手一起删
+  assert.match(theme, /\.row\s*\{/);
+  assert.match(theme, /\.spacer\s*\{/);
+
+  // .button-download 只在 library.css 里留一份。download.css 那份本页从来没用过，
+  // 而且漏了 box-shadow 和 :hover —— 两份定义迟早会漂成两个样子。
+  assert.doesNotMatch(
+    readProjectFile("download.css"),
+    /^\s*\.button-download\s*\{/m,
+    ".button-download 应当只在 library.css 里定义"
+  );
+  assert.match(readProjectFile("library.css"), /\.button-download\s*\{/);
+});
+
+test("文档里的测试项数和真实数量一致（静态回归）", () => {
+  const real = (readProjectFile("test/stability.test.cjs").match(/^test\(/gm) || []).length;
+
+  // 这三处以前各写各的（141 / 141 / 127），实际早就涨上去了 —— 和 README 版本历史
+  // 是同一类问题：数字写死在文档里就一定会过期。release.ps1 也用同一套标记核对。
+  for (const doc of ["SMOKE_TEST.md", "README.md", "AI_HANDOFF.md"]) {
+    const markers = [...readProjectFile(doc).matchAll(/<!--\s*test-count:(\d+)\s*-->/g)].map((m) => Number(m[1]));
+    assert.ok(markers.length > 0, `${doc} 里要有 <!-- test-count:N --> 标记（渲染时看不见）`);
+    for (const n of markers) assert.equal(n, real, `${doc} 写的是 ${n} 项，实际是 ${real} 项`);
+  }
+});
+
+test("公开仓库里不留本机真实路径和真实规模（静态回归）", () => {
+  // 仓库是公开的：作者的下载目录、真实收藏夹条数都不该出现在示例和注释里
+  assert.doesNotMatch(
+    readProjectFile("install-native-folder-opener.ps1"),
+    /D:\\本地收藏夹/,
+    "安装脚本的示例路径不能是作者本机的真实目录"
+  );
+  assert.doesNotMatch(readProjectFile("SMOKE_TEST.md"), /2799/, "冒烟清单别引用真实收藏夹的条数");
+});
+
+test("弹窗里关于默认档位的注释和实际默认值一致（静态回归）", () => {
+  const html = readProjectFile("popup.html");
+  const lower = html.match(/<button[^>]*data-speed-value="lower"[^>]*>/)?.[0] || "";
+  assert.match(lower, /aria-pressed="true"/, "默认档位是「较低」");
+  assert.doesNotMatch(html, /默认「标准」/, "注释不能还写着默认「标准」（V1.1.20 起默认就是较低）");
+});
+
+test("改收藏夹归属时，新旧两种磁盘标签都要认（静态回归）", () => {
+  // 视频信息.txt 里那一行记录「这条视频属于哪个 B 站收藏夹」。字段名以前叫
+  // 「保存文件夹：」，和用户选的根目录撞名 —— 同一个词指两个完全不同的东西，
+  // V1.2.0 起写入方改成「所属收藏夹：」。改写方必须同时认两种标签：只认旧标签
+  // 的话，新文件匹配不到，updated === text 直接 return，改了归属却什么都没发生，
+  // 而且不报错。
+  const library = readProjectFile("library.js");
+  assert.match(
+    library,
+    /const updated = text\.replace\(\/\^\(\?:保存文件夹\|所属收藏夹\)\[：:\]\.\*\$\/m, `所属收藏夹：\$\{folderName\}`\)/,
+    "改写方要同时认新旧标签，并且写回新标签（顺手迁移老文件）"
+  );
+  assert.match(
+    readProjectFile("background.js"),
+    /所属收藏夹：\$\{folderName\}/,
+    "background.js 的 buildInfo 是唯一的写入方，要用新标签"
+  );
+  // 不许退回只认旧标签
+  assert.doesNotMatch(library, /\/\^保存文件夹\[：:\]\.\*\$\/m/);
+});
+
+test("示意图里的版本号从 manifest 现读，不许写死（静态回归）", () => {
+  // 写死在 HTML 里的版本号一定会过期：V1.2.0 审计时教程第三步的示意图还停在
+  // 1.1.28，落后十个版本，没有任何机制会发现它。library.html 的 sideVersion
+  // 由 library.js 现读覆盖，教程这张卡片以前没有脚本管，所以才烂在那儿。
+  const tutorialHtml = readProjectFile("tutorial.html");
+  assert.doesNotMatch(
+    tutorialHtml,
+    /class="ext-ver"[^>]*>\s*\d+\.\d+\.\d+/,
+    "教程示意图的版本号不许写死，交给 tutorial.js 从 manifest 现读"
+  );
+  assert.match(tutorialHtml, /id="tutorialVersion"/);
+
+  const tutorialJs = readProjectFile("tutorial.js");
+  assert.match(tutorialJs, /getElementById\("tutorialVersion"\)/);
+  assert.match(tutorialJs, /getManifest\(\)\.version/);
+});
+
+test("完成提示弹窗不会因为两个来源抢着弹而丢掉一条（静态回归）", () => {
+  const popupJs = readProjectFile("popup.js");
+
+  // 导入完成（importDone）和差异对比完成（diffState）各自异步恢复，
+  // 互不知情却都可能要弹同一个 <dialog>。原生 dialog 开着时再 showModal()
+  // 会抛 InvalidStateError，而调用点都是 .catch(() => {}) —— 异常被吞，
+  // 用户就永远看不到第二条提示。所以要排队。
+  assert.match(popupJs, /const pendingDoneDialogs = \[\];/, "要有排队用的数组");
+  assert.match(
+    popupJs,
+    /if \(doneDialog\.open\) \{\s*pendingDoneDialogs\.push\(text\);\s*return;\s*\}/,
+    "已经开着时不许再 showModal()，要排队"
+  );
+  assert.match(popupJs, /function showNextDoneDialog\(\)/, "要有弹出下一条的入口");
+  assert.match(
+    popupJs,
+    /function dismissDoneDialog\(\)[\s\S]{0,900}?showNextDoneDialog\(\);/,
+    "点掉「知道了」（或按 Esc）之后要接着弹排队里的下一条"
+  );
+  // 反向断言：不许退回"直接 showModal、不看是否已打开"的写法
+  assert.doesNotMatch(
+    popupJs,
+    /function showDoneDialog\(text\) \{\s*doneDialogText\.textContent = text;\s*doneDialog\.showModal\(\);\s*\}/,
+    "无条件的 showModal 会让第二条提示静默丢失"
   );
 });
 

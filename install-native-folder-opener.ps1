@@ -31,7 +31,7 @@ $launcherName = "folder-opener-launcher.exe"
 if (-not $ExtensionId) { $ExtensionId = (Read-Host "请从 chrome://extensions 复制本插件的扩展程序 ID（在插件介绍下方有一个 ID:xxxxxxxx，把那串复制到这条命令后按回车）").Trim() }
 if ($ExtensionId -notmatch "^[a-p]{32}$") { throw "扩展程序 ID 格式不正确。请复制 chrome://extensions 中显示的 32 位 ID。" }
 
-if (-not $DownloadBasePath) { $DownloadBasePath = (Read-Host "请输入视频下载目录的完整绝对路径（例如 D:\本地收藏夹\000视频下载）：打开你的视频下载文件夹，在文件资源管理器上方的地址栏点一下，把里面的绝对地址复制到这条命令后按回车").Trim().Trim('"') }
+if (-not $DownloadBasePath) { $DownloadBasePath = (Read-Host "请输入视频下载目录的完整绝对路径（例如 D:\B站收藏\000视频下载）：打开你的视频下载文件夹，在文件资源管理器上方的地址栏点一下，把里面的绝对地址复制到这条命令后按回车").Trim().Trim('"') }
 $DownloadBasePath = [Environment]::ExpandEnvironmentVariables($DownloadBasePath)
 if (-not [System.IO.Path]::IsPathRooted($DownloadBasePath)) { throw "下载目录必须是完整路径，例如 D:\B站收藏\000视频下载。" }
 $DownloadBasePath = [System.IO.Path]::GetFullPath($DownloadBasePath)

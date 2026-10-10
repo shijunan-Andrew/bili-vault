@@ -187,7 +187,7 @@ async function saveHandle(handle) {
       const tx = db.transaction(DB_STORE, "readwrite");
       tx.objectStore(DB_STORE).put(handle, "rootHandle");
       tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error || new Error(BcaI18n.t("保存目录授权失败。")));
+      tx.onerror = () => reject(tx.error || new Error(BcaI18n.t("本地备份文件夹授权失败。")));
     });
   } finally { db.close(); }
 }
@@ -1613,6 +1613,62 @@ function openStatusConfirm(videos, source) {
   statusConfirm.showModal();
 }
 
+/* 4.4 起后台每处理一条视频就回一条 bca-status-progress，看门狗据此判断"它还活着"：
+   连续 STATUS_REFRESH_IDLE_TIMEOUT_MS 没有任何回报，就认定后台被回收或接口吊死。
+   没有它的时候，刷新期间「取消」是禁用的、Esc 被 preventDefault，
+   后台一挂用户面对的就是一个所有按钮都点不动的模态框，只能刷新整页。
+   单条最坏耗时 ≈ 页面代理 15s + 直连 15s + 800ms 间隔 ≈ 31s，所以 60s 不会误杀正常任务。 */
+const STATUS_REFRESH_IDLE_TIMEOUT_MS = 60000;
+let statusWatchdogTimer = 0;
+let statusWatchdogExpire = null;
+
+function disarmStatusRefreshWatchdog() {
+  clearTimeout(statusWatchdogTimer);
+  statusWatchdogTimer = 0;
+  statusWatchdogExpire = null;
+}
+
+// 收到一条进度就把看门狗往后推：只有"连续静默"才算卡住
+function feedStatusRefreshWatchdog() {
+  if (!statusWatchdogExpire) return;
+  clearTimeout(statusWatchdogTimer);
+  statusWatchdogTimer = setTimeout(fireStatusRefreshWatchdog, STATUS_REFRESH_IDLE_TIMEOUT_MS);
+}
+
+function fireStatusRefreshWatchdog() {
+  const expire = statusWatchdogExpire;
+  disarmStatusRefreshWatchdog();
+  if (expire) expire();
+}
+
+/* 带看门狗的 sendMessage。超时不是"后台回了失败"，所以单独标一个 TimeoutError，
+   文案里也说清楚部分记录可能已经更新，别让用户以为整批白跑了。 */
+function sendMessageWatched(message, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      disarmStatusRefreshWatchdog();
+      callback();
+    };
+    statusWatchdogExpire = () => {
+      const error = new Error(BcaI18n.t("后台 {seconds} 秒没有响应，已停止等待；部分记录可能已经更新，可先点右上角的「刷新」查看，或点「重试」继续。", { seconds: Math.round(timeoutMs / 1000) }));
+      error.name = "TimeoutError";
+      finish(() => reject(error));
+    };
+    statusWatchdogTimer = setTimeout(fireStatusRefreshWatchdog, timeoutMs);
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        const runtimeError = chrome.runtime.lastError;
+        finish(() => runtimeError ? reject(new Error(runtimeError.message)) : resolve(response));
+      });
+    } catch (error) {
+      finish(() => reject(error));
+    }
+  });
+}
+
 async function runStatusRefresh() {
   if (statusRefreshInProgress || !statusPendingTargets.length) return;
   // 已经出结果时，这个按钮变成「完成」
@@ -1632,10 +1688,10 @@ async function runStatusRefresh() {
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
-    const result = await chrome.runtime.sendMessage({
+    const result = await sendMessageWatched({
       type: "bca-refresh-video-stats",
       data: { targets, limit: STATUS_BATCH_LIMIT }
-    });
+    }, STATUS_REFRESH_IDLE_TIMEOUT_MS);
     if (!result?.ok) throw new Error(result?.message || BcaI18n.t("更新失败。"));
     const summary = targets.length === 1 ? statusDetailText(result) : statusSummaryText(result);
     const remaining = Number(result.remaining) || 0;
@@ -1646,21 +1702,32 @@ async function runStatusRefresh() {
     else clearRefreshFailures();
     statusShowingResult = true;
     statusConfirmGo.textContent = BcaI18n.t("完成");
-    await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已刷新"));
-    if (anchorId) {
-      const refreshed = allVideos().find((item) => item.id === anchorId);
-      if (refreshed) {
-        // displayRoot 已经重画过页面，这里再开详情不要再叠一层焦点陷阱
-        openDetail(refreshed, null, { trap: false });
-        const again = detailContent.querySelector(".detail-refresh-status");
-        if (again) { again.hidden = false; again.textContent = summary; }
+    // 到这里后台已经把状态写进文件了，下面的刷新只是界面收尾。
+    // 它失败绝不能再被下面的 catch 改写成「更新失败」——那样用户会对着
+    // 已经更新好的数据再点一次「重试」，白打一轮 B 站接口。
+    const refreshError = await refreshAfterLocalChange(async () => {
+      await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已刷新"));
+      if (anchorId) {
+        const refreshed = allVideos().find((item) => item.id === anchorId);
+        if (refreshed) {
+          // displayRoot 已经重画过页面，这里再开详情不要再叠一层焦点陷阱
+          openDetail(refreshed, null, { trap: false });
+          const again = detailContent.querySelector(".detail-refresh-status");
+          if (again) { again.hidden = false; again.textContent = summary; }
+        }
       }
+    });
+    if (refreshError) {
+      statusConfirmProgress.textContent += refreshFailureSuffix(refreshError);
+      showToast(BcaI18n.t("已更新，但列表刷新失败，请手动点右上角的「刷新」。"));
     }
   } catch (error) {
     statusConfirmProgress.textContent = BcaI18n.t("更新失败：{message}", { message: error?.message || BcaI18n.t("未知错误") });
     statusConfirmGo.textContent = BcaI18n.t("重试");
     setRefreshFailures([{ name: source === "batch" ? BcaI18n.t("批量更新视频状态") : (detailVideo()?.title || BcaI18n.t("更新视频状态")), message: error?.message || BcaI18n.t("未知错误") }]);
   } finally {
+    // 看门狗必须在这里收掉，否则下一批刷新会被上一批的定时器提前打断
+    disarmStatusRefreshWatchdog();
     statusRefreshInProgress = false;
     statusConfirmGo.disabled = false;
     statusConfirmCancel.disabled = false;
@@ -2104,12 +2171,21 @@ function openDetail(video, restoreTo, options = {}) {
   const markDownloadedButton = detailContent.querySelector(".mark-downloaded");
   if (markDownloadedButton) markDownloadedButton.addEventListener("click", () => openMarkDownloadedDialog(video));
   const moveButton = detailContent.querySelector(".move-local");
-  moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
-  detailContent.querySelector(".refresh-status").addEventListener("click", () => openStatusConfirm([video], "detail"));
-  detailContent.querySelector(".download-local").addEventListener("click", () => openDownloadInterface([video]));
-  detailContent.querySelector(".open-download-directory").addEventListener("click", () => openDownloadDirectory(video));
-  detailContent.querySelector(".copy-download-path").addEventListener("click", () => copyDownloadPath(video));
-  detailContent.querySelector(".delete-local").addEventListener("click", () => askToDeleteVideo(video));
+  if (moveButton) moveButton.addEventListener("click", () => openCollectionActionDialog([video], "detail"));
+  /* 下面这一串按钮全都来自上面那段超长 innerHTML 模板。模板一改（换个 class 名、
+     删掉某个按钮、条件渲染少一个分支）querySelector 就是 null，裸调 addEventListener
+     会抛 TypeError，openDetail 从这里断掉：面板停在前面的半成品状态，
+     用户看到的就是"点卡片没反应"。所以每一个都先判空再绑。 */
+  const refreshStatusButton = detailContent.querySelector(".refresh-status");
+  if (refreshStatusButton) refreshStatusButton.addEventListener("click", () => openStatusConfirm([video], "detail"));
+  const downloadLocalButton = detailContent.querySelector(".download-local");
+  if (downloadLocalButton) downloadLocalButton.addEventListener("click", () => openDownloadInterface([video]));
+  const openDirectoryButton = detailContent.querySelector(".open-download-directory");
+  if (openDirectoryButton) openDirectoryButton.addEventListener("click", () => openDownloadDirectory(video));
+  const copyPathButton = detailContent.querySelector(".copy-download-path");
+  if (copyPathButton) copyPathButton.addEventListener("click", () => copyDownloadPath(video));
+  const deleteLocalButton = detailContent.querySelector(".delete-local");
+  if (deleteLocalButton) deleteLocalButton.addEventListener("click", () => askToDeleteVideo(video));
   showDownloadSize(video).catch(() => {});
   detailPanel.classList.add("open");
   detailPanel.setAttribute("aria-hidden", "false");
@@ -2322,7 +2398,14 @@ async function updateSavedFolderName(directory, folderName) {
   const infoHandle = await directory.getFileHandle("视频信息.txt");
   const file = await infoHandle.getFile();
   const text = await file.text();
-  const updated = text.replace(/^保存文件夹[：:].*$/m, `保存文件夹：${folderName}`);
+  // 这一行记录的是「这条视频属于哪个 B 站收藏夹」。字段名以前叫「保存文件夹：」，
+  // 和用户选的根目录撞名（同一个词指两个完全不同的东西），V1.2.0 起写入方
+  // （background.js 的 buildInfo）改成「所属收藏夹：」。
+  // 这里必须同时认两种标签，而且写回要用新标签：
+  //   ① 老归档里还是旧标签，正则不认识就 updated === text，直接 return —— 改了收藏夹
+  //      归属却什么都没发生，而且没有任何报错；
+  //   ② 认出来之后写回新标签，顺手把老文件迁移掉。
+  const updated = text.replace(/^(?:保存文件夹|所属收藏夹)[：:].*$/m, `所属收藏夹：${folderName}`);
   if (updated === text) return;
   const writable = await infoHandle.createWritable();
   try {
@@ -2386,7 +2469,7 @@ async function removeMovedSource(video) {
 async function markVideoDownloaded(video) {
   // 4.9.4：传 create —— 用户点的就是「新建文件夹并标记」，没有 000视频下载 就建出来
   const parent = await getWritableDownloadParent({ create: true });
-  if (!parent) throw new Error(BcaI18n.t("无法创建默认下载文件夹 000视频下载，请检查保存文件夹的写入权限。"));
+  if (!parent) throw new Error(BcaI18n.t("无法创建默认下载文件夹 000视频下载，请检查本地备份文件夹的写入权限。"));
   const collectionName = BcaArchiveCore.safeName(video.collection || "未分类收藏", "未分类收藏", 120);
   const directoryName = BcaArchiveCore.videoDirectoryLabel(video, 0);
   const collectionHandle = await parent.getDirectoryHandle(collectionName, { create: true });
@@ -2428,17 +2511,21 @@ async function runMarkDownloaded() {
   try {
     const { directoryName } = await markVideoDownloaded(markDownloadedVideo);
     markDownloadedDialog.close();
-    showResultDialog(BcaI18n.t("已标记为已下载"), BcaI18n.t("文件夹：{name}", { name: directoryName }), "ok");
-    // 只有「已下载」这个筛选值会参与选项池的计算，其它筛选值下池子不受影响
-    if (videoFilter === "downloaded") refreshVideoFilterOptions();
-    renderVideos();
-    // 详情面板开着、且正是这条视频时，把它重画一遍让「已下载？」按钮消失。
-    // 这里必须用 detailVideo()（按 detailContent.dataset.videoId 查当前打开的那条），
-    // 曾经写成 currentDetailVideo —— 那个变量根本不存在，于是这行抛 ReferenceError，
-    // 被下面的 catch 当成「标记失败」弹出来。而此刻标记其实已经写完了，
-    // 所以用户看到的是「提示失败、但文件真的建好了」。
-    const openDetailVideo = detailVideo();
-    if (openDetailVideo && openDetailVideo.id === markDownloadedVideo.id) openDetail(markDownloadedVideo);
+    // 文件夹已经真的建好了（副作用完成）：从这里往后的刷新只是界面收尾，
+    // 出任何错都不许再报「标记失败」——那样用户会以为没成功而不停重点。
+    const refreshError = await refreshAfterLocalChange(() => {
+      // 只有「已下载」这个筛选值会参与选项池的计算，其它筛选值下池子不受影响
+      if (videoFilter === "downloaded") refreshVideoFilterOptions();
+      renderVideos();
+      // 详情面板开着、且正是这条视频时，把它重画一遍让「已下载？」按钮消失。
+      // 这里必须用 detailVideo()（按 detailContent.dataset.videoId 查当前打开的那条），
+      // 曾经写成 currentDetailVideo —— 那个变量根本不存在，于是这行抛 ReferenceError，
+      // 被下面的 catch 当成「标记失败」弹出来。而此刻标记其实已经写完了，
+      // 所以用户看到的是「提示失败、但文件真的建好了」。
+      const openDetailVideo = detailVideo();
+      if (openDetailVideo && openDetailVideo.id === markDownloadedVideo.id) openDetail(markDownloadedVideo);
+    });
+    showResultDialog(BcaI18n.t("已标记为已下载"), BcaI18n.t("文件夹：{name}", { name: directoryName }) + refreshFailureSuffix(refreshError), "ok");
   } catch (error) {
     markDownloadedStatus.textContent = BcaI18n.t("标记失败：{message}", { message: error.message });
     showResultDialog(BcaI18n.t("标记失败"), error.message, "error");
@@ -2474,7 +2561,7 @@ async function getWritableDownloadParent({ create = false } = {}) {
     // 用户既然点了「新建文件夹并标记」，就是明确要一个下载目录，这里按需建出来。
     if (create) {
       const rootPermission = await rootHandle.requestPermission({ mode: "readwrite" });
-      if (rootPermission !== "granted") throw new Error(BcaI18n.t("没有获得保存文件夹的写入权限；请在插件弹窗里重新设置保存位置。"));
+      if (rootPermission !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限；请在插件弹窗里重新授权本地备份文件夹。"));
     }
     try { parent = await rootHandle.getDirectoryHandle("000视频下载", { create }); }
     catch (error) { if (error?.name === "NotFoundError") return null; throw error; }
@@ -2796,16 +2883,19 @@ async function confirmPendingDelete() {
     deleteInProgress = false;
     closeDeleteConfirmation();
     closeDetail();
-    await displayRoot(rootHandle, selectedCollection);
+    /* 上面的 removeEntry 都已经返回：删除是不可逆的既成事实，确认浮层也关掉了
+       （用户就算再点一次也没有入口）。这里只是重画列表，displayRoot 抛错若被下面的
+       catch 接住，弹出来的却是「删除失败」，用户只会再点一次「删除」再吃一次同样的错。 */
+    const refreshError = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
     if (action.type === "collection") {
-      showResultDialog(BcaI18n.t("已删除本地收藏夹"), BcaI18n.t("“{name}”", { name: action.collection.name }) + downloadCleanupSuffix(downloadCleanupFailures.length), "ok");
+      showResultDialog(BcaI18n.t("已删除本地收藏夹"), BcaI18n.t("“{name}”", { name: action.collection.name }) + downloadCleanupSuffix(downloadCleanupFailures.length) + refreshFailureSuffix(refreshError), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
-      showToast(batchResult.failures.length
+      showToast((batchResult.failures.length
         ? BcaI18n.t("已删除 {deleted} 个，{failed} 个失败并保留选中。{first}", { deleted: batchResult.deleted, failed: batchResult.failures.length, first: batchResult.failures[0] })
-        : BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }) + downloadCleanupSuffix(downloadCleanupFailures.length));
+        : BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }) + downloadCleanupSuffix(downloadCleanupFailures.length)) + refreshFailureSuffix(refreshError));
     } else {
-      showResultDialog(BcaI18n.t("已删除本地归档"), BcaI18n.t("本地归档文件已删除。") + downloadCleanupSuffix(downloadCleanupFailures.length), "ok");
+      showResultDialog(BcaI18n.t("已删除本地归档"), BcaI18n.t("本地归档文件已删除。") + downloadCleanupSuffix(downloadCleanupFailures.length) + refreshFailureSuffix(refreshError), "ok");
     }
   } catch (error) {
     showResultDialog(BcaI18n.t("删除失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
@@ -2817,12 +2907,38 @@ async function confirmPendingDelete() {
   }
 }
 
+/* 副作用完成之后的界面刷新统一走这里。
+   删除、标记已下载、更新状态这几件事，只要对应的文件操作已经返回，就算"真的完成了"；
+   而收尾的刷新（displayRoot / renderVideos / openDetail）随时可能因为一个选择器改动、
+   一条脏数据抛错。它们和副作用原本挤在同一个 try 里，一抛错就被同一个 catch 改写成
+   「失败」——磁盘上明明已经完成，用户看到失败提示只会再点一次。
+   刷新失败只记一条日志，由调用方在成功提示后面追加半句，绝不覆盖成功结论。 */
+async function refreshAfterLocalChange(run) {
+  try {
+    await run();
+    return null;
+  } catch (error) {
+    console.warn("界面刷新失败（本地改动已经完成）", error);
+    // 保证返回真值：调用方只关心"有没有刷新失败"，不看具体是哪个错误
+    return error || new Error("refresh failed");
+  }
+}
+
+// 副作用已完成、只是列表刷新失败时的统一后缀，词条只有一条
+function refreshFailureSuffix(error) {
+  return error ? BcaI18n.t("；但列表刷新失败，请手动点右上角的「刷新」。") : "";
+}
+
 /* 整理类操作的结果弹窗。
    这几件事（已下载标记 / 移动复制 / 删除 / 打开本地目录）失败时代价很大，
    而底部 toast 一闪就没了，用户经常看不到 —— 改成必须点掉的弹窗。
    kind: "ok" 成功、"error" 失败。 */
 function showResultDialog(title, text, kind = "ok", options = {}) {
   if (!resultDialog) return;
+  /* 同一个 <dialog> 连着 showModal() 会抛 InvalidStateError，而调用点几乎都没接住，
+     结果是"本该弹出的失败提示反而不出现"（上一条结果还没点掉，用户以为按钮失灵）。
+     已经开着就先关掉再开，等价于把内容换成新的这条。 */
+  if (resultDialog.open) resultDialog.close();
   // 教程按钮只在需要"照着做一串步骤"的失败场景出现（目前是打开本地目录失败）。
   // 平时不显示，免得把普通的结果提示撑出多余的选择。
   resultDialogTutorial.hidden = !options.tutorial;
@@ -2857,7 +2973,7 @@ function validateCollectionName(rawName) {
 }
 
 function openCreateCollectionDialog() {
-  if (!rootHandle || library.hidden) { showToast(BcaI18n.t("请先打开本地收藏根目录。")); return; }
+  if (!rootHandle || library.hidden) { showToast(BcaI18n.t("请先选择本地备份文件夹。")); return; }
   collectionNameInput.value = "";
   collectionDialog.showModal();
   collectionNameInput.focus();
@@ -3029,19 +3145,34 @@ async function confirmLibraryRiskySpeed() {
   const label = speed === "high" ? "高" : "较高";
   diffRiskyText.textContent = BcaI18n.t("当前是「{speed}」档，而这个收藏夹线上有 {total} 条。建议先到插件弹窗里改用「较低」档位。",
     { speed: label, total });
+  settleDiffRisky(false); // 上一次的等待先结掉，避免留下悬空的 Promise
+  if (diffRiskyDialog.open) diffRiskyDialog.close();
   diffRiskyDialog.showModal();
   return new Promise((resolve) => { diffRiskyResolve = resolve; });
 }
 
-document.getElementById("diffRiskyCancel").addEventListener("click", () => {
-  diffRiskyDialog.close();
-  if (diffRiskyResolve) diffRiskyResolve(false);
+/* Promise 的 settle 只有这一个出口。以前只绑了两个按钮的 click，
+   按 Esc 关掉对话框时没有任何一处调 resolve：await confirmLibraryRiskySpeed()
+   从此永远挂住，「与 B 站对比」按钮点不动，而且只有刷新整页才能恢复。
+   cancel（Esc）和 close（任何方式关掉）都兜住；settle 后把槽位置空，重复调用安全。 */
+function settleDiffRisky(confirm) {
+  const resolve = diffRiskyResolve;
   diffRiskyResolve = null;
+  if (resolve) resolve(confirm);
+}
+
+diffRiskyDialog.addEventListener("cancel", () => settleDiffRisky(false));
+diffRiskyDialog.addEventListener("close", () => {
+  // 已经重新打开（极短时间里又发起了一次对比）说明这条 close 属于上一次，别误杀新的等待
+  if (!diffRiskyDialog.open) settleDiffRisky(false);
+});
+document.getElementById("diffRiskyCancel").addEventListener("click", () => {
+  settleDiffRisky(false);
+  diffRiskyDialog.close();
 });
 document.getElementById("diffRiskyGo").addEventListener("click", () => {
+  settleDiffRisky(true);
   diffRiskyDialog.close();
-  if (diffRiskyResolve) diffRiskyResolve(true);
-  diffRiskyResolve = null;
 });
 
 diffLibraryButton.addEventListener("click", () => {
@@ -3207,7 +3338,7 @@ function setBusy(isBusy, busyKey = "reading") {
 }
 
 async function refreshCurrentRoot() {
-  if (!rootHandle) { showToast(BcaI18n.t("请先选择本地收藏根目录。")); return; }
+  if (!rootHandle) { showToast(BcaI18n.t("请先选择本地备份文件夹。")); return; }
   const collectionToKeep = selectedCollection;
   setBusy(true, "refreshing");
   // 「刷新」按强制全量走：清掉这个根目录的缓存并重新读所有文件。
@@ -3281,7 +3412,7 @@ async function restoreLastRoot() {
     setDynamicText(rootLabel, BcaI18n.t("上次目录无法访问"));
     updateStorageUsage(null);
     statusDot.classList.remove("ready");
-    setDynamicText(welcomeCopy, BcaI18n.t("上次选择的目录暂时无法访问，请重新选择收藏根目录。"));
+    setDynamicText(welcomeCopy, BcaI18n.t("上次选择的目录暂时无法访问，请重新选择本地备份文件夹。"));
     showWelcomeChooseLabel("choose");
     showToast(error?.message || BcaI18n.t("无法连接上次选择的目录。"));
   }
@@ -3510,6 +3641,8 @@ viewListButton?.addEventListener("click", () => setViewMode("list"));
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "bca-status-progress") return;
   if (!statusRefreshInProgress) return;
+  // 有进度就说明后台还活着：把看门狗往后推，正常的长任务不会被误判成卡死
+  feedStatusRefreshWatchdog();
   const status = detailContent.querySelector(".detail-refresh-status");
   if (status) { status.hidden = false; status.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在更新…"); }
   applyStatusProgress(message);
@@ -3601,8 +3734,21 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.downloadRevision && rootHandle) refreshDownloadStatuses();
   // 4.5：在弹窗或下载页改了语言时，已经打开的收藏库也要跟上
   const next = changes[BcaI18n.STORAGE_KEY]?.newValue;
-  if (BcaI18n.isSupported(next) && next !== BcaI18n.locale()) BcaI18n.use(next, { silent: true });
+  if (!BcaI18n.isSupported(next) || next === BcaI18n.locale()) return;
+  /* BcaI18n.use 是异步的，词典损坏 / 取不到语言文件时会 reject。
+     原来这里既不 await 也不 catch，切语言失败是完全静默的：界面留在旧语言，
+     用户只会觉得"我切了语言怎么没反应"。失败必须说出来。 */
+  try {
+    Promise.resolve(BcaI18n.use(next, { silent: true })).catch(reportLocaleSwitchFailure);
+  } catch (error) {
+    reportLocaleSwitchFailure(error);
+  }
 });
+
+// 切换语言的失败提示。这里用 t() 取的是当前（旧）语言，失败时这正是对的
+function reportLocaleSwitchFailure(error) {
+  showToast(BcaI18n.t("切换界面语言失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
+}
 window.addEventListener("focus", refreshDownloadStatuses);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") refreshDownloadStatuses();

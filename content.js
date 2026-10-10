@@ -5,6 +5,13 @@
   let archiveEnabled = false;
   let enabledStateUpdated = false;
 
+  /* 下面三个常量认的是 B 站自己的界面文字，不是扩展的界面语言 —— B 站有简体/繁體两套，
+     用户把 B 站切成繁體后，只认简体会让「点收藏自动归档」静默失效（收藏成功但归档没触发）。
+     规则：只放宽、不收窄。认不出来的后果是漏判，多认几个写法不会误判。 */
+  const FAV_DIALOG_TITLE = /添加到收藏[夹夾]/;
+  const CONFIRM_MENTION = /[确確]定/;      // 对话框整段文字里「提到」确定按钮
+  const CONFIRM_TEXT = /^[确確]定$/;       // 按钮自己的文字「就是」确定
+
   chrome.storage.local.get("enabled").then(({ enabled }) => {
     if (!enabledStateUpdated) archiveEnabled = enabled !== false;
   }).catch(() => {});
@@ -81,7 +88,7 @@
     for (const item of event.composedPath()) {
       if (!(item instanceof Element) || !visible(item)) continue;
       const text = textOf(item);
-      if (text.includes("添加到收藏夹") && /确定/.test(text)) return item;
+      if (FAV_DIALOG_TITLE.test(text) && CONFIRM_MENTION.test(text)) return item;
     }
     return null;
   }
@@ -90,7 +97,7 @@
     for (const item of event.composedPath()) {
       if (!(item instanceof Element) || !dialog.contains(item)) continue;
       const text = textOf(item);
-      if (text === "确定" && (item.matches("button, [role=button], .ant-btn") || item.children.length === 0)) return item;
+      if (CONFIRM_TEXT.test(text) && (item.matches("button, [role=button], .ant-btn") || item.children.length === 0)) return item;
     }
     return null;
   }
@@ -111,11 +118,11 @@
     let name = textOf(row);
     // Bilibili puts a folder's item count after its visibility label, e.g. "默认收藏夹 [私密] 2802".
     // Keep digits that belong to a user-chosen folder name, and remove only the count after that label.
-    name = name.replace(/(\[(?:私密|公开|仅自己可见|所有人可见)\])\s+\d[\d,]*(?:\.\d+)?\s*(?:万|亿)?$/u, "$1");
+    name = name.replace(/(\[(?:私密|公开|公開|仅自己可见|僅自己可見|所有人可见|所有人可見)\])\s+\d[\d,]*(?:\.\d+)?\s*(?:万|萬|亿|億)?$/u, "$1");
     return name
       .replace(/\b\d+\s*\/\s*\d+\b/g, " ")
-      .replace(/\[(?:私密|公开|仅自己可见|所有人可见)\]/g, " ")
-      .replace(/(?:编辑|删除)\s*$/g, " ")
+      .replace(/\[(?:私密|公开|公開|仅自己可见|僅自己可見|所有人可见|所有人可見)\]/g, " ")
+      .replace(/(?:编辑|編輯|删除|刪除)\s*$/g, " ")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -134,7 +141,7 @@
       if (!selected) continue;
       const row = rowForCheckbox(control, dialog);
       const name = folderNameFromRow(row);
-      if (!name || name.includes("添加到收藏夹")) continue;
+      if (!name || FAV_DIALOG_TITLE.test(name)) continue;
       const id = control.value || control.getAttribute("data-id") || row?.getAttribute("data-id") || "";
       found.set(`${id}|${name}`, { id, name });
     }

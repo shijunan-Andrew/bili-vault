@@ -5,8 +5,7 @@
 <title>本地目录打开助手 · 安装教程</title>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="mockup.css">
-<style>
-</style>
+<link rel="stylesheet" href="page.css">
 </head>
 <body>
 <div class="wrap">
@@ -39,7 +38,7 @@
         <div class="ext-card">
           <div class="ext-logo">哔</div>
           <div class="ext-main">
-            <div class="ext-name">哔哩藏库 <span class="ext-ver">1.1.28</span></div>
+            <div class="ext-name">哔哩藏库 <span class="ext-ver" id="tutorialVersion"></span></div>
             <div class="ext-desc">把 B 站收藏夹备份本地。启用后，收藏成功自动保存视频资料到本地，支持已有收藏夹视频的本地归档与失效视频恢复，支持本地收藏夹浏览、搜索…</div>
             <div class="ext-id"><span>ID：</span><span class="val">●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●</span></div>
             <div class="ext-view">检查视图：<a>Service Worker</a></div>
@@ -55,12 +54,12 @@
 
     <li>
       <p class="what">再粘贴<strong>视频下载目录的绝对路径</strong></p>
-      <p class="hint">打开你的视频下载文件夹（默认是收藏根目录下的 <code>000视频下载</code>），在文件资源管理器<strong>上方的地址栏点一下</strong>，把里面的完整地址复制过来，粘贴到黑窗口里按回车。</p>
+      <p class="hint">打开你的视频下载文件夹（默认是本地备份文件夹下的 <code>000视频下载</code>），在文件资源管理器<strong>上方的地址栏点一下</strong>，把里面的完整地址复制过来，粘贴到黑窗口里按回车。</p>
       <div class="win">
         <div class="win-title"><span class="ico">📁</span><span class="tab">000视频下载</span><span class="btn">＋</span><span class="spacer"></span><span class="btn">—</span><span class="btn">▢</span><span class="btn">✕</span></div>
         <div class="ex-nav"><span class="arrow on">←</span><span class="arrow">→</span><span class="arrow">↑</span><span class="arrow">↻</span></div>
         <div class="ex-addr">
-          <span class="path">D:\本地收藏夹\000视频下载</span>
+          <span class="path">D:\你的备份文件夹\000视频下载</span>
           <span class="search">在 000视频下载 中搜索</span>
         </div>
         <div class="ex-cmd"><span>＋ 新建</span><span>✂</span><span>⧉</span><span>📋</span><span>✎</span><span>🗑</span><span>↕ 排序</span><span>☰ 查看</span><span>…</span><span class="grow"></span><span class="on">▤ 预览</span></div>
@@ -68,7 +67,7 @@
           <div class="ex-side">
             <div>💻 此电脑</div>
             <div class="sub">Windows (C:)</div>
-            <div class="sub on">DATA1 (D:)</div>
+            <div class="sub on">数据盘 (D:)</div>
           </div>
           <div class="ex-list">
             <div class="ex-list head"><b class="col-name">名称</b><span class="col-date">修改日期</span><span class="col-type">类型</span><span class="col-size">大小</span></div>
@@ -79,7 +78,7 @@
       <div class="cmd">
         <div class="cmd-title"><span>🖥</span><span>C:\WINDOWS\system32\cmd.exe</span><span class="spacer"></span><span class="btn">—</span><span class="btn">▢</span><span class="btn">✕</span></div>
         <div class="cmd-body"><span class="dim">请从 chrome://extensions 复制本插件的扩展程序 ID（…）：●●●●●●●●…
-请输入视频下载目录的完整绝对路径（例如 D:\本地收藏夹\000视频下载）：打开你的视频下载文件夹，在文件资源管理器上方的地址栏点一下，把里面的绝对地址复制到这条命令后按回车：</span><span class="in">D:\本地收藏夹\000视频下载</span></div>
+请输入视频下载目录的完整绝对路径（例如 D:\你的备份文件夹\000视频下载）：打开你的视频下载文件夹，在文件资源管理器上方的地址栏点一下，把里面的绝对地址复制到这条命令后按回车：</span><span class="in">D:\你的备份文件夹\000视频下载</span></div>
       </div>
     </li>
 
@@ -94,7 +93,7 @@
 <span class="dim">扩展程序 ID：</span>●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 <span class="dim">宿主启动器：</span>C:\Users\&lt;你的用户名&gt;\AppData\Local\BcaFolderOpener\folder-opener-launcher.exe
 <span class="dim">原生消息清单：</span>C:\Users\&lt;你的用户名&gt;\AppData\Local\BcaFolderOpener\com.bcatch.folder_opener.json
-<span class="dim">下载目录：</span>D:\本地收藏夹\000视频下载
+<span class="dim">下载目录：</span>D:\你的备份文件夹\000视频下载
 
 <span class="dim">接下来请按顺序操作：</span>
 <span class="dim">1. 在 chrome://extensions 中重新加载本插件（如果换了插件目录，ID 会变化）。</span>

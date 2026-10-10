@@ -5,11 +5,11 @@
 ## 项目基线
 
 - 项目目录：`Desktop\bili-vault\` —— **仓库根就是扩展目录**，扩展文件直接放在根目录，不再套一层带版本号的文件夹（版本交给 git tag 管理）。V1.0.0 交付时曾短暂叫过 `b-vault-V1.0.0`，**该名字已废弃**。**1.0–4.9 的独立文件夹快照已经删除**：它们全部重放成了 git 历史与 tag，所以取历史版本一律走 git，不要再去找 `bili-vault-beta*` 目录（那些目录已经不存在了）。
-- 扩展版本：`1.0.0`（界面显示 `V1.0.0`），Chrome Manifest V3，最低 Chrome 版本 111。测试版时期界面显示 `beta4.x`，差别只在 `library.js` / `popup.js` 里的 `RELEASE_CHANNEL` 常量。
-- **版本管理方式在 V1.0.0 改了**：以前每个版本是一个独立文件夹（`b_catch_*` → `bili-vault-beta*`），现在**改用 git**——36 个版本对应 36 个 commit 与 36 个同名 tag（`beta1.0` … `beta4.9`、`V1.0.0`），提交日期用的是各版本快照的真实文件时间，所以 `git log` 直接就是那条时间线。远程：`https://github.com/shijunan-Andrew/bili-vault`。**新版本直接在当前目录改并提交，不要再复制文件夹。**
+- 扩展版本：**以 `manifest.json` 的 `version` 为准，这里不写死**（界面上的版本号是它加上 `library.js` / `popup.js` 里的 `RELEASE_CHANNEL` 前缀拼出来的；两处常量必须一致）。Chrome Manifest V3，最低 Chrome 版本 111。测试版时期界面显示 `beta4.x`，差别只在那两处 `RELEASE_CHANNEL` 常量。
+- **版本管理方式在 V1.0.0 改了**：以前每个版本是一个独立文件夹（`b_catch_*` → `bili-vault-beta*`），现在**改用 git**——每个版本一个 commit 与一个同名 tag（`beta1.0` … `beta4.9`、`V1.0.0` 一路到当前版本；**tag 数量每次发布都在涨，别在任何地方写死**），提交日期用的是各版本快照的真实文件时间，所以 `git log` 直接就是那条时间线。远程：`https://github.com/shijunan-Andrew/bili-vault`。**新版本直接在当前目录改并提交，不要再复制文件夹。**
 - **历史版本编号沿革**：项目最初叫 `b_catch`，目录名 `b_catch_1.0` … `b_catch_3.8`，后来随改名统一成 `bili-vault-beta1.0` … `bili-vault-beta3.8`。**这些快照目录现在都已删除**，内容完整保留在 git 历史里（`git show beta2.0:manifest.json` 这样就能取到）。完整的逐版本演变见 `README.md` 的版本历史段，图示与量化数据见 `Desktop\bili-vault开发文档\`。
 
-  **目录名与 manifest 版本号曾经不一致**——早期那套是手工复制文件夹，改名时没同步 `manifest.json`。只有下面 3 个对不上，其余 33 个一致，查历史时按这张表对齐，别被绕进去：
+  **目录名与 manifest 版本号曾经不一致**——早期那套是手工复制文件夹，改名时没同步 `manifest.json`。只有下面这 3 个对不上，其余都一致，查历史时按这张表对齐，别被绕进去：
 
   | tag | `manifest.json` 里写的 |
   |---|---|
@@ -77,8 +77,9 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 ```text
 bili-vault/                       # 仓库根即扩展目录；改名会改变扩展 ID，必须重装本地目录打开助手
-├── .git/                         # 36 个版本的完整历史（tag: beta1.0 … beta4.9、V1.0.0）
+├── .git/                         # 完整版本历史（tag: beta1.0 … beta4.9、V1.0.0 一路到当前版本；数量随发布增长，别写死）
 ├── .gitignore / .gitattributes   # 忽略本地归档；换行策略（.bat/.ps1/.cs 钉死 CRLF）
+├── .node-path                    # 本机 node.exe 的路径（各人机器不同，已被 .gitignore，不进仓库）
 ├── manifest.json                 # MV3 权限、后台 worker、内容脚本注册
 ├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡
@@ -90,9 +91,13 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── locales/
 │   ├── zh-TW.json                # 繁体词典（简体中文不需要词典，查不到就原样返回）
 │   └── en.json                   # 英文词典
-├── popup.html/js/css             # 插件弹窗：自动归档开关、根目录、导入界面、主题与语言
+├── popup.html/js/css             # 插件弹窗：自动归档开关、本地备份文件夹、导入界面、主题与语言
 ├── library.html/js/css           # 本地收藏库页面
 ├── download.html/js/css          # 视频解析和下载界面
+├── guide.html / tutorial.html     # 使用说明页 / 安装教程页（两页共用 tutorial.js、page.css、mockup.css）
+├── tutorial.js                    # 上面两页共用的关窗按钮脚本
+├── mockup.css                     # 教程页与说明页共用的界面示意图样式（CSS 画的假截图）
+├── page.css                       # 教程页与说明页共用的页面骨架样式
 ├── native/
 │   ├── folder-opener-launcher.cs # 原生消息宿主启动器源码（安装时编译成 exe）
 │   └── folder-opener-host.ps1    # 原生消息主机工作脚本
@@ -100,7 +105,7 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── uninstall-native-folder-opener.ps1
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
-│   ├── stability.test.cjs        # Node 内置测试（141 项）：静态回归断言 + 并进来的单元测试
+│   ├── stability.test.cjs        # Node 内置测试（项数以 `node test/stability.test.cjs` 的实际输出为准）：静态回归断言 + 并进来的单元测试
 │   ├── archive-core.test.cjs     # 59 项真执行单元测试：require archive-core.js 真的调用它
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
@@ -159,7 +164,7 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 
 收藏库的「更新视频状态」按钮经 `bca-refresh-video-stats` 触发 `refreshVideoStatus()`，逐条调用 `refreshOneArchiveStatus()`：
 
-- **有效视频**：调用 `/x/web-interface/view` 拿 `stat`，按 UP 缓存调用 `/x/relation/stat` 拿粉丝数，然后用 `patchVolatileFields()` **只替换** UP主粉丝数、`【互动数据】` 整块，以及原值为「未知」时的发布时间。标题、简介、标签、收藏时间、保存文件夹、目录结构全部逐字不动（测试会核对行数与逐行差异）。
+- **有效视频**：调用 `/x/web-interface/view` 拿 `stat`，按 UP 缓存调用 `/x/relation/stat` 拿粉丝数，然后用 `patchVolatileFields()` **只替换** UP主粉丝数、`【互动数据】` 整块，以及原值为「未知」时的发布时间。标题、简介、标签、收藏时间、所属收藏夹、目录结构全部逐字不动（测试会核对行数与逐行差异）。
 - **失效视频**：`biliImportApiGet()` 把接口错误码挂在 `error.apiCode` 上；只有 `typeof error.apiCode === "number"` 才判定为失效（网络/超时错误保持原样、记为失败），此时**只写一行** `视频状态：已失效视频（更新状态时检测到）`，其余内容一个字都不改。网页端 `isInvalid` 的依据是 `/失效/.test(视频状态)`，因此标记后立即表现为「已失效」徽标 + 红色标题 + 灰色封面，与导入时识别的失效视频一致。若该记录又能正常访问，更新时会把标记改回「正常」。
 
 **关键约束**：`patchVolatileFields()` 在 `archive-core.js` 与 `background.js` 各有一份（service worker 无法 require 经典脚本），**两份必须保持一致**——`test/stability.test.cjs` 会从 background.js 抽出真实函数、用多组输入与共享实现逐个比对。改其中一份必须同步改另一份。
@@ -194,13 +199,18 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 
 ### 更新视频状态（4.5 调整）
 
-4.4 的批量刷新（页面标题栏 + 对话框 + `statusBatchSize`）**已整体删除**。现在按钮在**视频详情面板的互动数据下方**，经 `refreshOneVideoStatus(video)` 一次只提交一条：
+**4.4 删掉的是「无确认的单条刷新」，不是批量入口。** 详情面板那个点一下就提交、不先弹确认框的 `refreshOneVideoStatus(video)` 确实没了（`test/stability.test.cjs` 有一条断言它的名字不许回到 `library.js`）；现在**所有**刷新都先过确认框：
+
+- **统一入口**：`openStatusConfirm(videos, source)`（`source` 是 `"detail"` 或 `"batch"`）→ 用户点「开始更新」→ `runStatusRefresh()` 提交：
 
 ```
-chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets: [target], limit: 1 } })
+chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets, limit: STATUS_BATCH_LIMIT } })
 ```
 
-后台实现（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。这样设计是为了避免批量刷接口触发风控——不要再把批量入口加回来。
+- **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频状态」（`library.html:138` 的 `#updateSelected`），`library.js:3302` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:789-798` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
+- **上限**：`library.js:1446` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
+- **后台实现**（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。风控的顾虑不是靠「不做批量」解决的，而是靠**确认框 + 80 条上限 + 串行间隔**（`IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`）。**不要再把无确认的单条刷新加回来。**
+- 上面几处行号是 V1.2.0 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
 ### CSS 覆盖顺序（4.8.3 的教训）
 
 **同一组件的规则必须写在它的基础规则之后。** 4.7 给 `.import-card` 加橘黄时把新规则写在了 `.import-card > summary { … }` 前面，结果：
@@ -299,7 +309,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 一次覆盖 约 8800 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**
 
-- **主测试套件是文本级断言，不执行被测代码**（这一条在 V1.0.0 之后有所缓解：`test/archive-core.test.cjs` 的 59 项是真执行的，见「常用验证」）。`stability.test.cjs` 的其余断言是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
+- **主测试套件是文本级断言，不执行被测代码**（这一条在 V1.0.0 之后有所缓解：`test/archive-core.test.cjs` 里的单元测试是真执行的，见「常用验证」）。`stability.test.cjs` 的其余断言是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
 - **配置没有版本迁移**。`CONFIG_VERSION = 1`，导入配置时只校验结构不做迁移。将来升版本必须补。
 - **没有多标签页互斥**。两个标签页同时打开同一归档、同时做写操作（标记已下载 / 删除 / 移动）没有锁。日常使用很难触发，但理论上存在竞态。
 - **没有归档完整性校验与备份机制**。`视频信息.txt` 损坏就是永久丢失，插件没有校验和、没有导出元数据的功能。
@@ -373,7 +383,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 `library.js` 通过 File System Access API 读取本地目录，只认下列视频归档结构：
 
 ```text
-根目录/
+本地备份文件夹/
 └── 收藏夹名称/
     └── YYYY年M月D日H时M分S秒[_n]/
         ├── 视频信息.txt
@@ -389,7 +399,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 默认下载布局：
 
 ```text
-根目录/
+本地备份文件夹/
 ├── 000视频下载/
 │   └── 收藏夹名称/
 │       └── 视频标题 - BV号/av号/
@@ -431,7 +441,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 【基本信息】
 视频收藏时间：2026年10月09日 01时19分50秒.175
 信息保存于：2026-10-09 01:19:50
-保存文件夹：2026年10月09日01时19分50秒
+所属收藏夹：蜡笔小新
 视频标题：……
 视频链接：https://www.bilibili.com/video/BV……/
 BV号：……            # 导入的档案还会在此前插入「视频状态」「恢复情况」两行
@@ -501,7 +511,7 @@ UP主主页：https://space.bilibili.com/……
 
 **IndexedDB**：数据库 `bili-fav-archiver`，对象仓库 `settings`。常用键：
 
-- `rootHandle`：本地收藏根目录的 FileSystemDirectoryHandle。
+- `rootHandle`：本地备份文件夹的 FileSystemDirectoryHandle。
 - `downloadFolder`：自选下载目录句柄。
 - `downloadFolderMode`：`default` 或 `custom`。
 
@@ -530,8 +540,8 @@ UP主主页：https://space.bilibili.com/……
 node test/stability.test.cjs
 ```
 
-当前包含 **141 项检查**（140 项静态回归 + 1 项把 `test/archive-core.test.cjs` 的 59 项真执行单元测试并进来）。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。
+检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:172 -->
 
 - **归档与下载匹配**（开头，9 项）：下载队列的收藏夹传递、BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -546,7 +556,7 @@ node test/stability.test.cjs
 另外在本地归档上跑一次体检（统计有多少条记录其实没有标签或简介）：
 
 ```powershell
-node test/archive-audit.cjs "<你的收藏根目录>"
+node test/archive-audit.cjs "<你的本地备份文件夹>"
 ```
 
 多语言的词条工具（改过任何界面文字之后都要跑）：
@@ -577,7 +587,7 @@ node test/_unmarked.cjs
 只读预览 4.2 的导入会抓到什么（不改任何文件，适合改完接口逻辑后先验证）：
 
 ```powershell
-node test/import-trial.cjs "<你的收藏根目录>" 3
+node test/import-trial.cjs "<你的本地备份文件夹>" 3
 ```
 
 每次改动还应执行：
@@ -598,8 +608,8 @@ node test/import-trial.cjs "<你的收藏根目录>" 3
 - 用户曾报告收藏成功但本地归档失败，并看到 B 站收藏弹窗提示 `The next() called multiple times`。另一次控制台网络错误指向 Kaspersky 浏览器组件的 `gc.kis.v2.scr.kaspersky-labs.com`。后者不是本项目域名；判断归因前需在禁用相关第三方扩展的环境中复现。不要把这类外部错误直接归为本扩展故障。
 - 3.8 修复的两个本地目录打开助手缺陷都是运行时问题，Node 静态检查发现不了：一个是 Chrome 静默忽略清单 `args`，一个是 PowerShell 5.1 的默认 ANSI 读取。改动这一块必须跑 `test-native-folder-opener.ps1`，不能只做语法检查。
 - 待确认（尚未定性）：`content.js` 在 MV3 隔离世界中读取页面变量 `window.__INITIAL_STATE__`，而清单未声明 `world: "MAIN"`，该变量很可能始终读不到，元数据实际走 DOM/meta 回退，自动归档的“分区/视频时长/视频发布时间/标签”容易落成“未知”。需要用一份真实的 `视频信息.txt` 核对后再决定是否改用其他采集方式。
-- **归档数据本身的完整度**（4.1 实测用户档案 333 条记录）：只有 75 条（22.5%）有标签、142 条（42.6%）有简介，150 条（45%）两者都没有。根因是导入流程里 `normalizeImportMedia()` 把 `tags` 硬编码为 `[]`，且只有失效视频会去抓资料。4.1 负责把这些数据正确地显示出来，**4.2 负责在导入/更新时把它们抓全**——对已有档案执行一次「导入或更新」，缺失的标签、发布时间、粉丝数与互动数据都会被补上。
-- **一个已证实的数据错误**：`蜡笔小新/2026年10月09日01时19分50秒` 的归档里 `UP主UID` 写成了 `1515305135`，而接口返回的真实 `owner.mid` 是 `87795103`。抽查另外 4 条记录都是对的，怀疑是收藏夹接口在个别条目上返回了错误的 `upper`。4.2 因为改从 `/x/web-interface/view` 取 UP 主信息，执行一次更新即可修正这类记录。
+- **归档数据本身的完整度**（4.1 实测一个上千条的档案）：只有约两成有标签、约四成有简介，将近一半两者都没有。根因是导入流程里 `normalizeImportMedia()` 把 `tags` 硬编码为 `[]`，且只有失效视频会去抓资料。4.1 负责把这些数据正确地显示出来，**4.2 负责在导入/更新时把它们抓全**——对已有档案执行一次「导入或更新」，缺失的标签、发布时间、粉丝数与互动数据都会被补上。
+- **一个已证实的数据错误**：某条归档里 `UP主UID` 写的不是该视频作者的真实 `mid`（两者对不上；抽查另外 4 条记录都是对的），怀疑是收藏夹接口在个别条目上返回了错误的 `upper`。4.2 因为改从 `/x/web-interface/view` 取 UP 主信息，执行一次更新即可修正这类记录。
 - 4.2 的导入会对每条视频发 2–3 个请求（view + tags + 每个 UP 一次的 relation/stat），**这是用户明确要求的完整抓取**。**注意速率在 4.3 已下调为串行 + 每条间隔 800ms**（原为并发 2 + 350ms）；如果将来风控变严，应先调 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，而不是回到“只补缺失字段”的老逻辑。
 - 3.7 的下载目录日志修复仍建议在 Chrome/B 站实际触发一次验证，因为历史报告表明错误发生在目录创建的运行时路径。
 

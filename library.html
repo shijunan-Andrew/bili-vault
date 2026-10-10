@@ -64,7 +64,7 @@
           <div class="usage-label"><span data-i18n="本地收藏夹占用：">本地收藏夹占用：</span><b id="storageUsage" class="tnum">—</b></div>
           <button id="diffLibrary" class="button button-quiet" type="button" disabled data-i18n="与 B 站对比" data-i18n-title="只对比收藏夹列表，不抓取每条视频的详情，很快完成">与 B 站对比</button>
     <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录" data-i18n-title="重新读取本地收藏目录"><span data-icon="refresh"></span><span data-i18n="刷新">刷新</span></button>
-          <button id="chooseRoot" class="button button-primary"><span class="choose-root-icon" data-icon="plus"></span><span data-busy-label="idle" data-i18n="选择收藏根目录">选择收藏根目录</span><span data-busy-label="reading" data-i18n="正在读取…" hidden>正在读取…</span><span data-busy-label="refreshing" data-i18n="正在刷新…" hidden>正在刷新…</span><span data-busy-label="connecting" data-i18n="正在连接上次目录…" hidden>正在连接上次目录…</span><span data-busy-label="loading-last" data-i18n="正在读取上次目录…" hidden>正在读取上次目录…</span></button>
+          <button id="chooseRoot" class="button button-primary"><span class="choose-root-icon" data-icon="plus"></span><span data-busy-label="idle" data-i18n="选择本地备份文件夹">选择本地备份文件夹</span><span data-busy-label="reading" data-i18n="正在读取…" hidden>正在读取…</span><span data-busy-label="refreshing" data-i18n="正在刷新…" hidden>正在刷新…</span><span data-busy-label="connecting" data-i18n="正在连接上次目录…" hidden>正在连接上次目录…</span><span data-busy-label="loading-last" data-i18n="正在读取上次目录…" hidden>正在读取上次目录…</span></button>
         </div>
       </header>
 
@@ -76,12 +76,12 @@
         </div>
         <p class="eyebrow">YOUR PERSONAL ARCHIVE</p>
         <h1 data-i18n-html="让收藏的视频，<span>一目了然</span>">让收藏的视频，<span>一目了然</span></h1>
-        <p class="welcome-copy" data-i18n="首次选择归档根目录后会自动记住路径，下次打开直接读取，浏览器只在本机读写。">首次选择归档根目录后会自动记住路径，下次打开直接读取，浏览器只在本机读写。</p>
+        <p class="welcome-copy" data-i18n="首次选择本地备份文件夹后会自动记住路径，下次打开直接读取，浏览器只在本机读写。">首次选择本地备份文件夹后会自动记住路径，下次打开直接读取，浏览器只在本机读写。</p>
         <button id="welcomeChoose" class="button button-primary button-large"><span data-label="choose" data-i18n="选择本地收藏目录">选择本地收藏目录</span><span data-label="authorize" data-i18n="授权并继续使用上次目录" hidden>授权并继续使用上次目录</span> <span data-icon="chevron-right"></span></button>
         <ol class="welcome-steps">
           <li class="welcome-step">
             <span class="welcome-step-index">1</span>
-            <strong data-i18n="选择一个归档根目录">选择一个归档根目录</strong>
+            <strong data-i18n="选择一个本地备份文件夹">选择一个本地备份文件夹</strong>
             <p data-i18n="视频信息和封面都保存在这个文件夹里，结构是「收藏夹 / 时间目录」。">视频信息和封面都保存在这个文件夹里，结构是「收藏夹 / 时间目录」。</p>
           </li>
           <li class="welcome-step">
@@ -95,7 +95,7 @@
             <p data-i18n="在 B 站收藏夹页面打开插件，一次把已有收藏夹同步到本地。">在 B 站收藏夹页面打开插件，一次把已有收藏夹同步到本地。</p>
           </li>
         </ol>
-        <p class="welcome-footnote" data-i18n="只解析符合“根目录 / 收藏夹 / 时间戳目录 / 视频信息.txt + 封面.png”结构的记录">只解析符合“根目录 / 收藏夹 / 时间戳目录 / 视频信息.txt + 封面.png”结构的记录</p>
+        <p class="welcome-footnote" data-i18n="只解析符合“本地备份文件夹 / 收藏夹 / 时间戳目录 / 视频信息.txt + 封面.png”结构的记录">只解析符合“本地备份文件夹 / 收藏夹 / 时间戳目录 / 视频信息.txt + 封面.png”结构的记录</p>
       </section>
 
       <section id="library" class="library-view" hidden>
@@ -203,7 +203,7 @@
       <h2 id="collectionDialogTitle" data-i18n="新建收藏夹">新建收藏夹</h2>
       <label for="collectionName" data-i18n="收藏夹名称">收藏夹名称</label>
       <input id="collectionName" name="collectionName" type="text" maxlength="120" autocomplete="off" required placeholder="例如：收藏夹 A" data-i18n-placeholder="例如：收藏夹 A">
-      <p class="editor-hint" data-i18n="将在本地收藏根目录下创建同名文件夹。">将在本地收藏根目录下创建同名文件夹。</p>
+      <p class="editor-hint" data-i18n="将在本地备份文件夹下创建同名文件夹。">将在本地备份文件夹下创建同名文件夹。</p>
       <div class="editor-actions">
         <button id="cancelCreateCollection" class="button button-quiet" type="button" data-i18n="取消">取消</button>
         <button id="submitCreateCollection" class="button button-primary" type="submit" data-i18n="创建收藏夹">创建收藏夹</button>
@@ -289,7 +289,7 @@
 
   <dialog id="diffDialog" class="editor-dialog diff-dialog" aria-labelledby="diffDialogTitle">
     <div class="editor-heading"><span class="editor-heading-icon" data-icon="refresh"></span><h2 id="diffDialogTitle" data-i18n="与 B 站对比">与 B 站对比</h2></div>
-    <p class="editor-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情，所以很快（1000 条约 1 分钟）。完整列表会写进归档根目录的 002同步报告 文件夹。">只对比收藏夹列表，不抓取每条视频的详情，所以很快（1000 条约 1 分钟）。完整列表会写进归档根目录的 002同步报告 文件夹。</p>
+    <p class="editor-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情，所以很快（1000 条约 1 分钟）。完整列表会写进本地备份文件夹的 002同步报告 文件夹。">只对比收藏夹列表，不抓取每条视频的详情，所以很快（1000 条约 1 分钟）。完整列表会写进本地备份文件夹的 002同步报告 文件夹。</p>
     <p id="diffDialogStatus" class="dialog-progress" role="status"></p>
     <div id="diffDialogBody" class="diff-body"></div>
     <div class="editor-actions">

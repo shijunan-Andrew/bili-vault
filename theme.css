@@ -252,15 +252,6 @@ button { cursor: pointer; }
 /* 数字对齐：日期、计数、BV 号在微软雅黑下会因为比例数字而参差 */
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
-.sr-only {
-  position: absolute;
-  width: 1px; height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 /* 细滚动条：Windows 默认滚动条在侧栏、日志、简介框里视觉过重 */
 * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -269,8 +260,8 @@ button { cursor: pointer; }
 *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 *::-webkit-scrollbar-corner { background: transparent; }
 
-/* 通用工具类 */
-.stack { display: grid; gap: var(--sp-3); }
+/* 通用工具类。.sr-only 和 .stack 曾在这里，全仓库零使用，V1.2.0 删掉了 ——
+   需要时一行就能加回来，留着反而让人以为某个页面在用它。 */
 .row { display: flex; align-items: center; gap: var(--sp-2); }
 .spacer { margin-left: auto; }
 

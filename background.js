@@ -31,6 +31,11 @@ const COVER_FILE_NAME = "封面.webp";
 // 4.9：读取与存在性检查要同时认旧名字。老档案里的封面是真 PNG，不迁移、不重下，
 // 所以目录里可能只有 封面.png；两个都没有才算真的缺封面。
 const COVER_FILE_NAMES = ["封面.png", COVER_FILE_NAME];
+// 4.9.x：封面候选全部失败时会写一张「封面暂不可恢复」的占位图。占位图必须留下痕迹，
+// 否则下次导入只会看到"目录里有封面文件"而判定封面完好，这条记录就永远不会再尝试补真封面。
+// 所以占位图对应在「视频信息.txt」里写一行这个标记；导入侧的刷新判定认它，收藏库侧不受影响
+//（library.js 只读自己认识的字段，多这一行既不会让它跳过记录，也不会覆盖用户数据）。
+const COVER_PENDING_LINE = "封面状态：待补全（当前为占位图）";
 const COVER_WIDTH = 320;
 const COVER_HEIGHT = 180;
 const COVER_MIME_TYPE = "image/webp";
@@ -188,7 +193,7 @@ function formatPublishDate(value) {
 async function ensureWritePermission(handle) {
   const permission = await handle.queryPermission({ mode: "readwrite" });
   if (permission !== "granted") {
-    throw new Error("所选文件夹的写入授权已失效。请点击插件图标中的“重新授权收藏根目录”，允许访问后重试。 ");
+    throw new Error("所选文件夹的写入授权已失效。请点击插件图标中的“重新授权本地备份文件夹”，允许访问后重试。");
   }
 }
 
@@ -272,7 +277,7 @@ function buildInfo(data, folderName, savedAt) {
     "【基本信息】",
     `视频收藏时间：${favoriteAtText}`,
     `信息保存于：${formatDateTime(savedAt)}`,
-    `保存文件夹：${folderName}`,
+    `所属收藏夹：${folderName}`,
     `视频标题：${title}`,
     `视频链接：${videoUrl}`,
     `BV号：${bvid}`,
@@ -280,6 +285,8 @@ function buildInfo(data, folderName, savedAt) {
     `分区：${metadata.category || "未知"}`,
     `视频时长：${metadata.imported && !(Number(metadata.duration) > 0) ? "未知" : formatDuration(metadata.duration)}`,
     `视频发布时间：${formatPublishDate(metadata.pubdate)}`,
+    // 封面候选全失败时这里会留下「待补全」标记，让后续导入还能重新尝试补真封面（见 COVER_PENDING_LINE）
+    ...(metadata.coverMissing ? [COVER_PENDING_LINE] : []),
     "",
     "【UP主】",
     `UP主昵称：${upName}`,
@@ -362,7 +369,12 @@ async function fetchManualVideoMetadata(identifier) {
         tags = tagPayload.data.map((tag) => tag.tag_name).filter(Boolean);
       }
     }
-  } catch (_) {}
+  } catch (error) {
+    // L14：标签接口是"能拿到就更好"，失败不该让整条视频解析失败 —— 所以照旧吞掉。
+    // 但原来是个空 catch，连一行日志都不留：真机上标签集体丢失时无从判断
+    // 是"这个视频本来没标签"还是"标签接口挂了"。
+    console.warn("读取视频标签失败（不影响视频信息）", error);
+  }
   const bvid = video.bvid || identifier.bvid || "";
   return {
     title: video.title,
@@ -388,7 +400,7 @@ async function addManualVideo(data) {
     if (!collectionNames.length) throw new Error("请至少选择一个目标收藏夹。");
     if (collectionNames.some((name) => safeSegment(name) !== name || ["错误报告", "001错误报告", "002同步报告", "000视频下载"].includes(name))) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
     const root = await getRootHandle();
-    if (!root) throw new Error("尚未设置本地收藏根目录，请先选择收藏根目录。");
+    if (!root) throw new Error("尚未设置本地备份文件夹，请先选择本地备份文件夹。");
     await ensureWritePermission(root);
     const identifier = parseManualVideoIdentifier(data?.identifier);
     metadata = await fetchManualVideoMetadata(identifier);
@@ -441,10 +453,20 @@ async function addManualVideo(data) {
     if (duplicates.length) messageParts.push(`已存在相同视频，跳过 ${duplicates.length} 个收藏夹`);
     if (failures.length) messageParts.push(`${failures.length} 个收藏夹保存失败`);
     const message = messageParts.join("；") || "已存在相同视频，未重复添加。";
-    await chrome.storage.local.set({
-      lastResult: { message: `“${metadata.title}”：${message}`, path: savedPaths.slice(0, 10).join("\n"), createdAt: Date.now() },
-      ...(failures.length ? { lastError: { reportPath, createdAt: Date.now(), report: message } } : { lastError: null })
-    });
+    // 4.9.x：视频此刻已经写进磁盘了，这里只是"记录最近一次结果"的收尾。
+    // 它一旦抛错就会被下面的 catch 接住、把结果改写成「添加失败」——用户重新添加一次，
+    // 又会因为"已存在"被跳过，等于白跑。所以收尾必须自己兜住异常。
+    try {
+      await chrome.storage.local.set({
+        lastResult: { message: `“${metadata.title}”：${message}`, path: savedPaths.slice(0, 10).join("\n"), createdAt: Date.now() },
+        // S3：这一支会把上面 logError 写的 lastError 整个覆盖掉，所以 needsReauth 必须自己补上 ——
+        // 覆盖掉布尔值就等于把「重新授权」按钮又抹掉了，而这里恰恰会撞上授权失效
+        // （writeFile 落盘时才发现权限被回收）。判据与 logError 保持一致，走同一个 helper。
+        ...(failures.length ? { lastError: { reportPath, createdAt: Date.now(), report: message, needsReauth: failures.some((item) => needsReauthFromError(item.message)) } } : { lastError: null })
+      });
+    } catch (storageError) {
+      console.warn("写入最近结果失败（视频已经保存成功）", storageError);
+    }
     const ok = !failures.length || savedCollections.length > 0 || duplicates.length > 0;
     return { ok, message, paths: savedPaths, added: savedCollections, skipped: duplicates, failed: failures, reportPath };
   } catch (error) {
@@ -499,10 +521,27 @@ async function persistErrorReport(text) {
   }
 }
 
+// S3：判断一个错误是不是"本地备份文件夹的写入授权失效"。
+// 以前这个判断散在三个调用点各写一遍字符串匹配，popup 那边也得跟着匹配后台的文案 ——
+// 文案一改，「重新授权」按钮就静默消失（用户只看到报错，找不到能救回来的入口）。
+// 现在统一在这里判断一次，结果以结构化的 lastError.needsReauth 布尔值传给界面；
+// 字符串匹配保留，只作为给日志/报告用的兜底。
+function needsReauthFromError(error) {
+  return String(error?.message || error || "").includes("写入授权已失效");
+}
+
 async function logError(error, context = {}) {
   const report = reportText(error, context);
   const reportPath = await persistErrorReport(report);
-  await chrome.storage.local.set({ lastError: { report, reportPath, createdAt: Date.now() }, authorizedErrorAt: null });
+  // 4.9.x：这里必须是"尽力而为"。原来裸 await 没有任何保护，storage 一抛错就会顺着
+  // 调用链传出去：saveFavorite / addManualVideo 会被改写成"保存失败"，而
+  // import-bili-favorites 的处理器更糟 —— 它在 await logError 之后才 sendResponse，
+  // 一旦抛在这里，调用方永远收不到回应（弹窗一直转圈）。
+  try {
+    await chrome.storage.local.set({ lastError: { report, reportPath, createdAt: Date.now(), needsReauth: needsReauthFromError(error) }, authorizedErrorAt: null });
+  } catch (storageError) {
+    console.warn("写入错误报告失败（报告正文仍会返回给调用方）", storageError);
+  }
   return { report, reportPath };
 }
 
@@ -513,10 +552,10 @@ async function saveFavorite(data) {
   if (settings.enabled === false) return { ok: false, message: "自动归档已关闭，本次收藏未保存到本地。" };
   try {
     if (!folders.length || folders.some((folder) => !folder?.name)) {
-      throw new Error("无法从 B 站读取本次收藏夹的实际名称。请保持收藏夹列表已加载后重试。 ");
+      throw new Error("无法从 B 站读取本次收藏夹的实际名称。请保持收藏夹列表已加载后重试。");
     }
     const root = await getRootHandle();
-    if (!root) throw new Error("尚未设置本地保存文件夹。请点击插件图标并选择一个保存目录。 ");
+    if (!root) throw new Error("尚未设置本地备份文件夹。请点击插件图标并选择本地备份文件夹。");
     await ensureWritePermission(root);
 
     const favoriteAt = new Date(Number(data.favoriteAt) || Date.now());
@@ -526,13 +565,16 @@ async function saveFavorite(data) {
     for (const folder of folders) {
       const collectionFolder = await root.getDirectoryHandle(safeSegment(folder.name), { create: true });
       const recordFolder = await uniqueTimeFolder(collectionFolder, dateFolderName);
-      const info = buildInfo({ ...data, metadata }, recordFolder.name, savedAt);
       try {
         // 4.9：先封面、后 txt（txt 即完成标记），失败时把整个目录清掉，不留半截记录
         const cover = await loadCoverPng(metadata.cover);
         await writeFile(recordFolder, COVER_FILE_NAME, cover);
-        await writeFile(recordFolder, "视频信息.txt", info);
+        // buildInfo 也必须在这个 try 内：它一旦抛错，目录已经建出来了，
+        // 下面的 catch 负责把这个空目录清掉（否则每失败一次就留一个空目录）
+        await writeFile(recordFolder, "视频信息.txt", buildInfo({ ...data, metadata }, recordFolder.name, savedAt));
       } catch (error) {
+        // 4.9.x：目录是上面 getDirectoryHandle(create:true) 刚建出来的，buildInfo 抛错时它已经在磁盘上了。
+        // 同样要回滚清理（和 addManualVideo / saveImportedItem 一致），否则每失败一次就留一个空目录。
         await collectionFolder.removeEntry(recordFolder.name, { recursive: true }).catch(() => {});
         throw error;
       }
@@ -540,7 +582,14 @@ async function saveFavorite(data) {
     }
 
     const message = `已保存到 ${savedFolders.length} 个收藏夹。`;
-    await chrome.storage.local.set({ lastResult: { message, path: savedFolders.join("\n"), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+    // 4.9.x：这时视频已经落盘（封面 + 视频信息.txt 都写完了），下面只是收尾。
+    // 原来它裸 await 在同一个 try 里：storage 一抛错就被 catch 改写成「保存失败」，
+    // 而磁盘上其实已经有一份完整记录。收尾必须自己兜住异常，不许改写已成功的结果。
+    try {
+      await chrome.storage.local.set({ lastResult: { message, path: savedFolders.join("\n"), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+    } catch (storageError) {
+      console.warn("写入最近结果失败（收藏已经保存成功）", storageError);
+    }
     return { ok: true, message, path: savedFolders.join("\n") };
   } catch (error) {
     if (error?.message?.includes("写入授权已失效")) {
@@ -560,6 +609,26 @@ function saveFavoriteInOrder(data) {
   const task = saveQueue.then(() => saveFavorite(data));
   saveQueue = task.catch(() => undefined);
   return task;
+}
+
+// 4.9.x：给"排在串行队列后面"的非归档请求一个有上限的等待。
+// 导入暂停时 saveQueue 会停在 importWaitIfPaused 上（可以停几个小时），排在后面的请求
+// 永远不会被执行、也不会报错。这里超时只放弃**等待**：队列里那一个仍然会照常跑完，
+// 只是界面能立刻收到一句解释，不至于永久停在"更新中"。
+const WITH_QUEUE_DEADLINE_EXPIRED = Symbol("queue-deadline-expired");
+
+async function withQueueDeadline(queue, timeoutMs, label) {
+  let timer = null;
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(WITH_QUEUE_DEADLINE_EXPIRED), timeoutMs);
+  });
+  try {
+    return await Promise.race([queue, expired]);
+  } catch (error) {
+    throw new Error(error?.message || `${label}失败。`);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const IMPORT_INVALID_TITLES = new Set(["已失效视频", "该视频已失效"]);
@@ -1338,7 +1407,7 @@ async function refreshOneArchiveStatus(root, target, tabId) {
 
 async function refreshVideoStatus(data, tabId = null) {
   const root = await getRootHandle();
-  if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
+  if (!root) throw new Error("尚未设置本地备份文件夹，请先在插件中选择本地备份文件夹。");
   await ensureWritePermission(root);
   const targets = (Array.isArray(data?.targets) ? data.targets : []).filter((target) => target?.collection && target?.directory);
   if (!targets.length) throw new Error("没有需要更新的记录。");
@@ -1393,6 +1462,10 @@ async function refreshVideoStatus(data, tabId = null) {
 /* ---------- 运行控制：暂停 / 继续 / 取消 ---------- */
 
 let importRun = { active: false, paused: false, cancelled: false, waiters: [] };
+// 4.9.x：已经排进队列、但还没真正开始的那一轮导入。claimImportRun 是在任务出队时才执行的，
+// 单靠 importRun.active 挡不住"按钮连点两次"（第二次点击时第一轮还在队列里等着，
+// 全局 active 仍是 false）。这个计数在收到消息的同步代码里就 +1，所以第二次点击必被拒。
+let importPending = 0;
 let importState = { running: false, paused: false, text: "", startedAt: 0, finishedAt: 0, summary: "" };
 let upFansCache = new Map();
 let importStatePublishAt = 0;
@@ -1418,6 +1491,11 @@ const IMPORT_INTERRUPTED_SESSION_KEY = "bcaInterruptedImport";  // 被回收打�
 // 必须明显小于 30 秒的回收阈值，留出一次请求的最长耗时（15 秒）的余量
 const IMPORT_KEEPALIVE_INTERVAL_MS = 20000;
 const IMPORT_RUN_PUBLISH_INTERVAL_MS = 5000;                    // 断点落盘节流
+// 4.9.x：串行队列（saveQueue）的等待上限。导入暂停时队列会一直停在 importWaitIfPaused 上，
+// 排在它后面的请求原本会永久挂着、既不执行也不报错（收藏库的「更新视频状态」因此
+// 永远显示"更新中"）。超过这个时长就明确回一句"队列被占用"，而不是无限等待。
+// 取 30 秒是刻意的：service worker 的空闲回收阈值就是约 30 秒。
+const IMPORT_QUEUE_WAIT_TIMEOUT_MS = 30000;
 // local 里的 importState 超过这么久没更新，才认定它是"被回收前的残影"。
 // 正常跑着的时候每 500ms 就会刷一次 updatedAt，所以 90 秒足够区分
 // "刚刚正常结束还没落盘" 与 "进程早就没了"。
@@ -1670,7 +1748,9 @@ async function importRecoverInterruptedImport() {
   ].join("\n");
   const reportPath = await persistErrorReport(report);
   await chrome.storage.local.set({
-    lastError: { report: report.slice(0, 16000), reportPath, createdAt: Date.now() }
+    // needsReauth 恒为 false：中断报告是"service worker 被回收"，与文件夹授权无关。
+    // 显式写出来是为了让这个字段在每条 lastError 上都存在，前台不必区分"旧数据"和"这次没失效"。
+    lastError: { report: report.slice(0, 16000), reportPath, createdAt: Date.now(), needsReauth: false }
   }).catch(() => {});
   return true;
 }
@@ -1735,9 +1815,9 @@ async function rollbackInterruptedImport() {
   const snapshot = stored?.[IMPORT_INTERRUPTED_SESSION_KEY];
   if (!snapshot?.journal) return { ok: false, message: BcaI18n.t("没有找到可回滚的上次中断记录。") };
   const root = await getRootHandle();
-  if (!root) return { ok: false, message: BcaI18n.t("尚未设置本地保存文件夹，无法回滚。") };
+  if (!root) return { ok: false, message: BcaI18n.t("尚未设置本地备份文件夹，无法回滚。") };
   if (await root.queryPermission({ mode: "readwrite" }) !== "granted") {
-    return { ok: false, message: BcaI18n.t("保存位置的写入授权已失效，请先在插件里重新授权保存位置，然后重试回滚。") };
+    return { ok: false, message: BcaI18n.t("本地备份文件夹的写入授权已失效，请先在插件里重新授权本地备份文件夹，然后重试回滚。") };
   }
   const journal = { createdCollections: [], createdRecords: [], modifiedFiles: [], addedFiles: [] };
   for (const name of snapshot.journal.createdCollections || []) {
@@ -1822,6 +1902,9 @@ function recordNeedsRefresh(record) {
     || importIsPlaceholder(pubdate)
     || !/^UP主粉丝数：/m.test(text)
     || !/【互动数据】/.test(text)
+    // 4.9.x：写入端在封面候选全失败时会写 COVER_PENDING_LINE 占位标记，
+    // 这里必须认它。否则"目录里有一张占位图"会被当成封面完好，这条记录永远不会再补真封面。
+    || text.includes(COVER_PENDING_LINE)
     // 4.9：目录里没有封面同样算"不完整"。coverMissing 由 importRecordNeedsRefresh()
     // 在本函数的文本判据都通过之后才去查一次盘并缓存在 record 上，正常记录不额外付 IO。
     // 背景：旧版本是"先写 视频信息.txt、后写 封面.png"，中途被杀就会留下只有 txt 的半截目录，
@@ -1870,30 +1953,35 @@ async function refreshImportedRecord(collection, record, item, journal) {
   const favoriteTimeUnknown = importIsPlaceholder(favoriteAtText);
   const parsed = favoriteTimeUnknown ? null : parseChineseDateTime(favoriteAtText);
   const favoriteAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date();
-  const metadata = importMetadata(item, null);
-  metadata.favoriteTimeUnknown = favoriteTimeUnknown;
-  const text = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.directory, new Date());
-  // 4.9：封面缺失也要补齐（library.js 把"没有封面"的记录当成不完整记录直接跳过，
-  // 用户在收藏库里根本看不到它）。coverMissing 还没算过就在这里补算一次——
-  // 只有"需要刷新"的记录会走这条路径，正常记录不受影响。
+  // coverMissing 还没算过就在这里补算一次——只有"需要刷新"的记录会走这条路径，正常记录不受影响。
   if (record.coverMissing === undefined) await recordMissingCover(collection, record);
-  let touched = false;
+  let cover = null;
   if (record.coverMissing) {
     // 抓不到真封面时会写入"封面暂不可恢复"占位图——和导入链路保持一致：
     // library.js 把没有封面的记录当成不完整记录直接跳过，宁可先写占位图让记录可见。
-    const cover = await loadImportCover([
+    // 但占位图必须留下标记（见 COVER_PENDING_LINE），否则这条记录会被当成封面完好、永不再补。
+    cover = await loadImportCover([
       ...(item.coverCandidates || []),
       ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
     ], item.isInvalid);
+  }
+  const metadata = importMetadata(item, cover);
+  metadata.favoriteTimeUnknown = favoriteTimeUnknown;
+  // 标记按"这次实际拿到了什么"决定去留：拿到真封面就清掉旧的待补标记，
+  // 仍然只有占位图（或本来就缺封面但这次也没补上）就继续保留待补标记。
+  metadata.coverMissing = cover ? cover.placeholder === true : record.coverMissing === true;
+  const refreshedText = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.directory, new Date());
+  let touched = false;
+  if (cover) {
     // 先写封面、后写 txt：txt 始终是"这条记录写完了"的完成标记
     journal?.addedFiles.push({ collectionHandle: collection, directoryHandle: directory, name: COVER_FILE_NAME });
     await writeFile(directory, COVER_FILE_NAME, cover.blob);
     record.coverMissing = false;
     touched = true;
   }
-  if (text !== original) {
+  if (refreshedText !== original) {
     journal.modifiedFiles.push({ collectionHandle: collection, directoryHandle: directory, name: "视频信息.txt", text: original });
-    await writeFile(directory, "视频信息.txt", text);
+    await writeFile(directory, "视频信息.txt", refreshedText);
     touched = true;
   }
   return touched;
@@ -2064,10 +2152,13 @@ async function loadImportCover(candidates, invalid) {
           if (mean > 180 && deviation < 8 && meanSaturation < 0.08) continue;
         } finally { bitmap.close(); }
       }
-      return { blob, source: candidate.source };
+      return { blob, source: candidate.source, placeholder: false };
     } catch (_) {}
   }
-  return { blob: await importedUnknownCover(), source: "未知" };
+  // 走到这里说明所有候选都失败了：返回的是一张「封面暂不可恢复」占位图。
+  // placeholder 必须传出去 —— 调用方要据此在 视频信息.txt 里写 COVER_PENDING_LINE，
+  // 否则占位图会被当成真封面，这条记录再也不会尝试补图。
+  return { blob: await importedUnknownCover(), source: "未知", placeholder: true };
 }
 
 async function readExistingImportIdentifiers(collection) {
@@ -2118,6 +2209,9 @@ function importMetadata(item, cover) {
     tags: item.tags.length ? item.tags : ["未知"],
     imported: true,
     invalid: item.isInvalid,
+    // 封面是占位图（候选全失败）时记下来：buildInfo 据此写 COVER_PENDING_LINE，
+    // 后续导入才会重新尝试给这条记录补真封面
+    coverMissing: cover?.placeholder === true,
     // 「失效原因」要靠它才写得进 视频信息.txt：buildInfo 读的是 metadata.attr，
     // 而 metadata 是这个函数现造的 —— 不在这里带一手，原因就永远只停在内存里。
     attr: Number(item.attr || 0),
@@ -2250,12 +2344,26 @@ async function importBiliFavorites(data, tabId = null) {
   // 用户于是只看到一个没有解释的「失败：N」。取消分支不写报告，所以只需在这里补。
   let activeFolderTitle = "";
   let activeFolderLog = [];
-  const root = await getRootHandle();
-  if (!root) throw new Error("尚未设置本地保存文件夹，请先在插件中选择保存目录。");
-  await ensureWritePermission(root);
-  if (!selectedIds.size) throw new Error("请至少勾选一个 B 站收藏夹。");
-
-  importRun = { active: true, paused: false, cancelled: false, waiters: [] };
+  // 4.9.x：占住这一轮导入。importRun 在这条 await 之前就已经置位，所以"按钮点两次"
+  // 不会再有中间窗口期：第二次请求会被 claimImportRun 直接拒掉，而不是排一轮在队列里，
+  // 更不会把取消信号打到另一个对象上（见 importBiliFavoritesInOrder 的注释）。
+  const run = claimImportRun();
+  if (!run) throw new Error("已经有一轮导入正在进行，请先等它结束或取消它。");
+  try {
+    const root = await getRootHandle();
+    if (!root) throw new Error("尚未设置本地备份文件夹，请先在插件中选择本地备份文件夹。");
+    await ensureWritePermission(root);
+    if (!selectedIds.size) throw new Error("请至少勾选一个 B 站收藏夹。");
+  } catch (error) {
+    // 置位之后、主流程之前就失败（没选文件夹 / 没授权 / 读不到根目录），
+    // 这里必须把占位放掉，否则界面会永久停在"导入中"。
+    run.active = false;
+    run.cancelled = false;
+    publishImportState({ running: false, paused: false, finishedAt: Date.now() }, true);
+    await clearImportRunSnapshot();
+    throw error;
+  }
+  const importRun = run;   // 这一轮固定引用自己那份运行状态，后面一律用它（不再用全局变量）
   upFansCache = new Map();
   // 4.4.1：失效视频恢复默认开启（它需要伪造成官方 APP 客户端请求 APP 接口，
   // 是合规上最勉强的一环，因此保留开关让用户能关掉；只有明确存成 false 才关闭）
@@ -2653,7 +2761,9 @@ async function importBiliFavorites(data, tabId = null) {
     if (folderNotes.length) reportLines.push("", "备注：", ...folderNotes);
     const reportPath = await persistErrorReport(reportLines.join("\n"));
     await chrome.storage.local.set({
-      lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: finishedAt },
+      // needsReauth 恒为 false：风控中止与文件夹授权无关。
+      // 显式写出来是为了让这个字段在每条 lastError 上都存在，前台不必区分"旧数据"和"这次没失效"。
+      lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: finishedAt, needsReauth: false },
       lastResult: { message, createdAt: finishedAt }
     });
     publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message, rateLimited: true }, true);
@@ -2673,7 +2783,11 @@ async function importBiliFavorites(data, tabId = null) {
   let reportPath = "";
   if (failed || hasIssues || reportLines.some((line) => line.includes("失败"))) {
     reportPath = await persistErrorReport(reportLines.join("\n"));
-    await chrome.storage.local.set({ lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: Date.now() } });
+    const report = reportLines.join("\n").slice(0, 16000);
+    // S3：导入失败也可能是"写到一半写入授权失效"（ensureWritePermission 在任务开始时查过，
+    // 但授权可能中途被回收）。报告正文里会带这句原文，这里顺手把它翻译成布尔值，
+    // 前台的「重新授权」按钮就不必再依赖中文文案。
+    await chrome.storage.local.set({ lastError: { report, reportPath, createdAt: Date.now(), needsReauth: needsReauthFromError(report) } });
   }
   // 分页缺口必须同时出现在回给界面的消息里，否则界面只会显示"失败 N 个"
   const message = `导入/更新完成：新导入 ${imported} 个，更新 ${refreshed} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`
@@ -2687,10 +2801,26 @@ async function importBiliFavorites(data, tabId = null) {
   return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath };
 }
 
+// 4.9.x：占住"当前这一轮导入"。claimImportRun 必须在任何 await 之前调用 ——
+// 排进 saveQueue 之后才轮到这里，中间那段"等队列""读根目录""查授权"全是 await，
+// 正是"按钮点两次"能钻进去的窗口：第二次会再排一轮，等第一轮结束就接着跑第二轮，
+// 而且会让取消信号打到另一个对象上（旧代码在函数体里 `importRun = {...}` 整个换对象，
+// 第一轮闭包握着的还是新对象，照样跑到底）。现在：pending 计数在消息进来的同步代码里
+// 就 +1，出队时再由这里置位，两处合起来把重复发起挡死；运行状态也只有一份对象。
+// 返回 null 表示已经有一轮在跑（或已在队列里等着）。
+function claimImportRun() {
+  if (importRun.active || importPending > 0) return null;
+  const run = { active: true, paused: false, cancelled: false, waiters: [] };
+  importRun = run;
+  return run;
+}
+
 function importBiliFavoritesInOrder(data, tabId = null) {
+  // 4.9.x：pending 在调用方（消息处理器）的同步代码里就已经 +1，这里只负责在任务真的
+  // 跑完（无论成功、失败还是取消）之后 -1，把"队列里还压着一轮导入"的标记放掉。
   const task = saveQueue.then(() => importBiliFavorites(data, tabId));
   saveQueue = task.catch(() => undefined);
-  return task;
+  return task.finally(() => { importPending = Math.max(0, importPending - 1); });
 }
 
 async function recordFavoriteError(data) {
@@ -2823,11 +2953,11 @@ async function getDownloadSubtitles(message) {
 /* ---------- V1.1.0：线上与本地的差异报告 ----------
 
    动机：导入会静默跳过已存在的记录，用户看不到 B 站那边变了什么；
-   而"再跑一次导入"对 2799 条的收藏夹要 39 分钟，代价太高。
+   而"再跑一次导入"对上千条的收藏夹要几十分钟，代价太高。
 
    **关键：差异只需要列表接口，绝不调详情接口。**
-   列表是 40 条/请求，详情是 1.25 条/秒。2799 条约 70 次请求（1~2 分钟），
-   而全量导入要 39 分钟 —— 相差 20 倍以上。
+   列表是 40 条/请求，详情是 1.25 条/秒。上千条约几十次请求（1~2 分钟），
+   而全量导入要几十分钟 —— 相差一个数量级以上。
    这个功能成立的前提就是这一条：**任何情况下都不要在这里调 fetchVideoDetail**，
    一旦调了它就不再"便宜"，也就失去了存在的意义。 */
 
@@ -2856,18 +2986,15 @@ const IMPORT_PAGE_DELAY_MS = 220;   // 额外的一层；实际节奏由 BILI_MI
    新增功能即使完全不写延迟，也不可能快过这个下限。
 
    修改这个常量前先想清楚：它同时决定了"最快能多快"和"多久会被限流"。 */
-/* 两次请求之间的最小间隔。为什么是 800ms：
+/* 两次请求之间的最小间隔 = 用户当前选的那一档（见下面的 REQUEST_SPEEDS）。
+   默认「较低」是 1200ms，还会每读 8 次停 6 秒。
 
-   项目里早就为详情抓取定了 IMPORT_DETAIL_DELAY_MS = 800（1.25 条/秒），
-   那是对着同一个接口的同一套风控拍的。列表接口没有任何理由比它快 2.5 倍 ——
-   之前写的 320ms 是凭手感定的，站不住脚。
+   这里以前写死过一个数：最早是 320ms（凭手感定的，比详情抓取快 2.5 倍，
+   真机上吃过一次风控），后来对齐到详情抓取的 800ms。现在改成跟着档位走 ——
+   档位是用户自己的选择，不该在代码里再写死一个默认值。
 
-   代价：上千条的收藏夹要翻几十页，耗时大约翻倍。
-   换来的是速率降到 1.25 次/秒，与详情一致；而且 57 秒仍在
-   "1000 条约 1 分钟"这个对用户的承诺之内。
-
-   想调快就改这一个数 —— 但改之前先想清楚：
-   320ms 那次真机风控，就是"觉得快一点没关系"的代价。 */
+   想改节奏只有两条路：调 REQUEST_SPEEDS 里的数值，或让用户换档。
+   改数值之前先想清楚：320ms 那次真机风控，就是"觉得快一点没关系"的代价。 */
 /* 请求速度档位。用户可在插件弹窗里选，存在 chrome.storage.session.requestSpeed。
    用 session 而不是 local：**关掉浏览器就回到默认的「较低」** ——
    用户要求不要沿用上一次的选择。快档是一次性的决定，不该在不经意间被继承下来。
@@ -2980,7 +3107,7 @@ function computeFavoriteDiff(remoteItems, localRecords) {
   const remote = Array.isArray(remoteItems) ? remoteItems : [];
   const local = Array.isArray(localRecords) ? localRecords : [];
 
-  // 用 Map 而不是每轮 find，2799 条时是 O(n) 与 O(n²) 的差别
+  // 用 Map 而不是每轮 find，上千条时是 O(n) 与 O(n²) 的差别
   const remoteByKey = new Map();
   for (const item of remote) {
     for (const key of item.keys || []) if (!remoteByKey.has(key)) remoteByKey.set(key, item);
@@ -3240,7 +3367,7 @@ async function diffBiliFavoritesInner(data, tabId = null) {
   if (!picked.length) throw new Error("没有找到要对比的收藏夹。如果本地收藏夹改过名，请先在 B 站核对名称。");
 
   const root = await getRootHandle();
-  if (!root) throw new Error("还没有设置本地保存位置，无法与本地对比。");
+  if (!root) throw new Error("还没有设置本地备份文件夹，无法与本地对比。");
 
   const diffs = [];
   for (const folder of picked) {
@@ -3308,10 +3435,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "bca-refresh-video-stats") {
-    // 与保存/导入共用串行队列，避免同时改写同一批归档文件
+    // 与保存/导入共用串行队列，避免同时改写同一批归档文件。
+    // 但导入暂停时队列会永久停住，所以这里给等待加一个上限（见 withQueueDeadline）：
+    // 超时就把"队列正忙"如实回报给界面，不再让它永远显示"更新中"。
     const task = saveQueue.then(() => refreshVideoStatus(message.data, sender?.tab?.id ?? null));
     saveQueue = task.catch(() => undefined);
-    task.then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "更新视频状态失败。" }));
+    withQueueDeadline(task, IMPORT_QUEUE_WAIT_TIMEOUT_MS, "更新视频状态")
+      .then((result) => {
+        if (result === WITH_QUEUE_DEADLINE_EXPIRED) {
+          sendResponse({
+            ok: false,
+            busy: true,
+            message: "本地队列正忙（很可能有导入正在暂停或进行中），本次状态更新已取消，请稍后重试；导入结束后会自动恢复正常。"
+          });
+          return;
+        }
+        sendResponse(result);
+      })
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "更新视频状态失败。" }));
     return true;
   }
   if (message?.type === "bca-import-control") {
@@ -3406,6 +3547,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "import-bili-favorites") {
+    // 4.9.x：必须在**同步代码里**就给"队列里压着一轮导入"记账。任务要等 saveQueue 空了
+    // 才真正开始，那段等待期里 importRun.active 还是 false，只看它挡不住连点第二次。
+    importPending += 1;
     importBiliFavoritesInOrder(message.data || message, sender?.tab?.id ?? null).then((result) => {
       // 落盘一份完成提示：导入要跑几分钟，用户多半已经切走页面、弹窗也关了，
       // 只在 sendMessage 回调里弹的话这次提示就永远看不到了。
@@ -3423,15 +3567,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "save-favorite") {
-    saveFavoriteInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error.message }));
+    // 兜底文案不能省：抛出来的不一定是 Error（比如 reject 一个字符串），
+    // 那时 error.message 是 undefined，前端的 BcaI18n.t(undefined) 会显示成一片空白。
+    saveFavoriteInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "保存收藏失败。" }));
     return true;
   }
   if (message?.type === "add-manual-video") {
-    addManualVideoInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error.message || "添加视频失败。" }));
+    addManualVideoInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "添加视频失败。" }));
     return true;
   }
   if (message?.type === "record-favorite-error") {
-    recordFavoriteError(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error.message }));
+    recordFavoriteError(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "记录收藏失败。" }));
     return true;
   }
   if (message?.type === "retry-pending-favorite") {

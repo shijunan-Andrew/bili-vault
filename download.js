@@ -350,11 +350,11 @@ async function useDefaultFolder() {
     await folderSetting("put", "default", "downloadFolderMode");
     archiveRootHandle = await folderSetting("get", null, "rootHandle");
     // 目录名是固有名称，只作为占位符参数；固定目录名「000视频下载」保持不变
-    downloadFolderName.textContent = archiveRootHandle ? BcaI18n.t("{name} / 000视频下载（默认）", { name: archiveRootHandle.name }) : BcaI18n.t("本地收藏根目录 / 000视频下载（默认）");
-    downloadFolderHelp.textContent = BcaI18n.t("开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。");
+    downloadFolderName.textContent = archiveRootHandle ? BcaI18n.t("{name} / 000视频下载（默认）", { name: archiveRootHandle.name }) : BcaI18n.t("本地备份文件夹 / 000视频下载（默认）");
+    downloadFolderHelp.textContent = BcaI18n.t("开始下载时会在本地备份文件夹下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。");
     folderPermissionHint.hidden = Boolean(archiveRootHandle);
-    if (!archiveRootHandle) folderPermissionHint.textContent = BcaI18n.t("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。");
-    addLog(BcaI18n.t("已切换到本地收藏根目录下的默认下载位置。"), "success");
+    if (!archiveRootHandle) folderPermissionHint.textContent = BcaI18n.t("请先在插件弹窗中设置本地备份文件夹，或选择一个自定义下载目录。");
+    addLog(BcaI18n.t("已切换到本地备份文件夹下的默认下载位置。"), "success");
     updateStartButton();
   } catch (error) {
     folderPermissionHint.hidden = false;
@@ -380,10 +380,10 @@ async function restoreFolder() {
     } else {
       downloadFolderMode = "default";
       downloadFolder = null;
-      downloadFolderName.textContent = archiveRootHandle ? BcaI18n.t("{name} / 000视频下载（默认）", { name: archiveRootHandle.name }) : BcaI18n.t("本地收藏根目录 / 000视频下载（默认）");
-      downloadFolderHelp.textContent = BcaI18n.t("开始下载时会在本地收藏根目录下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。");
+      downloadFolderName.textContent = archiveRootHandle ? BcaI18n.t("{name} / 000视频下载（默认）", { name: archiveRootHandle.name }) : BcaI18n.t("本地备份文件夹 / 000视频下载（默认）");
+      downloadFolderHelp.textContent = BcaI18n.t("开始下载时会在本地备份文件夹下自动创建“000视频下载”文件夹，并按收藏夹分目录保存。");
       folderPermissionHint.hidden = Boolean(archiveRootHandle);
-      if (!archiveRootHandle) folderPermissionHint.textContent = BcaI18n.t("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。");
+      if (!archiveRootHandle) folderPermissionHint.textContent = BcaI18n.t("请先在插件弹窗中设置本地备份文件夹，或选择一个自定义下载目录。");
     }
     updateStartButton();
   } catch (error) {
@@ -456,9 +456,9 @@ async function resolveDownloadFolder() {
     return downloadFolder;
   }
   if (!archiveRootHandle) archiveRootHandle = await folderSetting("get", null, "rootHandle");
-  if (!archiveRootHandle) throw new Error(BcaI18n.t("请先在插件弹窗中设置本地收藏根目录，或选择一个自定义下载目录。"));
+  if (!archiveRootHandle) throw new Error(BcaI18n.t("请先在插件弹窗中设置本地备份文件夹，或选择一个自定义下载目录。"));
   const permission = await archiveRootHandle.requestPermission({ mode: "readwrite" });
-  if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地收藏根目录的写入权限，请在插件弹窗中重新授权。"));
+  if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地备份文件夹的写入权限，请在插件弹窗中重新授权。"));
   // 使用固定目录名；已有目录时复用，不生成编号副本。
   return archiveRootHandle.getDirectoryHandle("000视频下载", { create: true });
 }
@@ -512,8 +512,17 @@ async function downloadUrl(directory, fileName, url) {
 async function downloadText(directory, fileName, text, type = "text/plain;charset=utf-8") {
   const file = await directory.getFileHandle(fileName, { create: true });
   const writable = await file.createWritable();
-  await writable.write(new Blob(["\uFEFF", text], { type }));
-  await writable.close();
+  // S7：write/close 失败时必须把 writable 中止掉，否则这个文件句柄一直被动持着，
+  // 在 Chrome 上会连带卡住后面同目录的写入（磁盘满、权限被回收都会走到这里）。
+  // 这里没有 reader 可以 cancel（正文是内存里的字符串），只做 abort 就行 ——
+  // 与 writeResponseToFile 里那套清理保持一致。
+  try {
+    await writable.write(new Blob(["\uFEFF", text], { type }));
+    await writable.close();
+  } catch (error) {
+    try { await writable.abort(); } catch (_) {}
+    throw error;
+  }
   savedFileCount += 1;
   updateProgress();
   addLog(BcaI18n.t("已保存 {fileName}", { fileName }), "success");
@@ -664,7 +673,7 @@ async function persistDownloadErrorReport() {
   try {
     const root = archiveRootHandle || await folderSetting("get", null, "rootHandle");
     // 这两条只会进页面日志；报告正文（下面的 lines）保持中文原样，别翻译
-    if (!root) throw new Error(BcaI18n.t("尚未设置本地收藏根目录"));
+    if (!root) throw new Error(BcaI18n.t("尚未设置本地备份文件夹"));
     let permission = await root.queryPermission({ mode: "readwrite" });
     if (permission !== "granted") permission = await root.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error(BcaI18n.t("没有获得错误报告目录的写入权限"));
@@ -771,27 +780,31 @@ async function start() {
     addLog(BcaI18n.t("至少选择一种下载内容。"), "error"); return;
   }
 
-  running = true;
-  paused = false;
-  cancelController = new AbortController();
-  savedFileCount = 0;
-  failedCount = 0;
-  downloadErrors = [];
-  activeDownloadContext = null;
-  completedTasks = 0;
-  plannedTasks = taskCountForCurrentSettings(pagesToDownload.length);
-  updateProgress();
-  setBadge(BcaI18n.t("下载中"), "active");
-  progressSummary.textContent = BcaI18n.t("准备下载 {videos} 个视频，共 {pages} 个分 P", { videos: validItems.length, pages: pagesToDownload.length });
-  progressCurrent.textContent = BcaI18n.t("正在创建下载目录");
-  startDownload.disabled = true;
-  downloadActions.hidden = false;
-  cancelDownload.disabled = false;
-  pauseDownload.disabled = false;
-  setButtonLabel(pauseDownload, "pause", BcaI18n.t("暂停下载"));
-  setQueueBusy(true);
-  addLog(BcaI18n.t("开始下载：{videos} 个视频 / {pages} 个分 P", { videos: validItems.length, pages: pagesToDownload.length }), "info");
+  // L2：初始化这一段（置 running、禁按钮、上屏进度）以前裸露在 try 之外，没有 finally
+  // 兜底：任何一步抛错（DOM 被脚本改动、setBadge 失败等）都会让 running 永远是 true、
+  // 按钮永远是灰的，用户只能重开标签页。所以把它并进下面这个 try —— 末尾的 finally
+  // 本来就负责复位，纳进来它才真的"无论如何都会跑"。
   try {
+    running = true;
+    paused = false;
+    cancelController = new AbortController();
+    savedFileCount = 0;
+    failedCount = 0;
+    downloadErrors = [];
+    activeDownloadContext = null;
+    completedTasks = 0;
+    plannedTasks = taskCountForCurrentSettings(pagesToDownload.length);
+    updateProgress();
+    setBadge(BcaI18n.t("下载中"), "active");
+    progressSummary.textContent = BcaI18n.t("准备下载 {videos} 个视频，共 {pages} 个分 P", { videos: validItems.length, pages: pagesToDownload.length });
+    progressCurrent.textContent = BcaI18n.t("正在创建下载目录");
+    startDownload.disabled = true;
+    downloadActions.hidden = false;
+    cancelDownload.disabled = false;
+    pauseDownload.disabled = false;
+    setButtonLabel(pauseDownload, "pause", BcaI18n.t("暂停下载"));
+    setQueueBusy(true);
+    addLog(BcaI18n.t("开始下载：{videos} 个视频 / {pages} 个分 P", { videos: validItems.length, pages: pagesToDownload.length }), "info");
     const folderCache = new Map();
     const failedFolders = new Set();
     const total = pagesToDownload.length;
@@ -869,6 +882,10 @@ async function start() {
     }
     await persistDownloadErrorReport();
     if (!cancelled) { completedTasks = plannedTasks; updateProgress(); }
+  } catch (error) {
+  // 复位已经由 finally 保证，这里只负责别让异常变成"没人接的 rejection"：
+  // 以前这段在 try 之外，抛错会直接冒到事件监听器外面的 Promise 上，进度区一行都不留。
+    addLog(BcaI18n.t("下载失败：{message}", { message: error?.message || String(error) }), "error");
   } finally {
     if (savedFileCount > 0 || cancelController?.signal.aborted) {
       try { await chrome.storage.local.set({ downloadRevision: crypto.randomUUID() }); }

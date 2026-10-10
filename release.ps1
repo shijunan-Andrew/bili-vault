@@ -198,6 +198,34 @@ $i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }
 if ($i18nOut -match '缺 [1-9]') { Say "    [$([char]0x2716)] 有词条缺翻译" $C_RED; $failed = $true }
 
+# 文档里写的测试项数必须和真实数量一致。这三处以前各写各的（141 / 141 / 127），
+# 实际早就涨到 163 了，读文档的人会以为测试规模还是原来那点 —— 和 README 版本历史
+# 是同一类问题：数字写死在文档里，就一定会过期。
+# 标记写成 HTML 注释，渲染出来看不见，但脚本能核对。
+Say "  文档里的测试项数…" $C_DIM
+$stabilitySrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'test/stability.test.cjs') -Raw -Encoding UTF8
+$realTestCount = ([regex]::Matches($stabilitySrc, '(?m)^test\(')).Count
+$staleDocs = @()
+foreach ($doc in @('SMOKE_TEST.md', 'README.md', 'AI_HANDOFF.md')) {
+  $docPath = Join-Path $PSScriptRoot $doc
+  if (-not (Test-Path -LiteralPath $docPath)) { $staleDocs += "$doc 不存在"; continue }
+  $docText = Get-Content -LiteralPath $docPath -Raw -Encoding UTF8
+  $markers = [regex]::Matches($docText, '<!--\s*test-count:(\d+)\s*-->')
+  if ($markers.Count -eq 0) { $staleDocs += "$doc 里找不到 <!-- test-count:N --> 标记"; continue }
+  foreach ($m in $markers) {
+    if ([int]$m.Groups[1].Value -ne $realTestCount) {
+      $staleDocs += "$doc 写的是 $($m.Groups[1].Value) 项，实际是 $realTestCount 项"
+    }
+  }
+}
+if ($staleDocs.Count -gt 0) {
+  foreach ($line in $staleDocs) { Say "    [$([char]0x2716)] $line" $C_RED }
+  Say "    改法：把这三处文档里的 test-count 标记统一改成 $realTestCount（只改数字）。" $C_YELLOW
+  $failed = $true
+} else {
+  Say "    [$([char]0x2713)] 三处文档都记着 $realTestCount 项" $C_GREEN
+}
+
 if ($failed) {
   & $rollback
   Die "检查未通过，版本号改动已回滚。修好之后重新运行。"

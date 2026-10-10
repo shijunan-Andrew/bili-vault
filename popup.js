@@ -326,7 +326,7 @@ async function startDiff() {
   const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   if (!folderIds.length) return;
   if (!rootHandle) {
-    importStatus.textContent = BcaI18n.t("请先选择本地保存文件夹。");
+    importStatus.textContent = BcaI18n.t("请先选择本地备份文件夹。");
     importStatus.classList.add("error");
     return;
   }
@@ -445,9 +445,28 @@ function confirmRiskySpeed() {
 }
 
 /* 完成提示弹窗。
-   以前只在「最近状态」里写一行小字，勾了很多收藏夹、跑了很久之后很容易看漏。 */
+   以前只在「最近状态」里写一行小字，勾了很多收藏夹、跑了很久之后很容易看漏。
+
+   两个来源会各自异步恢复上一次的结果（导入完成的 importDone、对比完成的 diffState），
+   它们互不知情，可能同时想弹。原生 <dialog> 已经开着时再 showModal() 会抛
+   InvalidStateError，而调用点的 .catch(() => {}) 会把它吞掉 —— 用户就永远看不到第二条。
+   所以这里排队：开着就先存起来，点掉「知道了」之后接着弹下一条。 */
+const pendingDoneDialogs = [];
 function showDoneDialog(text) {
+  if (!doneDialog || !text) return;
+  if (doneDialog.open) {
+    pendingDoneDialogs.push(text);
+    return;
+  }
   doneDialogText.textContent = text;
+  doneDialog.showModal();
+}
+/* 当前这条关掉之后，接着弹排队里的下一条 */
+function showNextDoneDialog() {
+  if (doneDialog?.open) return;
+  const next = pendingDoneDialogs.shift();
+  if (!next) return;
+  doneDialogText.textContent = next;
   doneDialog.showModal();
 }
 
@@ -472,7 +491,7 @@ async function startImport(options = {}) {
   const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   if (!folderIds.length) return;
   if (!rootHandle) {
-    importStatus.textContent = BcaI18n.t("请先选择本地保存文件夹。");
+    importStatus.textContent = BcaI18n.t("请先选择本地备份文件夹。");
     importStatus.classList.add("error");
     return;
   }
@@ -485,7 +504,7 @@ async function startImport(options = {}) {
   importProgressText.textContent = BcaI18n.t("正在请求本地目录权限…");
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地保存文件夹的写入权限，请重新选择保存文件夹后重试。"));
+    if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地备份文件夹的写入权限，请重新选择本地备份文件夹后重试。"));
     const tab = await queryCurrentTab();
     const payload = { type: "bca-import-selected-folders", folderIds };
     if (options.recentDays) payload.recentDays = options.recentDays;
@@ -533,7 +552,7 @@ function openDb() {
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法保存目录设置。")));
+    request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法保存本地备份文件夹设置。")));
   });
 }
 
@@ -544,7 +563,7 @@ async function saveRootHandle(handle) {
       const transaction = db.transaction(DB_STORE, "readwrite");
       transaction.objectStore(DB_STORE).put(handle, "rootHandle");
       transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error || new Error(BcaI18n.t("保存目录授权失败。")));
+      transaction.onerror = () => reject(transaction.error || new Error(BcaI18n.t("本地备份文件夹授权失败。")));
     });
   } finally {
     db.close();
@@ -557,7 +576,7 @@ async function loadRootHandle() {
     return await new Promise((resolve, reject) => {
       const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get("rootHandle");
       request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取已选保存目录。")));
+      request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取已选的本地备份文件夹。")));
     });
   } finally {
     db.close();
@@ -603,14 +622,18 @@ async function refreshStatus() {
     lastError.hidden = true;
     errorReport = "";
   }
-  // 注意：这两个 includes 匹配的是 background 写的中文原文，不能翻译
-  const authorizationExpired = Boolean(status.lastError?.report?.includes("写入授权已失效"));
+  // BUG-8：优先用后台给的结构化字段 lastError.needsReauth 判断要不要显示「重新授权」。
+  // 以前这里靠 includes 匹配 background 写的中文原文，文案一改（就像这次统一术语）
+  // 这个入口会静默消失：用户只看到一句报错，却找不到能救回来的按钮。
+  // 下面的字符串匹配只是过渡兜底，等 background.js 写上 needsReauth 之后可以删掉。
+  const authorizationExpired = Boolean(status.lastError?.needsReauth)
+    || Boolean(status.lastError?.report?.includes("写入授权已失效"));
   const alreadyReauthorized = status.authorizedErrorAt === status.lastError?.createdAt;
   const canRecover = authorizationExpired && rootHandle && !alreadyReauthorized;
   reauthorizeButton.hidden = !canRecover;
   permissionHint.hidden = !canRecover;
   if (canRecover) {
-    reauthorizeButton.textContent = status.pendingFavorite ? BcaI18n.t("重新授权并补存刚才的视频") : BcaI18n.t("重新授权收藏根目录");
+    reauthorizeButton.textContent = status.pendingFavorite ? BcaI18n.t("重新授权并补存刚才的视频") : BcaI18n.t("重新授权本地备份文件夹");
     // permissionNotice 里已经是可直接显示的文案
     permissionHint.textContent = permissionNotice || (status.pendingFavorite
       ? BcaI18n.t("点击后按 Chrome 提示允许访问，插件会接着保存这条视频。")
@@ -642,7 +665,7 @@ chooseButton.addEventListener("click", async () => {
     }
   } finally {
     chooseButton.disabled = false;
-    chooseButton.textContent = BcaI18n.t("选择收藏根目录");
+    chooseButton.textContent = BcaI18n.t("选择本地备份文件夹");
   }
 });
 
@@ -654,7 +677,7 @@ reauthorizeButton.addEventListener("click", async () => {
     // Invoke permission prompting directly from the click handler.
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     const permission = await permissionRequest;
-    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得保存目录的写入权限。请允许访问，或重新选择保存文件夹。"));
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。请允许访问，或重新选择本地备份文件夹。"));
     permissionNotice = "";
 
     const status = await chrome.runtime.sendMessage({ type: "get-status" });
@@ -664,7 +687,7 @@ reauthorizeButton.addEventListener("click", async () => {
       if (!result?.ok) throw new Error(result?.message ? BcaI18n.t(result.message) : BcaI18n.t("授权已恢复，但视频补存失败。请查看最近错误信息。"));
     } else {
       await chrome.storage.local.set({
-        lastResult: { message: BcaI18n.t("保存目录授权已恢复，请重新收藏刚才的视频。"), createdAt: Date.now() },
+        lastResult: { message: BcaI18n.t("本地备份文件夹授权已恢复，请重新收藏刚才的视频。"), createdAt: Date.now() },
         authorizedErrorAt: status.lastError?.createdAt || null
       });
     }
@@ -740,7 +763,16 @@ document.getElementById("riskyWarnGo").addEventListener("click", () => {
   if (riskyConfirmResolve) riskyConfirmResolve(true);
   riskyConfirmResolve = null;
 });
-document.getElementById("doneDialogClose").addEventListener("click", () => {
+/* 按 Esc 关掉同样要把等在 Promise 上的调用点放掉。
+   否则「开始导入」「开始更新」「先看差异」会永久挂住：按钮点了没反应，也没有任何报错。
+   Esc 等价于「取消」。 */
+riskyWarnDialog.addEventListener("cancel", () => {
+  if (riskyConfirmResolve) riskyConfirmResolve(false);
+  riskyConfirmResolve = null;
+});
+/* 完成提示被关掉时要做的事。点「知道了」和按 Esc 都走这里 ——
+   只绑 click 的话，Esc 关掉不写 acknowledged，下次打开插件会重新弹一遍。 */
+function dismissDoneDialog() {
   doneDialog.close();
   // 两类完成提示都标记"已提示过"，否则下次打开插件会重放
   chrome.storage.local.get("importDone").then((saved) => {
@@ -755,7 +787,11 @@ document.getElementById("doneDialogClose").addEventListener("click", () => {
       diffState: { ...state, summary: { ...state.summary, acknowledged: true } }
     });
   }).catch(() => {});
-});
+  // 排队等着的那条（如果有）接着弹
+  showNextDoneDialog();
+}
+document.getElementById("doneDialogClose").addEventListener("click", dismissDoneDialog);
+doneDialog.addEventListener("cancel", dismissDoneDialog);
 // 与「开始导入」「开始更新」保持一致：点一下先弹确认框，再点一次才真的开始
 function openDiffConfirm() {
   if (importBusy) return;

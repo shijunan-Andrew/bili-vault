@@ -90,7 +90,10 @@ body {
 .button-primary:hover:not(:disabled) { background: var(--brand-strong); }
 .button-secondary { color: var(--text); border-color: var(--line); background: var(--surface); }
 .button-secondary:hover:not(:disabled) { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
-.button-download { color: #fff; border-color: var(--success-solid); background: var(--success-solid); }
+/* 这里原来还有一条 .button-download。本页从来没用过那个类（开始下载按钮是
+   button-primary），真正在用它的地方是 library.css 的工具栏和详情页。
+   两份定义迟早会漂：library.css 那份带 box-shadow 和 :hover，这份没有。
+   要用绿色下载按钮请去 library.css 抄完整的那份，不要在这里重新定义。 */
 .text-button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 2px; border: 0; color: var(--brand-deep); background: transparent; font-size: var(--fs-sm); font-weight: 600; }
 .text-button:hover { color: var(--brand-strong); text-decoration: underline; }
 

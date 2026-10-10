@@ -17,3 +17,10 @@ if (closeButton) {
     }, 60);
   });
 }
+
+/* 教程第三步里画了一个 chrome://extensions 的示意图，上面有版本号。
+   这个数字以前是写死在 HTML 里的（停在 1.1.28，落后了十个版本都没人发现）——
+   凡是写死在文档/示意图里的版本号都一定会过期。改成从 manifest 现读，
+   示意图就永远和真实扩展一致。（使用说明页没有这个示意卡片，取值前先判空。） */
+const versionSlot = document.getElementById("tutorialVersion");
+if (versionSlot) versionSlot.textContent = chrome.runtime.getManifest().version;

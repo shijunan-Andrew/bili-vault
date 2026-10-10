@@ -69,7 +69,8 @@
         <button type="button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>
         <button type="button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
       </div>
-      <!-- 使用须知第一条讲的就是请求速度。默认「标准」；切到「较高」或「高」必须先过提醒弹窗。 -->
+      <!-- 使用须知第一条讲的就是请求速度。默认「较低」（存在 storage.session，关浏览器即回到默认）；
+           切到「较高」或「高」必须先过提醒弹窗。 -->
       <div class="speed-row">
         <span id="speedLabel" class="speed-label" data-i18n="请求速度">请求速度</span>
         <div id="speedGroup" class="segmented speed-segmented" role="group" data-i18n-aria="请求速度" aria-label="请求速度">
@@ -91,12 +92,12 @@
     </section>
 
     <section class="card folder-card">
-      <div class="section-label" data-i18n="本地收藏根目录">本地收藏根目录</div>
+      <div class="section-label" data-i18n="本地备份文件夹">本地备份文件夹</div>
       <div id="folderName" class="folder-name" data-i18n="尚未选择文件夹">尚未选择文件夹</div>
-      <button id="chooseFolder" class="primary" data-i18n="选择收藏根目录">选择收藏根目录</button>
-      <button id="reauthorizeFolder" class="secondary" data-i18n="重新授权收藏根目录" hidden>重新授权收藏根目录</button>
+      <button id="chooseFolder" class="primary" data-i18n="选择本地备份文件夹">选择本地备份文件夹</button>
+      <button id="reauthorizeFolder" class="secondary" data-i18n="重新授权本地备份文件夹" hidden>重新授权本地备份文件夹</button>
       <p id="permissionHint" class="hint" hidden></p>
-      <p class="hint" data-i18n="这里选的就是本地收藏库的根目录，和收藏库左上角「选择收藏根目录」是同一个位置，在哪边改都生效。">这里选的就是本地收藏库的根目录，和收藏库左上角「选择收藏根目录」是同一个位置，在哪边改都生效。</p>
+      <p class="hint" data-i18n="和收藏库右上角「选择本地备份文件夹」是同一个位置，在哪边改都生效。">和收藏库右上角「选择本地备份文件夹」是同一个位置，在哪边改都生效。</p>
       <p class="hint" data-i18n="选择一次后会记住路径，并按收藏夹名称和时间创建子目录。">选择一次后会记住路径，并按收藏夹名称和时间创建子目录。</p>
     </section>
 

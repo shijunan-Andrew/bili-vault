@@ -1,0 +1,113 @@
+/* ==========================================================================
+   page.css —— tutorial.html 与 guide.html 两页共用的页面骨架
+   V1.1.32 把示意图样式抽成 mockup.css 时，把教程页那段内联 <style> 整个删掉了，
+   但那段里同时装着页面骨架 —— 结果教程页五步编号圆标、卡片边框、按钮全部退化成
+   浏览器默认样式。这里把骨架收回来，两页都 <link> 它，样式只有一份。
+
+   全部色值/圆角/字号/间距来自 theme.css，不写死新颜色；不写 !important；
+   跟随深色主题由 theme.css 的变量替换完成，本文件一行都不用改。
+
+   定义在别处的类不在这里重复：示意图在 mockup.css，图标与令牌在 theme.css。
+   本文件只补两页真正用到的：.wrap / .lead / .steps / .h2… 骨架，以及
+   .what / .hint / .actions / .button / .note。后五个要么全仓库没有定义
+   （.what / .actions），要么只写在 popup.css、library.css 里，而这两页都不加载
+   那两个文件（.button 另有 library.css:328 一份，本文件与它逐条对齐）；
+   .note 在 mockup.css:112 只有 .pop .note 这种带祖先后缀的形式，补一条通用的，
+   好让教程页那个直接挂在 <li> 下的 .note 也有样式。本文件在 mockup.css 之后加载，
+   带祖先后缀的那几条特异性更高，依然优先，guide.html 的观感不变。
+   ========================================================================== */
+
+/* ── 页面骨架 ── */
+body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font: 15px/1.75 var(--font-sans); }
+.wrap { max-width: 900px; margin: 0 auto; padding: 28px 20px 72px; }
+h1 { font-size: 24px; margin: 0 0 6px; }
+.lead { color: var(--muted); margin: 0 0 26px; }
+h2 { font-size: 18px; margin: 40px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }
+h2:first-of-type { border-top: 0; padding-top: 0; }
+h3 { font-size: 15px; margin: 22px 0 8px; }
+p { margin: 10px 0; }
+ul, ol { margin: 10px 0; padding-left: 22px; }
+li { margin: 5px 0; }
+code { padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); font-size: 13px; }
+
+.muted { color: var(--muted); }
+.callout { margin: 14px 0; padding: 13px 16px; border: 1px solid var(--accent-line); border-radius: var(--r-sm); background: var(--accent-soft); }
+.callout.warn { border-color: var(--danger-line); background: var(--danger-soft); }
+.callout.ok { border-color: var(--success-line); background: var(--success-soft); }
+.callout > b:first-child { display: block; margin-bottom: 5px; }
+.callout.warn > b:first-child { color: var(--danger); }
+
+/* 说明段落：教程页五步的正文与补充说明。正文用 --fs-md（15px，和页面正文一致），
+   补充说明用 --fs-base（13px，theme.css 规定中文正文不低于 13px，所以不跟
+   popup.css 的 --fs-sm 走）。 */
+.what { margin: var(--sp-3) 0 0; font-size: var(--fs-md); line-height: 1.7; }
+.hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-base); line-height: 1.7; }
+/* 教程页第五步的 .note 直接挂在 <li> 下，没有 .pop 祖先，
+   mockup.css 的 .pop .note 那条选择器盖不到它，所以要在这里补一条。 */
+.note { margin: var(--sp-3) 0 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--accent-line);
+        border-radius: var(--r-sm); background: var(--accent-soft); line-height: 1.7; }
+.note > strong:first-child { color: var(--accent); }
+
+/* 表格：与 guide.html 里的原有写法一致（.num 是等宽数字列） */
+table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+th, td { padding: 9px 11px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--surface-soft); font-weight: 600; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* 步骤列表：编号圆标靠 counter 生成，圆标、边框、底色缺一不可 */
+.steps { counter-reset: s; list-style: none; padding: 0; }
+.steps > li { counter-increment: s; position: relative; margin: 0 0 22px; padding: 16px 18px 16px 56px;
+              border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.steps > li::before { content: counter(s); position: absolute; left: 16px; top: 15px; width: 26px; height: 26px;
+                      border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px;
+                      display: grid; place-items: center; }
+.steps > li > b { display: block; margin-bottom: 4px; }
+/* 教程页的步骤正文是 <p class="what">，卡片已经有 16px 内边距，首行不用再留 12px */
+.steps > li > .what { margin-top: 0; }
+
+.faq { margin: 0; }
+.faq dt { margin-top: 18px; font-weight: 600; }
+.faq dd { margin: 5px 0 0; color: var(--muted); }
+
+/* 目录卡：两列网格，窄屏退回一列（原来固定两列，英文界面上会挤成一团） */
+.toc { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; margin: 0 0 8px; padding: 14px 18px;
+       border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: 13.5px; }
+.toc a { color: var(--accent); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+@media (max-width: 620px) { .toc { grid-template-columns: 1fr; } }
+
+.end { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); text-align: center; }
+
+/* 示意图里的内联 SVG 图标（语言菜单、左下角浮标那种）。
+   实际界面用的是 icons.js 里的几何图标，不是 emoji；这里把尺寸、对齐、
+   描边色统一好，示意图就能直接内联同一份 SVG，且不必逐处写 style。
+   用 inline-block 而不是 flex，这样放在 div 和带上标文字的行内都好看。 */
+.mock-ico { display: inline-block; width: 15px; height: 15px; vertical-align: -3px; fill: none;
+            stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* 页脚操作区：教程页「知道了，去试试」。按钮单独一行居中，不和正文贴在一起。 */
+.actions { display: flex; justify-content: center; margin: var(--sp-6) 0 0; }
+
+/* ── 按钮 ──
+   与 library.css 的同名规则逐条对齐（同样 40px 高、--brand 底、白字 + 品牌阴影），
+   这样教程页的按钮和收藏库里的按钮是同一个东西，不因为换了页面就变样。 */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  font-weight: 650;
+  text-decoration: none;
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.button:hover:not(:disabled) { transform: translateY(-1px); }
+.button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+/* 白字压在 --brand 上属于「彩色底上的文字」，不随主题变（和 library.css:345 一致） */
+.button-primary { color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
+.button-primary:hover:not(:disabled) { background: var(--brand-strong); }
