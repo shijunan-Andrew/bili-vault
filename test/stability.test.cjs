@@ -1830,6 +1830,10 @@ test("the settings page offers theme, language, and the two help pages", () => {
   assert.ok(backAt > 0 && closeCalls[0].index > backAt, "关页只能出现在「返回收藏库」的处理器里");
   // 只改选中态、不写文字：切完语言后写死的文字会把译文盖回中文
   assert.doesNotMatch(script, /textContent\s*=/);
+  // 毛玻璃开关的视觉是 .off 类画的（照 popup.css 的约定）。只写 aria-pressed 的话，
+  // 「上次已经开着毛玻璃」的用户再打开设置页会看到一个显示为「关」的开关。
+  assert.match(html, /id="glassToggle" class="toggle-switch off"/);
+  assert.match(script, /glass\.classList\.toggle\("off", !appearance\.glass\)/);
 });
 test("the interface language switcher offers three locales", () => {
   const html = readProjectFile("library.html");
@@ -1931,10 +1935,25 @@ test("the safety notice uses the warning palette with larger type", () => {
 /* ------------------------- 4.5 多语言词典 ------------------------- */
 
 // 在沙箱里加载 theme.js / i18n.js：它们都是 IIFE，参数化 globalThis 就能隔离测试
-function loadThemeModule({ stored = null, prefersDark = false } = {}) {
+function loadThemeModule({ stored = null, prefersDark = false, appearance = null } = {}) {
   const attributes = {};
+  const properties = {};
+  const classes = new Set();
   const listeners = {};
-  const storage = { value: stored, getItem() { return this.value; }, setItem(_key, next) { this.value = next; } };
+  // 1.4.0 起 theme.js 还会读写 interfaceAppearance，所以这里按「键」分清：
+  // 界面主题仍走 .value（老用例直接改它来模拟别的页面写入），外观走 .values。
+  const storage = {
+    value: stored,
+    values: {},
+    getItem(key) {
+      if (key === "interfaceAppearance") return this.values[key] ?? null;
+      return this.value;
+    },
+    setItem(key, next) {
+      if (key === "interfaceAppearance") { this.values[key] = next; return; }
+      this.value = next;
+    }
+  };
   const sandbox = {
     localStorage: storage,
     matchMedia: () => ({ matches: prefersDark, addEventListener() {} }),
@@ -1945,12 +1964,21 @@ function loadThemeModule({ stored = null, prefersDark = false } = {}) {
   const fakeDocument = {
     documentElement: {
       dataset: {},
+      classList: {
+        toggle(name, on) { if (on) classes.add(name); else classes.delete(name); return Boolean(on); },
+        contains(name) { return classes.has(name); }
+      },
+      style: {
+        setProperty(name, value) { properties[name] = value; },
+        removeProperty(name) { delete properties[name]; }
+      },
       setAttribute(name, value) { attributes[name] = value; },
       removeAttribute(name) { delete attributes[name]; }
     }
   };
+  if (appearance) storage.values["interfaceAppearance"] = JSON.stringify(appearance);
   new Function("globalThis", "document", readProjectFile("theme.js"))(sandbox, fakeDocument);
-  return { api: sandbox.BcaTheme, attributes, storage, sandbox };
+  return { api: sandbox.BcaTheme, attributes, dataset: fakeDocument.documentElement.dataset, properties, classes, storage, sandbox };
 }
 
 test("theme.js resolves 白天 / 夜晚 / 跟随系统 correctly", () => {
@@ -3688,5 +3716,133 @@ test("详情关掉之后就不算「正在看这条」，切语言不会再把�
     /BcaI18n\.use\(next, \{ silent: true \}\)/,
     "读到新语言后要真的切过去（silent：别让它在收藏库页再写一次 storage）"
   );
+});
+
+/* ---- 1.4.0：外观（自定义背景 + 毛玻璃），外观统一在设置页改 ---- */
+
+test("外观多了「自定义」，底色仍按白天算（真跑一遍 theme.js）", () => {
+  const theme = loadThemeModule({ stored: "custom", prefersDark: true });
+
+  // 自定义 = data-theme="light" + data-appearance="custom"。这样原本所有按深色
+  // 写的规则都不用动，弹窗也就自动是白天色 —— 不用为它单写一套「自定义」配色。
+  assert.equal(theme.api.current(), "custom");
+  assert.equal(theme.api.resolved(), "light", "自定义要压过系统深色，一律按白天算");
+  assert.equal(theme.attributes["data-theme"], "light", "必须挂 data-theme=light，否则挡不住系统深色");
+  assert.equal(theme.dataset.appearance, "custom");
+  assert.equal(theme.api.modes().length, 4, "四种外观：跟随系统 / 白天 / 夜晚 / 自定义");
+
+  // 另外三种仍是纯色：不该挂成 custom（否则会去找背景图）
+  assert.equal(loadThemeModule({ stored: "dark" }).dataset.appearance, "plain");
+});
+
+test("外观的三个数值都会落到 <html> 的 CSS 变量上（真跑一遍 theme.js）", () => {
+  const theme = loadThemeModule({
+    stored: "custom",
+    appearance: { veil: 80, blur: 24, glass: true, glassBlur: 12 }
+  });
+
+  assert.equal(theme.classes.has("bca-glass"), true, "开了毛玻璃要挂 bca-glass");
+  assert.equal(theme.properties["--bca-wallpaper-blur"], "24px");
+  assert.equal(theme.properties["--bca-glass-blur"], "12px");
+  // 遮罩是「浅色雾」，颜色就是页面底色（--bg #f2f5f9），不是黑幕：
+  // 黑幕会把整页拖进深色，后面的白卡片看着就是浮起来的。
+  assert.equal(theme.properties["--bca-wallpaper-veil"], "rgba(242, 245, 249, 0.736)");
+
+  // 关掉毛玻璃要把类名摘掉，不能只靠「不再写变量」——类名留着，卡片还是半透明
+  theme.api.setAppearance({ glass: false });
+  assert.equal(theme.classes.has("bca-glass"), false);
+
+  // 设置页的滑块靠这条通知回填，不用自己去读 localStorage
+  let seen = null;
+  theme.api.onAppearanceChange((next) => { seen = next.veil; });
+  theme.api.setAppearance({ veil: 20 });
+  assert.equal(seen, 20, "改外观要通知订阅者");
+});
+
+test("外观的取值会被夹在范围内，脏数据不许穿透（真跑一遍 theme.js）", () => {
+  const theme = loadThemeModule({
+    stored: "custom",
+    appearance: { veil: 500, blur: -20, glassBlur: 999 }
+  });
+
+  assert.equal(theme.api.appearance().veil, 100, "遮罩上限 100");
+  assert.equal(theme.api.appearance().blur, 0, "模糊下限 0");
+  assert.equal(theme.api.appearance().glassBlur, 20, "毛玻璃强度上限 20（与参考实现在同一量级）");
+  assert.equal(theme.api.setAppearance({ glassBlur: 0 }).glassBlur, 1, "下限 1：0 等于没开，要用开关而不是把强度调到 0");
+  assert.equal(theme.api.setAppearance({ glassBlur: "abc" }).glassBlur, 16, "非法值退回默认 16");
+
+  // 外观与界面主题是两份设置、两个键：写一份不能把另一份覆盖掉
+  assert.notEqual(theme.storage.values["interfaceAppearance"], undefined, "外观写进 interfaceAppearance");
+  assert.equal(theme.storage.value, "custom", "写外观不该改掉界面主题");
+});
+
+test("背景图存 IndexedDB 的 Blob，不进 chrome.storage（静态回归）", () => {
+  const theme = readProjectFile("theme.js");
+  const css = readProjectFile("theme.css");
+
+  // 一张手机照片动辄几 MB，chrome.storage.local 默认只有 10MB，还得跟别的设置挤
+  assert.match(theme, /WALLPAPER_DB = "bili-vault-appearance"/);
+  assert.match(theme, /indexedDB\.open\(WALLPAPER_DB, 1\)/);
+  assert.equal(/mirrorToStorage\([^)]*[Ww]allpaper/.test(theme), false, "图片不许进 chrome.storage");
+  assert.equal(/unlimitedStorage/.test(readProjectFile("manifest.json")), false, "没为背景图新增任何权限");
+
+  // 存之前先压一道：长边 2560 + webp 0.92（压不动就原样存 —— 压不了不该挡住用户设背景）
+  assert.match(theme, /file\.type\.startsWith\("image\/"\)/, "只接受图片");
+  assert.match(theme, /const MAX_EDGE = 2560;/);
+  assert.match(theme, /"image\/webp", 0\.92\)/);
+
+  // 弹窗不铺背景图：靠 <html data-wallpaper-scope="popup"> 认出来；
+  // 而且「页面让出底色」那条规则要放过它，否则弹窗只剩浏览器窗口色。
+  assert.match(readProjectFile("popup.html"), /<html lang="zh-CN" data-wallpaper-scope="popup">/);
+  assert.match(theme, /dataset\.wallpaperScope === "popup"/);
+  assert.match(
+    css,
+    /html\[data-appearance="custom"\]:not\(\[data-wallpaper-scope="popup"\]\) body \{ background: transparent; \}/
+  );
+});
+
+test("毛玻璃糊在哪些面上、怎么糊，都钉住（静态回归）", () => {
+  const css = readProjectFile("theme.css");
+
+  assert.match(css, /--bca-glass-blur: 16px;/, "要有兜底默认值：设置还没读完时也得能看");
+  assert.match(css, /html\.bca-glass :is\(\.sidebar, \.video-card, \.detail-panel, \.batch-toolbar,/);
+  assert.match(css, /backdrop-filter: blur\(var\(--bca-glass-blur\)\) saturate\(170%\)/);
+  assert.match(css, /-webkit-backdrop-filter: blur\(var\(--bca-glass-blur\)\) saturate\(170%\)/, "Safari 要前缀");
+  // 玻璃边缘高光：没有它，半透明卡片看着像「没画完」而不是「磨砂」
+  assert.match(css, /html\.bca-glass :is\(\.video-card, \.settings-card, \.detail-panel\) \{[\s\S]{0,240}inset 0 0 12px/);
+  // 四个玻璃令牌都必须从当前主题的令牌推出来：写死白色的话，夜晚主题下
+  // 卡片会亮成一片、字压在亮底上看不清，边缘高光还会顶着一圈白边（theme=dark&glass=1 真跑出来过）。
+  // 底色 / 高光 / 暗部从 --surface 推，描边从 --line 推，两者都是跟着主题走的令牌。
+  for (const [token, base] of [["--bca-glass-surface", "--surface"], ["--bca-glass-line", "--line"],
+    ["--bca-glass-glow", "--surface"], ["--bca-glass-shade", "--surface"]]) {
+    const declaration = (css.match(new RegExp(`${token}: [^;]+;`)) || [""])[0];
+    assert.match(declaration, /color-mix\(/, `${token} 要用 color-mix 从主题色推出来`);
+    assert.ok(declaration.includes(`var(${base})`), `${token} 要跟着 ${base} 走`);
+    // 取值本身如果是写死的白色（#fff / rgba(255,255,255)）就算犯规；
+    // color-mix(...) 里的 #fff / #000 是允许的 —— 它们带着「往白/黑提多少」的百分比，
+    // 仍然以主题色为主（--bca-glass-glow: color-mix(in srgb, var(--surface), #fff 55%)）。
+    // 只钉「整段颜色就是写死值」这一种：末尾的 color-mix(...) 参数如果是不带百分比的
+    // 十六进制色，说明底色被写死了，夜晚主题下会亮成一片。
+    assert.equal(/(#[0-9a-f]{3,8}\s*\)|#[0-9a-f]{3,8}\s*;|rgba?\(\s*255\s*,)/i.test(declaration), false,
+      `${token} 不许把颜色写死（夜晚主题下会亮成一片）`);
+  }
+
+  // 背景图那层：模糊按半径外扩。只用 transform: scale() 的话，模糊一大边缘会透出底色。
+  assert.match(css, /\.bca-wallpaper::before \{[\s\S]{0,240}inset: calc\(-1 \* \(var\(--bca-wallpaper-blur\) \+ 12px\)\);/);
+  assert.equal(/\.bca-wallpaper::before \{[\s\S]{0,320}transform: scale/.test(css), false, "别再用 scale 硬撑边缘");
+  // 模糊只做在图这一层：遮罩层再来一次整屏 backdrop-filter，成本高得多
+  assert.equal(/\.bca-wallpaper::after \{[^}]*backdrop-filter/.test(css), false, "遮罩不该再糊一次");
+});
+
+test("弹窗不再有主题滑块：外观只在设置页改（V1.4.0）", () => {
+  const popupHtml = readProjectFile("popup.html");
+  const popupJs = readProjectFile("popup.js");
+
+  assert.equal(/themeButtons|renderThemeOptions/.test(popupJs), false, "弹窗不该再渲染主题选项");
+  assert.equal(/data-theme-value/.test(popupHtml), false, "弹窗里不该再有主题按钮");
+  assert.equal(/BcaTheme/.test(popupJs), false, "弹窗不该再碰主题");
+  // 但弹窗仍要跟着主题走，也不能顺手把语言一起搬走
+  assert.match(popupHtml, /<script src="theme\.js"><\/script>/, "theme.js 必须在：弹窗的配色靠它");
+  assert.match(popupHtml, /data-locale="en"/, "语言仍然留在弹窗里");
 });
 

@@ -1,47 +1,275 @@
 /* 设置页（settings.html）专属的排版。
-   卡片观感、按钮族、分段控件全部沿用 theme.css / page.css / popup.css 里已有的那套，
-   这里只补「顶部标题行 + 一张张设置卡片」的骨架，不新造设计语言。 */
+   骨架借了 BewlyCat 那类「分组卡 + 行内左标题右控件 + 顶部工具条 + 左侧图标导航」的
+   布局思路，但类名、配色、组件全部是本仓库自己的：颜色只走 theme.css 的令牌
+   （深色主题下不用改一行），分段控件直接复用 theme.css 的 .segmented，
+   按钮复用 page.css 的 .button。这里只写设置页自己才有的东西。 */
 
-/* 标题 + 说明在左、返回收藏库在右；窄屏改成上下排 */
-.settings-head {
+/* 顶栏高度写成根变量：顶栏自己是 sticky、侧栏是另一个 grid 子项，
+   两者不是祖孙关系，挂在 .settings-topbar 上侧栏就取不到值了。 */
+:root { --topbar-h: 56px; }
+
+/* 顶栏要横向铺满整屏（下面那行 grid 的 -1 列），所以不能放在 grid 里当子项 */
+.settings-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
+  gap: var(--sp-3);
+  min-height: var(--topbar-h);
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
-.settings-head h1 { margin: 0 0 4px; }
-/* page.css 的 .lead 留了 26px 下边距，这里换成更紧的间距 */
-.settings-head .muted { margin: 0; }
-.settings-head .button { flex: 0 0 auto; }
 
+/* 标题行 + 面包屑同占顶栏左侧。两者说的是同一件事（本页是设置页、当前在第几组），
+   所以窗口一窄就把整条面包屑收起来，只留大标题。 */
+.topbar-lead { display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
+.topbar-lead h1 {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 面包屑：齿轮 → 设置 → › → 当前分组。
+   第一格是栏目名而不是「返回收藏库」：那是个动作、不是上一级栏目，
+   做成可点的还会多开出一个收藏库标签页（返回入口只留顶栏右侧那一个）。
+   两格都不加 --brand-deep，免得跟左侧导航的选中态抢注意力。 */
+.crumbs { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--muted); font-size: var(--fs-base); }
+.crumbs [data-icon] { display: inline-flex; font-size: var(--fs-md); opacity: .8; }
+.crumbs-root { white-space: nowrap; }
+.crumbs-sep { font-size: var(--fs-base); color: var(--faint); }
+#crumbGroup { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.topbar-tools { display: flex; align-items: center; gap: var(--sp-3); flex: 0 0 auto; }
+/* 32px 是图标按钮的常见尺寸，比 .button 的 40px 矮一档，顶栏里不抢视线 */
+.topbar-tools .button { min-height: 32px; padding: 0 var(--sp-3); }
+
+/* 搜索框 + 结果下拉。外面这层**没有** backdrop-filter：
+   玻璃会新建包含块，下拉的绝对定位就跟着歪了。 */
+.settings-search { position: relative; width: 260px; }
+.settings-search .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); display: inline-flex; color: var(--muted); font-size: var(--fs-md); pointer-events: none; }
+.settings-search input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--sp-3) 0 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  background: var(--surface-soft);
+  font-size: var(--fs-base);
+}
+.settings-search input::placeholder { color: var(--faint); }
+.settings-search input:focus-visible { border-color: var(--brand); background: var(--surface); outline: none; box-shadow: var(--focus-ring); }
+
+/* 结果下拉：一屏最多 8 条，超了在框内滚 */
+.search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--sp-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+.search-hit:hover { background: var(--surface-sunken); }
+.search-hit-title { font-size: var(--fs-base); font-weight: 600; }
+.search-hit-group { color: var(--muted); font-size: var(--fs-sm); }
+.search-none { padding: var(--sp-2) var(--sp-3); color: var(--muted); font-size: var(--fs-base); }
+
+/* 侧栏 + 正文两栏。窄屏（<900px）侧栏收成横向图标条，见文件末尾的媒体查询 */
+.settings-shell {
+  --side-w: 188px;
+  display: grid;
+  grid-template-columns: var(--side-w) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-5);
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--sp-5) var(--sp-5) var(--sp-6);
+  /* 顶栏是 sticky 的，锚点跳转要给它让出高度，否则目标行会被顶栏压住 */
+  scroll-padding-top: calc(var(--sp-5) + var(--sp-4));
+}
+.settings-side { position: sticky; top: calc(var(--topbar-h) + var(--sp-4)); }
+/* 导航自己带一层底色，做成浮在照片上的胶囊卡片。
+   背景图 + 遮罩拉到 0 时，侧栏那三个字是直接压在照片上的灰字，基本读不出来
+   （AI_HANDOFF 修改原则 23：每一处文字都要落在自有底色的面上）。
+   开了毛玻璃时这层底色会被 theme.css 换成半透明的 --bca-glass-surface，
+   所以类名 .settings-nav 要留在那份 html.bca-glass :is(...) 清单里。 */
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  text-align: left;
+}
+.nav-item:hover { color: var(--ink); background: var(--surface-soft); }
+.nav-icon { display: inline-flex; font-size: var(--fs-md); opacity: .8; }
+/* 当前分组：软底 + 品牌色，跟分段控件的选中态是同一套语言 */
+.nav-item[aria-current="true"] { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
+.nav-item[aria-current="true"] .nav-icon { color: var(--brand); opacity: 1; }
+.nav-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 分组卡：卡片本身就是一条分界，标题不用 page.css 那条上边框 */
 .settings-card {
   margin-top: var(--sp-4);
-  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  padding: var(--sp-4) var(--sp-5) var(--sp-2);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
-/* 卡片本身就是一条分界，标题不用 page.css 那条上边框 */
-.settings-card h2 {
-  margin: 0 0 4px;
-  padding-top: 0;
-  border-top: 0;
-  font-size: var(--fs-lg);
-}
-.settings-card .muted {
-  margin: 0 0 var(--sp-3);
-  font-size: var(--fs-base);
-}
+.settings-card:first-child { margin-top: 0; }
+.settings-card h2 { margin: 0 0 4px; padding-top: 0; border-top: 0; font-size: var(--fs-lg); }
+.card-lead { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--fs-base); }
 
-.settings-links { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* 一行一项：左标题 + 副说明，右控件。行与行之间用 1px --line 分隔 */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--line);
+  /* 搜索跳到这里时留出顶栏的高度，同时给 1.5s 的高亮留个落脚点 */
+  scroll-margin-top: calc(56px + var(--sp-4));
+}
+.card-lead + .setting-row { border-top: 0; }
+.setting-row-text { min-width: 0; }
+.setting-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; color: var(--ink); font-size: var(--fs-md); font-weight: 600; }
+.setting-row-desc { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
+/* 右侧控件：右对齐、不换行；分段控件与滑块在这里各有固定宽度 */
+.setting-row-control { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; gap: var(--sp-2); white-space: nowrap; }
+.setting-row-control .segmented { flex: 0 0 auto; width: 320px; }
+.setting-row-control .segmented-button { min-width: 0; }
+.setting-slider { display: flex; align-items: center; gap: var(--sp-3); width: 264px; }
+.setting-slider input[type="range"] { flex: 1 1 auto; width: auto; min-width: 0; accent-color: var(--brand); }
+/* 定宽 + 等宽数字：拖滑块时右边的数值不会左右跳 */
+.slider-value { flex: 0 0 46px; color: var(--muted); font-size: var(--fs-sm); text-align: right; }
 
-/* page.css 的 .button 只管尺寸与排版，底色由 .button-primary 提供；
-   设置页这三处都是次要动作，补一条安静样式（与 library.css 的 .button-quiet 同观感）。 */
+/* 「性能影响」胶囊：橙色告警三件套走 --warning 系列令牌，深色主题自动跟着换 */
+.perf-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border: 1px solid var(--warning-line);
+  border-radius: 9999px;
+  color: var(--warning);
+  background: var(--warning-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.row-error { margin: 0; color: var(--warning); font-size: var(--fs-base); }
+
+/* 开关：结构照 popup.css 的 .toggle-switch（圆槽 + 一个圆点，.off 时点回到左边），
+   但配色走 --surface-sunken / --brand 令牌 —— popup.css 那版里底色与圆点是写死的，
+   设置页要在深色主题下也成立，所以这里自己定义一份，不去动 popup.css。 */
+.toggle-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  min-width: 46px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 1px solid var(--brand);
+  border-radius: var(--r-pill);
+  background: var(--brand);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.toggle-switch span {
+  position: absolute;
+  top: 2px;
+  left: 22px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: left var(--dur) var(--ease);
+}
+.toggle-switch.off { border-color: var(--line); background: var(--surface-sunken); }
+.toggle-switch.off span { left: 2px; background: var(--faint); }
+
+/* 隐藏的原生选图控件：按钮代它触发 click，键盘用户走 :focus-visible 的替身高亮 */
+.hidden-file-input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); }
+#wallpaperChoose:focus-visible ~ .hidden-file-input { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* 次要动作按钮：与 library.css 的 .button-quiet 同观感（page.css 的 .button 只管尺寸） */
 .button-quiet { color: var(--brand-deep); border-color: var(--brand-line); background: var(--brand-soft); }
 .button-quiet:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-ring); }
+/* 移除背景图：一个不可逆的破坏性动作，用告警色和旁边两处安静按钮区分开 */
+.button-warn { color: var(--warning); border-color: var(--warning-line); background: var(--warning-soft); }
+.button-warn:hover:not(:disabled) { border-color: var(--warning); box-shadow: none; }
+
+/* 搜索命中那一行的短暂高亮，1.5s 后由 settings.js 摘掉 */
+.setting-row.row-flash { border-radius: var(--r-sm); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-ring); }
+
+/* 页脚说明也做成一张卡：铺了背景图以后，凡是贴在卡片外的文字都会直接压在照片上，
+   滚动时更是糊在照片里。要出现在页面上的文字，就得先有自己的一层底色。 */
+.settings-foot {
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--fs-sm);
+}
+
+/* 窄屏：侧栏收成一行横向图标条（图标 + 文字并排，不再占一整列） */
+@media (max-width: 900px) {
+  .settings-shell { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); padding: var(--sp-4) var(--sp-4) var(--sp-6); }
+  .settings-side { position: static; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; gap: var(--sp-2); }
+  .nav-item { padding: var(--sp-1) var(--sp-3); }
+}
 
 @media (max-width: 620px) {
-  .settings-head { flex-direction: column; align-items: stretch; }
+  .settings-topbar { flex-wrap: wrap; padding: var(--sp-2) var(--sp-4); }
+  .settings-search { width: 100%; }
+  .topbar-tools { flex: 1 1 100%; justify-content: space-between; }
+  /* 一行放不下就上下排：标题一行，控件一行靠左 */
+  .setting-row { flex-direction: column; align-items: stretch; gap: var(--sp-2); }
+  .setting-row-control { justify-content: flex-start; flex-wrap: wrap; white-space: normal; }
+  .setting-row-control .segmented { width: 100%; }
+  .setting-slider { width: 100%; }
 }

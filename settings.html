@@ -13,47 +13,210 @@
   <script src="icons.js"></script>
 </head>
 <body>
-  <div class="wrap">
-    <!-- 顶部跟使用说明页同形：标题 + 一句说明，右上角多一个回收藏库的出口 -->
-    <header class="settings-head">
-      <div>
-        <h1 data-i18n="哔哩藏库 · 设置">哔哩藏库 · 设置</h1>
-        <p class="muted" data-i18n="外观、语言和使用说明都在这里改，改完立即生效。">外观、语言和使用说明都在这里改，改完立即生效。</p>
-      </div>
+  <!-- 顶部固定条：左边是页面标题 + 面包屑，右边是返回收藏库 + 搜索。
+       它是 grid 的第 1 行、横向铺满两栏（见 settings.css 的 grid-template-areas）——
+       放进去的话会把导航挤到第二行去。
+       条上必须有底色：铺了背景图以后，粘性条里的文字不能直接压在照片上滚过去。
+       搜索下拉挂在 .settings-search 里、**不做** backdrop-filter：
+       粘性条与下拉同属一个包含块，玻璃的 backdrop-filter 会新建包含块，
+       下拉的绝对定位就会跟着歪（这条是踩过的坑，别再把两者挪到一起）。 -->
+  <header class="settings-topbar">
+    <div class="topbar-lead">
+      <h1 data-i18n="哔哩藏库 · 设置">哔哩藏库 · 设置</h1>
+      <nav class="crumbs" aria-label="当前位置" data-i18n-aria="当前位置">
+        <span data-icon="settings"></span>
+        <!-- 面包屑只说「现在在哪一节」：第一格是栏目名「设置」，第二格是滚动/点击后跟着换的分组名。
+             之前那一格写的是「返回收藏库」，但它是个动作、不是上一级栏目，和右上角 #settingsBack 重复，
+             语义也不对；而且做成链接的话点一下会把设置页这个标签导航成收藏库，用户手里就多出
+             第二个收藏库标签 —— V1.3.2 正是在修这个（AI_HANDOFF 修改原则 22 第 1 条），
+             所以整页「返回收藏库」只留右上角那一个可点入口。 -->
+        <span class="crumbs-root" data-i18n="设置">设置</span>
+        <span class="crumbs-sep" data-icon="chevron-right"></span>
+        <span id="crumbGroup" data-i18n="外观">外观</span>
+      </nav>
+    </div>
+
+    <div class="topbar-tools">
+      <!-- 返回收藏库：本页是新开的一个标签，能关就直接关掉回到原来那个收藏库标签，
+           关不掉（用户手输地址进来）才退回导航过去。位置从原来的标题行挪到了顶栏右侧。 -->
       <button id="settingsBack" class="button button-quiet" type="button" data-i18n="返回收藏库">返回收藏库</button>
-    </header>
 
-    <!-- 主题名是界面文字，要翻译；按钮里有图标兄弟节点，data-i18n 只能套在文字 span 上
-         （data-i18n 走 textContent，直接标在按钮上会把图标清掉）。 -->
-    <section class="settings-card">
-      <h2 data-i18n="外观">外观</h2>
-      <p class="muted" data-i18n="跟随系统会跟着系统的深色模式走。">跟随系统会跟着系统的深色模式走。</p>
-      <div class="segmented" role="group" data-i18n-aria="主题" aria-label="主题">
-        <button type="button" data-theme-value="system" aria-pressed="false" data-i18n-title="跟随系统" title="跟随系统"><span class="segmented-icon" data-icon="monitor"></span><span data-i18n="跟随系统">跟随系统</span></button>
-        <button type="button" data-theme-value="light" aria-pressed="false" data-i18n-title="白天" title="白天"><span class="segmented-icon" data-icon="sun"></span><span data-i18n="白天">白天</span></button>
-        <button type="button" data-theme-value="dark" aria-pressed="false" data-i18n-title="夜晚" title="夜晚"><span class="segmented-icon" data-icon="moon"></span><span data-i18n="夜晚">夜晚</span></button>
+      <div class="settings-search">
+        <span class="search-icon" data-icon="search" aria-hidden="true"></span>
+        <input id="settingsSearch" type="search" autocomplete="off" data-i18n-placeholder="搜索设置" placeholder="搜索设置"
+               data-i18n-aria="搜索设置" aria-label="搜索设置">
+        <!-- 下拉默认 hidden；theme.css 有 [hidden] { display:none !important } 兜底 -->
+        <div id="searchResults" class="search-results" role="listbox" data-i18n-aria="搜索结果" aria-label="搜索结果" hidden></div>
       </div>
-    </section>
+    </div>
+  </header>
 
-    <!-- 语言名是各语言的自称，任何界面下都原样显示，所以不挂 data-i18n -->
-    <section class="settings-card">
-      <h2 data-i18n="语言">语言</h2>
-      <p class="muted" data-i18n="切换后本页、收藏库和弹窗都会立刻跟着变。">切换后本页、收藏库和弹窗都会立刻跟着变。</p>
-      <div class="segmented" role="group" data-i18n-aria="界面语言" aria-label="界面语言">
-        <button type="button" data-locale="zh-CN" aria-pressed="false" title="简体中文"><span class="segmented-icon" data-icon="globe"></span>简体中文</button>
-        <button type="button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>
-        <button type="button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
-      </div>
-    </section>
+  <div class="settings-shell">
+    <!-- 左侧图标导航：点一下滚到对应分组，滚动时由 settings.js 标出当前分组 -->
+    <aside class="settings-side">
+      <nav id="settingsNav" class="settings-nav" aria-label="设置分组" data-i18n-aria="设置分组">
+        <button type="button" class="nav-item" data-group="appearance" aria-current="true">
+          <span class="nav-icon" data-icon="sparkle"></span>
+          <span class="nav-text" data-i18n="外观">外观</span>
+        </button>
+        <button type="button" class="nav-item" data-group="language">
+          <span class="nav-icon" data-icon="globe"></span>
+          <span class="nav-text" data-i18n="语言">语言</span>
+        </button>
+        <button type="button" class="nav-item" data-group="guide">
+          <span class="nav-icon" data-icon="info"></span>
+          <span class="nav-text" data-i18n="使用说明">使用说明</span>
+        </button>
+      </nav>
+    </aside>
 
-    <section class="settings-card">
-      <h2 data-i18n="使用说明">使用说明</h2>
-      <p class="muted" data-i18n="第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。">第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。</p>
-      <div class="settings-links">
-        <a class="button button-quiet" href="tutorial.html" target="_blank" rel="noopener" data-i18n="打开安装教程">打开安装教程</a>
-        <a class="button button-quiet" href="guide.html" target="_blank" rel="noopener" data-i18n="打开使用说明">打开使用说明</a>
-      </div>
-    </section>
+    <main class="settings-main">
+      <!-- 卡片里的每一行都要能搜索：settings.js 按行取「标题 + 副说明」做多词匹配。
+           行的文案一律「一个元素一句话」，data-i18n 的元素里不放子元素（textContent
+           会连子元素一起清掉），带图标的按钮就把文字包一层 span。 -->
+      <section class="settings-card" id="group-appearance" data-group="appearance">
+        <h2 data-i18n="外观">外观</h2>
+        <p class="card-lead" data-i18n="白天、夜晚、跟随系统，或者用自己的图片铺在页面背后。">白天、夜晚、跟随系统，或者用自己的图片铺在页面背后。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="界面主题">界面主题</p>
+            <p class="setting-row-desc" data-i18n="跟随系统会跟着系统的深色模式走。">跟随系统会跟着系统的深色模式走。</p>
+          </div>
+          <div class="setting-row-control">
+            <!-- 主题名是界面文字，要翻译；按钮里有图标兄弟节点，data-i18n 只能套在文字 span 上
+                 （data-i18n 走 textContent，直接标在按钮上会把图标清掉）。 -->
+            <div class="segmented" role="group" data-i18n-aria="界面主题" aria-label="界面主题">
+              <button type="button" class="segmented-button" data-theme-value="system" aria-pressed="false" data-i18n-title="跟随系统" title="跟随系统"><span class="segmented-icon" data-icon="monitor"></span><span data-i18n="跟随系统">跟随系统</span></button>
+              <button type="button" class="segmented-button" data-theme-value="light" aria-pressed="false" data-i18n-title="白天" title="白天"><span class="segmented-icon" data-icon="sun"></span><span data-i18n="白天">白天</span></button>
+              <button type="button" class="segmented-button" data-theme-value="dark" aria-pressed="false" data-i18n-title="夜晚" title="夜晚"><span class="segmented-icon" data-icon="moon"></span><span data-i18n="夜晚">夜晚</span></button>
+              <button type="button" class="segmented-button" data-theme-value="custom" aria-pressed="false" data-i18n-title="自定义" title="自定义"><span class="segmented-icon" data-icon="image"></span><span data-i18n="自定义">自定义</span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 自定义外观：只有当前主题是「自定义」时才显示（settings.js 切 hidden） -->
+        <div class="setting-row" id="wallpaperRow" hidden>
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="背景图片">背景图片</p>
+            <p class="setting-row-desc" data-i18n="选一张本地图片铺在页面背后，图片只存在这台机器上。">选一张本地图片铺在页面背后，图片只存在这台机器上。</p>
+          </div>
+          <div class="setting-row-control">
+            <input type="file" id="wallpaperFile" class="hidden-file-input" accept="image/*" data-i18n-aria="选择背景图片" aria-label="选择背景图片">
+            <button id="wallpaperChoose" class="button button-quiet" type="button" data-i18n="选择背景图片">选择背景图片</button>
+            <button id="wallpaperRemove" class="button button-quiet button-warn" type="button" data-i18n="移除背景图片">移除背景图片</button>
+          </div>
+        </div>
+
+        <div class="setting-row" id="wallpaperVeilRow" hidden>
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="背景遮罩透明度">背景遮罩透明度</p>
+            <p class="setting-row-desc" data-i18n="往图片上压一层雾，数值越大背景越淡，文字越好认。">往图片上压一层雾，数值越大背景越淡，文字越好认。</p>
+          </div>
+          <div class="setting-row-control">
+            <div class="setting-slider">
+              <input id="wallpaperVeil" type="range" min="0" max="100" step="1" data-i18n-aria="背景遮罩透明度" aria-label="背景遮罩透明度">
+              <output id="wallpaperVeilValue" class="slider-value tnum" for="wallpaperVeil">50%</output>
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-row" id="wallpaperBlurRow" hidden>
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="背景模糊强度">背景模糊强度</p>
+            <p class="setting-row-desc" data-i18n="把背景图糊开，图片的花纹就不会抢正文的注意力。">把背景图糊开，图片的花纹就不会抢正文的注意力。</p>
+          </div>
+          <div class="setting-row-control">
+            <div class="setting-slider">
+              <input id="wallpaperBlur" type="range" min="0" max="40" step="1" data-i18n-aria="背景模糊强度" aria-label="背景模糊强度">
+              <output id="wallpaperBlurValue" class="slider-value tnum" for="wallpaperBlur">0px</output>
+            </div>
+          </div>
+        </div>
+
+        <!-- 选图失败 / 本地存不下时的可见提示。文案由 settings.js 按失败原因换成
+             「这张图片读不出来，换一张试试。」或「浏览器不让存背景图片，可能是空间不够。」，
+             所以这里只给一个初值，不挂 data-i18n —— 挂上会被 apply() 把当前那条提示
+             盖回初值（切语言时正在报的错会消失）。 -->
+        <div class="setting-row" id="wallpaperErrorRow" hidden>
+          <p class="row-error" id="wallpaperError" role="alert">这张图片读不出来，换一张试试。</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title">
+              <span data-i18n="毛玻璃效果">毛玻璃效果</span>
+              <!-- 性能提示做成橙色胶囊：这一行是本页唯一会明显吃性能的开关 -->
+              <span class="perf-badge"><span data-i18n="性能影响">性能影响</span></span>
+            </p>
+            <p class="setting-row-desc" data-i18n="让卡片透出背后的背景，滚动时要实时重算模糊，低配机器上可能掉帧。">让卡片透出背后的背景，滚动时要实时重算模糊，低配机器上可能掉帧。</p>
+          </div>
+          <div class="setting-row-control">
+            <button id="glassToggle" class="toggle-switch off" type="button" aria-pressed="false" data-i18n-aria="毛玻璃效果" aria-label="毛玻璃效果"><span></span></button>
+          </div>
+        </div>
+
+        <div class="setting-row" id="glassBlurRow" hidden>
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="毛玻璃模糊强度">毛玻璃模糊强度</p>
+            <p class="setting-row-desc" data-i18n="数值越大越像磨砂玻璃，同时也越费性能。">数值越大越像磨砂玻璃，同时也越费性能。</p>
+          </div>
+          <div class="setting-row-control">
+            <div class="setting-slider">
+              <input id="glassBlur" type="range" min="1" max="20" step="1" data-i18n-aria="毛玻璃模糊强度" aria-label="毛玻璃模糊强度">
+              <output id="glassBlurValue" class="slider-value tnum" for="glassBlur">16px</output>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 语言名是各语言的自称，任何界面下都原样显示，所以不挂 data-i18n -->
+      <section class="settings-card" id="group-language" data-group="language">
+        <h2 data-i18n="语言">语言</h2>
+        <p class="card-lead" data-i18n="界面文字用哪种语言显示。">界面文字用哪种语言显示。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="界面语言">界面语言</p>
+            <p class="setting-row-desc" data-i18n="切换后本页、收藏库和弹窗都会立刻跟着变。">切换后本页、收藏库和弹窗都会立刻跟着变。</p>
+          </div>
+          <div class="setting-row-control">
+            <div class="segmented" role="group" data-i18n-aria="界面语言" aria-label="界面语言">
+              <button type="button" class="segmented-button" data-locale="zh-CN" aria-pressed="false" title="简体中文"><span class="segmented-icon" data-icon="globe"></span>简体中文</button>
+              <button type="button" class="segmented-button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>
+              <button type="button" class="segmented-button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-card" id="group-guide" data-group="guide">
+        <h2 data-i18n="使用说明">使用说明</h2>
+        <p class="card-lead" data-i18n="第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。">第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="打开安装教程">打开安装教程</p>
+            <p class="setting-row-desc" data-i18n="从解压扩展目录到在浏览器里加载，一步一步的新手流程。">从解压扩展目录到在浏览器里加载，一步一步的新手流程。</p>
+          </div>
+          <div class="setting-row-control">
+            <a class="button button-quiet" href="tutorial.html" target="_blank" rel="noopener" data-i18n="打开安装教程">打开安装教程</a>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="打开使用说明">打开使用说明</p>
+            <p class="setting-row-desc" data-i18n="每个按钮做什么、有哪些注意事项，都在这一页。">每个按钮做什么、有哪些注意事项，都在这一页。</p>
+          </div>
+          <div class="setting-row-control">
+            <a class="button button-quiet" href="guide.html" target="_blank" rel="noopener" data-i18n="打开使用说明">打开使用说明</a>
+          </div>
+        </div>
+      </section>
+
+      <p class="settings-foot" data-i18n="外观、语言和使用说明都在这里改，改完立即生效。">外观、语言和使用说明都在这里改，改完立即生效。</p>
+    </main>
   </div>
 
   <script src="settings.js"></script>

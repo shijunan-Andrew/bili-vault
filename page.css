@@ -20,6 +20,18 @@
 /* ── 页面骨架 ── */
 body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font: 15px/1.75 var(--font-sans); }
 .wrap { max-width: 900px; margin: 0 auto; padding: 28px 20px 72px; }
+/* 1.4.0：用户在「外观 → 自定义」里铺了背景图以后，正文必须落在自带底色的面上 ——
+   这两页是长文档，整段文字直接压在照片上读不了（AI_HANDOFF 修改原则 23）。
+   只在「自定义外观 + 真的有图」时才多出这层纸，其它情况仍是整幅平铺。
+   这里刻意不做毛玻璃：长正文透出底下的照片只会更难读。 */
+html[data-appearance="custom"][data-wallpaper="on"] .wrap {
+  margin: 28px auto 64px;
+  padding: 28px 32px 56px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
 h1 { font-size: 24px; margin: 0 0 6px; }
 .lead { color: var(--muted); margin: 0 0 26px; }
 h2 { font-size: 18px; margin: 40px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }

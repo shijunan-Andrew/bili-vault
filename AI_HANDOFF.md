@@ -33,6 +33,7 @@
 3. 打开本地收藏库后，按固定目录结构解析视频，支持搜索、筛选、详情、新建/删除收藏夹、添加视频、移动/复制、批量操作。
 4. 把外部下载好的视频放进收藏夹：在详情里点「将下载到本地的视频放入收藏夹中」，插件按与下载器相同的规则建好目录，你把文件放进去，卡片就显示「已下载」。（1.3.0 起不再内置下载器。）
 5. 通过可选的 Windows Native Messaging 辅助程序，在文件资源管理器打开视频目录。
+6. 外观可选「自定义」（1.4.0）：整页铺一张本机图片，可调遮罩透明度 / 背景模糊，并可开启毛玻璃（强度可调）；图片存 IndexedDB 的 Blob，不进 `chrome.storage`。
 
 ## 路线图（用户 2026-10-10 确认的方向）
 
@@ -73,6 +74,30 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.4.0：自定义外观（背景图 / 毛玻璃）
+
+用户要求（2026-10-12）：「主题选择」改名「外观」并新增**自定义**——挑一张本机图片铺在页面背后，可调遮罩透明度与模糊强度；再加一个可选的**毛玻璃**开关与强度；插件弹窗里的主题滑块删掉；设置页重新排版（参考 [BewlyCat](https://github.com/keleus/BewlyCat)，只借交互设计与参数区间，**没抄代码**）。
+
+**外观是「主题」的第四种取值，不是第二套主题系统。** `theme.js` 的 `MODES` 加了 `custom`，`resolved()` 把 `custom` 解析成 `light`，`paint()` 同时写 `data-theme`（light）、`data-theme-resolved`（custom）和 `data-appearance`（custom / plain）。收益是所有「夜晚」分支（深色令牌、内容脚本的提示卡）一行都不用改，弹窗自动就是白天色。**不要再给 `custom` 另造一套深色分支。**
+
+**存储分两处，理由不同：**
+- 外观三个数值 → `localStorage` 与 `chrome.storage.local` 的 `interfaceAppearance`（`APPEARANCE_KEY`，JSON 字符串）。理由同主题：`localStorage` 管同源页面之间的即时同步，`chrome.storage` 管镜像与补救。
+- 背景图 → **IndexedDB**（库 `bili-vault-appearance` / store `wallpaper` / 键 `current`），存 Blob。**绝不能塞进 `chrome.storage.local`**：那里默认上限 10MB（Chrome 113 前 5MB），还要和「收藏库用哪个目录」这类小设置共享配额。参考实现正是踩过这个坑，注释里写着 to prevent the `QUOTA_BYTES quota exceeded` error。
+
+**图片在存之前先过 canvas**：`prepareWallpaper()` 用 `createImageBitmap(file)` → canvas 等比缩到长边 2560 → `toBlob(webp, 0.92)`；原图 ≤1.5MB 时原样存；任何一步失败都退回原图。`saveWallpaper()` 里 `await` 它，所以设置页不需要自己做压缩。
+
+**背景图层是 `z-index:-1` 的固定层，模糊不加在图上。** `.bca-wallpaper` 是 `position:fixed; inset:0; z-index:-1; pointer-events:none`；图片走它的 `::before`（`background-image: var(--bca-wallpaper-image)` + `filter: blur(var(--bca-wallpaper-blur))`），遮罩雾走 `::after`。**不要改成对背景图元素直接 `filter: blur()`** —— 那会糊掉元素边缘、出现透明羽化边；`::before` 的 `inset: calc(-1 * (var(--bca-wallpaper-blur) + 12px))` 就是给模糊留的余量，去掉它放大模糊会看到边缘发暗。
+
+**遮罩是「浅色雾」不是黑幕**：`rgba(242, 245, 249, ·)`（页面底色），上限 92%。写成黑幕会把整页拖进深色，白卡片看着就"浮"起来了。
+
+**「自定义」在哪几页生效。** 图层由 `theme.js` 挂到 `body` 的第一个子节点，但弹窗（`popup.html` 的 `<html data-wallpaper-scope="popup">`）与内容脚本会被跳过，`theme.css` 里「页面底色透明」那条规则也带 `:not([data-wallpaper-scope="popup"])` 守卫。**收藏库与设置页**本来就由卡片拼成，照片从卡片缝隙里透出来即可；**guide.html / tutorial.html 是长文档**，所以 `page.css` 另给 `.wrap` 加了一层纸面（`html[data-appearance="custom"][data-wallpaper="on"]` 才生效，刻意不做玻璃 —— 长正文透出照片只会更难读）。**新增页面时要自己决定属于哪一边：卡片式页面直接铺，长文页面必须自带底色。**
+
+**毛玻璃 = 给一组「面」加半透明 + `backdrop-filter`。** `html.bca-glass` 命中 `.sidebar / .video-card / .detail-panel / .batch-toolbar / .confirm-dialog / .editor-dialog / .diff-dialog / .settings-card / .toast`；顶栏单独用 `blur(calc(var(--bca-glass-blur) + 6px))`（它本来就是 92% 的 `color-mix` 底）。**要新增「面」就往 `theme.css` 那份 `:is(...)` 里加，不要在页面 CSS 里各写一份。** 玻璃默认关：全屏背景 + 大面积 `backdrop-filter` 对低配机器是真实成本，参考实现也一样默认关。**玻璃的底色与边缘高光必须从 `--surface` 用 `color-mix` 推出来**（`--bca-glass-surface` / `--bca-glass-line` / `--bca-glass-glow` / `--bca-glass-shade`）：写死白色的话，夜晚主题下卡片会亮成一片、卡上的字几乎看不清 —— 1.4.0 实测踩过这一条。**`backdrop-filter` 会自建层叠上下文与包含块** —— 带玻璃的面里不要再放需要 `position: fixed` 的浮层（下拉、tooltip）。
+
+**参数区间与默认值**：遮罩 0–100（默认 50）、背景模糊 0–40px（默认 0）、玻璃强度 1–20px（默认 16）、玻璃开关默认关。全部由 `theme.js` 的 `clamp` 夹住，脏数据不穿透（有测试）。
+
+**测试**：`test/stability.test.cjs` 的 theme 沙箱原来只桩了 `document`，1.4.0 补了 `classList` / `style` / `dataset`（`dataset` 用 Proxy 指回 attributes）与一份写在内容里的外观簿记，因此能真 `require` `theme.js` 跑 `use("custom")` / `setAppearance(...)` 并断言挂出来的 CSS 变量。新增 6 项（外观四项、变量落点、脏数据夹取、图片不进 `chrome.storage`、玻璃糊在哪些面上、弹窗没有主题滑块），总数 182 → 188。
+
 ## 1.3.0：移除下载功能（公开版）
 
 **背景**：两个第三方 B 站工具先后收到 B 站委托律所（上海市弘安律师事务所）的《侵权告知函》—— DownKyi / downkyicore（2026-07-06）与 bilibili-API-collect（2026-01-28）。函告的重点不是「下载」本身，而是：**未经授权对非公开接口、认证体系、访问控制机制、付费内容保护与会员体系作逆向分析与适配，并以客户端工具、脚本、技术文档等形式向不特定公众传播**；加重情节写的是「将上述爬取能力作为官方特性内置、持续更新、随每一次版本发布向全球不特定用户分发，已超出一般开源项目的被动托管性质，构成对相关代码的主动提供与背书」。用户据此决定：**公开版 bili-vault 不再提供下载功能，重构前的版本封存到 bili-vault-developer**。
@@ -107,13 +132,14 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
 ├── archive-core.js               # 可复用的纯逻辑：安全名称、下载目录匹配、下载路径、视频信息解析、页码序列
-├── theme.css / theme.js          # 4.0 / 4.5：唯一的设计令牌来源；theme.js 在 <head> 同步应用主题
+├── theme.css / theme.js          # 4.0 / 4.5：唯一的设计令牌来源；theme.js 在 <head> 同步应用主题。1.4.0 起 theme.js 还管自定义外观（背景图层 + 毛玻璃变量，图片存 IndexedDB）
 ├── i18n.js                       # 4.5：以中文原文为 key 的翻译层
 ├── icons.js                      # 4.0：线性 SVG 图标，替代字符图标
 ├── locales/
 │   ├── zh-TW.json                # 繁体词典（简体中文不需要词典，查不到就原样返回）
 │   └── en.json                   # 英文词典
-├── popup.html/js/css             # 插件弹窗：自动归档开关、本地备份文件夹、导入界面、主题与语言
+├── popup.html/js/css             # 插件弹窗：自动归档开关、本地备份文件夹、导入界面、语言（1.4.0 起弹窗不再有主题滑块）
+├── settings.html/js/css          # 1.3.2：设置页（外观 / 语言 / 使用说明）；1.4.0 起外观含自定义背景与毛玻璃
 ├── library.html/js/css           # 本地收藏库页面
 ├── guide.html / tutorial.html     # 使用说明页 / 安装教程页（两页共用 tutorial.js、page.css、mockup.css）
 ├── tutorial.js                    # 上面两页共用的关窗按钮脚本
@@ -568,7 +594,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:182 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:188 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -781,4 +807,6 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     2. **改设置不许把页面带走。** 设置页里切换主题 / 语言只改状态、重画选中态（`aria-pressed`），不导航、不 `window.close()`、不刷新 —— 测试会数 `window.close()` 的出现次数并断言它只出现在「返回收藏库」那一个处理器里。
     3. **跨页同步不要新增信号。** 语言走 `library.js` 原有的 `chrome.storage.onChanged`（`interfaceLocale`，**必须带 `next === BcaI18n.locale()` 自触发防护**，否则自己写的值会绕回来重画一遍）；主题走 `theme.js` 的 `localStorage` `storage` 事件（它只在别的文档里触发）；设置页两处选中态一律从 `BcaTheme.current()` / `BcaI18n.locale()` **现推**，不记「上次是谁点的」。
     4. **共享控件放 `theme.css`。** `.segmented`（分段控件）原来只写在 `popup.css` 里，设置页要用就把它挪进 `theme.css` 当公共组件 —— 别在 `settings.css` 里再抄一份，两份迟早会走样。图标用 `icons.js` 里的 SVG（新增 `settings`），**不要用「⚙」这种字符**：字符当图标在不同字体下大小、基线都不一样，`test/stability.test.cjs:165-172` 已明确禁止。
+
+23. **铺了全屏背景图以后，每一个贴在照片上的「面」都要自带底色。**（1.4.0 加自定义背景时定。）任何没有底色的文字都会直接压在照片上，滚动时尤其难看：设置页的 sticky header、页脚说明、收藏库空状态的大标题都属这一类。做法是把它放进卡片，或者给那一层补 `background: var(--surface)` / 半透明 + `backdrop-filter`（**不透明时也必须能看**）。**不要**用「给整页再盖一层黑/白」来代替——那会把卡片一起压暗。
 

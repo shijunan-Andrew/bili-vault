@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-wallpaper-scope="popup">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -54,16 +54,12 @@
       </a>
     </div>
 
-    <!-- 4.5.1：主题与语言从页脚移到顶部，改成图标 + 文字的分段控件。
-         主题名是界面文字，必须可翻译；因为有图标兄弟节点，data-i18n 只能套在文字 span 上
-         （data-i18n 走 textContent，直接标在按钮上会把图标清掉）。
-         语言名（简体中文 / 繁體中文 / English）是各语言的自称，任何界面下都原样显示，不翻译。 -->
+    <!-- 1.4.0：主题选择从弹窗删掉了。外观统一在设置页改（收藏库右下角齿轮 → 外观），
+          弹窗这一格只留界面语言与请求速度。
+          语言名（简体中文 / 繁體中文 / English）是各语言的自称，任何界面下都原样显示，不翻译。
+          外观选「自定义」时弹窗按白天色显示（theme.js 把它解析成 light），
+          弹窗不铺背景图、也不做毛玻璃效果。 -->
     <section class="card controls-card">
-      <div class="segmented" role="group" data-i18n-aria="主题" aria-label="主题">
-        <button type="button" data-theme-value="system" aria-pressed="false" data-i18n-title="跟随系统" title="跟随系统"><span class="segmented-icon" data-icon="monitor"></span><span data-i18n="跟随系统">跟随系统</span></button>
-        <button type="button" data-theme-value="light" aria-pressed="false" data-i18n-title="白天" title="白天"><span class="segmented-icon" data-icon="sun"></span><span data-i18n="白天">白天</span></button>
-        <button type="button" data-theme-value="dark" aria-pressed="false" data-i18n-title="夜晚" title="夜晚"><span class="segmented-icon" data-icon="moon"></span><span data-i18n="夜晚">夜晚</span></button>
-      </div>
       <div class="segmented" role="group" data-i18n-aria="界面语言" aria-label="界面语言">
         <button type="button" data-locale="zh-CN" aria-pressed="false" title="简体中文"><span class="segmented-icon" data-icon="globe"></span>简体中文</button>
         <button type="button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>

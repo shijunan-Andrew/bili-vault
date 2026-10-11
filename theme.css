@@ -303,6 +303,81 @@ button { cursor: pointer; }
 .row { display: flex; align-items: center; gap: var(--sp-2); }
 .spacer { margin-left: auto; }
 
+/* ==========================================================================
+   1.4.0：自定义外观 —— 页面背后的背景图 + 毛玻璃
+   --------------------------------------------------------------------------
+   令牌单独写一个 :root 块：它们属于「外观」，跟白天/夜晚无关，塞进上面那两块
+   会让「浅色与深色两处令牌集合必须相同」的守卫测试失效。
+   实际数值由 theme.js 按用户设置写在 <html> 的行内样式上（见 paintAppearance）——
+   行内样式优先于这里的默认值，这里只是「还没读完设置时」的兜底。
+   参考 BewlyCat（https://github.com/keleus/BewlyCat）的外观做法：背景图铺在
+   页面最底层一层，遮罩与模糊各一个滑块；毛玻璃用半透明底色 + backdrop-filter，
+   模糊强度做成变量。写法是我们自己按本项目的令牌体系重写的，没有引入它的代码。
+   ========================================================================== */
+:root {
+  --bca-wallpaper-image: none;
+  --bca-wallpaper-veil: #f2f5f975;      /* 浅色雾（页面底色），约 46%：用户还没设置时的兜底 */
+  --bca-wallpaper-blur: 0px;
+  --bca-glass-blur: 16px;
+  /* 玻璃底色必须跟着主题走：夜晚主题下如果写死白色，卡片会亮成一片、卡上的字看不清 */
+  --bca-glass-surface: color-mix(in srgb, var(--surface) 78%, transparent);
+  --bca-glass-line: color-mix(in srgb, var(--line) 72%, transparent);
+  /* 边缘高光同样跟着主题走：写死白色的话，夜晚主题下卡片会顶着一圈白边 */
+  --bca-glass-glow: color-mix(in srgb, var(--surface), #fff 55%);
+  --bca-glass-shade: color-mix(in srgb, var(--surface), #000 10%);
+}
+
+/* 页面背后那一层。由 theme.js 插成 body 的第一个子节点（弹窗不插），
+   只有「自定义」外观且真的选了图片时才有内容。 */
+.bca-wallpaper { display: none; position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+html[data-appearance="custom"][data-wallpaper="on"] .bca-wallpaper { display: block; }
+/* 模糊做在图片这一层，并且让图片比视口大一圈：blur 会把边缘糊成半透明，
+   只用 transform: scale() 放大的话，模糊半径一大边缘还是会透出一圈底色
+   （scale 只补得上几个像素）。这里按模糊半径动态外扩，多少像素都盖得住。
+   参考实现在遮罩层用 backdrop-filter 糊下面那层，同样能避开羽化边，但整屏
+   backdrop-filter 每帧都要重新采样，成本高得多 —— 我们这版更省。 */
+.bca-wallpaper::before {
+  position: absolute;
+  inset: calc(-1 * (var(--bca-wallpaper-blur) + 12px));
+  content: "";
+  background: var(--bca-wallpaper-image) center / cover no-repeat;
+  filter: blur(var(--bca-wallpaper-blur));
+}
+/* 遮罩：浅色雾，负责把照片压到「能看清上面文字」的程度 */
+.bca-wallpaper::after { position: absolute; inset: 0; background: var(--bca-wallpaper-veil); content: ""; }
+/* 铺了背景图就得把页面自己那层纯色底让出来，否则图被盖住看不见。
+   弹窗例外：它不铺背景图（theme.js 靠 data-wallpaper-scope 认出它），
+   底一透明就只剩浏览器窗口色，比不设背景还难看。 */
+html[data-appearance="custom"]:not([data-wallpaper-scope="popup"]) body { background: transparent; }
+
+/* 毛玻璃。只给「收藏库 / 设置页」这几类面开：插件弹窗与文档页不参与
+   （正文页要的是可读性，弹窗小、糊起来没有意义还费性能）。
+   color-mix 让底色保持半透明 —— 不透明的话 backdrop-filter 没有东西可模糊。 */
+html.bca-glass :is(.sidebar, .video-card, .detail-panel, .batch-toolbar,
+  .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast) {
+  background: var(--bca-glass-surface);
+  border-color: var(--bca-glass-line);
+  backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
+}
+/* 顶栏原本就有一层 92% 的毛玻璃，开了开关再透一点、再糊一点：
+   它底下永远有滚过去的卡片，是这套效果里最显眼的一处。 */
+html.bca-glass .topbar {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  backdrop-filter: blur(calc(var(--bca-glass-blur) + 6px)) saturate(170%);
+  -webkit-backdrop-filter: blur(calc(var(--bca-glass-blur) + 6px)) saturate(170%);
+}
+/* 玻璃边缘高光：上左偏亮、下右偏暗，再加一圈内发光。没有它，半透明卡片
+   看着像「没画完」而不是「磨砂」。三个颜色都从当前主题的 --surface 推出来，
+   所以白天与夜晚各自成立，不是写死的白色。 */
+html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
+  box-shadow:
+    inset 1px 1px 1px -.5px color-mix(in srgb, var(--bca-glass-glow) 45%, transparent),
+    inset -1px -1px 1px -.5px color-mix(in srgb, var(--bca-glass-shade) 32%, transparent),
+    inset 0 0 12px color-mix(in srgb, var(--bca-glass-glow) 60%, transparent),
+    var(--shadow-sm);
+}
+
 /* 尊重系统的“减少动态效果”设置 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
