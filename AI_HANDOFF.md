@@ -568,7 +568,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:181 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:182 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -763,4 +763,15 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     3. **「占位值」也要分两种 —— 判"要不要再抓一次"时它们的答案相反。** 符号类（`-` `--` `—` `/`）是「B 站这段本来就是空的」，再抓一百次还是同一个符号，刷新它纯属白写文件；词类（`未知` `无` `暂无` `N/A` `null`）多半是「上一次没取到」，值得再试。所以有了 `importPlaceholderWorthRetry()`（`background.js`，紧挨 `importIsPlaceholder`）。
     4. **`importPlaceholderWorthRetry` 不能拿去替换 `importIsPlaceholder`。** 后者问的是「这段文字算不算占位」，`refreshImportedRecord` 里 `importIsPlaceholder(favoriteAtText)` 判的是「收藏时间能不能解析」—— 那里纯符号也必须算占位，否则一条收藏时间写着 `-` 的记录会被改写成"现在"。**同一个词在两个场景含义不同时，宁可加一个名字说明区别的新函数，也别改那个共用的。**
     5. **真机现象别只信"占位"这一个词。** 一开始按"3 条都是 `-`"推断，实际跑一遍归档才看清：2 条是 `未知`（摘符号根本治不到），真正的持续改写来自那行时间戳。**对着用户真实目录跑一遍诊断脚本，比读代码推演可靠。**
+
+20. **「关掉之后就不算还在」—— 查询「当前在做什么」的函数，不能只看「上次是哪一条」的记录。**（V1.3.1 修的就是这个：`closeDetail()` 不清 `detailContent.dataset.videoId`，而 `detailVideo()` 只认那个 id，于是任何「重画一遍界面」的动作都会把用户早就关掉的详情重新 `openDetail` 出来。两个入口都能撞上：在收藏库里切语言触发 `BcaI18n.onChange`；在弹窗里切语言写的是同一个 `interfaceLocale`，收藏库的 `chrome.storage.onChanged` 收到通知后同样走这条路。）
+    1. **状态要从「现在的样子」推，不要从「最后一次设置的值」推。** 修法是给 `detailVideo()` 加一关：`if (!detailPanel.classList.contains("open")) return null;`。DOM 上的 `class="open"` 才是权威，`dataset.videoId` 只是「上次开过哪条」的历史。**凡是"重新渲染一遍 / 刷新一遍"的代码路径，都会把这类历史值当成现状** —— 所以这种函数要么读真正的现状，要么在关闭时把历史清掉（两处只做一处也不算错，但别只做历史那半边）。
+    2. **同一个设置改了，别的已打开页面会收到通知 —— 写"重画界面"的代码时要假设自己是在这种被动场景里被调用的。** `chrome.storage.onChanged`（`library.js` 收 `BcaI18n.STORAGE_KEY` 与 `rootHandleRevision`）与 `BcaI18n.onChange` 都不是用户手点的按钮；出问题时用户看到的是「我什么都没点，它自己弹出来了」，最难往这条路上想。
+
+21. **每一个界面都必须接入多语言，漏一个页面就是「整个插件都没翻译」的观感。**（V1.3.1 修的就是这个：`guide.html` 从建立起就没接过 `BcaI18n`，语言切成繁體中文或 English 只有它一动不动。使用说明又是新手最先打开的一页。）
+    1. **接入方式固定四件套**：页面加载 `i18n.js` → 界面文字加 `data-i18n` / `data-i18n-html`（属性值写简体中文原文，一字不差）→ 词条补进 `locales/zh-TW.json` 与 `locales/en.json` → **把该文件加进 `test/i18n-extract.cjs` 的 `SOURCE_FILES`**。漏掉最后一步，这个页面以后缺词条也不会有任何测试报错。
+    2. **`data-i18n` 是拿 `textContent` 覆盖的**，所以属性值必须与元素里的文字逐字一致（比较前只把空白归一化），而且**带子元素的元素只能用 `data-i18n-html`**，否则子元素会被整块清掉。`test/stability.test.cjs` 的「every data-i18n marker matches its element text exactly」专门拦这两种错。
+    3. **不翻译数据。** 视频标题、UP 主名、简介、标签、示例目录名这类固有名称一律保留原文（`i18n.js` 顶部写着这条规矩）。`guide.html` 的演示卡片里有示例标题和示例收藏夹名，切语言时它们不该跟着变。
+    4. **`<title>` 不在 `data-i18n*` 的能力范围内**（那套属性只能写元素的 `textContent` / `innerHTML` / `title` 属性 / `placeholder` / `aria-label`），页面标题要在 JS 里 `document.title = BcaI18n.t("…")`。
+    5. **拟态「别的软件」的部分不翻译。** 使用说明与安装教程里都有 Windows 资源管理器、cmd 黑窗、`chrome://extensions` 的拟真卡片 —— 那些画的是**用户自己系统语言下的其他软件**，不是本插件的界面（安装脚本真实打印的就是中文），切语言时它们保持简体中文。判据是「这块字是谁的界面」：本插件自己画的界面（弹窗、收藏库、详情面板、浮标）跟着语言变，别家软件的界面、目录名与示例数据都不变。
 

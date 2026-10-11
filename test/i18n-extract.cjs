@@ -21,6 +21,10 @@ const SOURCE_FILES = [
   "library.html", "library.js",
   // 1.3.0 起下载页（download.html / download.js）已整体删除
   "popup.html", "popup.js",
+  // V1.3.1：使用说明页（guide.html）接入了 i18n —— 它加载 i18n.js 并由 tutorial.js 调 init。
+  // 两页共用 tutorial.js，所以那个文件也一起扫（它里面的 t("字面量") 同样需要词条）。
+  // 安装教程页（tutorial.html）同理：不写进来的话，它缺词条不会报错，只会静默退回中文。
+  "guide.html", "tutorial.html", "tutorial.js",
   "content.js",
   // 4.9：把后台纳入扫描。background.js 是模块化 service worker，加载不了 i18n.js，
   // 所以自己做了个存在性兜底；新增的界面文案仍写成 BcaI18n.t("字面量")。

@@ -2222,7 +2222,12 @@ function nativeHostRequest(message) {
   });
 }
 
+// 当前「正在看」的那条视频。面板关掉之后一律算没有 —— closeDetail 不会清
+// detailContent.dataset.videoId，谁在关掉之后再问一次都会拿到上一条，
+// 于是切语言（BcaI18n.onChange → relabelAfterLocaleChange）这种「重画一遍界面」
+// 的动作，会把用户早就关掉的详情重新弹出来。
 function detailVideo() {
+  if (!detailPanel.classList.contains("open")) return null;
   return allVideos().find((video) => video.id === detailContent.dataset.videoId) || null;
 }
 

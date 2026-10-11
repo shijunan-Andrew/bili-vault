@@ -2137,7 +2137,8 @@ test("every data-i18n marker matches its element text exactly", () => {
   // 切到别的语言再切回来就会显示成属性值那份——静默的错误。
   // 另外带子元素的元素不能直接用 data-i18n，否则子元素会被整块清掉。
   const problems = [];
-  for (const file of ["library.html", "popup.html"]) {
+  // V1.3.1：使用说明页也接进了 i18n，所以一并接受这套逐字校验
+  for (const file of ["library.html", "popup.html", "guide.html", "tutorial.html"]) {
     const html = readProjectFile(file);
     for (const match of html.matchAll(/<([a-z0-9-]+)((?:[^>]*?))\sdata-i18n="([^"]*)"((?:[^>]*?))>([\s\S]*?)<\/\1>/gi)) {
       const [, tag, , key, , inner] = match;
@@ -2158,10 +2159,14 @@ test("the interface strings are actually marked up across every surface", () => 
   assert.ok(readProjectFile("popup.html").includes('src="i18n.js"'), "弹窗未引入 i18n.js");
   const manifest = JSON.parse(readProjectFile("manifest.json"));
   assert.ok(manifest.content_scripts[0].js.includes("i18n.js"), "内容脚本需要 i18n.js 才能翻译提示卡");
-  for (const file of ["library.html", "popup.html"]) {
+  for (const file of ["library.html", "popup.html", "guide.html"]) {
     const marked = [...readProjectFile(file).matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?="/g)].length;
     assert.ok(marked >= 15, `${file} 只标了 ${marked} 处，覆盖面明显不足`);
   }
+  // V1.3.1：安装教程页能标的位置天然少（资源管理器、cmd 黑窗、chrome://extensions 那几张
+  // 拟真图与目录名按规矩不翻，示例数据同样不翻），所以阈值单独给，不并进上面那个 15。
+  const tutorialMarked = [...readProjectFile("tutorial.html").matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?="/g)].length;
+  assert.ok(tutorialMarked >= 12, `tutorial.html 只标了 ${tutorialMarked} 处，覆盖面明显不足`);
   for (const file of ["library.js", "popup.js"]) {
     const calls = [...readProjectFile(file).matchAll(/(?:\bBcaI18n\.)?\bt\("/g)].length;
     assert.ok(calls >= 20, `${file} 只用了 ${calls} 次 t()，动态文案覆盖不足`);
@@ -3598,5 +3603,58 @@ test("重复导入不该给内容没变的记录刷新时间戳、也不该报�
   const refreshBody = background.slice(refreshAt, background.indexOf("\n}", refreshAt));
   assert.match(refreshBody, /if \(importStableInfoText\(refreshedText\) !== importStableInfoText\(original\)\) \{/);
   assert.equal(/if \(refreshedText !== original\)/.test(refreshBody), false, "不要再拿带时间戳的原文直接比");
+});
+
+// V1.3.1：切界面语言会把早就关掉的详情页重新弹回来。
+// 根因：closeDetail() 不会清 detailContent.dataset.videoId，而 detailVideo() 只认那个 id，
+// 于是任何「重画一遍界面」的动作（BcaI18n.onChange → relabelAfterLocaleChange）都会
+// 拿到上一条视频并重新 openDetail。修法是让 detailVideo() 在面板关着时一律返回 null。
+// 在收藏库页里切语言、和在弹窗里切语言（弹窗写 storage，收藏库的 onChanged 收到信号）都会触发。
+test("详情关掉之后就不算「正在看这条」，切语言不会再把它弹回来（V1.3.1）", () => {
+  const library = readProjectFile("library.js");
+
+  const at = library.indexOf("function detailVideo() {");
+  assert.notEqual(at, -1, "library.js 里找不到 detailVideo");
+  const source = library.slice(at, library.indexOf("\n}", at) + 2);
+
+  // 真的把生产代码里那份 detailVideo() 拿出来跑，而不是只做文本断言
+  const videos = [{ id: "BV1", title: "甲" }, { id: "BV2", title: "乙" }];
+  const build = (panelOpen) => {
+    const detailPanel = { classList: { contains: (name) => name === "open" && panelOpen } };
+    const detailContent = { dataset: { videoId: "BV2" } };
+    const allVideos = () => videos;
+    return new Function("detailPanel", "detailContent", "allVideos", `${source};\nreturn detailVideo;`)(
+      detailPanel,
+      detailContent,
+      allVideos
+    );
+  };
+
+  assert.equal(build(true)()?.id, "BV2", "面板开着时要按 dataset.videoId 找到那一条");
+  assert.equal(
+    build(false)(),
+    null,
+    "面板关着时 dataset.videoId 还留着上一条，也必须算「没在看任何详情」"
+  );
+
+  // 接线：切语言后要不要重开详情，必须以 detailVideo() 为准
+  assert.ok(library.includes("const current = detailVideo();"), "relabelAfterLocaleChange 的判据要用 detailVideo()");
+  assert.ok(
+    library.includes("if (current) openDetail(current, null, { trap: false });"),
+    "只有真的还在看详情时才重开，且不要再叠一层焦点陷阱"
+  );
+
+  /* 弹窗里切语言走的是 chrome.storage → 收藏库 onChanged 这条转发。
+     这条一旦丢了，用户会看到「在弹窗切了语言，收藏库毫无反应」。 */
+  assert.match(
+    library,
+    /const next = changes\[BcaI18n\.STORAGE_KEY\]\?\.newValue;/,
+    "收藏库要在 onChanged 里读语言设置的新值"
+  );
+  assert.match(
+    library,
+    /BcaI18n\.use\(next, \{ silent: true \}\)/,
+    "读到新语言后要真的切过去（silent：别让它在收藏库页再写一次 storage）"
+  );
 });
 
