@@ -3263,12 +3263,17 @@ collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInP
 videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
 
 async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n.t("已读取"), options = {}) {
-  /* V1.4.3：写入路径（添加视频 / 新建收藏夹 / 删除 / 刷新扫描）各有一套 inProgress 标记，
-     与 setBusy 互不知情。两轮扫描撞在一起会互相用旧快照覆盖新快照，还会把对方正在
+  /* V1.4.3：写入路径（添加视频 / 新建收藏夹 / 删除）各有一套 inProgress 标记，
+     与扫描互不知情。两轮扫描撞在一起会互相用旧快照覆盖新快照，还会把对方正在
      显示的封面 blob: URL 撤掉 —— 表现是列表少一批记录 + 封面裂图，只能刷新页面恢复。
-     所以除「自己刚写完、由自己发起的这一次刷新」外，写入期间一律不重画。 */
+     所以写入期间一律不重画，只有「自己刚写完、由自己发起的这一次刷新」例外。
+
+     ⚠️ 这个判据里**不能**放 busyNow：所有扫描入口（刷新、选择目录、连接上次目录、
+     恢复上次目录）都是先 setBusy(true) 再调 displayRoot，把它写进来等于每次扫描
+     都被自己挡在门外 —— V1.4.3 发版时就是这样：选完目录、授权过的老用户进来，
+     界面一律停在「尚未选择目录」。写入标记才是这里要挡的东西。 */
   if (!options.allowDuringWrite &&
-      (busyNow || videoAddInProgress || deleteInProgress || collectionCreateInProgress)) return;
+      (videoAddInProgress || deleteInProgress || collectionCreateInProgress)) return;
   // 封面 blob: URL 现在跟着缓存条目走，这里不再整批 revoke —— 缓存未命中的条目
   // 会在下次扫描时被新 URL 取代，复用中的条目则必须保留原来的 URL。
   const preserveDownloadStatuses = rootHandle === handle;
@@ -3631,14 +3636,31 @@ async function refreshCurrentRoot() {
   } finally { forceFullScan = false; setBusy(false); }
 }
 
+/* V1.4.4：选完目录后把插件自己的三个固定目录建出来。
+   以前只有弹窗会建 000视频下载，收藏库什么都不建 —— 选一个空文件夹进来，
+   目录树是空的，「标记已下载」还会撞上一句指错方向的提示。
+   这三个名字必须与 background.js 的 RESERVED_COLLECTION_NAMES 以及本文件里
+   扫描时跳过的那份名单一致。创建失败（只读权限、用户拒绝）不影响主流程。 */
+const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告"];
+
+async function ensureRootStructure(handle) {
+  if (!handle) return;
+  for (const name of ROOT_STRUCTURE_DIRECTORIES) {
+    try { await handle.getDirectoryHandle(name, { create: true }); } catch (_) { /* 跳过 */ }
+  }
+}
+
 async function chooseAndScan() {
   if (!window.showDirectoryPicker) { showToast(BcaI18n.t("当前 Chrome 暂不支持本地目录访问，请更新浏览器后重试。")); return; }
   setBusy(true);
   try {
-    const handle = await window.showDirectoryPicker({ mode: "read" });
-    const permission = await handle.requestPermission({ mode: "read" });
-    if (permission !== "granted") throw new Error(BcaI18n.t("未获得读取目录的权限。"));
+    /* 收藏库这边要建目录（见 ensureRootStructure），所以按读写要权限 ——
+       弹窗选择时也是这么要的，两边的授权范围保持一致。 */
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    const permission = await handle.requestPermission({ mode: "readwrite" });
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得此文件夹的写入权限。"));
     await saveHandle(handle);
+    await ensureRootStructure(handle);
     await displayRoot(handle);
   } catch (error) {
     if (error?.name !== "AbortError") showToast(error?.message || BcaI18n.t("读取目录失败。"));
@@ -3649,9 +3671,10 @@ async function continueWithLastRoot() {
   if (!rootHandle) { await chooseAndScan(); return; }
   setBusy(true, "connecting");
   try {
-    const permissionRequest = rootHandle.requestPermission({ mode: "read" });
+    const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     const permission = await permissionRequest;
     if (permission !== "granted") throw new Error(BcaI18n.t("没有获得上次目录的读取权限。可使用右上角按钮重新选择目录。"));
+    await ensureRootStructure(rootHandle);
     await displayRoot(rootHandle);
   } catch (error) {
     if (error?.name !== "AbortError") showToast(error?.message || BcaI18n.t("连接上次目录失败。"));
@@ -3677,6 +3700,8 @@ async function restoreLastRoot() {
     const permission = await handle.queryPermission({ mode: "read" });
     if (permission === "granted") {
       setBusy(true, "loading-last");
+      // 老用户可能只授过只读权限：建目录会失败，但那只影响目录树，不影响读归档
+      try { await ensureRootStructure(handle); } catch (_) { /* 忽略 */ }
       try { await displayRoot(handle); }
       finally { setBusy(false); }
       return;

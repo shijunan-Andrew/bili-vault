@@ -1,6 +1,9 @@
 const DB_NAME = "bili-fav-archiver";
 // 4.9.4：默认下载目录名（与归档布局、已下载标记保持一致）
 const DOWNLOAD_FOLDER_NAME = "000视频下载";
+// V1.4.4：选完目录时一并建出来的三个固定目录（与 background.js 的保留目录名单、
+// library.js 的 ROOT_STRUCTURE_DIRECTORIES 保持一致 —— 三处改动要一起改）
+const ROOT_STRUCTURE_DIRECTORIES = [DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告"];
 const DB_STORE = "settings";
 
 const folderName = document.getElementById("folderName");
@@ -671,10 +674,13 @@ chooseButton.addEventListener("click", async () => {
     if (permission !== "granted") throw new Error(BcaI18n.t("没有获得此文件夹的写入权限。"));
     await saveRootHandle(handle);
     rootHandle = handle;
-    // 4.9.4：顺手把默认下载目录建出来。「标记为已下载」需要它，而从没下载过的用户
-    // 根本没有这个文件夹，会卡在一句指错方向的「还没有下载目录」上。
+    // 4.9.4：顺手把插件自己的固定目录建出来。V1.4.4 起三个都建：
+    // 「标记为已下载」需要 000视频下载，错误报告与同步报告要落进另外两个。
+    // 空文件夹选进来时也能立刻看出插件认了这个目录。
     // 这里一定是 readwrite 权限（上面刚 requestPermission 过），失败也不影响主流程。
-    try { await handle.getDirectoryHandle(DOWNLOAD_FOLDER_NAME, { create: true }); } catch (_) {}
+    for (const name of ROOT_STRUCTURE_DIRECTORIES) {
+      try { await handle.getDirectoryHandle(name, { create: true }); } catch (_) {}
+    }
     const currentStatus = await chrome.runtime.sendMessage({ type: "get-status" });
     await chrome.storage.local.set({ authorizedErrorAt: currentStatus.lastError?.createdAt || null });
     folderName.textContent = handle.name;

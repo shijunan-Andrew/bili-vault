@@ -1210,8 +1210,11 @@ test("the default download folder is created when it is missing", () => {
   // 实测问题：000视频下载 只在真正下载时才被创建。从没下载过的用户根本没有它，
   // 「标记为已下载」直接失败，而报错说的却是"请先到下载页选择保存位置"——保存位置早就选好了。
   // ① 弹窗里选保存位置时顺手建出来（那时一定是 readwrite 权限）
+  //    V1.4.4 起三个固定目录一起建：000视频下载 / 001错误报告 / 002同步报告
   assert.match(popup, /const DOWNLOAD_FOLDER_NAME = "000视频下载";/);
-  assert.match(popup, /await handle\.getDirectoryHandle\(DOWNLOAD_FOLDER_NAME, \{ create: true \}\)/);
+  assert.match(popup, /const ROOT_STRUCTURE_DIRECTORIES = \[DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告"\];/);
+  assert.match(popup, /for \(const name of ROOT_STRUCTURE_DIRECTORIES\) \{/);
+  assert.match(popup, /await handle\.getDirectoryHandle\(name, \{ create: true \}\)/);
   // ② 老用户（根目录已设好但没这个文件夹）也能立刻用上：标记时按需创建
   assert.match(library, /async function getWritableDownloadParent\(\{ create = false \} = \{\}\)/);
   assert.match(library, /const parent = await getWritableDownloadParent\(\{ create: true \}\);/);
@@ -4014,14 +4017,20 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
 
   // P2-3 的保留目录名单在 library.js 里还有两份副本（两个页面脚本没法共享常量），
   // 这里钉住它们必须和 background.js 的完全一致 —— 防以后改一处漏一处。
+  // V1.4.4 起多了一份三名字的「固定目录」名单（选完目录就建出来），所以放行两种形状。
   const libraryForNames = stripComments(readProjectFile("library.js"));
   const reservedLists = [...libraryForNames.matchAll(/\[("(?:错误报告|001错误报告|002同步报告|000视频下载|视频下载)"(?:,\s*"[^"]+")*)\]/g)];
   const namesOf = (literal) => [...literal.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
-  const expectedReserved = ["000视频下载", "001错误报告", "002同步报告", "视频下载", "错误报告"];
-  assert.ok(reservedLists.length >= 2,
-    `library.js 里应该能找到保留目录名名单，实际 ${reservedLists.length} 处`);
-  for (const [literal] of reservedLists) {
-    assert.deepEqual(namesOf(literal), expectedReserved, `library.js 的保留目录名要和 background.js 一致：${literal}`);
+  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "视频下载", "错误报告"].join("|");
+  const shapeStructure = ["000视频下载", "001错误报告", "002同步报告"].join("|");
+  const shapes = reservedLists.map(([literal]) => namesOf(literal).join("|"));
+  assert.ok(shapes.filter((shape) => shape === shapeReserved).length >= 2,
+    `library.js 里应该有两份「扫描时跳过的保留目录名」，实际 ${JSON.stringify(shapes)}`);
+  assert.ok(shapes.includes(shapeStructure),
+    `library.js 里应该有 V1.4.4 的固定目录名单，实际 ${JSON.stringify(shapes)}`);
+  for (const shape of shapes) {
+    assert.ok(shape === shapeReserved || shape === shapeStructure,
+      `library.js 里的目录名名单只允许两种形状（保留目录 / 固定目录），实际 ${shape}`);
   }
 });
 
@@ -4074,4 +4083,44 @@ test("上线前审查第二批（收藏库侧）：导入提示、单飞对比�
   assert.ok(library.includes("function syncDiffButton("), "对比按钮的状态要统一算");
   assert.equal((library.match(/diffLibraryButton\.disabled/g) || []).length, 1,
     "diffLibraryButton.disabled 只允许在 syncDiffButton 里出现一次");
+});
+
+test("选完目录必须真的读一次，空文件夹也要建出三个固定目录（V1.4.4）", () => {
+  const library = stripComments(readProjectFile("library.js"));
+  const popup = stripComments(readProjectFile("popup.js"));
+  const background = stripComments(readProjectFile("background.js"));
+
+  // 1) displayRoot 的写入守卫里不能出现 busyNow：
+  //    四个扫描入口（刷新 / 选择目录 / 连接上次目录 / 恢复上次目录）都是先
+  //    setBusy(true) 再调 displayRoot，带上 busyNow 就等于每次扫描都被自己挡回去
+  //    —— V1.4.3 的真实事故：选完目录、老用户进来，界面一律停在「尚未选择目录」。
+  const guardStart = library.indexOf("if (!options.allowDuringWrite &&");
+  assert.ok(guardStart > 0, "displayRoot 要保留写入守卫");
+  const guard = library.slice(guardStart, library.indexOf("return;", guardStart));
+  assert.ok(!/busyNow/.test(guard), "displayRoot 的守卫不能用 busyNow 当判据");
+  for (const flag of ["videoAddInProgress", "deleteInProgress", "collectionCreateInProgress"]) {
+    assert.ok(guard.includes(flag), `写入守卫要挡住 ${flag}`);
+  }
+
+  // 2) 收藏库：一份固定目录名单 + 一个建目录助手，选择目录与连接上次目录都要走它
+  assert.ok(library.includes('const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告"];'),
+    "收藏库要有一份固定目录名单");
+  assert.ok(library.includes("async function ensureRootStructure("), "要有建目录的助手");
+  assert.ok(library.includes("await ensureRootStructure(handle);"), "选择目录后要建出固定目录");
+  assert.ok(library.includes("await ensureRootStructure(rootHandle);"), "连接上次目录时也要补齐");
+  assert.ok(library.includes('showDirectoryPicker({ mode: "readwrite" })'),
+    "收藏库要按读写要权限，否则建不了目录");
+
+  // 3) 弹窗：一次建三个，名字与收藏库同一份
+  assert.ok(popup.includes('const ROOT_STRUCTURE_DIRECTORIES = [DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告"];'),
+    "弹窗的固定目录名单要和收藏库一致");
+  assert.ok(popup.includes("for (const name of ROOT_STRUCTURE_DIRECTORIES)"),
+    "弹窗要按名单逐个创建");
+
+  // 4) 三个名字必须在 background.js 的保留目录名单里（三处一起改，别让名单漂移）
+  for (const name of ["000视频下载", "001错误报告", "002同步报告"]) {
+    assert.ok(library.includes(`"${name}"`), `收藏库的固定目录里有 ${name}`);
+    assert.ok(popup.includes(`"${name}"`), `弹窗的固定目录里有 ${name}`);
+    assert.ok(background.includes(`"${name}"`), `${name} 也要在 background.js 的保留名单里`);
+  }
 });
