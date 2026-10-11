@@ -61,6 +61,7 @@ const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
 const settingsFab = document.getElementById("settingsFab");
+const scrollTopFab = document.getElementById("scrollTopFab");
 const emptySearch = document.getElementById("emptySearch");
 const clearSearch = document.getElementById("clearSearch");
 const detailBackdrop = document.getElementById("detailBackdrop");
@@ -3551,6 +3552,26 @@ settingsFab.addEventListener("click", () => {
   // 扩展页面可以直接被扩展自己打开，不需要 web_accessible_resources
   chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
 });
+
+// V1.4.1：齿轮上方那个「回到顶部」。收藏库是整页跟着窗口滚的（顶栏是 sticky，
+// 没有内部滚动容器），所以直接滚 window 就对了。
+// 它只在滚过一段距离以后才出现：停在顶部时按它不会有任何变化，露着反而像坏了。
+const SCROLL_TOP_REVEAL_AT = 240;
+const prefersReducedMotion = () => {
+  try { return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true; }
+  catch (_) { return false; }
+};
+function syncScrollTopFab() {
+  const nearTop = window.scrollY < SCROLL_TOP_REVEAL_AT;
+  scrollTopFab.classList.toggle("is-hidden", nearTop);
+  // 淡出以后不该还能被 Tab 到（.is-hidden 只管鼠标）
+  scrollTopFab.tabIndex = nearTop ? -1 : 0;
+}
+scrollTopFab.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+});
+window.addEventListener("scroll", syncScrollTopFab, { passive: true });
+syncScrollTopFab();
 
 // 切语言后要重画所有由 JS 生成的文字
 function relabelAfterLocaleChange() {

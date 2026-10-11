@@ -229,16 +229,25 @@
       .catch(() => file);
   }
 
+  // V1.4.1：背景图存在 IndexedDB 的 Blob 里，localStorage 那条同步通道看不见它 ——
+  // 「设置页选了图，已经开着的收藏库要按刷新才变」就是这么来的。这里在 chrome.storage
+  // 放一个时间戳当信号：存图 / 删图时写一次，别的扩展页面收到就重新读一遍 Blob。
+  const WALLPAPER_REVISION_KEY = "interfaceWallpaperRevision";
+
+  function announceWallpaperChange() {
+    try { global.chrome?.storage?.local?.set({ [WALLPAPER_REVISION_KEY]: Date.now() }); } catch (_) {}
+  }
+
   function saveWallpaper(file) {
     if (!file) return Promise.reject(new Error("no file"));
     return prepareWallpaper(file)
       .then((prepared) => withWallpaperStore("readwrite", (store) => store.put(prepared, WALLPAPER_KEY))
-        .then(() => { applyWallpaperUrl(prepared); return prepared; }));
+        .then(() => { applyWallpaperUrl(prepared); announceWallpaperChange(); return prepared; }));
   }
 
   function clearWallpaper() {
     return withWallpaperStore("readwrite", (store) => store.delete(WALLPAPER_KEY))
-      .then(() => { applyWallpaperUrl(null); return true; });
+      .then(() => { applyWallpaperUrl(null); announceWallpaperChange(); return true; });
   }
 
   // ---------- 主题本体 ----------
@@ -379,6 +388,15 @@
       use(readStored(), { silent: true });
       if (mode === "custom") loadWallpaper();
     });
+    // V1.4.1：背景图的跨页同步。setAppearance 走 localStorage 就能通知到别的页面，
+    // 但图片本体在 IndexedDB 里 —— 存图 / 删图时写一个时间戳到 chrome.storage，
+    // 别的页面（正在开着的收藏库）收到就重新读一次，不用用户手动刷新。
+    try {
+      global.chrome?.storage?.onChanged?.addListener((changes, areaName) => {
+        if (areaName !== "local" || !changes[WALLPAPER_REVISION_KEY]) return;
+        if (mode === "custom") loadWallpaper();
+      });
+    } catch (_) {}
   }
 
   function current() { return mode; }

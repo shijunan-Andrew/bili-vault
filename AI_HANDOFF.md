@@ -413,7 +413,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 交互外壳（4.5.1）
 
-- **设置入口**：收藏库右下角只有一个齿轮 `#settingsFab`（`.floating-dock`，`position: fixed; z-index: 6`），点击 `chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") })` 打开**独立设置页**。设置页分三张卡：外观（`BcaTheme`）、语言（`BcaI18n`）、使用说明（`guide.html` + `tutorial.html` 两个入口）。**改完立即生效、人留在设置页**；「返回收藏库」按钮 `window.close()` 之后再 `chrome.tabs.getCurrent` + `chrome.tabs.update` 兜底导航，保证手动输地址进来时也退得出去。**主题名要翻译**（`跟随系统/白天/夜晚` 是界面文字），**语言名不翻译**（`简体中文/繁體中文/English` 是各语言自称）。旧的三球浮层菜单（`THEME_ICONS` / `toggleDockMenu` / `closeDockMenus` / `buildDockMenu` / `renderDockMenus` / `.dock-menu` / `.guide-fab`）已整块删除，测试里有反向断言，不要再抄回来。
+- **设置入口**：收藏库右下角挂着**两个圆球**（`.floating-dock`，`position: fixed; z-index: 6; bottom: calc(var(--sp-6) + var(--sp-5))`）—— 上面是**回到顶部** `#scrollTopFab`（`.is-hidden` 时 `opacity: 0` + `pointer-events: none`，滚过 `SCROLL_TOP_REVEAL_AT = 240` 才淡出来，点击 `window.scrollTo({ top: 0, behavior: 平滑或 auto })`，`prefers-reduced-motion` 时直接跳），下面是齿轮 `#settingsFab`，点击 `chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") })` 打开**独立设置页**。设置页分三张卡：外观（`BcaTheme`）、语言（`BcaI18n`）、使用说明（`guide.html` + `tutorial.html` 两个入口）。**改完立即生效、人留在设置页**；「返回收藏库」直接 `chrome.tabs.getCurrent` + `chrome.tabs.update(tab.id, { url })` **就地导航**（V1.4.1 起不再用 `window.close()` —— 关标签页只在「上一个被激活的标签恰好是收藏库」时才对）。**主题名要翻译**（`跟随系统/白天/夜晚/自定义` 是界面文字），**语言名不翻译**（`简体中文/繁體中文/English` 是各语言自称）。旧的三球浮层菜单（`THEME_ICONS` / `toggleDockMenu` / `closeDockMenus` / `buildDockMenu` / `renderDockMenus` / `.dock-menu` / `.guide-fab`）已整块删除，测试里有反向断言，不要再抄回来。
 - **插件弹窗的分段控件**：`.segmented`，按钮用 `aria-pressed` 表达选中。**主题按钮的文字必须套 `<span data-i18n>`**——按钮里还有 `<span class="segmented-icon">` 图标，`data-i18n` 用 `textContent` 会把图标清掉。
 - **新建收藏夹**在收藏夹列表之后（`.collection-create-tail`），不要再放回「我的收藏夹」标题行。
 - **更新视频状态必须过确认框**（`openStatusConfirm` → `#statusConfirm`）：单条与批量共用，批量走 `selectedRecords()`（**不是 `selectedVideos()`**——后者是当前收藏夹的全部视频，用错会把整个收藏夹刷一遍，正好是最容易触发风控的行为）。上限 `STATUS_BATCH_LIMIT = 80`，超出部分提示分次继续。
@@ -803,7 +803,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 
 22. **一个入口开新标签页时必须给退路；设置类改动要「就地生效、人留在原地」。**（V1.3.2 把右下角三个浮标收成一个齿轮、点开独立设置页 `settings.html`。）收藏库那个齿轮只是**入口**，真正的设置在别的文档里，于是有三条硬要求：
 
-    1. **新标签页要能退出去。**「返回收藏库」不能只写 `<a href="library.html">` —— 那会把当前这个标签页变成第二个收藏库；正确做法是 `window.close()`，失败时（用户手动输地址打开、标签不是脚本开的）再用 `chrome.tabs.getCurrent` + `chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("library.html") })` 兜底。`tutorial.js` 的关窗按钮是同一套两道兜底。
+    1. **新标签页要能退出去。**「返回收藏库」不能只写 `<a href="library.html">` —— 那会把当前这个标签页变成第二个收藏库。正确做法是**就地导航**：`chrome.tabs.getCurrent` 拿到当前标签，再 `chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("library.html") })`，拿不到 tab 时退回 `window.location.href = url`。（V1.4.1 之前写的是 `window.close()` + 兜底，真机上报过「点返回收藏库只把设置页关掉了、人没转过去」—— 关标签页只在「上一个被激活的标签恰好是收藏库」时才看起来正确，别再用。）`tutorial.js` 的关窗按钮保持两道兜底不变（它是弹出来的小窗口，关掉才是对的）。
     2. **改设置不许把页面带走。** 设置页里切换主题 / 语言只改状态、重画选中态（`aria-pressed`），不导航、不 `window.close()`、不刷新 —— 测试会数 `window.close()` 的出现次数并断言它只出现在「返回收藏库」那一个处理器里。
     3. **跨页同步不要新增信号。** 语言走 `library.js` 原有的 `chrome.storage.onChanged`（`interfaceLocale`，**必须带 `next === BcaI18n.locale()` 自触发防护**，否则自己写的值会绕回来重画一遍）；主题走 `theme.js` 的 `localStorage` `storage` 事件（它只在别的文档里触发）；设置页两处选中态一律从 `BcaTheme.current()` / `BcaI18n.locale()` **现推**，不记「上次是谁点的」。
     4. **共享控件放 `theme.css`。** `.segmented`（分段控件）原来只写在 `popup.css` 里，设置页要用就把它挪进 `theme.css` 当公共组件 —— 别在 `settings.css` 里再抄一份，两份迟早会走样。图标用 `icons.js` 里的 SVG（新增 `settings`），**不要用「⚙」这种字符**：字符当图标在不同字体下大小、基线都不一样，`test/stability.test.cjs:165-172` 已明确禁止。

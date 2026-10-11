@@ -1763,23 +1763,36 @@ test("theme, language, and the guide all live in the settings page behind one ge
   for (const gone of ["themeBall", "themeBallIcon", "themeMenu", "localeBall", "localeMenu", "guide-fab"]) {
     assert.equal(html.includes(gone), false, `library.html 里不应再有 ${gone}`);
   }
-  // 右下角只剩一个齿轮：跟原来的球共用 .dock-ball 的圆形浮标观感
+  // 右下角两个球：齿轮 + 它上面的「回到顶部」，跟原来一样共用 .dock-ball 的圆形浮标观感
   assert.match(html, /<button id="settingsFab" class="dock-ball"/, "收藏库右下角要有一个设置齿轮");
+  assert.match(html, /<button id="scrollTopFab" class="dock-ball is-hidden"/, "齿轮上方要有回到顶部");
+  assert.match(html, /id="scrollTopFab"[^>]*data-i18n-title="回到顶部"/, "回到顶部的 title 要能翻译");
+  assert.match(html, /id="scrollTopFab"[\s\S]{0,200}?data-icon="arrow-up"/, "回到顶部要用 icons.js 里的 arrow-up 图标");
+  assert.ok(html.indexOf('id="scrollTopFab"') < html.indexOf('id="settingsFab"'), "回到顶部要排在齿轮上方");
+  assert.match(readProjectFile("icons.js"), /"arrow-up": '<path /, "icons.js 里要有 arrow-up");
   assert.match(html, /id="settingsFab"[^>]*data-i18n-title="设置"/, "齿轮的 title 要能翻译");
   assert.match(html, /id="settingsFab"[\s\S]{0,200}?data-icon="settings"/, "齿轮要用 icons.js 里的 settings 图标");
   // 点齿轮开独立的设置页（扩展页面可以直接被扩展自己打开，不需要 web_accessible_resources）
   assert.match(library, /settingsFab\.addEventListener\("click"/);
   assert.match(library, /chrome\.tabs\.create\(\{ url: chrome\.runtime\.getURL\("settings\.html"\) \}\)/);
+  // V1.4.1：回到顶部。收藏库是整页跟着窗口滚的，所以滚 window；滚过一段距离才露出来，
+  // 停在顶部时按它不会有任何变化，露着反而像坏了。
+  assert.match(library, /const SCROLL_TOP_REVEAL_AT = 240;/);
+  assert.match(library, /scrollTopFab\.classList\.toggle\("is-hidden", nearTop\)/);
+  assert.match(library, /scrollTopFab\.tabIndex = nearTop \? -1 : 0;/);
+  assert.match(library, /window\.scrollTo\(\{ top: 0, behavior: prefersReducedMotion\(\) \? "auto" : "smooth" \}\)/);
+  assert.match(library, /window\.addEventListener\("scroll", syncScrollTopFab, \{ passive: true \}\)/);
   // 旧悬浮球那套菜单逻辑不许留死代码
   for (const gone of ["THEME_ICONS", "function themeLabel(", "function toggleDockMenu(", "function closeDockMenus(", "function buildDockMenu(", "function renderDockMenus(", "BcaTheme.onChange("]) {
     assert.equal(library.includes(gone), false, `library.js 里不应再有 ${gone}`);
   }
-  // 浮标容器还在：齿轮仍然钉在右下角
+  // 浮标容器还在：两个球都钉在右下角，而且整体抬高一档（原来 bottom 只有 22px，贴着页脚）
   const rule = (readProjectFile("library.css").match(/\.floating-dock \{[^}]*\}/) || [""])[0];
   assert.match(rule, /position: fixed/);
   assert.match(rule, /right:/);
-  assert.match(rule, /bottom:/);
+  assert.match(rule, /bottom: calc\(var\(--sp-6\) \+ var\(--sp-5\)\)/, "整排要抬高一档");
   const css = stripComments(readProjectFile("library.css"));
+  assert.match(css, /\.dock-ball\.is-hidden \{ opacity: 0; pointer-events: none; \}/, "收起时不该还能点");
   assert.equal(css.includes(".dock-menu"), false, "菜单样式应随菜单一起删掉");
   assert.equal(css.includes(".guide-fab"), false, "问号球样式应随问号球一起删掉");
 });
@@ -1789,13 +1802,14 @@ test("the settings page offers theme, language, and the two help pages", () => {
   const script = readProjectFile("settings.js");
   // 顶部沿用「标题 + 一句说明 + 右上角返回收藏库」的形态
   assert.match(html, /<h1 data-i18n="哔哩藏库 · 设置">/, "设置页标题要能翻译");
-  // 返回收藏库：本页是新开的一个标签，能关就直接关掉回到原来那个收藏库标签，
-  // 关不掉（用户手输地址进来）才退回导航过去 —— 和 tutorial.js 的关窗按钮同一套两道兜底。
+  // 返回收藏库：把这个标签页本身导航回去。V1.4.1 之前是先 window.close()，但「关掉标签页」
+  // 只在「上一个被激活的标签恰好是收藏库」时才看起来正确 —— 用户真机上报过
+  // 「点返回收藏库只是把设置页关掉，人没转到收藏库」。
   assert.match(html, /<button id="settingsBack"[^>]*data-i18n="返回收藏库">/, "设置页要有返回收藏库的按钮");
   assert.match(script, /getElementById\("settingsBack"\)\?\.addEventListener\("click"/);
-  assert.match(script, /window\.close\(\)/);
   assert.match(script, /chrome\.tabs\.getCurrent\(\(tab\) => \{/);
-  assert.match(script, /chrome\.tabs\.update\(tab\.id, \{ url: chrome\.runtime\.getURL\("library\.html"\) \}\)/);
+  assert.match(script, /chrome\.tabs\.update\(tab\.id, \{ url \}\)/);
+  assert.match(script, /window\.location\.href = url;/, "拿不到 tab 时要退回就地导航，别把人卡住");
   // 外观：三个主题选项（分段控件与弹窗共用 theme.css 里的那一份）
   assert.match(html, /class="segmented"/);
   for (const mode of ["system", "light", "dark"]) {
@@ -1821,13 +1835,11 @@ test("the settings page offers theme, language, and the two help pages", () => {
   // 别处（弹窗）改了语言要跟上，同时要认出「这是我自己刚写的」
   assert.match(script, /chrome\.storage\.onChanged\.addListener/);
   assert.match(script, /next === BcaI18n\.locale\(\)/);
-  // 改设置本身不该关掉设置页：这个文件里只允许「返回收藏库」那一个出口关页，
-  // 而且它必须是先 close 再兜底导航，别处不许出现关页/摘标签的调用。
-  assert.doesNotMatch(script, /chrome\.tabs\.remove/);
-  const closeCalls = [...script.matchAll(/window\.close\(\)/g)];
-  assert.equal(closeCalls.length, 1, "设置页里只应有「返回收藏库」一处关页");
-  const backAt = script.indexOf('getElementById("settingsBack")');
-  assert.ok(backAt > 0 && closeCalls[0].index > backAt, "关页只能出现在「返回收藏库」的处理器里");
+  // 改设置本身不该关掉设置页，也不该再靠关标签页「返回收藏库」（V1.4.1 改成导航）。
+  // 查「关页」要剥注释 —— 说明文字里会提到旧写法。
+  const settingsCode = stripComments(script);
+  assert.doesNotMatch(settingsCode, /chrome\.tabs\.remove/);
+  assert.equal(/window\.close\(\)/.test(settingsCode), false, "设置页不再靠关标签页返回，也就不该有关页调用");
   // 只改选中态、不写文字：切完语言后写死的文字会把译文盖回中文
   assert.doesNotMatch(script, /textContent\s*=/);
   // 毛玻璃开关的视觉是 .off 类画的（照 popup.css 的约定）。只写 aria-pressed 的话，
@@ -3799,6 +3811,18 @@ test("背景图存 IndexedDB 的 Blob，不进 chrome.storage（静态回归）"
     css,
     /html\[data-appearance="custom"\]:not\(\[data-wallpaper-scope="popup"\]\) body \{ background: transparent; \}/
   );
+
+  // V1.4.1：换图 / 删图要能通知到已经开着的别的页面。localStorage 那条通道看不见
+  // IndexedDB 里的 Blob，所以另发一个时间戳到 chrome.storage，收到就重读一次
+  // （真机上报过「设置页选了背景，收藏库要手动刷新才变」）。
+  assert.match(theme, /const WALLPAPER_REVISION_KEY = "interfaceWallpaperRevision";/);
+  assert.match(theme, /function announceWallpaperChange\(\)/);
+  assert.match(theme, /global\.chrome\?\.storage\?\.local\?\.set\(\{ \[WALLPAPER_REVISION_KEY\]: Date\.now\(\) \}\)/);
+  assert.match(theme, /chrome\?\.storage\?\.onChanged\?\.addListener\(\(changes, areaName\) => \{/);
+  assert.match(theme, /if \(areaName !== "local" \|\| !changes\[WALLPAPER_REVISION_KEY\]\) return;/);
+  // 存图与删图两条路都要发信号，否则删掉图以后旧页面会一直挂着那张图
+  const saves = theme.match(/announceWallpaperChange\(\);/g) || [];
+  assert.equal(saves.length, 2, "存图与删图各发一次信号");
 });
 
 test("毛玻璃糊在哪些面上、怎么糊，都钉住（静态回归）", () => {

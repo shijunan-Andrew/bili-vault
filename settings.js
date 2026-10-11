@@ -386,16 +386,17 @@ async function boot() {
     Promise.resolve(BcaI18n.use(next, { silent: true })).catch(() => {}).then(renderLocaleOptions);
   });
 
-  // 齿轮是在收藏库那个标签页里点开的，本页是新开的一个标签：能关就直接关掉、回到原来
-  // 那个收藏库标签（用户手动输地址进来时关不掉，才退回导航过去）。和 tutorial.js 的
-  // 关窗按钮同一套做法，两道都兜住，用户不会卡在一个退不出去的页面上。
+  // V1.4.1：「返回收藏库」改成把这个标签页本身导航回去，不再先 window.close()。
+  // 关标签页只在「上一个被激活的标签恰好是收藏库」时才看起来正确 —— 用户可能是从书签、
+  // 地址栏或别的扩展页进来的，关掉之后落在哪个标签上就不一定了（真机上报过这个问题：
+  // 点了「返回收藏库」只是把设置页关掉，人留在了原来的页面上）。
   document.getElementById("settingsBack")?.addEventListener("click", () => {
-    window.close();
-    setTimeout(() => {
-      chrome.tabs.getCurrent((tab) => {
-        if (tab?.id !== undefined) chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("library.html") });
-      });
-    }, 60);
+    const url = chrome.runtime.getURL("library.html");
+    chrome.tabs.getCurrent((tab) => {
+      // 非标签上下文里拿不到 tab（理论上不会发生），退回就地导航，别把人卡住
+      if (tab && tab.id !== undefined) chrome.tabs.update(tab.id, { url });
+      else window.location.href = url;
+    });
   });
 }
 

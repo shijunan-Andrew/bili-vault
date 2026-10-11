@@ -326,8 +326,12 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- V1.3.2：4.5.1 那三个球（？/ 主题 / 语言）合成一个齿轮，点开进独立的设置页。
-       主题与语言在设置页里改，改完写各自的存储，这一页靠 theme.js / i18n.js 的监听跟着变。 -->
+       主题与语言在设置页里改，改完写各自的存储，这一页靠 theme.js / i18n.js 的监听跟着变。
+       V1.4.1：齿轮上方加一个「回到顶部」，只在这一页滚下去以后才露出来（逻辑在本页脚本里）。 -->
   <div class="floating-dock">
+    <div class="dock-slot">
+      <button id="scrollTopFab" class="dock-ball is-hidden" type="button" aria-label="回到顶部" data-i18n-aria="回到顶部" title="回到顶部" data-i18n-title="回到顶部"><span data-icon="arrow-up"></span></button>
+    </div>
     <div class="dock-slot">
       <button id="settingsFab" class="dock-ball" type="button" aria-label="设置" data-i18n-aria="设置" title="设置" data-i18n-title="设置"><span data-icon="settings"></span></button>
     </div>

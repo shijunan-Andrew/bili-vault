@@ -229,8 +229,10 @@ html.banner-visible { --banner-h: 42px; }
 .sidebar-bottom { margin-top: auto; padding: var(--sp-3) var(--sp-2) 0; }
 
 /* V1.3.2：右下角只剩一个设置齿轮（点开进 settings.html）。
-   4.5.1～V1.3.1 是主题 / 语言 / 使用说明三个球，这里只留浮标本身的定位与圆形观感。 */
-.floating-dock { position: fixed; right: var(--sp-5); bottom: var(--sp-5); z-index: 6; display: grid; gap: var(--sp-3); }
+   4.5.1～V1.3.1 是主题 / 语言 / 使用说明三个球，这里只留浮标本身的定位与圆形观感。
+   V1.4.1：齿轮上方多了「回到顶部」，整排抬高一档 —— 原来 bottom 只有 22px，
+   贴在页面最下面，页脚和工具条都挤在它旁边。 */
+.floating-dock { position: fixed; right: var(--sp-5); bottom: calc(var(--sp-6) + var(--sp-5)); z-index: 6; display: grid; gap: var(--sp-3); }
 .dock-slot { position: relative; display: grid; justify-items: end; }
 .dock-ball {
   display: grid;
@@ -243,10 +245,13 @@ html.banner-visible { --banner-h: 42px; }
   color: var(--brand-deep);
   font-size: var(--fs-lg);
   box-shadow: var(--shadow-md);
-  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease);
 }
 .dock-ball:hover { transform: translateY(-2px); border-color: var(--brand); box-shadow: var(--shadow-lg); }
 .dock-ball:active { transform: translateY(0) scale(.96); }
+/* V1.4.1：「回到顶部」只有页面滚下去以后才有意义。到顶时按它什么都不会发生，
+   看着像坏了，所以到顶就淡出并让出点击（tabIndex 也由 library.js 摘掉）。 */
+.dock-ball.is-hidden { opacity: 0; pointer-events: none; }
 /* V1.3.2：原来给主题 / 语言菜单用的 .dock-menu / @keyframes dock-in / .dock-check，
    以及球展开时的 [aria-expanded="true"] 选中态，都随菜单一起删掉了。 */
 
