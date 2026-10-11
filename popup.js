@@ -487,6 +487,19 @@ function openUpdateRecent() {
   updateRecentDialog.showModal();
 }
 
+/* 导入过程中用户把 B 站收藏夹页面关掉时，弹窗发给页面的那条消息会随着标签页一起断掉。
+   后台其实还在跑（1.4.3 起「关掉页面也继续」是有意做的），但这里的 await 会直接失败，
+   于是既不显示完成提示、还会写一句「请先打开并刷新收藏夹页面」的假错误。
+   所以先问一句后台还在不在跑：在跑就改成等 importDone 落地再提示。 */
+async function importStillRunning() {
+  try {
+    const saved = await chrome.storage.local.get("importState");
+    return Boolean(saved?.importState?.running);
+  } catch (_) {
+    return false;
+  }
+}
+
 async function startImport(options = {}) {
   if (importBusy) return;
   activeOperation = options.recentDays ? "update" : "import";
@@ -504,6 +517,7 @@ async function startImport(options = {}) {
   updateImportSelection();
   importStatus.classList.remove("error");
   importProgressText.textContent = BcaI18n.t("正在请求本地目录权限…");
+  const startedAt = Date.now();
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地备份文件夹的写入权限，请重新选择本地备份文件夹后重试。"));
@@ -523,8 +537,15 @@ async function startImport(options = {}) {
     showDoneDialog(doneText);
     if (response.reportPath) importStatus.textContent += ` ${BcaI18n.t("错误报告：{path}", { path: response.reportPath })}`;
   } catch (error) {
-    importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("导入失败。");
-    importStatus.classList.add("error");
+    // 页面被关掉 ≠ 导入失败：后台还在跑的话，等它把结果写进 importDone 再提示。
+    if (await importStillRunning()) {
+      awaitingBackgroundImport = startedAt;
+      importStatus.classList.remove("error");
+      importStatus.textContent = BcaI18n.t("页面已关闭，导入仍在后台继续；完成后这里会提示。");
+    } else {
+      importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("导入失败。");
+      importStatus.classList.add("error");
+    }
   } finally {
     importBusy = false;
     importPaused = false;
@@ -884,10 +905,28 @@ chrome.runtime.onMessage.addListener((message) => {
   importProgressText.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在导入…");
 });
 
+/* 收藏夹页面在导入途中被关掉时，只有后台会把结果写进 importDone；
+   这里记下「等哪一次导入的结果」，收到就补一次完成提示。 */
+let awaitingBackgroundImport = 0;
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.enabled) renderEnabledState(changes.enabled.newValue !== false);
   // 收藏库里换了备份文件夹：把这一行名字同步过来，别让两边显示得不一样
   if (areaName === "local" && changes.rootHandleRevision) syncFolderLabelFromHandle();
+  // 页面被关掉之后后台自己跑完的那一轮：结果只写在 importDone 里
+  if (areaName === "local" && changes.importDone && awaitingBackgroundImport) {
+    const done = changes.importDone.newValue;
+    if (done?.text && !done.acknowledged && (!done.at || done.at >= awaitingBackgroundImport)) {
+      awaitingBackgroundImport = 0;
+      importBusy = false;
+      importPaused = false;
+      disarmCancel();
+      updateImportSelection();
+      importStatus.classList.remove("error");
+      importStatus.textContent = done.text;
+      showDoneDialog(done.text);
+    }
+  }
   if (areaName === "local" && changes.importState) {
     const state = changes.importState.newValue || {};
     importPaused = Boolean(state.paused);

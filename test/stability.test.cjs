@@ -4160,3 +4160,23 @@ test("封面白名单接受接口回的 http 地址并升到 https（V1.4.5）",
   assert.ok(background.includes('fetch(coverUrl, { credentials: "omit"'), "取封面要用升级后的地址");
   assert.ok(!/coverUrlAllowed/.test(background), "旧的、只认 https 的 coverUrlAllowed 不该再留着");
 });
+
+test("导入途中关掉收藏夹页面时，弹窗不许报假失败、也不许漏掉完成提示（V1.4.7）", () => {
+  const popup = stripComments(readProjectFile("popup.js"));
+
+  // 页面被关掉 ≠ 导入失败：catch 里先问一句后台还在不在跑
+  assert.ok(popup.includes("async function importStillRunning()"), "要有「后台还在跑吗」的判断");
+  assert.ok(popup.includes("if (await importStillRunning())"), "catch 里要用它分流");
+  assert.ok(popup.includes("页面已关闭，导入仍在后台继续；完成后这里会提示。"), "后台仍在跑时要说实话，不是报错");
+  assert.ok(popup.includes("awaitingBackgroundImport = startedAt;"), "要记下在等哪一次的结果");
+  assert.ok(popup.includes("const startedAt = Date.now();"), "开始时要记时间戳，免得收到上一轮的旧结果");
+
+  // 后台自己跑完那一轮：结果只写在 importDone 里，storage 变更要接住
+  assert.ok(/changes\.importDone && awaitingBackgroundImport/.test(popup), "要接住后台写完的结果");
+  assert.ok(popup.includes("importStatus.textContent = done.text;"), "结果要写回状态行");
+  assert.ok(popup.includes("showDoneDialog(done.text);"), "也要弹完成提示");
+
+  // 两条老路径不许被改坏：页面还在时的直接响应、以及重开弹窗时补显示
+  assert.ok(popup.includes("showDoneDialog(doneText);"), "页面还在时的老路径要留着");
+  assert.ok(popup.includes('chrome.storage.local.get("importDone")'), "重开弹窗时仍要读上次结果");
+});

@@ -530,6 +530,7 @@
   "也可以批量导入": "You can also import in bulk",
   "页": "Page",
   "页面没有返回结果。": "The page returned no results.",
+  "页面已关闭，导入仍在后台继续；完成后这里会提示。": "The page was closed, but the import is still running in the background; the result will show up here.",
   "夜晚": "Dark",
   "一、这个插件做了什么": "1. What this extension does",
   "一般做不到": "Usually not",
