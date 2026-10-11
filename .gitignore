@@ -1,0 +1,20 @@
+# i18n 工具生成的待译清单（按需用 --todo 重新生成）
+locales/_todo.json
+locales/_delta*.json
+
+# 系统与编辑器
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# 本地归档与报告不属于仓库
+001错误报告/
+000视频下载/
+
+# 本机 node.exe 的路径（各人机器不同，不进仓库）
+.node-path
+
+# 临时排查脚本。我（AI）已经三次把它们误提交进仓库，直接从忽略规则上堵死。
+_*.cjs

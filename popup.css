@@ -1,0 +1,489 @@
+/* ==========================================================================
+   popup.css —— 插件弹窗（4.0）
+   Chrome 弹窗上限是 800×600。3.x 的内容约 850px 高，必然要滚动。
+   4.0 把“导入或更新”折叠成可展开区块，默认视图控制在 600px 以内。
+   ========================================================================== */
+
+body {
+  width: 420px;
+  max-height: 600px;
+  margin: 0;
+  overflow-y: auto;
+  color: var(--text);
+  background: var(--bg);
+}
+
+main { padding: var(--sp-3) var(--sp-4) var(--sp-2); }
+
+.brand-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+/* 纯白字母压在品牌蓝渐变上，属于“彩色底上的文字”，不随主题变 */
+.brand-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-md);
+  color: #fff;
+  background: linear-gradient(140deg, var(--brand), var(--brand-strong));
+  box-shadow: var(--shadow-brand);
+  font-size: var(--fs-xl);
+  font-weight: 800;
+}
+.brand-icon.disabled { background: var(--ghost); box-shadow: none; }
+h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
+.subtitle { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+
+.card { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-sm); }
+.feature-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-4); }
+.feature-title { color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
+.feature-hint { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
+
+/* ---------- 4.5.1：主题 / 语言分段控件 ----------
+   一条 --surface-soft 浅槽里放三个等宽按钮，选中的用 --surface 底 + --shadow-sm 凸起。
+   颜色只走 theme.css 的令牌，深色主题下自动跟着换。 */
+/* 卡片间距统一收到 --sp-2：4.5.1 顶部多了主题 / 语言两行控件，
+   不改功能、只压留白，尽量把默认视图拉回 600px 以内。 */
+.controls-card { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+.segmented {
+  display: flex;
+  gap: var(--sp-1);
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-soft);
+}
+/* 宽度覆盖 button 基类的 100%，让三个按钮等分整条槽 */
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  min-width: 0;
+  min-height: 30px;
+  flex: 1;
+  padding: 0 var(--sp-1);
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.segmented button:hover:not([aria-pressed="true"]) { color: var(--ink); background: var(--surface-sunken); }
+/* 选中态：卡片底色 + 细描边 + 小阴影，从槽里“凸”出来 */
+.segmented button[aria-pressed="true"] { border-color: var(--line); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm); }
+.segmented-icon { display: inline-flex; font-size: var(--fs-md); opacity: .75; }
+.segmented button[aria-pressed="true"] .segmented-icon { color: var(--brand); opacity: 1; }
+
+.toggle-switch { position: relative; width: 46px; min-width: 46px; height: 26px; min-height: 26px; padding: 0; border: 0; border-radius: var(--r-pill); background: var(--brand); transition: background var(--dur) var(--ease); }
+/* 滑块固定用纯白：它压在 --brand / --ghost 的彩色轨道上，和主题无关 */
+.toggle-switch span { position: absolute; top: 3px; left: 23px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm); transition: left var(--dur) var(--ease); }
+.toggle-switch.off { background: var(--ghost); }
+.toggle-switch.off span { left: 3px; }
+
+/* 「使用说明」是次要入口，放在标题行下方一行，不与主出口抢位置 */
+.guide-link {
+  display: inline-block;
+  margin: 0 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+.guide-link:hover { color: var(--accent); text-decoration: underline; }
+
+.library-link {
+  /* 位置在标题行右侧（弹窗里最主要的出口，压在开关下面反而像次级操作）。
+     所以按"标题行里的一个胶囊按钮"来排，不再占满一整行。 */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  margin-left: auto;
+  padding: 7px var(--sp-3);
+  border: 1px solid var(--success-line);
+  border-radius: var(--r-pill);
+  color: var(--success-strong);
+  /* 绿色渐变与阴影全部走令牌，深色下由 --success-soft / --success-line 换成墨绿 */
+  background: linear-gradient(135deg, var(--success-soft), var(--success-line));
+  box-shadow: var(--shadow-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.library-link:hover { border-color: var(--success); color: var(--success-strong); background: var(--success-line); transform: translateY(-1px); }
+.library-link .icon { font-size: var(--fs-md); }
+/* 标题块可压缩：窄语言（English）下副标题先换行，也不把按钮挤出可视区 */
+.brand-text { min-width: 0; }
+
+.folder-card, .status-card { padding: var(--sp-4); }
+.status-card { margin-top: var(--sp-2); }
+.section-label { margin-bottom: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+.folder-name { margin-bottom: var(--sp-2); color: var(--ink); font-size: var(--fs-md); font-weight: 650; overflow-wrap: anywhere; }
+.folder-name.unselected { color: var(--danger); }
+
+button { width: 100%; min-height: 38px; border: 0; border-radius: var(--r-sm); cursor: pointer; font: inherit; font-size: var(--fs-base); font-weight: 650; }
+button:disabled { cursor: wait; opacity: .6; }
+/* 纯白文字压在 --brand 蓝底上，属于“彩色底上的文字”，不随主题变 */
+.primary { color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
+.primary:hover:not(:disabled) { background: var(--brand-strong); }
+.secondary { margin-top: var(--sp-2); border: 1px solid var(--line); color: var(--text); background: var(--surface); }
+.secondary:hover:not(:disabled) { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
+.hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+/* 文件夹卡片专用：这条说明和上面的按钮同属一组，间距收到 4px
+   （原来的 --sp-2 / --sp-3 留白，4.5.1 让位给顶部的主题 / 语言控件） */
+.folder-card .hint { margin-top: 4px; }
+.muted { color: var(--text); font-size: var(--fs-base); line-height: 1.6; overflow-wrap: anywhere; }
+
+/* ---------- 可折叠的导入区块 ---------- */
+/* 4.8：顶部静态开源横幅。做成吸顶，滚动时也看得到；高度压到 26px，
+   尽量少占弹窗本来就紧张的垂直空间。 */
+.popup-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 26px;
+  /* 负外边距是为了通栏：抵消 main 的上内边距（sp-3）和左右内边距（sp-4），
+     让横幅紧贴弹窗顶边、左右顶满。下边距只留 sp-1，尽量少占本来就紧张的垂直空间。
+     净增高 = 26 - 12 + 4 = 18px。 */
+  margin: calc(var(--sp-3) * -1) calc(var(--sp-4) * -1) var(--sp-1);
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  background: linear-gradient(90deg, var(--success-solid), var(--success));
+  color: #fff;                       /* 绿色底上的白字，不随主题变 */
+  font-size: var(--fs-micro);
+}
+/* 刻意不做 position: sticky。sticky 的 top 是「吸附阈值」，
+   写成负值会让横幅往上滚一段才吸附、顶部被切掉一截；
+   而且它常驻可视区会一直占掉 26px，反而让弹窗更挤。
+   作为普通块级元素，它随内容滚走，可视区就还给了内容。 */
+.popup-banner-link { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; color: inherit; text-decoration: none; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.popup-banner-link > span:first-child { flex: 0 0 auto; font-size: var(--fs-sm); }
+.popup-banner-close { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border: 0; border-radius: var(--r-xs); background: transparent; color: inherit; opacity: .85; }
+.popup-banner-close:hover { background: #ffffff2e; opacity: 1; }
+
+.import-card { margin-top: var(--sp-3); padding: 0; overflow: hidden; }
+.import-card > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  cursor: pointer;
+  list-style: none;
+}
+.import-card > summary::-webkit-details-marker { display: none; }
+/* 悬停底色由下面 4.8.3 那一组统一接管（必须排在 .import-card > summary 之后） */
+.import-summary-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: var(--r-xs); color: var(--brand-deep); background: var(--brand-soft); font-size: var(--fs-md); }
+.import-summary-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.import-summary-copy strong { color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
+.import-summary-copy small { color: var(--muted); font-size: var(--fs-sm); }
+/* 4.2：导入过程的暂停 / 取消 */
+.import-progress-view.paused .progress-spinner { animation-play-state: paused; border-top-color: var(--warning); }
+.import-control { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-2); }
+.import-control .secondary { margin-top: 0; }
+.import-control .danger { border-color: var(--danger-line); color: var(--danger-strong); background: var(--danger-soft); }
+/* 悬停加深一档：--danger-soft 是常态底色，这里用同色系的 --danger-line */
+.import-control .danger:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-line); }
+.import-control-hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+.import-card > summary .chevron { color: var(--faint); font-size: var(--fs-md); transition: transform var(--dur) var(--ease); }
+.import-card[open] > summary .chevron { transform: rotate(180deg); }
+/* 4.8.3：「导入或更新」是弹窗里最主要的入口，用橘黄突出。
+   —— 这一组必须排在 .import-card > summary 那几条**之后**。
+   4.7 时它们写在前面，同为 (0,2,1) 优先级的 :hover 被后面的规则盖掉，
+   橘黄悬停从来没生效过。
+   折叠态与展开态统一用 --feature-soft 底色，视觉上不再有断层。
+   图标做成实心：橘黄底 + 浅橘色的图形。
+   浅色下 #fdf0e0 on #a5560a = 4.76，深色下 #2e2318 on #efa45a = 7.39，两套主题都达标。 */
+.import-card { border-color: var(--feature-line); }
+.import-card > summary { background: var(--feature-soft); }
+.import-card > summary strong { color: var(--feature); }
+.import-card > summary:hover { background: var(--feature-line); }
+.import-card > summary .import-summary-icon { color: var(--feature-soft); background: var(--feature); }
+.import-card > summary .chevron { color: var(--feature); }
+.import-body { padding: 0 var(--sp-4) var(--sp-4); border-top: 1px solid var(--line-soft); }
+
+.import-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: var(--sp-3) 0 var(--sp-2); }
+.refresh-button { width: auto; min-height: 32px; margin: 0; padding: 0 var(--sp-3); font-size: var(--fs-sm); }
+.import-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 0 6px; }
+.import-selection-label { color: var(--muted); font-size: var(--fs-sm); font-weight: 650; }
+.import-selected-count { color: var(--faint); font-size: var(--fs-sm); }
+.import-folder-list { max-height: 156px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); }
+.import-folder-row { display: flex; align-items: center; gap: var(--sp-2); min-height: 38px; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line-soft); font-size: var(--fs-base); cursor: pointer; }
+.import-folder-row:last-child { border-bottom: 0; }
+.import-folder-row:hover { background: var(--brand-soft); }
+.import-folder-row input { accent-color: var(--brand); }
+.import-folder-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-folder-count { color: var(--faint); font-size: var(--fs-sm); }
+.import-warning { margin: var(--sp-2) 0 var(--sp-1); color: var(--danger); font-size: var(--fs-sm); line-height: 1.6; }
+/* 4.3：失效视频恢复默认关闭，需要用户显式勾选 */
+.import-option { display: flex; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); cursor: pointer; }
+.import-option input { margin: 2px 0 0; accent-color: var(--brand); }
+.import-option span { display: grid; gap: 2px; color: var(--text); font-size: var(--fs-base); }
+.import-option small { color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
+.import-selection-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); margin: var(--sp-2) 2px; }
+.text-button { width: auto; min-height: 26px; padding: 2px 4px; color: var(--brand-deep); background: transparent; font-size: var(--fs-sm); font-weight: 600; }
+.text-button:hover { color: var(--brand-strong); text-decoration: underline; }
+.import-status { min-height: 18px; margin-top: var(--sp-2); overflow-wrap: anywhere; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+.import-status:empty { display: none; }
+.import-status.error { color: var(--danger); }
+
+.import-progress-view { display: flex; align-items: center; gap: var(--sp-3); min-height: 78px; margin-top: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); }
+.import-progress-view strong { display: block; color: var(--ink); font-size: var(--fs-base); }
+.import-progress-view p { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+.progress-spinner { width: 24px; height: 24px; flex: 0 0 auto; border: 2px solid var(--brand-line); border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- 最近状态与错误 ---------- */
+.result-details { margin-top: var(--sp-2); color: var(--brand-deep); font-size: var(--fs-sm); }
+.result-details summary { cursor: pointer; }
+.result-path { max-height: 92px; margin-top: 5px; overflow: auto; color: var(--muted); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.error-block { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.error-title { display: flex; align-items: center; gap: 5px; color: var(--danger); font-size: var(--fs-base); font-weight: 700; }
+.error-block pre { max-height: 112px; margin: 6px 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: var(--fs-sm)/1.6 var(--font-sans); }
+.report-path { color: var(--faint); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+
+/* ---------- 使用须知（4.4.1：置顶、黄色底、字号调大、可折叠但不能关闭） ---------- */
+.safety-notice { margin: 0 0 var(--sp-2); padding: 0; overflow: hidden; border-color: var(--warning-line); background: var(--warning-soft); }
+.safety-notice > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--warning);
+  cursor: pointer;
+  list-style: none;
+  /* 单行紧凑条：折叠后整条约 36px，远低于弹窗 600px 上限 */
+  line-height: 1.2;
+}
+.safety-notice > summary::-webkit-details-marker { display: none; }
+.safety-notice > summary:hover { background: var(--warning-soft-strong); }
+.safety-summary-icon { color: var(--warning); font-size: var(--fs-lg); }
+.safety-notice > summary strong { flex: 1; min-width: 0; color: var(--warning); font-size: var(--fs-md); font-weight: 700; }
+.safety-notice > summary .chevron { color: var(--warning); font-size: var(--fs-lg); transition: transform var(--dur) var(--ease); }
+.safety-notice[open] > summary .chevron { transform: rotate(180deg); }
+.safety-notice-list { max-height: 200px; overflow-y: auto; display: grid; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--warning-line); list-style: none; }
+.safety-notice-list li { color: var(--text); font-size: var(--fs-md); line-height: 1.8; overflow-wrap: anywhere; }
+/* 4.5.1：第一条「请勿滥用」加重。深色下 --warning 本身就是提亮过的金色，直接用令牌 */
+.safety-notice-list li.safety-abuse { color: var(--warning); font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.safety-notice-list a { color: var(--brand-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.safety-notice-list a:hover { color: var(--brand-strong); }
+
+/* ---------- 页脚 ---------- */
+.popup-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-3); }
+.support-link { display: inline-flex; align-items: center; gap: 5px; color: var(--brand-deep); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
+.support-link:hover { text-decoration: underline; }
+/* 4.8.1：页脚左侧放「一键三连 + 仓库地址」两个入口 */
+.foot-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.repo-link { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--fs-micro); font-weight: 500; text-decoration: none; }
+.repo-link:hover { text-decoration: underline; }
+.support-link .icon, .repo-link .icon { flex: 0 0 auto; }
+.foot-right { display: flex; align-items: center; gap: var(--sp-2); }
+/* 4.5.1：语言切换已移出页脚（顶部 .segmented 承担），这里只留版本号 */
+.popup-version { color: var(--faint); font-size: var(--fs-sm); }
+
+/* V1.1.0：先看差异。以下都是新类，不覆盖任何既有选择器。 */
+.diff-button {
+  width: 100%;
+  margin-top: var(--sp-2);
+}
+
+.diff-hint {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.diff-result {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.diff-line {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: 1.7;
+}
+
+.diff-line + .diff-line {
+  margin-top: var(--sp-1);
+}
+
+.diff-line strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.diff-warn {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* V1.1.3：最近状态改成可折叠 —— 导入很多记录后这一块会变得很长。
+   折叠时用 .status-brief 显示首行摘要。以下都是新类，不覆盖既有选择器。 */
+.status-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.status-summary::-webkit-details-marker {
+  display: none;
+}
+
+.status-summary .section-label {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+
+.status-brief {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-card[open] .status-brief {
+  display: none;
+}
+
+.status-card[open] .status-summary {
+  margin-bottom: var(--sp-2);
+}
+
+/* V1.1.3：导入前的确认框。 */
+.popup-dialog {
+  width: min(320px, calc(100vw - 32px));
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 12px 32px #10182833;
+}
+
+.popup-dialog::backdrop {
+  background: #10182880;
+}
+
+.popup-dialog h2 {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink);
+  font-size: var(--fs-base);
+  font-weight: 700;
+}
+
+.popup-dialog .muted {
+  margin: 0;
+}
+
+/* 风控提醒要让用户真的看一眼，所以用红色 + 加粗 + 淡红底块，
+   而不是原来那种和正文差不多的小字。
+   注意：导入确认框与更新对话框也用这个类，红色对它们同样合适。 */
+.popup-dialog-warning {
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-sm);
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.7;
+}
+
+/* 白底次要按钮在弹窗里要保证边界清楚（弹窗本身也是白底） */
+.speed-warn-go {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.popup-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+/* V1.1.4：「开始更新」的时间窗选择。新类，不覆盖既有选择器。
+   显式写 display:flex —— popup.css 目前没有 `label` 通配规则，
+   但别的地方（library.css）有过 .editor-dialog label 盖掉 display 的先例，
+   这里写死就不用再担心被继承来的规则影响。 */
+.update-range-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+}
+
+.update-range {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.update-range:hover {
+  background: var(--brand-soft);
+}
+
+.update-range input {
+  margin: 0;
+  accent-color: var(--brand);
+}
+
+/* V1.1.11：请求速度。新类，不覆盖既有选择器。 */
+/* 「已选 x 个 · 共 x 条视频」是决定要不要开跑的关键信息，比旁边的小字重要，
+   所以单独放大加粗。 */
+.import-selected-count {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.speed-row {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+
+.speed-label {
+  display: block;
+  margin-bottom: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.speed-segmented {
+  width: 100%;
+}
+
+.speed-hint {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+/* 「较高」「高」的说明是一条风控警告，用红色而不是土黄 —— 与弹窗里的提醒一致 */
+.speed-hint.danger {
+  color: var(--danger);
+  font-weight: 600;
+}

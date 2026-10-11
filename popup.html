@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>哔哩藏库</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="popup.css">
+  <!-- 4.5：theme.js 必须在 head 里同步跑完，先挂好 data-theme，避免先渲染成浅色再跳深色 -->
+  <script src="theme.js"></script>
+  <!-- 4.5：i18n.js 要排在页面自己的脚本之前；中文原文就是 key，简体中文不需要词典 -->
+  <script src="i18n.js"></script>
+</head>
+<body>
+  <main>
+    <!-- 4.8：顶部静态开源横幅。链接地址与 library.js 的 PROJECT_REPO_URL 保持一致 -->
+    <div id="githubBanner" class="popup-banner" hidden>
+      <a id="githubBannerLink" class="popup-banner-link" href="https://github.com/shijunan-Andrew/bili-vault" target="_blank" rel="noopener noreferrer">
+        <span data-icon="github"></span>
+        <span data-i18n="此项目已在 Github 上开源，点击查看">此项目已在 Github 上开源，点击查看</span>
+      </a>
+      <button id="dismissGithubBanner" class="popup-banner-close" type="button" aria-label="关闭" data-i18n-aria="关闭"><span data-icon="close"></span></button>
+    </div>
+    <details id="safetyNotice" class="card safety-notice">
+      <summary>
+        <span class="safety-summary-icon" data-icon="alert"></span>
+        <strong data-i18n="使用须知">使用须知</strong>
+        <span class="chevron" data-icon="chevron-down"></span>
+      </summary>
+      <ul class="safety-notice-list">
+        <li class="safety-abuse" data-i18n="请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。">请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制。请分批、低速使用。</li>
+        <li data-i18n="出于安全考虑，1.3.0 起本插件不再提供下载功能；你仍然可以把下载到本地的视频放进收藏夹，方便点击跳转。">出于安全考虑，1.3.0 起本插件不再提供下载功能；你仍然可以把下载到本地的视频放进收藏夹，方便点击跳转。</li>
+        <li data-i18n="你放进收藏夹的视频文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。">你放进收藏夹的视频文件请仅用于个人离线观看，不要在网络上传播、分享或二次发布。</li>
+        <li data-i18n="本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。">本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。</li>
+        <li data-i18n="插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。">插件不会修改你 B 站账号里的任何数据：所有请求都是只读的，不会代替你收藏、点赞或评论。</li>
+        <li data-i18n="所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。">所有文件都保存在你本机，插件不上传任何数据，也没有任何遥测。</li>
+        <li data-i18n="从 chrome://extensions 导入插件后请不要移动插件文件夹位置，否则可能导致插件失效，需要重新导入。">从 chrome://extensions 导入插件后请不要移动插件文件夹位置，否则可能导致插件失效，需要重新导入。</li>
+      </ul>
+    </details>
+
+    <div class="brand-row">
+      <div id="brandIcon" class="brand-icon">B</div>
+      <div class="brand-text">
+        <h1 data-i18n="哔哩藏库">哔哩藏库</h1>
+        <p class="subtitle" data-i18n="自动归档视频，也可批量导入收藏夹">自动归档视频，也可批量导入收藏夹</p>
+      </div>
+      <a class="guide-link" href="guide.html" target="_blank" rel="noopener">
+      <span data-i18n="使用说明">使用说明</span>
+    </a>
+
+    <a class="library-link" href="library.html" target="_blank" rel="noopener">
+        <span data-i18n="打开本地收藏库">打开本地收藏库</span>
+        <span data-icon="external"></span>
+      </a>
+    </div>
+
+    <!-- 4.5.1：主题与语言从页脚移到顶部，改成图标 + 文字的分段控件。
+         主题名是界面文字，必须可翻译；因为有图标兄弟节点，data-i18n 只能套在文字 span 上
+         （data-i18n 走 textContent，直接标在按钮上会把图标清掉）。
+         语言名（简体中文 / 繁體中文 / English）是各语言的自称，任何界面下都原样显示，不翻译。 -->
+    <section class="card controls-card">
+      <div class="segmented" role="group" data-i18n-aria="主题" aria-label="主题">
+        <button type="button" data-theme-value="system" aria-pressed="false" data-i18n-title="跟随系统" title="跟随系统"><span class="segmented-icon" data-icon="monitor"></span><span data-i18n="跟随系统">跟随系统</span></button>
+        <button type="button" data-theme-value="light" aria-pressed="false" data-i18n-title="白天" title="白天"><span class="segmented-icon" data-icon="sun"></span><span data-i18n="白天">白天</span></button>
+        <button type="button" data-theme-value="dark" aria-pressed="false" data-i18n-title="夜晚" title="夜晚"><span class="segmented-icon" data-icon="moon"></span><span data-i18n="夜晚">夜晚</span></button>
+      </div>
+      <div class="segmented" role="group" data-i18n-aria="界面语言" aria-label="界面语言">
+        <button type="button" data-locale="zh-CN" aria-pressed="false" title="简体中文"><span class="segmented-icon" data-icon="globe"></span>简体中文</button>
+        <button type="button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>
+        <button type="button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
+      </div>
+      <!-- 使用须知第一条讲的就是请求速度。默认「较低」（存在 storage.session，关浏览器即回到默认）；
+           切到「较高」或「高」必须先过提醒弹窗。 -->
+      <div class="speed-row">
+        <span id="speedLabel" class="speed-label" data-i18n="请求速度">请求速度</span>
+        <div id="speedGroup" class="segmented speed-segmented" role="group" data-i18n-aria="请求速度" aria-label="请求速度">
+          <button type="button" data-speed-value="lower" aria-pressed="true" data-i18n="较低">较低</button>
+          <button type="button" data-speed-value="standard" aria-pressed="false" data-i18n="标准">标准</button>
+          <button type="button" data-speed-value="higher" aria-pressed="false" data-i18n="较高">较高</button>
+          <button type="button" data-speed-value="high" aria-pressed="false" data-i18n="高">高</button>
+        </div>
+        <p id="speedHint" class="speed-hint" role="status"></p>
+      </div>
+    </section>
+
+    <section class="card feature-card">
+      <div>
+        <div id="enabledLabel" class="feature-title" data-i18n="自动归档已开启">自动归档已开启</div>
+        <p id="enabledHint" class="feature-hint" data-i18n="收藏成功后自动保存视频资料">收藏成功后自动保存视频资料</p>
+      </div>
+      <button id="toggleEnabled" class="toggle-switch" type="button" aria-label="关闭自动归档" data-i18n-aria="关闭自动归档" aria-pressed="true"><span></span></button>
+    </section>
+
+    <section class="card folder-card">
+      <div class="section-label" data-i18n="本地备份文件夹">本地备份文件夹</div>
+      <div id="folderName" class="folder-name" data-i18n="尚未选择文件夹">尚未选择文件夹</div>
+      <button id="chooseFolder" class="primary" data-i18n="选择本地备份文件夹">选择本地备份文件夹</button>
+      <button id="reauthorizeFolder" class="secondary" data-i18n="重新授权本地备份文件夹" hidden>重新授权本地备份文件夹</button>
+      <p id="permissionHint" class="hint" hidden></p>
+      <p class="hint" data-i18n="和收藏库右上角「选择本地备份文件夹」是同一个位置，在哪边改都生效。">和收藏库右上角「选择本地备份文件夹」是同一个位置，在哪边改都生效。</p>
+      <p class="hint" data-i18n="选择一次后会记住路径，并按收藏夹名称和时间创建子目录。">选择一次后会记住路径，并按收藏夹名称和时间创建子目录。</p>
+    </section>
+
+    <details id="importCard" class="card import-card">
+      <summary>
+        <span class="import-summary-icon" data-icon="refresh"></span>
+        <span class="import-summary-copy">
+          <strong data-i18n="导入或更新">导入或更新</strong>
+          <small data-i18n="把 B 站收藏夹整理到本地资料库">把 B 站收藏夹整理到本地资料库</small>
+        </span>
+        <span class="chevron" data-icon="chevron-down"></span>
+      </summary>
+      <div class="import-body">
+        <div id="importPanelHeading" class="import-panel-heading">
+          <span class="import-selection-label" data-i18n="选择要导入的收藏夹">选择要导入的收藏夹</span>
+          <button id="refreshImportFolders" class="secondary refresh-button" type="button" data-i18n="刷新列表">刷新列表</button>
+        </div>
+        <div id="importPanel">
+          <div id="importSelectionView">
+            <div class="import-heading">
+              <span class="import-selection-label" data-i18n="收藏夹列表">收藏夹列表</span>
+              <span id="importSelectedCount" class="import-selected-count" data-i18n="已选 0 个">已选 0 个</span>
+            </div>
+            <div id="importFolderList" class="import-folder-list" aria-live="polite" data-i18n="请先打开 B 站个人空间的收藏夹页面。">请先打开 B 站个人空间的收藏夹页面。</div>
+            <p class="import-warning" data-i18n="请勿一次选择过多收藏夹。频繁请求 B 站接口可能触发风控，导致 IP 暂时受限。">请勿一次选择过多收藏夹。频繁请求 B 站接口可能触发风控，导致 IP 暂时受限。</p>
+            <div class="import-selection-actions">
+              <button id="selectAllImportFolders" class="text-button" type="button" data-i18n="全选">全选</button>
+              <button id="clearImportFolders" class="text-button" type="button" data-i18n="清空">清空</button>
+            </div>
+            <label class="import-option">
+              <input id="recoverInvalid" type="checkbox" checked>
+              <span><span data-i18n="尝试找回失效视频的部分信息">尝试找回失效视频的部分信息</span><small data-i18n="失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。">失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。</small></span>
+            </label>
+            <button id="startImport" class="primary" type="button" data-i18n="开始导入" disabled>开始导入</button>
+            <p class="diff-hint" data-i18n="导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（1000 条约 10 分钟以上）。中途可以暂停或取消。">导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（1000 条约 10 分钟以上）。中途可以暂停或取消。</p>
+            <button id="updateRecent" class="secondary diff-button" type="button" data-i18n="开始更新" disabled>开始更新</button>
+            <p class="diff-hint" data-i18n="只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。">只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。</p>
+            <button id="diffFolders" class="secondary diff-button" type="button" data-i18n="先看差异" disabled>先看差异</button>
+            <p class="diff-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情：1000 条约 1 分钟。导入本身要 10 分钟以上，所以建议先看一眼变了什么。">只对比收藏夹列表，不抓取每条视频的详情：1000 条约 1 分钟。导入本身要 10 分钟以上，所以建议先看一眼变了什么。</p>
+          </div>
+          <div id="diffResult" class="diff-result" hidden></div>
+          <div id="importProgressView" class="import-progress-view" hidden>
+            <span class="progress-spinner" aria-hidden="true"></span>
+            <div><strong id="importProgressTitle" data-i18n="正在导入收藏夹">正在导入收藏夹</strong><p id="importProgressText" data-i18n="正在准备…">正在准备…</p></div>
+          </div>
+          <div id="importControl" class="import-control" hidden>
+            <button id="pauseImport" class="secondary" type="button" data-i18n="暂停导入">暂停导入</button>
+            <button id="cancelImport" class="secondary danger" type="button" data-i18n="取消导入">取消导入</button>
+          </div>
+          <p id="importControlHint" class="import-control-hint" data-i18n="取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。" hidden>取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。</p>
+          <div id="importStatus" class="import-status" role="status"></div>
+        </div>
+      </div>
+    </details>
+
+    <details id="statusCard" class="card status-card">
+      <summary class="status-summary">
+        <span class="section-label" data-i18n="最近状态">最近状态</span>
+        <span id="lastResultBrief" class="status-brief muted" data-i18n="暂无保存记录">暂无保存记录</span>
+      </summary>
+      <div id="lastResult" class="muted" data-i18n="暂无保存记录">暂无保存记录</div>
+      <details id="resultDetails" class="result-details" hidden>
+        <summary id="resultDetailsSummary" data-i18n="查看保存位置">查看保存位置</summary>
+        <div id="resultPath" class="result-path"></div>
+      </details>
+      <div id="lastError" class="error-block" hidden>
+        <div class="error-title"><span data-icon="alert"></span><span data-i18n="最近一次错误">最近一次错误</span></div>
+        <pre id="errorText"></pre>
+        <div id="reportPath" class="report-path"></div>
+        <button id="downloadReport" class="secondary" data-i18n="下载错误报告">下载错误报告</button>
+      </div>
+    </details>
+
+    <div class="popup-foot">
+      <div class="foot-left">
+        <a class="support-link" href="https://space.bilibili.com/1515305135" target="_blank" rel="noopener noreferrer"><span data-icon="tv"></span><span data-i18n="给 up 一个一键三连">给 up 一个一键三连</span></a>
+        <a class="repo-link" href="https://github.com/shijunan-Andrew/bili-vault" target="_blank" rel="noopener noreferrer"><span data-icon="github"></span><span data-i18n="Github 仓库地址">Github 仓库地址</span></a>
+      </div>
+      <div class="foot-right">
+        <!-- 4.5.1：语言切换已移到顶部控件组，页脚只留版本号 -->
+        <div id="popupVersion" class="popup-version"></div>
+      </div>
+    </div>
+  </main>
+  <dialog id="riskyWarnDialog" class="popup-dialog" aria-labelledby="riskyWarnTitle">
+    <h2 id="riskyWarnTitle" data-i18n="建议改用「较低」档位">建议改用「较低」档位</h2>
+    <p id="riskyWarnText" class="popup-dialog-warning"></p>
+    <p class="muted" data-i18n="「较高」「高」档配上大收藏夹，是最容易触发风控的组合。换成「较低」会分批停顿，慢一些但安全得多。">「较高」「高」档配上大收藏夹，是最容易触发风控的组合。换成「较低」会分批停顿，慢一些但安全得多。</p>
+    <div class="popup-dialog-actions">
+      <button id="riskyWarnCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="riskyWarnLower" class="primary" type="button" data-i18n="改用「较低」">改用「较低」</button>
+      <button id="riskyWarnGo" class="secondary speed-warn-go" type="button" data-i18n="照当前档位继续">照当前档位继续</button>
+    </div>
+  </dialog>
+
+  <dialog id="doneDialog" class="popup-dialog" aria-labelledby="doneDialogTitle">
+    <h2 id="doneDialogTitle" data-i18n="已完成">已完成</h2>
+    <p id="doneDialogText" class="muted"></p>
+    <div class="popup-dialog-actions">
+      <button id="doneDialogClose" class="primary" type="button" data-i18n="知道了">知道了</button>
+    </div>
+  </dialog>
+
+  <dialog id="speedWarnDialog" class="popup-dialog" aria-labelledby="speedWarnTitle">
+    <h2 id="speedWarnTitle" data-i18n="这个速度有风控风险">这个速度有风控风险</h2>
+    <p class="popup-dialog-warning" data-i18n="此模式可能会有风控风险，请不要一次勾选太多收藏夹，勾选内容的总量尽量在 500 条以下。如果需要导入大容量收藏夹，请选择「较低」模式。">此模式可能会有风控风险，请不要一次勾选太多收藏夹，勾选内容的总量尽量在 500 条以下。如果需要导入大容量收藏夹，请选择「较低」模式。</p>
+    <div class="popup-dialog-actions">
+      <button id="speedWarnCancel" class="primary" type="button" data-i18n="取消">取消</button>
+      <button id="speedWarnGo" class="secondary speed-warn-go" type="button" data-i18n="我知道了，仍然使用">我知道了，仍然使用</button>
+    </div>
+  </dialog>
+  <dialog id="diffStartConfirm" class="popup-dialog" aria-labelledby="diffStartTitle">
+    <h2 id="diffStartTitle" data-i18n="与 B 站对比">与 B 站对比</h2>
+    <p id="diffStartDetail" class="muted"></p>
+    <p class="popup-dialog-warning" data-i18n="只读取 B 站的收藏夹列表，不抓取每条视频的详情。对比过程不会改动任何本地文件。">只读取 B 站的收藏夹列表，不抓取每条视频的详情。对比过程不会改动任何本地文件。</p>
+    <div class="popup-dialog-actions">
+      <button id="diffStartCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="diffStartGo" class="primary" type="button" data-i18n="开始对比">开始对比</button>
+    </div>
+  </dialog>
+
+  <dialog id="updateRecentDialog" class="popup-dialog" aria-labelledby="updateRecentTitle">
+    <h2 id="updateRecentTitle" data-i18n="开始更新">开始更新</h2>
+    <p id="updateRecentDetail" class="muted"></p>
+    <p class="muted" data-i18n="只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。">只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。</p>
+    <div class="update-range-list">
+      <label class="update-range"><input type="radio" name="updateRange" value="3" checked><span data-i18n="最近 3 天">最近 3 天</span></label>
+      <label class="update-range"><input type="radio" name="updateRange" value="7"><span data-i18n="最近 7 天">最近 7 天</span></label>
+      <label class="update-range"><input type="radio" name="updateRange" value="15"><span data-i18n="最近 15 天">最近 15 天</span></label>
+    </div>
+    <div class="popup-dialog-actions">
+      <button id="updateRecentCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="updateRecentGo" class="primary" type="button" data-i18n="开始更新">开始更新</button>
+    </div>
+  </dialog>
+  <dialog id="importConfirm" class="popup-dialog" aria-labelledby="importConfirmTitle">
+    <h2 id="importConfirmTitle" data-i18n="开始导入？">开始导入？</h2>
+    <p id="importConfirmDetail" class="muted"></p>
+    <p class="popup-dialog-warning" data-i18n="导入会逐条解析收藏夹里的每个视频并写入本地，耗时可能很长。中途可以暂停或取消，取消会回滚本次新建的内容。">导入会逐条解析收藏夹里的每个视频并写入本地，耗时可能很长。中途可以暂停或取消，取消会回滚本次新建的内容。</p>
+    <div class="popup-dialog-actions">
+      <button id="importConfirmCancel" class="secondary" type="button" data-i18n="取消">取消</button>
+      <button id="importConfirmGo" class="primary" type="button" data-i18n="开始导入">开始导入</button>
+    </div>
+  </dialog>
+  <script src="icons.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

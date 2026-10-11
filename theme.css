@@ -1,0 +1,276 @@
+/* ==========================================================================
+   theme.css —— 全项目唯一的设计令牌与通用基元
+   4.0 起：颜色、圆角、阴影、间距、字号、动效只在这里定义。
+   页面 CSS 只允许引用变量，不允许再写死色值；也不要再追加“覆写区块”，
+   否则会退回到 3.x 那种越叠越乱的层叠状态（见 AI_HANDOFF.md）。
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* —— 品牌 —— */
+  --brand: #00a1d6;
+  --brand-strong: #0089b8;
+  --brand-tint: #4cc4ea;
+  --brand-deep: #026f95;
+  --brand-soft: #e9f7fc;
+  --brand-soft-strong: #d5eefa;
+  --brand-line: #bfe5f2;
+  --brand-ring: #00a1d62e;
+
+  /* —— 语义色 —— */
+  --success: #2f9068;
+  --success-solid: #27775a;
+  --success-strong: #21734f;
+  --success-soft: #ecf7f1;
+  --success-line: #c6e5d4;
+  --warning: #8a5c12;
+  --warning-soft: #fdf5e5;
+  --warning-line: #edd9ac;
+  --danger: #b2382e;
+  --danger-strong: #a83a33;
+  --danger-soft: #fdf1ef;
+  --danger-line: #f0cdc8;
+  --accent: #a9762f;
+  --accent-soft: #f8f0e2;
+  --warning-soft-strong: #f8ecd2;
+  --accent-line: #e8d5b2;
+  --feature: #a5560a;
+  --feature-soft: #fdf0e0;
+  --feature-line: #f0d2ad;
+
+  /* —— 中性阶：正文对比度均达到 WCAG AA（≥4.5:1）—— */
+  --ink: #1d2330;
+  --text: #3c4552;
+  --muted: #5f6875;
+  --faint: #858d9a;
+  --ghost: #a9b0bb;
+  --line: #e2e8f0;
+  --line-soft: #edf1f6;
+  --surface: #ffffff;
+  --surface-soft: #f7f9fc;
+  --surface-sunken: #eef2f7;
+  --bg: #f2f5f9;
+
+  /* —— 圆角 —— */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-pill: 999px;
+
+  /* —— 阴影 —— */
+  --shadow-sm: 0 1px 2px #1018280f, 0 1px 3px #1018280a;
+  --shadow-md: 0 6px 18px #10182814, 0 1px 3px #1018280d;
+  --shadow-lg: 0 22px 58px #1018282b;
+  --shadow-brand: 0 6px 16px #00a1d624;
+
+  /* —— 间距 —— */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 22px;
+  --sp-6: 30px;
+
+  /* —— 字号（中文正文不低于 13px，最小 11px 仅用于纯装饰）—— */
+  --fs-micro: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 27px;
+
+  /* —— 动效 —— */
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --dur-fast: .14s;
+  --dur: .2s;
+  --dur-slow: .3s;
+
+  /* —— 字体 —— */
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+
+  /* —— 布局 —— */
+  --focus-ring: 0 0 0 3px var(--brand-ring);
+
+  /* —— 滚动条 —— */
+  --scroll-thumb: #c7d0da;
+  --scroll-thumb-hover: #aab4c0;
+
+  /* —— 主题 —— */
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   深色主题（4.5）
+   所有颜色都走令牌，所以深色只是一组变量的替换，页面 CSS 一行都不用改。
+   两种触发方式必须保持完全一致：
+     1. 用户手动选深色 → <html data-theme="dark">
+     2. 跟随系统且系统是深色 → 没有 data-theme="light" 时由媒体查询接管
+   （测试会比对两处的令牌集合必须相同，改一处必须改另一处。）
+   ========================================================================== */
+:root[data-theme="dark"] {
+  --brand: #2bb8e0;
+  --brand-strong: #56c9ea;
+  --brand-tint: #8fe0f5;
+  --brand-deep: #8ddaf2;
+  --brand-soft: #10303c;
+  --brand-soft-strong: #163d4c;
+  --brand-line: #1e4c5c;
+  --brand-ring: #2bb8e03d;
+  --success: #4cc38a;
+  --success-solid: #1f684d;
+  --success-strong: #7ad6a8;
+  --success-soft: #11291f;
+  --success-line: #1e4736;
+  --warning: #e0b45f;
+  --warning-soft: #2c2517;
+  --warning-soft-strong: #382e1c;
+  --warning-line: #4a3d22;
+  --danger: #ef7169;
+  --danger-strong: #f79b94;
+  --danger-soft: #2f1a18;
+  --danger-line: #522a26;
+  --accent: #d6a463;
+  --accent-soft: #2a2317;
+  --accent-line: #463823;
+  --feature: #efa45a;
+  --feature-soft: #2e2318;
+  --feature-line: #4a3823;
+  --ink: #eef2f7;
+  --text: #c6cfda;
+  --muted: #99a3b1;
+  --faint: #7b8592;
+  --ghost: #5c6672;
+  --line: #2a323d;
+  --line-soft: #222932;
+  --surface: #171b22;
+  --surface-soft: #1c212a;
+  --surface-sunken: #12161c;
+  --bg: #0f1216;
+  --shadow-sm: 0 1px 2px #00000059, 0 1px 3px #00000040;
+  --shadow-md: 0 6px 18px #00000073, 0 1px 3px #0000004d;
+  --shadow-lg: 0 22px 58px #000000b3;
+  --shadow-brand: 0 6px 16px #00000066;
+  --scroll-thumb: #3a434f;
+  --scroll-thumb-hover: #4b5563;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --brand: #2bb8e0;
+    --brand-strong: #56c9ea;
+  --brand-tint: #8fe0f5;
+    --brand-deep: #8ddaf2;
+    --brand-soft: #10303c;
+    --brand-soft-strong: #163d4c;
+    --brand-line: #1e4c5c;
+    --brand-ring: #2bb8e03d;
+    --success: #4cc38a;
+  --success-solid: #1f684d;
+    --success-strong: #7ad6a8;
+    --success-soft: #11291f;
+    --success-line: #1e4736;
+    --warning: #e0b45f;
+    --warning-soft: #2c2517;
+    --warning-soft-strong: #382e1c;
+    --warning-line: #4a3d22;
+    --danger: #ef7169;
+    --danger-strong: #f79b94;
+    --danger-soft: #2f1a18;
+    --danger-line: #522a26;
+    --accent: #d6a463;
+    --accent-soft: #2a2317;
+    --accent-line: #463823;
+  --feature: #efa45a;
+  --feature-soft: #2e2318;
+  --feature-line: #4a3823;
+    --ink: #eef2f7;
+    --text: #c6cfda;
+    --muted: #99a3b1;
+    --faint: #7b8592;
+    --ghost: #5c6672;
+    --line: #2a323d;
+    --line-soft: #222932;
+    --surface: #171b22;
+    --surface-soft: #1c212a;
+    --surface-sunken: #12161c;
+    --bg: #0f1216;
+    --shadow-sm: 0 1px 2px #00000059, 0 1px 3px #00000040;
+    --shadow-md: 0 6px 18px #00000073, 0 1px 3px #0000004d;
+    --shadow-lg: 0 22px 58px #000000b3;
+    --shadow-brand: 0 6px 16px #00000066;
+    --scroll-thumb: #3a434f;
+    --scroll-thumb-hover: #4b5563;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* 必须保留：很多组件显式设置了 display（.downloaded-badge 是 inline-flex、
+   .batch-toolbar 是 flex 等），会盖掉浏览器默认的 [hidden] { display: none }，
+   导致 hidden 属性失效。3.x 在每个页面各写了一遍，4.0 统一放在这里。 */
+[hidden] { display: none !important; }
+
+body {
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+
+/* 键盘焦点：4.0 之前只有少数控件有焦点样式，卡片和大部分按钮完全没有。
+   统一在这里给一个可见外圈，页面 CSS 不需要重复定义。 */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+:where(.video-card, .collection-button, .queue-item):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+/* 图标：统一尺寸、描边与基线，替代原来混用的 ▦▤▶♫＋↻ 等字符 */
+.icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  vertical-align: -.14em;
+  color: inherit;
+}
+.icon-slot { display: inline-flex; align-items: center; justify-content: center; }
+
+/* 数字对齐：日期、计数、BV 号在微软雅黑下会因为比例数字而参差 */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* 细滚动条：Windows 默认滚动条在侧栏、日志、简介框里视觉过重 */
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--r-pill); background: var(--scroll-thumb); background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* 通用工具类。.sr-only 和 .stack 曾在这里，全仓库零使用，V1.2.0 删掉了 ——
+   需要时一行就能加回来，留着反而让人以为某个页面在用它。 */
+.row { display: flex; align-items: center; gap: var(--sp-2); }
+.spacer { margin-left: auto; }
+
+/* 尊重系统的“减少动态效果”设置 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

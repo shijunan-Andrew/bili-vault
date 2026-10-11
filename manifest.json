@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "哔哩藏库",
+  "version": "1.2.8",
+  "description": "把 B 站收藏夹备份本地，启用后，收藏成功自动保存视频资料到本地，支持已有收藏夹视频的本地归档与失效视频恢复，支持本地收藏夹浏览、搜索与筛选。",
+  "minimum_chrome_version": "111",
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "permissions": [
+    "storage",
+    "nativeMessaging",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://*.hdslb.com/*",
+    "https://api.bilibili.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "哔哩藏库",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.bilibili.com/video/*",
+        "https://bilibili.com/video/*",
+        "https://m.bilibili.com/video/*"
+      ],
+      "js": [
+        "i18n.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://space.bilibili.com/*/favlist*"
+      ],
+      "js": [
+        "favorites-import.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
