@@ -25,6 +25,9 @@ const SOURCE_FILES = [
   // 两页共用 tutorial.js，所以那个文件也一起扫（它里面的 t("字面量") 同样需要词条）。
   // 安装教程页（tutorial.html）同理：不写进来的话，它缺词条不会报错，只会静默退回中文。
   "guide.html", "tutorial.html", "tutorial.js",
+  // V1.3.2：三个悬浮球合成右下角的齿轮，主题 / 语言 / 使用说明都搬进了设置页。
+  // 不写进来的话，设置页缺词条不会报错，只会静默退回中文。
+  "settings.html", "settings.js",
   "content.js",
   // 4.9：把后台纳入扫描。background.js 是模块化 service worker，加载不了 i18n.js，
   // 所以自己做了个存在性兜底；新增的界面文案仍写成 BcaI18n.t("字面量")。

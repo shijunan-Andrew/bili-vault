@@ -60,11 +60,7 @@ const dismissGithubBannerButton = document.getElementById("dismissGithubBanner")
 const videoGrid = document.getElementById("videoGrid");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
-const themeBall = document.getElementById("themeBall");
-const themeBallIcon = document.getElementById("themeBallIcon");
-const themeMenu = document.getElementById("themeMenu");
-const localeBall = document.getElementById("localeBall");
-const localeMenu = document.getElementById("localeMenu");
+const settingsFab = document.getElementById("settingsFab");
 const emptySearch = document.getElementById("emptySearch");
 const clearSearch = document.getElementById("clearSearch");
 const detailBackdrop = document.getElementById("detailBackdrop");
@@ -3544,149 +3540,20 @@ window.addEventListener("resize", () => {
   bannerResizeTimer = setTimeout(buildBannerMarquee, 150);
 });
 
-/* ---------------- 4.5.1：主题与语言悬浮球 ---------------- */
+/* ---------------- V1.3.2：右下角的设置齿轮 ---------------- */
 
-// 主题标签必须写成字面量：词条工具靠扫描 t("...") 取词，
-// 从 theme.js 的对象里取 label 会扫不到，那三个词就永远不会被翻译。
-const THEME_ICONS = { system: "monitor", light: "sun", dark: "moon" };
-
-function themeLabel(id) {
-  if (id === "light") return BcaI18n.t("白天");
-  if (id === "dark") return BcaI18n.t("夜晚");
-  return BcaI18n.t("跟随系统");
-}
-
-// 4.6：键盘操作悬浮球菜单——↑↓ 在选项间移动、Home/End 跳首尾、Enter/Space 选中、
-// Esc 关闭并把焦点还给球。选中态本来就是 aria-checked，这里不另造状态。
-function dockMenuOptions(menu) {
-  return [...menu.querySelectorAll('button[role="menuitemradio"]')];
-}
-
-function moveDockMenuFocus(menu, key) {
-  const options = dockMenuOptions(menu);
-  if (!options.length) return false;
-  const current = options.indexOf(document.activeElement);
-  if (key === "Home") { options[0].focus(); return true; }
-  if (key === "End") { options[options.length - 1].focus(); return true; }
-  if (key === "ArrowDown") { options[current < 0 ? 0 : (current + 1) % options.length].focus(); return true; }
-  if (key === "ArrowUp") { options[current < 0 ? options.length - 1 : (current - 1 + options.length) % options.length].focus(); return true; }
-  return false;
-}
-
-function activeDockMenu() {
-  if (themeMenu && !themeMenu.hidden) return { menu: themeMenu, ball: themeBall };
-  if (localeMenu && !localeMenu.hidden) return { menu: localeMenu, ball: localeBall };
-  return null;
-}
-
-function handleDockMenuKeydown(event) {
-  const active = activeDockMenu();
-  if (!active) return;
-  // 输入框/下拉框里的方向键属于光标与选项，不能被菜单抢走
-  if (event.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
-  if (event.key === "Escape") { event.preventDefault(); closeDockMenus(); active.ball.focus(); return; }
-  if (event.key === "Tab") { closeDockMenus(); return; }
-  const option = event.target.closest?.('button[role="menuitemradio"]');
-  if ((event.key === "Enter" || event.key === " ") && option && active.menu.contains(option)) {
-    event.preventDefault();
-    option.click();
-    return;
-  }
-  if (!event.key.startsWith("Arrow") && event.key !== "Home" && event.key !== "End") return;
-  if (moveDockMenuFocus(active.menu, event.key)) event.preventDefault();
-}
-
-function closeDockMenus(except) {
-  for (const [ball, menu] of [[themeBall, themeMenu], [localeBall, localeMenu]]) {
-    if (menu === except) continue;
-    menu.hidden = true;
-    ball.setAttribute("aria-expanded", "false");
-  }
-}
-
-function toggleDockMenu(ball, menu) {
-  const open = menu.hidden;
-  closeDockMenus(menu);
-  menu.hidden = !open;
-  ball.setAttribute("aria-expanded", String(open));
-  // 打开后把焦点交给当前选中项（没有就交给第一项），键盘用户不用先 Tab 进去
-  if (open) {
-    const options = dockMenuOptions(menu);
-    const checked = options.find((option) => option.getAttribute("aria-checked") === "true");
-    (checked || options[0])?.focus();
-  }
-}
-
-function buildDockMenu(menu, entries, currentId, onPick) {
-  menu.replaceChildren(...entries.map((entry) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute("role", "menuitemradio");
-    button.setAttribute("aria-checked", String(entry.id === currentId));
-    button.dataset.value = entry.id;
-    button.innerHTML = `${BcaIcons.svg(entry.icon)}<span></span><span class="dock-check">${BcaIcons.svg("check")}</span>`;
-    button.querySelector("span").textContent = entry.label;
-    button.addEventListener("click", () => {
-      onPick(entry.id);
-      closeDockMenus();
-    });
-    return button;
-  }));
-}
-
-// 选中态就地刷新，不重建按钮：重建会把键盘焦点弄丢（切主题时 onChange 又会重画一次）
-function syncDockMenuChecked(menu, currentId) {
-  if (!menu) return;
-  for (const option of dockMenuOptions(menu)) {
-    option.setAttribute("aria-checked", String(option.dataset.value === currentId));
-  }
-}
-
-function renderDockMenus() {
-  buildDockMenu(
-    themeMenu,
-    BcaTheme.modes().map((item) => ({ id: item.id, icon: THEME_ICONS[item.id] || "monitor", label: themeLabel(item.id) })),
-    BcaTheme.current(),
-    (id) => BcaTheme.use(id)
-  );
-  buildDockMenu(
-    localeMenu,
-    // 语言名用各自的写法，不翻译
-    BcaI18n.locales().map((item) => ({ id: item.id, icon: "globe", label: item.label })),
-    BcaI18n.locale(),
-    (id) => { BcaI18n.use(id).catch(() => {}); }
-  );
-  // 球的图标跟着当前主题走：跟随系统=显示器、白天=太阳、夜晚=月亮
-  themeBallIcon.setAttribute("data-icon", THEME_ICONS[BcaTheme.current()] || "monitor");
-  themeBallIcon.dataset.iconReady = "";
-  BcaIcons.hydrate(themeBallIcon.parentElement);
-  syncDockMenuChecked(themeMenu, BcaTheme.current());
-  syncDockMenuChecked(localeMenu, BcaI18n.locale());
-}
-
-renderDockMenus();
-themeBall.addEventListener("click", (event) => { event.stopPropagation(); toggleDockMenu(themeBall, themeMenu); });
-localeBall.addEventListener("click", (event) => { event.stopPropagation(); toggleDockMenu(localeBall, localeMenu); });
-themeMenu.addEventListener("click", (event) => event.stopPropagation());
-localeMenu.addEventListener("click", (event) => event.stopPropagation());
-themeMenu.addEventListener("keydown", handleDockMenuKeydown);
-localeMenu.addEventListener("keydown", handleDockMenuKeydown);
-// 菜单打开时焦点在菜单里，事件不会冒泡到 document，所以这里只是补一层兜底
-document.addEventListener("keydown", handleDockMenuKeydown);
-document.addEventListener("click", () => closeDockMenus());
-document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDockMenus(); });
-
-// 主题换成别的页面改的也要跟着更新图标
-BcaTheme.onChange(() => {
-  themeBallIcon.setAttribute("data-icon", THEME_ICONS[BcaTheme.current()] || "monitor");
-  themeBallIcon.dataset.iconReady = "";
-  BcaIcons.hydrate(themeBallIcon.parentElement);
-  renderDockMenus();
+// 4.5.1～V1.3.1 这里是主题与语言两个悬浮球（含各自的菜单、键盘操作与选中态同步），
+// V1.3.2 把这三块（含左下角的「使用说明」问号球）合成一个齿轮，点开进独立的设置页，
+// 所以整块菜单逻辑连同 THEME_ICONS / themeLabel / renderDockMenus 都删掉了。
+// 设置页改完写各自的存储，这一页靠 theme.js 的 storage 事件与下面的
+// chrome.storage.onChanged 监听（interfaceLocale）跟上，不需要额外信号。
+settingsFab.addEventListener("click", () => {
+  // 扩展页面可以直接被扩展自己打开，不需要 web_accessible_resources
+  chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
 });
 
 // 切语言后要重画所有由 JS 生成的文字
 function relabelAfterLocaleChange() {
-  renderDockMenus();
   renderCollections();
   // 选项池的第一项（全部 UP 主 / 全部标签）是翻译过的文案，切语言要重建一次
   refreshVideoFilterOptions();

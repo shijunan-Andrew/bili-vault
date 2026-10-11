@@ -325,18 +325,11 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <!-- 4.5.1：主题与语言改成右下角的悬浮球，比原来侧栏里的下拉框更好点、也更好看 -->
+  <!-- V1.3.2：4.5.1 那三个球（？/ 主题 / 语言）合成一个齿轮，点开进独立的设置页。
+       主题与语言在设置页里改，改完写各自的存储，这一页靠 theme.js / i18n.js 的监听跟着变。 -->
   <div class="floating-dock">
     <div class="dock-slot">
-      <a class="dock-ball guide-fab" href="guide.html" target="_blank" rel="noopener" data-i18n-title="使用说明" title="使用说明" aria-label="使用说明"><span class="guide-fab-mark">？</span></a>
-    </div>
-    <div class="dock-slot">
-      <div id="themeMenu" class="dock-menu" role="menu" hidden></div>
-      <button id="themeBall" class="dock-ball" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" aria-label="主题" data-i18n-aria="主题" title="主题" data-i18n-title="主题"><span id="themeBallIcon" data-icon="monitor"></span></button>
-    </div>
-    <div class="dock-slot">
-      <div id="localeMenu" class="dock-menu" role="menu" hidden></div>
-      <button id="localeBall" class="dock-ball" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="localeMenu" aria-label="语言" data-i18n-aria="语言" title="语言" data-i18n-title="语言"><span data-icon="globe"></span></button>
+      <button id="settingsFab" class="dock-ball" type="button" aria-label="设置" data-i18n-aria="设置" title="设置" data-i18n-title="设置"><span data-icon="settings"></span></button>
     </div>
   </div>
 

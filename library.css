@@ -228,7 +228,8 @@ html.banner-visible { --banner-h: 42px; }
 
 .sidebar-bottom { margin-top: auto; padding: var(--sp-3) var(--sp-2) 0; }
 
-/* 4.5.1：主题与语言改成右下角悬浮球 */
+/* V1.3.2：右下角只剩一个设置齿轮（点开进 settings.html）。
+   4.5.1～V1.3.1 是主题 / 语言 / 使用说明三个球，这里只留浮标本身的定位与圆形观感。 */
 .floating-dock { position: fixed; right: var(--sp-5); bottom: var(--sp-5); z-index: 6; display: grid; gap: var(--sp-3); }
 .dock-slot { position: relative; display: grid; justify-items: end; }
 .dock-ball {
@@ -246,41 +247,9 @@ html.banner-visible { --banner-h: 42px; }
 }
 .dock-ball:hover { transform: translateY(-2px); border-color: var(--brand); box-shadow: var(--shadow-lg); }
 .dock-ball:active { transform: translateY(0) scale(.96); }
-.dock-ball[aria-expanded="true"] { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+/* V1.3.2：原来给主题 / 语言菜单用的 .dock-menu / @keyframes dock-in / .dock-check，
+   以及球展开时的 [aria-expanded="true"] 选中态，都随菜单一起删掉了。 */
 
-.dock-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + var(--sp-2));
-  display: grid;
-  gap: 2px;
-  min-width: 176px;
-  padding: var(--sp-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-lg);
-  animation: dock-in var(--dur) var(--ease);
-}
-@keyframes dock-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.dock-menu button {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--text);
-  font-size: var(--fs-base);
-  text-align: left;
-}
-.dock-menu button:hover { background: var(--surface-soft); color: var(--ink); }
-.dock-menu button .icon { color: var(--faint); font-size: var(--fs-md); }
-.dock-menu button[aria-checked="true"] { background: var(--brand-soft); color: var(--brand-deep); font-weight: 650; }
-.dock-menu button[aria-checked="true"] .icon { color: var(--brand); }
-.dock-menu button .dock-check { margin-left: auto; color: var(--brand); font-size: var(--fs-sm); visibility: hidden; }
-.dock-menu button[aria-checked="true"] .dock-check { visibility: visible; }
 .privacy-note {
   display: flex;
   gap: var(--sp-2);
@@ -1201,19 +1170,8 @@ a.detail-tag:hover { border-color: var(--brand-line); color: var(--brand-deep); 
   background: var(--danger-soft);
 }
 
-/* 左下角的「使用说明」浮标，和主题 / 语言那两个圆钮排在一起 */
-/* 「？」和主题/语言球并排成一串浮标（.floating-dock）。原来它是 fixed 钉在左下角，
-   正好压在侧栏「归档文件只在本地管理」那张卡片上。现在复用 .dock-ball 的圆，
-   只把配色换成强调色以区别于主题/语言，并单独处理那个全角问号的居中。 */
-.guide-fab {
-  border-color: var(--accent-line);
-  color: var(--accent);
-  text-decoration: none;
-}
-.guide-fab:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-.guide-fab:active { transform: translateY(0) scale(.96); }
-/* 全角「？」自带右侧字边距，直接居中会看着偏左；缩到 .9em 再靠 line-height:1 收掉行高偏移 */
-.guide-fab-mark { font-size: .9em; font-weight: 700; line-height: 1; }
+/* V1.3.2：原来钉在左下角、后来并进浮标串的那个「使用说明」问号球已经删掉
+   （使用说明搬进设置页），.guide-fab / .guide-fab-mark 两条规则随之删除。 */
 
 .editor-hint-danger {
   padding: var(--sp-2) var(--sp-3);

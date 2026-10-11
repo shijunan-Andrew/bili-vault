@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#00a1d6">
+  <title>哔哩藏库 · 设置</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="page.css">
+  <link rel="stylesheet" href="settings.css">
+  <script src="theme.js"></script>
+  <script src="i18n.js"></script>
+  <script src="icons.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <!-- 顶部跟使用说明页同形：标题 + 一句说明，右上角多一个回收藏库的出口 -->
+    <header class="settings-head">
+      <div>
+        <h1 data-i18n="哔哩藏库 · 设置">哔哩藏库 · 设置</h1>
+        <p class="muted" data-i18n="外观、语言和使用说明都在这里改，改完立即生效。">外观、语言和使用说明都在这里改，改完立即生效。</p>
+      </div>
+      <button id="settingsBack" class="button button-quiet" type="button" data-i18n="返回收藏库">返回收藏库</button>
+    </header>
+
+    <!-- 主题名是界面文字，要翻译；按钮里有图标兄弟节点，data-i18n 只能套在文字 span 上
+         （data-i18n 走 textContent，直接标在按钮上会把图标清掉）。 -->
+    <section class="settings-card">
+      <h2 data-i18n="外观">外观</h2>
+      <p class="muted" data-i18n="跟随系统会跟着系统的深色模式走。">跟随系统会跟着系统的深色模式走。</p>
+      <div class="segmented" role="group" data-i18n-aria="主题" aria-label="主题">
+        <button type="button" data-theme-value="system" aria-pressed="false" data-i18n-title="跟随系统" title="跟随系统"><span class="segmented-icon" data-icon="monitor"></span><span data-i18n="跟随系统">跟随系统</span></button>
+        <button type="button" data-theme-value="light" aria-pressed="false" data-i18n-title="白天" title="白天"><span class="segmented-icon" data-icon="sun"></span><span data-i18n="白天">白天</span></button>
+        <button type="button" data-theme-value="dark" aria-pressed="false" data-i18n-title="夜晚" title="夜晚"><span class="segmented-icon" data-icon="moon"></span><span data-i18n="夜晚">夜晚</span></button>
+      </div>
+    </section>
+
+    <!-- 语言名是各语言的自称，任何界面下都原样显示，所以不挂 data-i18n -->
+    <section class="settings-card">
+      <h2 data-i18n="语言">语言</h2>
+      <p class="muted" data-i18n="切换后本页、收藏库和弹窗都会立刻跟着变。">切换后本页、收藏库和弹窗都会立刻跟着变。</p>
+      <div class="segmented" role="group" data-i18n-aria="界面语言" aria-label="界面语言">
+        <button type="button" data-locale="zh-CN" aria-pressed="false" title="简体中文"><span class="segmented-icon" data-icon="globe"></span>简体中文</button>
+        <button type="button" data-locale="zh-TW" aria-pressed="false" title="繁體中文"><span class="segmented-icon" data-icon="globe"></span>繁體中文</button>
+        <button type="button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <h2 data-i18n="使用说明">使用说明</h2>
+      <p class="muted" data-i18n="第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。">第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。</p>
+      <div class="settings-links">
+        <a class="button button-quiet" href="tutorial.html" target="_blank" rel="noopener" data-i18n="打开安装教程">打开安装教程</a>
+        <a class="button button-quiet" href="guide.html" target="_blank" rel="noopener" data-i18n="打开使用说明">打开使用说明</a>
+      </div>
+    </section>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

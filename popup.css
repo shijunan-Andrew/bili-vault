@@ -39,44 +39,11 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .feature-hint { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
 
 /* ---------- 4.5.1：主题 / 语言分段控件 ----------
-   一条 --surface-soft 浅槽里放三个等宽按钮，选中的用 --surface 底 + --shadow-sm 凸起。
-   颜色只走 theme.css 的令牌，深色主题下自动跟着换。 */
+   控件本身（.segmented / .segmented-icon）V1.3.2 起挪到 theme.css 当共享组件，
+   设置页用的是同一份；这里只留弹窗自己那张控制卡片的间距。 */
 /* 卡片间距统一收到 --sp-2：4.5.1 顶部多了主题 / 语言两行控件，
    不改功能、只压留白，尽量把默认视图拉回 600px 以内。 */
 .controls-card { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
-.segmented {
-  display: flex;
-  gap: var(--sp-1);
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface-soft);
-}
-/* 宽度覆盖 button 基类的 100%，让三个按钮等分整条槽 */
-.segmented button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  width: auto;
-  min-width: 0;
-  min-height: 30px;
-  flex: 1;
-  padding: 0 var(--sp-1);
-  border: 1px solid transparent;
-  border-radius: var(--r-xs);
-  color: var(--muted);
-  background: transparent;
-  font-size: var(--fs-base);
-  font-weight: 600;
-  white-space: nowrap;
-  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-}
-.segmented button:hover:not([aria-pressed="true"]) { color: var(--ink); background: var(--surface-sunken); }
-/* 选中态：卡片底色 + 细描边 + 小阴影，从槽里“凸”出来 */
-.segmented button[aria-pressed="true"] { border-color: var(--line); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm); }
-.segmented-icon { display: inline-flex; font-size: var(--fs-md); opacity: .75; }
-.segmented button[aria-pressed="true"] .segmented-icon { color: var(--brand); opacity: 1; }
 
 .toggle-switch { position: relative; width: 46px; min-width: 46px; height: 26px; min-height: 26px; padding: 0; border: 0; border-radius: var(--r-pill); background: var(--brand); transition: background var(--dur) var(--ease); }
 /* 滑块固定用纯白：它压在 --brand / --ghost 的彩色轨道上，和主题无关 */

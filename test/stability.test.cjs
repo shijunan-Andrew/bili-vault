@@ -115,14 +115,14 @@ test("native host reads its UTF-8 settings with an explicit encoding", () => {
 
 // 1.3.0 删掉了下载页：download.html / download.js / download.css 已整体移除，
 // 下面这些清单里不再有它们（「下载功能已经整体移除」那条测试盯着别回来）。
-const PAGE_STYLES = ["library.css", "popup.css"];
-const PAGE_SCRIPTS = ["library.js", "popup.js", "content.js"];
+const PAGE_STYLES = ["library.css", "popup.css", "settings.css"];
+const PAGE_SCRIPTS = ["library.js", "popup.js", "content.js", "settings.js"];
 
 // 去掉注释后再扫，避免把说明文字里的示例字符当成真实用法
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\r\n]*/g, "$1");
 
 test("every page loads the shared design tokens and the icon set", () => {
-  for (const page of ["library.html", "popup.html"]) {
+  for (const page of ["library.html", "popup.html", "settings.html"]) {
     const html = readProjectFile(page);
     assert.match(html, /<link rel="stylesheet" href="theme\.css">/, `${page} 未引入 theme.css`);
     assert.match(html, /<script src="icons\.js"><\/script>/, `${page} 未引入 icons.js`);
@@ -177,7 +177,7 @@ test("every referenced icon name exists in icons.js", () => {
   assert.ok(available.has("library") && available.has("check") && available.has("close"));
 
   const wanted = new Set();
-  for (const file of ["library.html", "popup.html"]) {
+  for (const file of ["library.html", "popup.html", "settings.html"]) {
     for (const match of readProjectFile(file).matchAll(/data-icon="([a-z-]+)"/g)) wanted.add(match[1]);
   }
   for (const file of PAGE_SCRIPTS) {
@@ -1753,65 +1753,94 @@ test("the abuse warning is emphasised on both surfaces", () => {
     assert.match(rule, /var\(--warning\)/, `${cssFile} 的强调色应使用 --warning 令牌`);
   }
 });
-test("theme and language are floating balls, not sidebar selects", () => {
+test("theme, language, and the guide all live in the settings page behind one gear", () => {
   const html = readProjectFile("library.html");
-  const library = readProjectFile("library.js");
-  // 4.5.1：原来的侧栏 <select> 太小，改成右下角悬浮球
+  // 注释里会提到删掉的那些东西，所以查“不该再有”之前先剥注释
+  const library = stripComments(readProjectFile("library.js"));
+  // 4.5.1 的侧栏 <select>、V1.3.1 的三个悬浮球，V1.3.2 起合成一个齿轮进设置页
   assert.equal(/id="themeSelect"/.test(html), false, "旧的主题下拉框应已删除");
   assert.equal(/id="localeSelect"/.test(html), false, "旧的语言下拉框应已删除");
-  for (const id of ["themeBall", "themeMenu", "localeBall", "localeMenu", "themeBallIcon"]) {
-    assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
+  for (const gone of ["themeBall", "themeBallIcon", "themeMenu", "localeBall", "localeMenu", "guide-fab"]) {
+    assert.equal(html.includes(gone), false, `library.html 里不应再有 ${gone}`);
   }
-  assert.match(library, /function toggleDockMenu\(/);
-  assert.match(library, /function closeDockMenus\(/);
-  assert.match(library, /function renderDockMenus\(/);
-  assert.match(library, /BcaTheme\.use\(id\)/);
-  assert.match(library, /BcaI18n\.use\(id\)/);
-  // 球的图标跟着当前主题走
-  assert.match(library, /const THEME_ICONS = \{ system: "monitor", light: "sun", dark: "moon" \}/);
-  // 悬浮球必须真的浮起来
+  // 右下角只剩一个齿轮：跟原来的球共用 .dock-ball 的圆形浮标观感
+  assert.match(html, /<button id="settingsFab" class="dock-ball"/, "收藏库右下角要有一个设置齿轮");
+  assert.match(html, /id="settingsFab"[^>]*data-i18n-title="设置"/, "齿轮的 title 要能翻译");
+  assert.match(html, /id="settingsFab"[\s\S]{0,200}?data-icon="settings"/, "齿轮要用 icons.js 里的 settings 图标");
+  // 点齿轮开独立的设置页（扩展页面可以直接被扩展自己打开，不需要 web_accessible_resources）
+  assert.match(library, /settingsFab\.addEventListener\("click"/);
+  assert.match(library, /chrome\.tabs\.create\(\{ url: chrome\.runtime\.getURL\("settings\.html"\) \}\)/);
+  // 旧悬浮球那套菜单逻辑不许留死代码
+  for (const gone of ["THEME_ICONS", "function themeLabel(", "function toggleDockMenu(", "function closeDockMenus(", "function buildDockMenu(", "function renderDockMenus(", "BcaTheme.onChange("]) {
+    assert.equal(library.includes(gone), false, `library.js 里不应再有 ${gone}`);
+  }
+  // 浮标容器还在：齿轮仍然钉在右下角
   const rule = (readProjectFile("library.css").match(/\.floating-dock \{[^}]*\}/) || [""])[0];
   assert.match(rule, /position: fixed/);
   assert.match(rule, /right:/);
   assert.match(rule, /bottom:/);
-  // 点空白处和按 Esc 都要收起
-  assert.match(library, /document\.addEventListener\("click", \(\) => closeDockMenus\(\)\)/);
-  assert.match(library, /event\.key === "Escape"/);
+  const css = stripComments(readProjectFile("library.css"));
+  assert.equal(css.includes(".dock-menu"), false, "菜单样式应随菜单一起删掉");
+  assert.equal(css.includes(".guide-fab"), false, "问号球样式应随问号球一起删掉");
 });
-test("「使用说明」的问号跟主题/语言球并成一串，且排在主题球上方（静态回归）", () => {
-  const html = readProjectFile("library.html");
-  const css = readProjectFile("library.css");
 
-  // 它必须在浮标串里面，且夹在 .floating-dock 开头和主题球之间 —— 也就是排在主题球上方
-  const dockAt = html.indexOf('<div class="floating-dock">');
-  const fabAt = html.indexOf("guide-fab");
-  const themeAt = html.indexOf("themeBall");
-  assert.ok(dockAt >= 0, "library.html 里必须有 .floating-dock");
-  assert.ok(fabAt > dockAt, "「？」必须放进 .floating-dock 里，不能自己钉在角落");
-  assert.ok(fabAt < themeAt, "「？」要排在主题球（themeBall）上方");
-  // 它得和另外两个球长得一样：共用 .dock-ball
-  const fabTag = html.slice(html.lastIndexOf("<", fabAt), html.indexOf(">", fabAt) + 1);
-  assert.match(fabTag, /class="dock-ball guide-fab"/);
-  // 问号本体单独一个元素，才能单独调居中
-  assert.match(html, /<span class="guide-fab-mark">？<\/span>/);
-
-  // 不能再自己 fixed 定位 —— 那正是当初压住侧栏卡片的原因
-  const rule = (css.match(/\.guide-fab \{[^}]*\}/) || [""])[0];
-  assert.ok(rule, "library.css 里必须有 .guide-fab 规则");
-  assert.doesNotMatch(rule, /position:\s*fixed/, "「？」不能再自己 fixed 到左下角");
-  assert.doesNotMatch(rule, /left:\s*\d+px/, "位置交给 .floating-dock，不要再写 left");
-
-  // 全角问号的居中处理
-  const mark = (css.match(/\.guide-fab-mark \{[^}]*\}/) || [""])[0];
-  assert.ok(mark, ".guide-fab-mark 规则必须存在，否则问号会偏");
-  assert.match(mark, /line-height:\s*1/, "line-height 不收回 1，问号会因行高偏移而不居中");
+test("the settings page offers theme, language, and the two help pages", () => {
+  const html = readProjectFile("settings.html");
+  const script = readProjectFile("settings.js");
+  // 顶部沿用「标题 + 一句说明 + 右上角返回收藏库」的形态
+  assert.match(html, /<h1 data-i18n="哔哩藏库 · 设置">/, "设置页标题要能翻译");
+  // 返回收藏库：本页是新开的一个标签，能关就直接关掉回到原来那个收藏库标签，
+  // 关不掉（用户手输地址进来）才退回导航过去 —— 和 tutorial.js 的关窗按钮同一套两道兜底。
+  assert.match(html, /<button id="settingsBack"[^>]*data-i18n="返回收藏库">/, "设置页要有返回收藏库的按钮");
+  assert.match(script, /getElementById\("settingsBack"\)\?\.addEventListener\("click"/);
+  assert.match(script, /window\.close\(\)/);
+  assert.match(script, /chrome\.tabs\.getCurrent\(\(tab\) => \{/);
+  assert.match(script, /chrome\.tabs\.update\(tab\.id, \{ url: chrome\.runtime\.getURL\("library\.html"\) \}\)/);
+  // 外观：三个主题选项（分段控件与弹窗共用 theme.css 里的那一份）
+  assert.match(html, /class="segmented"/);
+  for (const mode of ["system", "light", "dark"]) {
+    assert.match(html, new RegExp(`data-theme-value="${mode}"[^>]*aria-pressed="false"`), `设置页缺少主题选项 ${mode}`);
+  }
+  // 语言：三个选项
+  for (const locale of ["zh-CN", "zh-TW", "en"]) {
+    assert.match(html, new RegExp(`data-locale="${locale}"[^>]*aria-pressed="false"`), `设置页缺少语言选项 ${locale}`);
+  }
+  // 使用说明与安装教程的入口
+  assert.match(html, /href="guide\.html"[^>]*data-i18n="打开使用说明"/);
+  assert.match(html, /href="tutorial\.html"[^>]*data-i18n="打开安装教程"/);
+  // i18n 四件套：引 i18n.js、标界面文字、标题在 JS 里设（data-i18n-title 改不了 <title>）
+  assert.match(html, /<script src="i18n\.js"><\/script>/);
+  assert.match(html, /<link rel="stylesheet" href="settings\.css">/);
+  assert.match(script, /await BcaI18n\.init\(\)\.catch\(\(\) => \{\}\)/);
+  assert.match(script, /document\.title = BcaI18n\.t\("哔哩藏库 · 设置"\)/);
+  // 两个开关都走现成 API，改完立即生效并且留在本页
+  assert.match(script, /BcaTheme\.use\(button\.dataset\.themeValue\)/);
+  assert.match(script, /await BcaI18n\.use\(locale\)/);
+  assert.match(script, /BcaTheme\.onChange\(renderThemeOptions\)/);
+  assert.match(script, /BcaI18n\.onChange\(/);
+  // 别处（弹窗）改了语言要跟上，同时要认出「这是我自己刚写的」
+  assert.match(script, /chrome\.storage\.onChanged\.addListener/);
+  assert.match(script, /next === BcaI18n\.locale\(\)/);
+  // 改设置本身不该关掉设置页：这个文件里只允许「返回收藏库」那一个出口关页，
+  // 而且它必须是先 close 再兜底导航，别处不许出现关页/摘标签的调用。
+  assert.doesNotMatch(script, /chrome\.tabs\.remove/);
+  const closeCalls = [...script.matchAll(/window\.close\(\)/g)];
+  assert.equal(closeCalls.length, 1, "设置页里只应有「返回收藏库」一处关页");
+  const backAt = script.indexOf('getElementById("settingsBack")');
+  assert.ok(backAt > 0 && closeCalls[0].index > backAt, "关页只能出现在「返回收藏库」的处理器里");
+  // 只改选中态、不写文字：切完语言后写死的文字会把译文盖回中文
+  assert.doesNotMatch(script, /textContent\s*=/);
 });
 test("the interface language switcher offers three locales", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
+  const settings = readProjectFile("settings.html");
   assert.match(html, /<script src="i18n\.js"><\/script>/);
   assert.match(html, /<script src="theme\.js"><\/script>/);
-  assert.match(library, /BcaI18n\.locales\(\)/);
+  // V1.3.2：切换语言的三个选项搬到了设置页，收藏库只跟着变
+  for (const locale of ["zh-CN", "zh-TW", "en"]) {
+    assert.match(settings, new RegExp(`data-locale="${locale}"`), `设置页缺少语言选项 ${locale}`);
+  }
   assert.match(library, /function relabelAfterLocaleChange\(/);
   assert.match(library, /BcaI18n\.onChange\(/);
   assert.match(library, /BcaI18n\.init\(\)/);
@@ -1823,8 +1852,11 @@ test("the interface language switcher offers three locales", () => {
   assert.match(i18n, /用中文原文当 key/);
   // 内容脚本不能翻译宿主页面
   assert.match(i18n, /inExtensionPage\(\)/);
-  // 主题/语言名本身不翻译
-  assert.match(library, /语言名用各自的写法，不翻译/);
+  // 主题/语言名本身不翻译：语言名是各语言的自称，任何界面下都原样显示
+  for (const label of ["简体中文", "繁體中文", "English"]) {
+    assert.match(settings, new RegExp(`>${label}</button>`), `设置页缺少语言名 ${label}`);
+    assert.equal(new RegExp(`data-i18n="[^"]*">${label}</button>`).test(settings), false, `${label} 是自称，不该挂 data-i18n`);
+  }
 });
 // 使用须知必须在两个界面逐字一致，否则用户在不同入口看到的说法会不一样。
 // 4.5 起条目上带了 data-i18n、4.5.1 又加了 class，所以先剥掉属性再比文字。
@@ -2138,7 +2170,7 @@ test("every data-i18n marker matches its element text exactly", () => {
   // 另外带子元素的元素不能直接用 data-i18n，否则子元素会被整块清掉。
   const problems = [];
   // V1.3.1：使用说明页也接进了 i18n，所以一并接受这套逐字校验
-  for (const file of ["library.html", "popup.html", "guide.html", "tutorial.html"]) {
+  for (const file of ["library.html", "popup.html", "guide.html", "tutorial.html", "settings.html"]) {
     const html = readProjectFile(file);
     for (const match of html.matchAll(/<([a-z0-9-]+)((?:[^>]*?))\sdata-i18n="([^"]*)"((?:[^>]*?))>([\s\S]*?)<\/\1>/gi)) {
       const [, tag, , key, , inner] = match;
@@ -2159,7 +2191,7 @@ test("the interface strings are actually marked up across every surface", () => 
   assert.ok(readProjectFile("popup.html").includes('src="i18n.js"'), "弹窗未引入 i18n.js");
   const manifest = JSON.parse(readProjectFile("manifest.json"));
   assert.ok(manifest.content_scripts[0].js.includes("i18n.js"), "内容脚本需要 i18n.js 才能翻译提示卡");
-  for (const file of ["library.html", "popup.html", "guide.html"]) {
+  for (const file of ["library.html", "popup.html", "guide.html", "settings.html"]) {
     const marked = [...readProjectFile(file).matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?="/g)].length;
     assert.ok(marked >= 15, `${file} 只标了 ${marked} 处，覆盖面明显不足`);
   }
@@ -2239,7 +2271,7 @@ test("every design token referenced by a page actually exists", () => {
   assert.ok(defined.size >= 50, `theme.css 只定义了 ${defined.size} 个令牌，明显不对`);
 
   const problems = [];
-  for (const file of ["library.css", "popup.css", "theme.css"]) {
+  for (const file of ["library.css", "popup.css", "theme.css", "settings.css"]) {
     const css = readProjectFile(file);
     // 页面自己也可以定义布局用的局部变量（例如横幅的 --banner-h），
     // 只要它在本文件里定义过就行；真正的设计令牌仍然必须来自 theme.css。
@@ -2249,7 +2281,7 @@ test("every design token referenced by a page actually exists", () => {
     }
   }
   // JS 里动态拼过 var(--x) 的也要算上
-  for (const file of ["library.js", "popup.js", "icons.js"]) {
+  for (const file of ["library.js", "popup.js", "icons.js", "settings.js"]) {
     const source = readProjectFile(file);
     for (const match of source.matchAll(/var\((--[a-z0-9-]+)/g)) {
       if (!defined.has(match[1])) problems.push(`${file} 用了未定义的令牌 ${match[1]}`);

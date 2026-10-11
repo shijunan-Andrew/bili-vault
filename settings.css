@@ -1,0 +1,47 @@
+/* 设置页（settings.html）专属的排版。
+   卡片观感、按钮族、分段控件全部沿用 theme.css / page.css / popup.css 里已有的那套，
+   这里只补「顶部标题行 + 一张张设置卡片」的骨架，不新造设计语言。 */
+
+/* 标题 + 说明在左、返回收藏库在右；窄屏改成上下排 */
+.settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+.settings-head h1 { margin: 0 0 4px; }
+/* page.css 的 .lead 留了 26px 下边距，这里换成更紧的间距 */
+.settings-head .muted { margin: 0; }
+.settings-head .button { flex: 0 0 auto; }
+
+.settings-card {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+/* 卡片本身就是一条分界，标题不用 page.css 那条上边框 */
+.settings-card h2 {
+  margin: 0 0 4px;
+  padding-top: 0;
+  border-top: 0;
+  font-size: var(--fs-lg);
+}
+.settings-card .muted {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-base);
+}
+
+.settings-links { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+/* page.css 的 .button 只管尺寸与排版，底色由 .button-primary 提供；
+   设置页这三处都是次要动作，补一条安静样式（与 library.css 的 .button-quiet 同观感）。 */
+.button-quiet { color: var(--brand-deep); border-color: var(--brand-line); background: var(--brand-soft); }
+.button-quiet:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-ring); }
+
+@media (max-width: 620px) {
+  .settings-head { flex-direction: column; align-items: stretch; }
+}

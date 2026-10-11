@@ -249,6 +249,44 @@ button { cursor: pointer; }
 }
 .icon-slot { display: inline-flex; align-items: center; justify-content: center; }
 
+/* 分段控件：4.5.1 在弹窗里引入（主题 / 语言三选一），V1.3.2 设置页要用同一份，
+   于是从 popup.css 挪到这里当共享组件 —— 两处样式只有一份，观感不会漂。
+   一条 --surface-soft 浅槽里放三个等宽按钮，选中的用 --surface 底 + --shadow-sm 凸起；
+   颜色只走本文件的令牌，深色主题下自动跟着换。 */
+.segmented {
+  display: flex;
+  gap: var(--sp-1);
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-soft);
+}
+/* 宽度覆盖 button 基类的 100%，让三个按钮等分整条槽 */
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  min-width: 0;
+  min-height: 30px;
+  flex: 1;
+  padding: 0 var(--sp-1);
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.segmented button:hover:not([aria-pressed="true"]) { color: var(--ink); background: var(--surface-sunken); }
+/* 选中态：卡片底色 + 细描边 + 小阴影，从槽里“凸”出来 */
+.segmented button[aria-pressed="true"] { border-color: var(--line); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm); }
+.segmented-icon { display: inline-flex; font-size: var(--fs-md); opacity: .75; }
+.segmented button[aria-pressed="true"] .segmented-icon { color: var(--brand); opacity: 1; }
+
 /* 数字对齐：日期、计数、BV 号在微软雅黑下会因为比例数字而参差 */
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
