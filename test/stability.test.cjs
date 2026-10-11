@@ -4008,8 +4008,10 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
     "封面域名白名单只允许 B 站图床");
   assert.ok(!/COVER_HOST_SUFFIXES[\s\S]{0,200}(bilivideo|akamaized)/.test(background),
     "白名单里不许出现 bilivideo / akamaized（1.3.0 已删掉的三条权限）");
-  assert.ok(background.includes('if (!coverUrlAllowed(normalized)) throw new Error("封面地址不在允许的域名里，已跳过。");'),
+  assert.ok(background.includes("const coverUrl = coverFetchUrl(normalized);"),
     "不在白名单里的封面地址要直接跳过，不许发请求");
+  assert.ok(background.includes('if (!coverUrl) throw new Error("封面地址不在允许的域名里，已跳过。");'),
+    "白名单不通过时必须抛错，不能继续 fetch");
   assert.ok(background.includes("await biliThrottleWait();"),
     "封面下载要与 B 站接口共用同一个限速器");
   assert.ok(background.includes("const guardMs = Math.max(1000, (Number(timeoutMs) || 15000) + 2000);"),
@@ -4123,4 +4125,38 @@ test("选完目录必须真的读一次，空文件夹也要建出三个固定�
     assert.ok(popup.includes(`"${name}"`), `弹窗的固定目录里有 ${name}`);
     assert.ok(background.includes(`"${name}"`), `${name} 也要在 background.js 的保留名单里`);
   }
+});
+
+test("封面白名单接受接口回的 http 地址并升到 https（V1.4.5）", () => {
+  const { coverFetchUrl } = loadBackgroundFunctions(["coverFetchUrl", "normalizeUrl"], ["COVER_HOST_SUFFIXES"]);
+
+  // V1.4.3 的 P2-17 白名单只认 https，而 B 站接口回的 pic 是 http://i0.hdslb.com/...
+  // 而 manifest 只申请了 https://*.hdslb.com/* —— 于是「接口来的封面候选」全被挡掉：
+  // 收藏夹页面开着时还有页面抓来的 https 候选顶着，页面一关（含导入中途关掉）就整批
+  // 写成「封面暂不可恢复」。这条用例专门盯这个回归。
+  assert.equal(coverFetchUrl("http://i0.hdslb.com/bfs/archive/a.jpg"), "https://i0.hdslb.com/bfs/archive/a.jpg",
+    "接口回的 http 封面要升成 https 再取");
+  assert.equal(coverFetchUrl("http://hdslb.com/a.jpg"), "https://hdslb.com/a.jpg");
+  assert.equal(coverFetchUrl("//i0.hdslb.com/a.jpg"), "https://i0.hdslb.com/a.jpg");
+  assert.equal(coverFetchUrl("https://i0.hdslb.com/a.jpg"), "https://i0.hdslb.com/a.jpg");
+  assert.equal(coverFetchUrl("http://api.bilibili.com/a.jpg"), "https://api.bilibili.com/a.jpg");
+
+  // 白名单之外一律拒绝（不能因为放行 http 就把任意域名也放进来）
+  for (const blocked of [
+    "http://evil.com/i0.hdslb.com.jpg",
+    "https://i0.hdslb.com.evil.com/a.jpg",
+    "https://i0.bilivideo.com/a.jpg",
+    "https://i0.akamaized.net/a.jpg",
+    "ftp://i0.hdslb.com/a.jpg",
+    "",
+    "not a url"
+  ]) {
+    assert.equal(coverFetchUrl(blocked), "", `${blocked} 不该被放行`);
+  }
+
+  // 真正发请求的必须是升级后的地址：原始 http 地址没有 host 权限，必失败
+  const background = stripComments(readProjectFile("background.js"));
+  assert.ok(background.includes("const coverUrl = coverFetchUrl(normalized);"), "loadCoverPng 要先过白名单并升级");
+  assert.ok(background.includes('fetch(coverUrl, { credentials: "omit"'), "取封面要用升级后的地址");
+  assert.ok(!/coverUrlAllowed/.test(background), "旧的、只认 https 的 coverUrlAllowed 不该再留着");
 });

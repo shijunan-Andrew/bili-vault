@@ -267,14 +267,24 @@ function coverSourceRect(width, height) {
   return { x: 0, y: Math.max(0, Math.round((height - cropHeight) / 2)), width, height: cropHeight };
 }
 
-function coverUrlAllowed(rawUrl) {
+// V1.4.3（P2-17）：只向白名单里的域名取封面，绝不向任意域名发请求。
+// V1.4.5：B 站接口回的 pic 是 **http 协议的 i0.hdslb.com**（老式明文地址），而 manifest 只给了
+//   hdslb.com 域名下 https 的权限 —— 原来这里只认 https，于是接口来的封面候选全被挡掉；
+//   收藏夹页面开着时还有一个从页面抓到的 https 候选顶着，页面一关（或导入中途关掉）就整批
+//   变成「封面暂不可恢复」。所以这里接受 http，但取之前统一升到 https（这些域名的 https 都在）。
+//   返回「可以拿去 fetch 的地址」，不允许就返回空串。
+//   注意：这条注释里不能出现块注释开始符，仓库里的 stripComments 是正则实现，会把它当注释开头，
+//   把后面整个文件都吃掉（V1.4.5 真栽过：两条依赖 background.js 的测试直接报"匹配不上"）。
+function coverFetchUrl(rawUrl) {
   try {
-    const parsed = new URL(rawUrl);
-    if (parsed.protocol !== "https:") return false;
+    const parsed = new URL(normalizeUrl(rawUrl));
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
     const host = parsed.hostname.toLowerCase();
-    return COVER_HOST_SUFFIXES.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix));
+    if (!COVER_HOST_SUFFIXES.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))) return "";
+    if (parsed.protocol === "http:") parsed.protocol = "https:";
+    return parsed.href;
   } catch (_) {
-    return false;
+    return "";
   }
 }
 
@@ -282,7 +292,8 @@ async function loadCoverPng(url) {
   const normalized = normalizeUrl(url);
   if (!normalized) throw new Error("网页没有提供封面地址。");
   // V1.4.3（P2-17）：不在白名单里的封面地址直接跳过，绝不向任意域名发请求
-  if (!coverUrlAllowed(normalized)) throw new Error("封面地址不在允许的域名里，已跳过。");
+  const coverUrl = coverFetchUrl(normalized);
+  if (!coverUrl) throw new Error("封面地址不在允许的域名里，已跳过。");
   // V1.4.3（P2-15）：封面下载也要限速，并且必须带超时 —— 一次连接卡住会让整批
   // Promise.all 不返回（进度冻结），取消也要等这批。
   // 超时从「真正开始发请求」那一刻起算：排限速队列的时间不算进去（默认档一次最多等 7 秒左右，
@@ -291,7 +302,7 @@ async function loadCoverPng(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COVER_FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(normalized, { credentials: "omit", cache: "no-store", signal: controller.signal });
+    const response = await fetch(coverUrl, { credentials: "omit", cache: "no-store", signal: controller.signal });
     if (!response.ok) throw new Error(`封面下载失败：HTTP ${response.status}`);
     const source = await response.blob();
     const bitmap = await createImageBitmap(source);

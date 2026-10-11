@@ -594,7 +594,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:192 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:193 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -834,4 +834,11 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     4. **本地预览也要认边界**：预览页能验版式和渲染，但 `showDirectoryPicker` 这类需要用户手势的 API 在预览里根本走不到 —— 选目录 / 授权这两条路只能真机点，**或者至少读一遍调用链**。
     5. **「插件的固定目录」也是同一份名单散在多处**（承 25.1）：`background.js` 的 `RESERVED_COLLECTION_NAMES`、`library.js` 扫描时跳过的内联名单（两份）、`popup.js` 与 `library.js` 的 `ROOT_STRUCTURE_DIRECTORIES`。**改名字时四处一起改**；测试里钉住了「名单只允许两种形状」（5 个的保留目录 / 3 个的固定目录），多出一份新形状就会红。
     6. **选完目录就把结构建出来**：不管是弹窗还是收藏库，选目录后都调用建目录的逻辑（收藏库现在是 `ensureRootStructure(handle)`，因此要按 `mode: "readwrite"` 要权限，与弹窗一致）。空文件夹选进来时，用户能在文件管理器里立刻看到 `000视频下载` / `001错误报告` / `002同步报告` —— 「什么都没发生」是最容易让人以为插件坏了的反馈。
+
+27. **白名单要连「协议」一起想 —— B 站接口回的是明文 `http`，而 manifest 只授权了 `https`；另外注释里不许出现块注释开始符。**（V1.4.5 修 V1.4.3 带进来的封面事故。）
+    1. **症状**：V1.4.3 的 P2-17 给封面下载加了域名白名单，判定写成「协议必须是 `https:` 且 host 在 `COVER_HOST_SUFFIXES` 里」。而 `fetchVideoDetail()` 拿到的 `data.pic` 是 `http://i0.hdslb.com/...`（B 站接口一直回明文地址），`manifest.json` 的 `host_permissions` 只有 `https://*.hdslb.com/*` —— 两道加起来，**接口给的封面候选一个都取不到**。
+    2. **为什么症状挑「关掉收藏夹页面」时才出现**：收藏夹页面开着时，`favorites-import.js` / `content.js` 还会送上来一个从页面抓到的 `https` 封面候选，它顶着用；页面一关（含导入中途关掉），后面的条目只剩接口给的 `http` 地址，于是**整批**变成「封面暂不可恢复」占位图，而视频信息完全正常（信息走 `api.bilibili.com`，那条权限是有的）。用户报的就是这个组合。
+    3. **改法**：`coverUrlAllowed(url)`（返回布尔）换成 `coverFetchUrl(url)`（返回「可以拿去 fetch 的地址」或空串）—— 接受 `http` / `https`，host 仍须在白名单里，**如果是 `http` 就升成 `https` 再返回**（这些域名的 https 都通）。`loadCoverPng()` 必须用返回的地址去 `fetch`，不能拿原始地址。**只放宽协议，绝不放宽域名**：`http://evil.com/i0.hdslb.com.jpg`、`https://i0.hdslb.com.evil.com/...` 仍须被拒。
+    4. **占位图是可修复的**：写成占位图的记录同时写了 `COVER_PENDING_LINE`（「封面待补全」），所以 `recordMissingCover()` 认得它，重新跑一次「导入/更新」就会补真封面。**以后任何「取图失败」的降级路径都要留这种可识别的标记**，否则那条记录会被当成封面完好、永不再补。
+    5. **`/*` 在 `//` 注释里是地雷**：`test/stability.test.cjs` 的 `stripComments()` 是正则实现，看到 `/*` 就当成块注释开始 —— 我在 V1.4.5 的注释里写了 `https://*.hdslb.com`，`//*` 那一截被当成块注释开头，**后面整个文件都被吃掉**，两条依赖 `background.js` 的测试立刻报「匹配不上」。凡是注释里要写带 `*` 的 URL，就把它改写成文字（「hdslb.com 域名下 https 的权限」）。改完可以用一行脚本自检：正则 `/^\s*\/\//` 的行里不许 `includes("/*")`。
 
