@@ -2146,6 +2146,7 @@ async function refreshImportedRecord(collection, record, item, journal) {
       ...(item.coverCandidates || []),
       ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
     ], item.isInvalid);
+    noteCoverOutcome(cover);
   }
   const metadata = importMetadata(item, cover);
   metadata.favoriteTimeUnknown = favoriteTimeUnknown;
@@ -2311,6 +2312,7 @@ async function loadImportCover(candidates, invalid) {
   }
   const sourcePriority = { "APP收藏夹接口": 0, "观看历史": 1, "稍后再看": 2, "视频资料接口": 3, "收藏夹接口": 4 };
   unique.sort((left, right) => (sourcePriority[left.source] ?? 5) - (sourcePriority[right.source] ?? 5));
+  const failures = [];
   for (const candidate of unique) {
     try {
       if (invalid && /(?:blank|placeholder|default|sprite|no_cover|nocover)/i.test(candidate.url)) continue;
@@ -2337,13 +2339,49 @@ async function loadImportCover(candidates, invalid) {
           if (mean > 180 && deviation < 8 && meanSaturation < 0.08) continue;
         } finally { bitmap.close(); }
       }
-      return { blob, source: candidate.source, placeholder: false };
-    } catch (_) {}
+      return { blob, source: candidate.source, placeholder: false, failures, candidateCount: unique.length };
+    } catch (error) {
+      // V1.4.6：封面失败原来是完全静默的（这里 catch 掉就没了），真机上出现「整批封面变占位图」
+      // 时报告里一个字都没有，只能靠猜。现在把候选地址和原因留下来，报告里会写一行。
+      failures.push({ url: candidate.url, reason: error?.message || String(error) });
+      console.warn("[哔哩藏库] 封面候选失败：", candidate.url, error?.message || error);
+    }
   }
   // 走到这里说明所有候选都失败了：返回的是一张「封面暂不可恢复」占位图。
   // placeholder 必须传出去 —— 调用方要据此在 视频信息.txt 里写 COVER_PENDING_LINE，
   // 否则占位图会被当成真封面，这条记录再也不会尝试补图。
-  return { blob: await importedUnknownCover(), source: "未知", placeholder: true };
+  return { blob: await importedUnknownCover(), source: "未知", placeholder: true, failures, candidateCount: unique.length };
+}
+
+/* V1.4.6：把「封面为什么没取到」累积起来，一个收藏夹收尾时写进报告一行。
+
+   之前 loadImportCover 把每个候选的异常都吞掉，用户遇到的「导入完封面全是占位图」在报告里
+   没有任何痕迹 —— 只能靠读代码猜。现在区分三种情况：候选地址压根没拿到、候选全被域名白名单
+   跳过、以及每个候选各自的失败原因（HTTP 状态 / 超时 / 解码失败…）。 */
+const importCoverFailures = [];
+function noteCoverOutcome(cover) {
+  if (!cover || cover.placeholder !== true) return;
+  const failures = Array.isArray(cover.failures) ? cover.failures : [];
+  if (failures.length) {
+    for (const failure of failures) importCoverFailures.push(failure);
+    return;
+  }
+  importCoverFailures.push({
+    url: "",
+    reason: cover.candidateCount ? "候选地址全部被跳过（域名不在白名单里）" : "没有拿到封面候选地址"
+  });
+}
+
+function importCoverFailureLine() {
+  if (!importCoverFailures.length) return "";
+  const counts = new Map();
+  for (const failure of importCoverFailures) counts.set(failure.reason, (counts.get(failure.reason) || 0) + 1);
+  const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  const reasons = [...counts.entries()].sort((left, right) => right[1] - left[1]).slice(0, 3)
+    .map(([reason, count]) => `${reason}（${count} 次）`).join("；");
+  const sample = importCoverFailures.find((failure) => failure.url)?.url || "";
+  importCoverFailures.length = 0;
+  return `封面没取到 ${total} 次：${reasons}${sample ? `；例：${sample}` : ""}`;
 }
 
 async function readExistingImportIdentifiers(collection) {
@@ -2491,6 +2529,7 @@ async function saveImportedItem(root, folder, item, journal = null) {
   ];
   if (item.coverPreparationError) throw item.coverPreparationError;
   const cover = item.preparedCover || await loadImportCover(item.coverCandidates, item.isInvalid);
+  noteCoverOutcome(cover);
   const metadata = importMetadata(item, cover);
   const favoriteTimestamp = Number(item.favoriteAt) || 0;
   const parsedFavoriteAt = favoriteTimestamp ? new Date(favoriteTimestamp > 1e12 ? favoriteTimestamp : favoriteTimestamp * 1000) : null;
@@ -2888,6 +2927,9 @@ async function importBiliFavorites(data, tabId = null) {
           }
         }
       }
+
+      const coverFailureLine = importCoverFailureLine();
+      if (coverFailureLine) folderLog.push(coverFailureLine);
 
       for (const item of pendingItems) {
         for (const message of item.enrichErrors || []) {
