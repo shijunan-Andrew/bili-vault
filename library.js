@@ -2304,7 +2304,7 @@ async function copyDownloadPath(video) {
   try {
     await navigator.clipboard.writeText(resolved.path);
     setDownloadPathNote(resolved.source === "relative"
-      ? BcaI18n.t("已复制相对路径：{path}。要复制可直接粘贴的完整路径，请在下载页填写下载根目录的绝对路径，或安装 Windows 原生目录助手。", { path: resolved.path })
+      ? BcaI18n.t("已复制相对路径：{path}。要复制可直接粘贴的完整路径，请安装 Windows 原生目录助手。", { path: resolved.path })
       : BcaI18n.t("已复制完整路径：{path}", { path: resolved.path }));
     showToast(BcaI18n.t("已复制视频目录路径。"));
   } catch (error) {
@@ -2537,8 +2537,8 @@ async function runMarkDownloaded() {
 
 /* ---------------- 4.8.2：手填的下载根目录绝对路径 ----------------
 
-   没装本地目录打开助手时，绝对路径没有别的来源。用户在下载页填一次，
-   这里读出来拼路径，复制到的就是能直接粘进资源管理器的完整路径。 */
+   没装本地目录打开助手时，绝对路径没有别的来源。用户在 1.3.0 之前的下载页
+   填过一次的值仍然保留在这里，读出来拼路径，复制到的就是能直接粘进资源管理器的完整路径。 */
 
 async function readDownloadRootPath() {
   try {
@@ -2553,11 +2553,11 @@ async function getWritableDownloadParent({ create = false } = {}) {
   const isCustom = mode === "custom" || (!mode && Boolean(savedCustom));
   let parent;
   if (isCustom) {
-    if (!savedCustom) throw new Error(BcaI18n.t("自选下载目录设置已丢失，请先在下载页重新选择目录。"));
+    if (!savedCustom) throw new Error(BcaI18n.t("自选下载目录设置已丢失，请安装 Windows 原生目录助手后重试。"));
     parent = savedCustom;
   } else {
     // 4.9.4：默认下载目录只在真正下载时才被创建，从没下载过的用户根本没有它 ——
-    // 「标记为已下载」会因此失败，而报错说的却是"请先到下载页选择保存位置"（指错方向）。
+    // 「标记为已下载」会因此失败，而报错说的却是"请先选择保存位置"（指错方向）。
     // 用户既然点了「新建文件夹并标记」，就是明确要一个下载目录，这里按需建出来。
     if (create) {
       const rootPermission = await rootHandle.requestPermission({ mode: "readwrite" });

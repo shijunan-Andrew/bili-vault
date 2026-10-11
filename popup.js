@@ -1,5 +1,5 @@
 const DB_NAME = "bili-fav-archiver";
-// 4.9.4：默认下载目录名（与下载页、归档布局保持一致）
+// 4.9.4：默认下载目录名（与归档布局、已下载标记保持一致）
 const DOWNLOAD_FOLDER_NAME = "000视频下载";
 const DB_STORE = "settings";
 
