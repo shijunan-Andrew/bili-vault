@@ -138,8 +138,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 **顺手改掉的说法：** 使用须知里原来那条讲自带下载器不稳定、建议改用 DownKyi 的，换成了「1.3.0 起不再提供下载」与「放进收藏夹的文件请仅限个人离线观看」；插件内的使用说明页删掉了整节下载教程；README 的「下载视频」一节也重写了。
 
-（重构前带下载功能的完整版本封存在另一个本地仓库 `bili-vault-developer` 里，不对外发布。）
-
 测试仍是 **181 项**。
 
 ## V1.2.8：重复导入不再给「没变」的记录刷一遍时间戳
