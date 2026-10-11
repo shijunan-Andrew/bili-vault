@@ -1086,6 +1086,8 @@ a.detail-tag:hover { border-color: var(--brand-line); color: var(--brand-deep); 
 .confirm-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-sm); color: var(--danger); background: var(--danger-soft); font-size: var(--fs-lg); }
 .confirm-dialog h2 { margin: var(--sp-3) 0 6px; color: var(--ink); font-size: var(--fs-lg); }
 .confirm-dialog p { margin: 0; color: var(--muted); font-size: var(--fs-base); line-height: 1.75; overflow-wrap: anywhere; }
+/* 1.4.2：删除是不可逆的，这句提醒固定写在确认框里，不由每条消息自己拼 */
+.confirm-dialog .confirm-warning { margin-top: var(--sp-2); color: var(--danger-strong); font-size: var(--fs-sm); }
 .delete-downloads-option { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); color: var(--text); font-size: var(--fs-base); }
 .delete-downloads-option input { width: 16px; height: 16px; accent-color: var(--danger); }
 .confirm-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-5); }

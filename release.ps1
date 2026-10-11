@@ -122,6 +122,23 @@ if ($readme -notmatch "(?m)^## V$([regex]::Escape($版本))[：:]") {
   Die "发布中止：先在 README.md 里补上 V$版本 的小节。"
 }
 
+# 只查「这次要发的版本」还不够 —— V1.4.0 的 README 小节标题曾被一次编辑误删，
+# 而当时发的是 V1.4.1，那一节整整缺了一版都没人发现（发现时已经隔了两个版本）。
+# 所以这里把 git tag 全量过一遍：任何一个 V 开头的 tag 在 README.md 里找不到
+# "## V<版本>" 这一节，就不许发布。
+$tagList = @(Invoke-Native $Git @('tag') |
+  ForEach-Object { $_.Trim() } |
+  Where-Object { $_ -match '^V\d' })
+$missingSections = @($tagList | Where-Object {
+  $readme -notmatch "(?m)^## $([regex]::Escape($_))[：:]"
+})
+if ($missingSections.Count) {
+  Say "  README.md 里缺 $($missingSections.Count) 个已打 tag 的版本小节：" $C_RED
+  foreach ($m in $missingSections) { Say "    ## $m：..." $C_RED }
+  Say "  打了 tag 就必须有 README 小节，否则版本历史会缺环。" $C_YELLOW
+  Die "发布中止：先补上上面这些版本的 README 小节。"
+}
+
 $reserved = @(Get-ChildItem -LiteralPath $PSScriptRoot -Force -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -like '_*' })
 if ($reserved.Count) {

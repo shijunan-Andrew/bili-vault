@@ -3870,3 +3870,90 @@ test("弹窗不再有主题滑块：外观只在设置页改（V1.4.0）", () =>
   assert.match(popupHtml, /data-locale="en"/, "语言仍然留在弹窗里");
 });
 
+
+test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () => {
+  const backgroundCode = stripComments(readProjectFile("background.js"));
+  const libraryCode = stripComments(readProjectFile("library.js"));
+  const contentCode = stripComments(readProjectFile("content.js"));
+  const libraryHtml = readProjectFile("library.html");
+  const pack = readProjectFile("pack.ps1");
+
+  // P0-1：收尾要先写"跑完了"的快照再清，否则整轮成功导入会被当成中断的那一轮
+  assert.match(backgroundCode, /async function finishImportRunSnapshot\(\)/);
+  assert.equal((backgroundCode.match(/await finishImportRunSnapshot\(\);/g) || []).length, 3,
+    "取消 / 风控 / 成功三条收尾都要走 it");
+  assert.match(backgroundCode, /if \(leftover && leftover\.active !== true\)/,
+    "快照明明写着没在跑，就不能当成中断");
+  assert.equal(/if \(!snapshot\?\.active\) return false;/.test(backgroundCode), false,
+    "不能把「快照说没在跑」也当成中断");
+
+  // P1-2：回滚入口整块删掉，对用户的承诺也要跟着改
+  assert.equal(/rollbackInterruptedImport/.test(backgroundCode), false, "死代码入口不该还在");
+  assert.equal(/bca-import-rollback-recovered/.test(backgroundCode), false);
+  assert.equal(/markImportRunInterrupted|IMPORT_INTERRUPTED_SESSION_KEY/.test(backgroundCode), false);
+  assert.equal(/回滚日志已保存在本次浏览器会话中/.test(backgroundCode), false, "不能再承诺一个点不到的回滚");
+
+  // P1-1：删下载目录前先认归属，不是本插件写的就不删
+  assert.match(libraryCode, /async function collectionDownloadDirectoryLooksManaged\(handle\)/);
+  assert.match(libraryCode, /if \(!await collectionDownloadDirectoryLooksManaged\(handle\)\)/);
+  assert.match(libraryCode, /目录里有不是本插件写入的内容，为了安全没有删除。/);
+  assert.match(libraryCode, /identifiersFromDirectoryName\(entry\.name\)\.size/);
+
+  // P1-3：排队等待加上限；去重表只在真的归档成功之后才记
+  assert.match(backgroundCode, /async function runInSaveQueueWithDeadline\(task, label\)/);
+  assert.equal((backgroundCode.match(/runInSaveQueueWithDeadline\(/g) || []).length, 4,
+    "定义 1 处 + 保存收藏 / 手动添加 / 补存三个入口各 1 处");
+  assert.match(contentCode, /function rememberSeen\(signature\) \{[\s\S]{0,160}seen\.add\(signature\);/);
+  assert.equal((contentCode.match(/seen\.add\(/g) || []).length, 1, "去重表只该在 rememberSeen 里写一次");
+  assert.match(contentCode, /if \(seen\.has\(signature\)\) return;\r?\n\s*sendFavorite\(data, signature\);/,
+    "观察器里只查重，不再先记掉");
+  assert.match(contentCode, /rememberSeen\(signature\);\r?\n\s*showNotice\(BcaI18n\.t\("归档成功"\)/,
+    "只有真的归档成功才记进去重表");
+
+  // P1-4：纯本地读的两个循环也要保活
+  assert.equal((backgroundCode.match(/await keepServiceWorkerAlive\("scan"\);/g) || []).length, 2);
+  assert.match(backgroundCode, /await keepServiceWorkerAlive\("refresh"\);/);
+
+  // P1-6：同名位置上是文件时不能当成致命错误（换个后缀继续试）
+  assert.match(backgroundCode, /if \(error\?\.name !== "NotFoundError" && error\?\.name !== "TypeMismatchError"\) throw error;/);
+
+  // P1-7：确认框里固定写一句"删掉不可恢复"
+  assert.match(libraryHtml, /class="confirm-warning" data-i18n="本地删除不可恢复：不会进系统回收站，删掉就找不回来了。"/);
+
+  // P1-8：风控码补全；恢复扫描撞风控要整轮停，不能继续加压
+  assert.match(backgroundCode, /const IMPORT_RATE_LIMIT_CODES = new Set\(\[-412, -352, -509, -799\]\);/);
+  assert.match(backgroundCode, /let rateLimitedAbort = false;/);
+  assert.match(backgroundCode, /budgetExhausted \|\| rateLimitedAbort/);
+
+  // P2-21：打包白名单脚本在，且排除清单里确实有开发文件
+  for (const name of [".node-path", "test", "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1"]) {
+    assert.ok(pack.includes(`"${name}"`), `pack.ps1 要排除 ${name}`);
+  }
+
+  // 文档：release.ps1 要拿 git tag 全量核 README（只核「这次要发的版本」漏掉过 V1.4.0 整节）
+  const releaseScript = readProjectFile("release.ps1");
+  assert.match(releaseScript, /Invoke-Native \$Git @\('tag'\)/, "release.ps1 要全量比对 tag 与 README 小节");
+  assert.match(releaseScript, /个已打 tag 的版本小节/, "缺小节时要报出缺哪几版");
+
+  // README：每一版都要有小节，且必须从新到旧排（V1.4.0 / V1.3.1 的标题都被误删过）
+  const readme = readProjectFile("README.md");
+  for (const version of ["V1.4.0", "V1.3.1"]) {
+    assert.match(readme, new RegExp(`^## ${version.replace(/\./g, "\\.")}[：:]`, "m"),
+      `${version} 的小节标题不能再丢`);
+  }
+  const sections = [...readme.matchAll(/^## V(\d+(?:\.\d+)*)[：:]/gm)].map((m) => m[1]);
+  assert.ok(sections.length >= 40, `README 的「## V…」小节数不对：${sections.length}`);
+  const toNumbers = (v) => v.split(".").map(Number);
+  const compare = (a, b) => {
+    for (let i = 0; i < 3; i += 1) {
+      const x = a[i] || 0;
+      const y = b[i] || 0;
+      if (x !== y) return x - y;
+    }
+    return 0;
+  };
+  for (let i = 1; i < sections.length; i += 1) {
+    assert.ok(compare(toNumbers(sections[i - 1]), toNumbers(sections[i])) > 0,
+      `README 版本小节必须从新到旧：${sections[i - 1]} 之后出现了 ${sections[i]}`);
+  }
+});

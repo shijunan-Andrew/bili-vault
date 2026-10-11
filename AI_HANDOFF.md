@@ -594,7 +594,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:188 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:189 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -809,4 +809,13 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     4. **共享控件放 `theme.css`。** `.segmented`（分段控件）原来只写在 `popup.css` 里，设置页要用就把它挪进 `theme.css` 当公共组件 —— 别在 `settings.css` 里再抄一份，两份迟早会走样。图标用 `icons.js` 里的 SVG（新增 `settings`），**不要用「⚙」这种字符**：字符当图标在不同字体下大小、基线都不一样，`test/stability.test.cjs:165-172` 已明确禁止。
 
 23. **铺了全屏背景图以后，每一个贴在照片上的「面」都要自带底色。**（1.4.0 加自定义背景时定。）任何没有底色的文字都会直接压在照片上，滚动时尤其难看：设置页的 sticky header、页脚说明、收藏库空状态的大标题都属这一类。做法是把它放进卡片，或者给那一层补 `background: var(--surface)` / 半透明 + `backdrop-filter`（**不透明时也必须能看**）。**不要**用「给整页再盖一层黑/白」来代替——那会把卡片一起压暗。
+
+24. **「删除 / 中断 / 超时 / 限流」这四类边界要在写的时候就一起想，别等审查。**（V1.4.2 修上线前审查第一批时定，八处都是这四类的变体。）
+    1. **凡是递归删除用户看得见的目录，删之前先确认那是插件自己写的。**（P1-1）判据是 `collectionDownloadDirectoryLooksManaged()`：里面每一项都必须是 `xxx - BV号` / `xxx - av号` 形式的子目录（用 `archive-core.js` 的 `identifiersFromDirectoryName`），认不出来就整个不删、并计入 `downloadCleanupFailures`。**宁可留着让用户自己删，也不能误删别人的东西** —— 后端的 `removeEntry` 不进回收站，删了就没了。
+    2. **凡是给用户看的承诺，不能指向一个点不到或已经过期的能力。**（P1-2）「回滚日志已保存在本次浏览器会话中」这句话在 V1.4.2 被删掉：日志只存在 `chrome.storage.session`、关掉浏览器就没了，而回滚入口早就不存在（没有调用者的死代码）。**改掉行为时，连带把承诺一起改。**
+    3. **凡是跨页面/跨进程等待的队列，等待必须有上限，并且要能说清为什么没执行。**（P1-3）`runInSaveQueueWithDeadline()` 超时返回 `{ok:false, busy:true, message:"本地队列正忙…"}`，同时把这条收藏记进 `pendingFavorite` 以便重试。MV3 的 Service Worker 随时会被回收，**挂在队列里等着的条目等于已经丢了**。
+    4. **凡是收尾（成功 / 取消 / 风控）都要先把「已经跑完」写进持久状态，再清理。**（P0-1）`finishImportRunSnapshot()` 先写 `{active:false, finished:true}` 再删键 —— 否则收尾那几个 `await` 之间被回收，快照会停在「有一轮正在进行」，下次启动就把**已经成功**的那一轮当成中断。判据侧同理：`leftover.active !== true` 时不能宣告中断。
+    5. **纯本地的长循环也要保活**（P1-4：`keepServiceWorkerAlive("scan"/"refresh")`），`uniqueTimeFolder` 撞到同名**文件**（`TypeMismatchError`）要换后缀继续而不是抛错（P1-6），风控码 `IMPORT_RATE_LIMIT_CODES` 是 `{-412, -352, -509, -799}` 而恢复扫描撞上要整轮停（P1-8）。
+    6. **发分发包用 `pack.ps1`，别手工压 zip**（P2-21）：它排掉 `.git` / `test/` / 三份 md / `release.ps1` / `pack.ps1` / `.node-path`，并在打包前断言「清单完整、开发文件没混进去」。
+    7. **`release.ps1` 的 README 小节守卫是拿 `git tag` 全量比对的**（不只是本次要发的版本）—— 起因是 V1.4.0 的整节标题被一次编辑误删，而当时发的是 V1.4.1，隔了两个版本才发现。**编辑 README 时不要动 `## V<版本>：` 这一整行**；`test/stability.test.cjs` 里另有一条断言要求这些小节从新到旧排列、且 `## V1.4.0：` 必须存在。
 

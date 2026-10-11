@@ -2640,8 +2640,34 @@ async function removeVideoDownloadDirectories(downloadParent, video) {
   return failures;
 }
 
+/* 1.4.2（P1-1）：删收藏夹时勾了「同时删除关联的本地下载文件」，原来是无条件
+   removeEntry(收藏夹名, { recursive: true }) 删掉 000视频下载/<收藏夹名>。
+   那是用户自己的磁盘，而 File System Access 的 removeEntry 不进系统回收站 ——
+   万一这个目录里装的是用户自己整理的东西（不是本插件写的那种「标题 - BV号」目录），
+   一点下去就永久没了。所以先认一遍里面装的是什么，认不出来就整个不删，把原因报出去：
+     · 每一项都得是以 " - BV号" / " - av号" 结尾的子目录（archive-core.js 的命名约定，
+       插件写记录、写下载目录、建「请将视频放到这里.txt」都用它）；
+     · 出现别的命名、或者直接把文件散在目录里 → 不删，交给用户自己决定。
+   空目录按「可删」处理：删掉不损失任何东西。 */
+async function collectionDownloadDirectoryLooksManaged(handle) {
+  for await (const entry of handle.values()) {
+    if (entry.kind !== "directory") return false;
+    if (!identifiersFromDirectoryName(entry.name).size) return false;
+  }
+  return true;
+}
+
 async function removeCollectionDownloadDirectory(downloadParent, collectionName) {
   if (!downloadParent) return [];
+  let handle = null;
+  try { handle = await downloadParent.getDirectoryHandle(collectionName); }
+  catch (error) {
+    if (error?.name === "NotFoundError") return [];
+    return [`${collectionName}：${error.message}`];
+  }
+  if (!await collectionDownloadDirectoryLooksManaged(handle)) {
+    return [`${collectionName}：目录里有不是本插件写入的内容，为了安全没有删除。`];
+  }
   try { await downloadParent.removeEntry(collectionName, { recursive: true }); return []; }
   catch (error) {
     if (error?.name === "NotFoundError") return [];

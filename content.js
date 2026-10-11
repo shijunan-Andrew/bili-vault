@@ -327,7 +327,16 @@
     schedule();
   }
 
-  function sendFavorite(data) {
+  // 1.4.2（P1-3）：去重表只在**真的归档成功**之后才记（见 sendFavorite）。原来在观察器里
+  // 就先记掉了：后台队列忙、保存失败、或者授权掉了的时候，这次收藏其实没落地，
+  // 可这条视频再也不会被处理第二次，用户只能干看着。
+  function rememberSeen(signature) {
+    if (!signature) return;
+    seen.add(signature);
+    if (seen.size > 100) seen.clear();
+  }
+
+  function sendFavorite(data, signature) {
     showNotice(BcaI18n.t("正在归档视频…"), BcaI18n.t("B站已完成收藏，正在保存视频信息和封面。"), "", false);
     chrome.runtime.sendMessage({ type: "save-favorite", data }, (result) => {
       const runtimeError = chrome.runtime.lastError;
@@ -337,6 +346,7 @@
         // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
         showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);
       } else {
+        rememberSeen(signature);
         showNotice(BcaI18n.t("归档成功"), result?.message || BcaI18n.t("已保存视频信息和封面。"), result?.path || "", false, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
       }
     });
@@ -363,9 +373,7 @@
       data.favoriteAt = Date.now();
       const signature = `${data.metadata.bvid}|${data.folders.map((folder) => folder.name).sort().join(",")}`;
       if (seen.has(signature)) return;
-      seen.add(signature);
-      if (seen.size > 100) seen.clear();
-      sendFavorite(data);
+      sendFavorite(data, signature);
     });
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "aria-hidden"] });
     pendingStops.add(stop);

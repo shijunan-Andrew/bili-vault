@@ -205,8 +205,17 @@ async function uniqueTimeFolder(parent, name) {
       await parent.getDirectoryHandle(candidate);
       candidate = `${name}_${suffix++}`;
     } catch (error) {
-      if (error?.name !== "NotFoundError") throw error;
-      return parent.getDirectoryHandle(candidate, { create: true });
+      // 1.4.2（P1-6）：同名位置上是一个**文件**时，getDirectoryHandle 抛的是
+      // TypeMismatchError，不是 NotFoundError。原来会当成致命错误抛出去，整次保存
+      // 直接失败；这里跟"目录已存在"一样处理：换个后缀继续试，绝不去动用户那个文件。
+      // （create:true 自己也可能撞上刚出现的同名文件，所以那一层也兜一次。）
+      if (error?.name !== "NotFoundError" && error?.name !== "TypeMismatchError") throw error;
+      try {
+        return await parent.getDirectoryHandle(candidate, { create: true });
+      } catch (inner) {
+        if (inner?.name !== "TypeMismatchError") throw inner;
+        candidate = `${name}_${suffix++}`;
+      }
     }
   }
 }
@@ -631,6 +640,22 @@ async function withQueueDeadline(queue, timeoutMs, label) {
   }
 }
 
+// 1.4.2（P1-3）：导入进行中（尤其是暂停时）saveQueue 可能停几个小时，排在后面的
+// 「这次收藏」「手动添加」「补存」会一直等到导入结束，界面就永久停在「保存中」。
+// 给它们同一套上限：超时如实回 busy，让界面当场讲清楚"现在没做、等导入结束后重试"。
+// 注意队列里那一份仍然会照常跑完（withQueueDeadline 只放弃等待，不取消任务）。
+async function runInSaveQueueWithDeadline(task, label) {
+  const result = await withQueueDeadline(task, IMPORT_QUEUE_WAIT_TIMEOUT_MS, label);
+  if (result === WITH_QUEUE_DEADLINE_EXPIRED) {
+    return {
+      ok: false,
+      busy: true,
+      message: "本地队列正忙（很可能有一轮导入正在暂停或进行中），这次没有执行。等导入结束或取消后再试一次就好。"
+    };
+  }
+  return result;
+}
+
 const IMPORT_INVALID_TITLES = new Set(["已失效视频", "该视频已失效"]);
 const IMPORT_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
 // attr → 「失效原因」文案。0 是「有效」，不在表里（importAttrReason 返回空串，调用方据此不写这一行）。
@@ -709,8 +734,10 @@ function importLinkParam(value, names) {
    B 站在限流时返回 HTTP 412，或者带这些接口错误码。以前只有"更新视频状态"看 apiCode，
    导入链路完全不看：若 B 站开始限流，每条视频的详情/标签都失败，导入仍然会把
    "标签、简介、发布时间全是未知"的记录当成成功写下去（5000 条假成功）。
-   这里统一打上 rateLimited 标记，让整条导入链能识别并熔断。 */
-const IMPORT_RATE_LIMIT_CODES = new Set([-412, -352]);
+   这里统一打上 rateLimited 标记，让整条导入链能识别并熔断。
+   1.4.2（P1-8）：补上 -509 / -799 —— B 站"请求过于频繁"用的就是这两个码，
+   只认 -412/-352 时它们会被当成普通失败，于是照样写出残缺记录、也照样继续打接口。 */
+const IMPORT_RATE_LIMIT_CODES = new Set([-412, -352, -509, -799]);
 
 function importRateLimitError(message, status) {
   const error = new Error(message);
@@ -1033,6 +1060,8 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
   const maxPasses = IMPORT_RECOVERY_MAX_PASSES;
   let recoveryRequests = 0;
   let budgetExhausted = false;
+  // 1.4.2（P1-8）：撞风控时用它一次性跳出「页循环 + 轮次循环」，不再往下加压
+  let rateLimitedAbort = false;
   for (let pass = 1; pass <= maxPasses; pass += 1) {
     let page = 1;
     let passFailed = false;
@@ -1055,11 +1084,19 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
           break;
         } catch (error) {
           lastError = error;
+          // 1.4.2（P1-8）：撞上风控就别再重试了。原来这里不看错误类型连打三次，
+          // 外面还有 3 轮翻页，等于在限流时继续加压。
+          if (error?.rateLimited) break;
           if (attempt < 3) await importDelay(500 * attempt);
         }
       }
       if (!payload) {
         passFailed = true;
+        if (lastError?.rateLimited) {
+          rateLimitedAbort = true;
+          recoveryErrors.push(`APP收藏夹接口：触发 B 站风控，已停止恢复扫描（${lastError?.message || "请求被拦截"}）；已经找到的失效视频照常写进记录，剩下的保持原样，过一会儿重新导入即可。`);
+          break;
+        }
         recoveryErrors.push(`APP收藏夹接口：第 ${page} 页第 ${pass} 轮扫描失败（${lastError?.message || "请求失败"}）；已保留此前成功读取的恢复记录。`);
         break;
       }
@@ -1077,7 +1114,7 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
     }
 
     const missing = missingTargets();
-    if (!missing.length || budgetExhausted) break;
+    if (!missing.length || budgetExhausted || rateLimitedAbort) break;
     if (passFailed) recoveryErrors.push(`APP收藏夹接口：第 ${pass} 轮扫描在第 ${page} 页中断，剩余 ${missing.length} 个失效视频将继续重试。`);
     if (pass < maxPasses) await importDelay(1200);
   }
@@ -1506,7 +1543,6 @@ let importStatePublishAt = 0;
    ========================================================================== */
 
 const IMPORT_RUN_SESSION_KEY = "bcaImportRun";                  // 正在进行的导入（断点 + 回滚日志）
-const IMPORT_INTERRUPTED_SESSION_KEY = "bcaInterruptedImport";  // 被回收打断、仍可回滚的那一次
 // 必须明显小于 30 秒的回收阈值，留出一次请求的最长耗时（15 秒）的余量
 const IMPORT_KEEPALIVE_INTERVAL_MS = 20000;
 const IMPORT_RUN_PUBLISH_INTERVAL_MS = 5000;                    // 断点落盘节流
@@ -1684,15 +1720,25 @@ async function clearImportRunSnapshot() {
   await importRunPublishChain;
 }
 
-// 被回收打断的那次要挪到独立键：新导入只写活动键，于是这份可回滚日志
-// 不会被下一次导入覆盖，直到用户回滚或又一次被打断。
-async function markImportRunInterrupted(snapshot) {
-  try {
-    await chrome.storage.session.set({
-      [IMPORT_INTERRUPTED_SESSION_KEY]: { ...(snapshot || {}), active: false, interruptedAt: Date.now() }
-    });
-    await chrome.storage.session.remove(IMPORT_RUN_SESSION_KEY);
-  } catch (_) {}
+/* V1.4.2：这一轮导入"已经跑到底了"，只是还没把 session 键删掉。
+   三种收尾（成功 / 取消 / 风控中止）都必须先走这里，再删键。
+
+   不这样做的后果是一个很难发现、但很严重的窗口：
+   importRun.active 在收尾一开始就被置成 false，而快照落盘、写报告、写 lastResult 这些 await
+   还要跑几百毫秒到几秒 —— 浏览器正好在这几百毫秒里被关掉，session 里留下的就是一份 active:true 的快照。
+   下次启动时它会被当成「被回收打断的那一轮」，而它其实**整轮都成功了**。
+   最坏的结果是：有人照着「可回滚」的提示点一下，把整轮几万条归档递归删掉。
+
+   先把 active:false 写进 session，再删键：中间被打断时留下的也是一份"已完成"的快照，
+   不会被误判成中断。（键仍然要删，否则下一次的孤儿判定会看到一份旧记录。） */
+async function finishImportRunSnapshot() {
+  if (!importRunSnapshot) return clearImportRunSnapshot();
+  importRunSnapshot = {
+    ...importRunSnapshot, active: false, paused: false, finished: true, finishedAt: Date.now()
+  };
+  importRunPublishAt = Date.now();
+  try { await writeImportRunSnapshot(); } catch (_) {}
+  return clearImportRunSnapshot();
 }
 
 function importInterruptedSummary(snapshot) {
@@ -1702,7 +1748,10 @@ function importInterruptedSummary(snapshot) {
   if (cursor.folder) parts.push(`停在「${cursor.folder}」第 ${Number(cursor.page) || 1} 页`);
   if (Number(cursor.saved) > 0) parts.push(`该收藏夹已写入 ${Number(cursor.saved)} 条`);
   const created = snapshot?.journal?.createdRecords?.length || 0;
-  if (created) parts.push(`本次共新建 ${created} 个视频目录（回滚日志已保存在本次浏览器会话中）`);
+  // V1.4.2：这里原来写「（回滚日志已保存在本次浏览器会话中）」。那是句空头承诺：
+  // 回滚入口没有任何界面调用它，而且日志只在 session 里、浏览器一重启就没了。
+  // 现在改成陈述事实——中断时写进去的记录本身就是完整的。
+  if (created) parts.push(`本次共新建 ${created} 个视频目录，它们都是完整记录，重新导入会跳过`);
   if (Number(counts.imported) > 0) parts.push(`累计新导入 ${Number(counts.imported)} 条`);
   return parts.join("；");
 }
@@ -1735,12 +1784,25 @@ async function importReconcileState() {
   const stored = await chrome.storage.local.get("importState").catch(() => ({}));
   const storedState = stored?.importState || null;
   const leftover = await readImportRunSnapshot();
+  // V1.4.2：快照还在、但 active 不是 true —— 上一轮已经跑到收尾了（成功 / 取消 / 风控中止都会这样），
+  // 只是删键之前进程没了。它不是"中断的那一轮"：不能宣告中断，更不能把整轮日志留成可回滚的一份。
+  // 这里只把界面状态复位，然后清掉这份快照。
+  if (leftover && leftover.active !== true) {
+    await clearImportRunSnapshot();
+    if (storedState?.running === true) {
+      importState = { ...importState, running: false, paused: false, updatedAt: Date.now() };
+      await chrome.storage.local.set({ importState }).catch(() => {});
+    }
+    return { active: false, reset: false };
+  }
   const orphan = leftover?.active === true;
   const staleRunning = storedState?.running === true
     && (!Number(storedState?.updatedAt) || Date.now() - Number(storedState.updatedAt) > IMPORT_STALE_STATE_MS);
   if (!orphan && !staleRunning) return { active: false, reset: false };
   await importAnnounceInterruption(leftover);
-  await markImportRunInterrupted(leftover);
+  // V1.4.2：以前这里还会把这份快照挪到 bcaInterruptedImport 键上留作"可回滚"的一份，
+  // 但没有任何界面会去回滚它（见 importInterruptedSummary 上方的说明），所以不再留。
+  await clearImportRunSnapshot();
   return { active: false, reset: true };
 }
 
@@ -1749,11 +1811,16 @@ async function importReconcileState() {
 async function importRecoverInterruptedImport() {
   if (importRun.active) return false;
   const snapshot = await readImportRunSnapshot();
-  if (!snapshot?.active) return false;
+  if (!snapshot) return false;
+  // V1.4.2：收尾阶段被回收留下的快照（active 已经是 false）—— 它代表的是一轮已经跑完的导入，
+  // 清掉就好，绝不能当成中断的那一轮。
+  if (snapshot.active !== true) { await clearImportRunSnapshot(); return false; }
   if (importRun.active) return false;                 // 期间已经启动了新导入，别动它
   const current = await readImportRunSnapshot();      // 二次确认：快照没被新导入替换掉
   if (current?.startedAt !== snapshot.startedAt) return false;
-  await markImportRunInterrupted(snapshot);
+  // V1.4.2：不再把快照挪到 bcaInterruptedImport（那个键没有任何读者了），
+  // 但中断报告文件照写 —— 用户需要知道停在哪、已经写了多少。
+  await clearImportRunSnapshot();
   const { text, detail } = await importAnnounceInterruption(snapshot);
   // 有断点才写报告文件：报告里能写清"停在哪个收藏夹第几页、已经写了多少"
   const report = [
@@ -1828,50 +1895,14 @@ async function rollbackImport(journal) {
   return { removedRecords, restoredFiles, removedCollections, removedFiles };
 }
 
-// 回滚"被回收打断的那一次导入"：句柄进不了 storage，所以按存下来的名字重新取。
-async function rollbackInterruptedImport() {
-  const stored = await chrome.storage.session.get(IMPORT_INTERRUPTED_SESSION_KEY).catch(() => null);
-  const snapshot = stored?.[IMPORT_INTERRUPTED_SESSION_KEY];
-  if (!snapshot?.journal) return { ok: false, message: BcaI18n.t("没有找到可回滚的上次中断记录。") };
-  const root = await getRootHandle();
-  if (!root) return { ok: false, message: BcaI18n.t("尚未设置本地备份文件夹，无法回滚。") };
-  if (await root.queryPermission({ mode: "readwrite" }) !== "granted") {
-    return { ok: false, message: BcaI18n.t("本地备份文件夹的写入授权已失效，请先在插件里重新授权本地备份文件夹，然后重试回滚。") };
-  }
-  const journal = { createdCollections: [], createdRecords: [], modifiedFiles: [], addedFiles: [] };
-  for (const name of snapshot.journal.createdCollections || []) {
-    try { journal.createdCollections.push({ parentHandle: root, handle: await root.getDirectoryHandle(name), name }); }
-    catch (_) { /* 目录已经不在了：没什么可删的 */ }
-  }
-  for (const entry of snapshot.journal.createdRecords || []) {
-    try { journal.createdRecords.push({ collectionHandle: await root.getDirectoryHandle(entry.collection), name: entry.name }); }
-    catch (_) {}
-  }
-  for (const entry of snapshot.journal.addedFiles || []) {
-    try {
-      const collection = await root.getDirectoryHandle(entry.collection);
-      journal.addedFiles.push({ directoryHandle: await collection.getDirectoryHandle(entry.directory), name: entry.name });
-    } catch (_) {}
-  }
-  const unavailable = [];
-  for (const entry of snapshot.journal.modifiedFiles || []) {
-    if (entry.textUnavailable) { unavailable.push(`${entry.collection}/${entry.directory}`); continue; }
-    try {
-      const collection = await root.getDirectoryHandle(entry.collection);
-      journal.modifiedFiles.push({
-        directoryHandle: await collection.getDirectoryHandle(entry.directory), name: entry.name, text: String(entry.text ?? "")
-      });
-    } catch (_) {}
-  }
-  const result = await rollbackImport(journal);
-  await chrome.storage.session.remove(IMPORT_INTERRUPTED_SESSION_KEY).catch(() => {});
-  const message = `已回滚上次中断的导入：删除 ${result.removedRecords} 个新建的视频目录`
-    + `${result.removedCollections ? `、${result.removedCollections} 个新建收藏夹` : ""}`
-    + `${result.restoredFiles ? `，还原了 ${result.restoredFiles} 个被改写的视频信息.txt` : ""}`
-    + `${result.removedFiles ? `，移除了 ${result.removedFiles} 张新补的封面` : ""}。`
-    + `${unavailable.length ? `有 ${unavailable.length} 个文件的原文当时没能存下，未能还原。` : ""}`;
-  return { ok: true, message, ...result, unavailable: unavailable.length };
-}
+/* V1.4.2：删掉了 rollbackInterruptedImport()。
+   它原本是「回滚被回收打断的那一次导入」，但没有任何界面调用它（全仓只有一条
+   bca-import-rollback-recovered 消息分支，而那条分支自己也没有调用者），
+   但用户会被明确告知「回滚日志已保存在本次浏览器会话中」——等于承诺了一个点不到的功能。
+   而且它还是 P0 的引信：整轮成功导入被误判成中断时，点一下就会把整轮归档递归删光。
+
+   中断的那一轮不需要回滚：已经写进去的每条记录都带封面与视频信息.txt，是完整记录，
+   重新导入会按 BV/av 号跳过它们。取消（用户主动）仍然会回滚，那条路走的是 rollbackImport。 */
 
 /* ---------- 已有记录的读取与“是否需要刷新”判断 ---------- */
 
@@ -1881,6 +1912,10 @@ async function readExistingImportRecords(collection) {
   const records = new Map();
   for await (const entry of collection.values()) {
     if (entry.kind !== "directory") continue;
+    // 1.4.2（P1-4）：这个循环只读本地文件、一次网络请求都没有，几千条记录读下来
+    // 中间可以静默好几分钟 —— MV3 只在"扩展 API 调用/事件"时重置空闲回收计时器，
+    // 纯 await 不算。所以每圈都叫一次（函数内部按 20 秒节流，不会真打满）。
+    await keepServiceWorkerAlive("scan");
     let text = "";
     try {
       const file = await entry.getFileHandle("视频信息.txt");
@@ -2199,6 +2234,8 @@ async function readExistingImportIdentifiers(collection) {
   const identifiers = new Set();
   for await (const entry of collection.values()) {
     if (entry.kind !== "directory") continue;
+    // 1.4.2（P1-4）：同上，纯本地读取的循环也要保活（内部按 20 秒节流）
+    await keepServiceWorkerAlive("scan");
     try {
       const file = await entry.getFileHandle("视频信息.txt");
       const text = await (await file.getFile()).text();
@@ -2672,6 +2709,9 @@ async function importBiliFavorites(data, tabId = null) {
       // 更新模式：按新格式重写数据不完整的旧记录（原文进回滚日志）
       for (const entry of refreshTargets) {
         await importWaitIfPaused();
+        // 1.4.2（P1-4）：这条循环只重写本地文件、不联网，几千条时中间能静默很久，
+        // 不保活就会被 MV3 的空闲回收掐断（内部按 20 秒节流）
+        await keepServiceWorkerAlive("refresh");
         if (entry.item.rateLimited) {
           // 4.9：详情抓取撞上风控时绝不能重写旧记录——重写会用"未知"覆盖档案里
           // 已经有的标签、简介和互动数据，属于不可逆的数据损失。
@@ -2773,7 +2813,7 @@ async function importBiliFavorites(data, tabId = null) {
     const summary = `导入已取消：已回滚本次新建的 ${rollback.removedRecords} 个视频目录`
       + `${rollback.removedCollections ? `、${rollback.removedCollections} 个新建收藏夹` : ""}`
       + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。导入前的本地内容没有被改动。`;
-    await clearImportRunSnapshot();
+    await finishImportRunSnapshot();
     publishImportState({ running: false, paused: false, finishedAt, text: summary, summary }, true);
     await chrome.storage.local.set({ lastResult: { message: summary, createdAt: finishedAt } });
     return { ok: false, cancelled: true, message: summary, imported: 0, refreshed: 0, skipped, failed, total, reportPath: "" };
@@ -2806,7 +2846,7 @@ async function importBiliFavorites(data, tabId = null) {
       lastResult: { message, createdAt: finishedAt }
     });
     publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message, rateLimited: true }, true);
-    await clearImportRunSnapshot();
+    await finishImportRunSnapshot();
     return { ok: false, rateLimited: true, message, imported, refreshed, skipped, failed, total, reportPath };
   }
 
@@ -2835,7 +2875,7 @@ async function importBiliFavorites(data, tabId = null) {
     + (coverageNotes.length ? `（${coverageNotes.join("；")}。差额是 B 站收藏夹里的占位空槽：视频被删除后会留下空位，它计入总数但没有内容、接口也不返回，不是导入遗漏。）` : "");
   const pathText = savedPaths.slice(0, 10).join("\n");
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
-  await clearImportRunSnapshot();
+  await finishImportRunSnapshot();
   publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);
   return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath };
 }
@@ -3422,13 +3462,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ ok: true, active: importRun.active, reset: false, importState }));
     return true;
   }
-  if (message?.type === "bca-import-rollback-recovered") {
-    // 4.9：回滚"被回收打断的那一次导入"。回滚日志只存了名字，这里按名字重新取句柄。
-    rollbackInterruptedImport()
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, message: error?.message || "回滚上次中断的导入失败。" }));
-    return true;
-  }
   if (message?.type === "bca-import-state") {
     importReconcileState()
       .then(() => { importState = { ...importState, active: importRun.active }; sendResponse({ ok: true, importState }); })
@@ -3498,11 +3531,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "save-favorite") {
     // 兜底文案不能省：抛出来的不一定是 Error（比如 reject 一个字符串），
     // 那时 error.message 是 undefined，前端的 BcaI18n.t(undefined) 会显示成一片空白。
-    saveFavoriteInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "保存收藏失败。" }));
+    // 1.4.2（P1-3）：导入占着串行队列时这次收藏会一直等下去，所以给它加等待上限；超时就把
+    // 这条记成 pendingFavorite 并把原因写进 lastResult —— 弹窗「最近状态」能直接看到，
+    // 走「重新授权」那条路时也会顺手补存，用户不必回到 B 站重新收藏一次。
+    runInSaveQueueWithDeadline(saveFavoriteInOrder(message.data), "保存收藏")
+      .then((result) => {
+        if (result?.busy) {
+          chrome.storage.local.set({
+            pendingFavorite: message.data,
+            lastResult: { message: result.message, createdAt: Date.now() }
+          }).catch(() => {});
+        }
+        sendResponse(result);
+      })
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "保存收藏失败。" }));
     return true;
   }
   if (message?.type === "add-manual-video") {
-    addManualVideoInOrder(message.data).then(sendResponse).catch((error) => sendResponse({ ok: false, message: error?.message || "添加视频失败。" }));
+    runInSaveQueueWithDeadline(addManualVideoInOrder(message.data), "添加视频")
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "添加视频失败。" }));
     return true;
   }
   if (message?.type === "record-favorite-error") {
@@ -3512,7 +3560,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "retry-pending-favorite") {
     chrome.storage.local.get("pendingFavorite").then(({ pendingFavorite }) => {
       if (!pendingFavorite) return sendResponse({ ok: false, message: "没有可补存的视频，请回到 B 站重新收藏一次。" });
-      return saveFavoriteInOrder(pendingFavorite).then(sendResponse);
+      return runInSaveQueueWithDeadline(saveFavoriteInOrder(pendingFavorite), "补存视频").then(sendResponse);
     }).catch((error) => sendResponse({ ok: false, message: error.message || "读取待补存视频失败。" }));
     return true;
   }
