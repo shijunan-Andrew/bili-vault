@@ -43,6 +43,9 @@ const scanNoticeText = document.getElementById("scanNoticeText");
 const dismissScanNoticeButton = document.getElementById("dismissScanNotice");
 const importHint = document.getElementById("importHint");
 const dismissImportHintButton = document.getElementById("dismissImportHint");
+// P2-8：导入进行中/暂停中的常驻提示条（状态来自 background 写的 storage.local.importState）
+const importRunningNotice = document.getElementById("importRunningNotice");
+const importRunningText = document.getElementById("importRunningText");
 const scanProgress = document.getElementById("scanProgress");
 const videoPager = document.getElementById("videoPager");
 const viewGridButton = document.getElementById("viewGrid");
@@ -1042,7 +1045,14 @@ function renderVideos() {
   videoFilter = videoFilterSelect.value;
   const query = searchQuery();
   // 选项池已移到 refreshVideoFilterOptions()：只在数据源/筛选条件变化时重建（见那里的注释）
-  const matching = videos.filter((video) => matchesVideoFilters(video, query));
+  /* P2-12：筛选值的总数（「共 N 条」用的那个）不再拿 videos 再 filter 一遍 ——
+     那一趟在这里顺路数完。两个计数都只来自内存里的记录数组，不碰文件系统。 */
+  const matching = [];
+  let filterTotal = 0;
+  for (const video of videos) {
+    if (videoFilter === "invalid" ? video.isInvalid : video.downloaded) filterTotal += 1;
+    if (matchesVideoFilters(video, query)) matching.push(video);
+  }
   const sort = sortSelect.value;
   // 4.5：按播放量从高到低。没有播放量数据的排在最后（用 -1 而不是 0，
   // 否则“0 播放”会和“没有数据”混在一起），同档再按收藏时间倒序。
@@ -1068,7 +1078,7 @@ function renderVideos() {
   const countLabel = videoFilter !== "all"
     ? BcaI18n.t("{shown} / {total} 个{kind}视频", {
         shown: matching.length,
-        total: videos.filter((video) => videoFilter === "invalid" ? video.isInvalid : video.downloaded).length,
+        total: filterTotal,
         kind: videoFilter === "invalid" ? BcaI18n.t("失效") : BcaI18n.t("已下载")
       })
     : query || upFilter !== "all" || tagFilter !== "all" ? BcaI18n.t("{shown} / {total} 个视频", { shown: matching.length, total: videos.length }) : BcaI18n.t("{count} 个视频", { count: videos.length });
@@ -1265,7 +1275,10 @@ function goToPage(page) {
   if (next === currentPage) return;
   currentPage = next;
   renderVideos();
-  videoGrid.scrollIntoView({ block: "start", behavior: "smooth" });
+  // P2-13：换页也要尊重「减少动态效果」，复用「回到顶部」那一个判断
+  // （prefersReducedMotion 定义在本文件后半的 V1.4.1 段落里，是 const；
+  //   本函数只在事件里被调用，那时它早已初始化，不会踩 TDZ）。
+  videoGrid.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
 }
 
 function resetPaging() {
@@ -1586,7 +1599,12 @@ function canRefreshStatus(video) {
 }
 
 function openStatusConfirm(videos, source) {
-  if (statusRefreshInProgress) return;
+  // P2-14：上一批还在后台跑（用户可能按过「不再等待」）时，静默 return 会让
+  // 「更新状态」看起来是坏的；如实说一句，并说明这一批结束前开不了新的。
+  if (statusRefreshInProgress) {
+    showToast(BcaI18n.t("上一批更新还在后台进行，结束后才能发起新的更新。"));
+    return;
+  }
   const targets = videos.map(refreshTargetOf).filter(Boolean);
   if (!targets.length) {
     showToast(source === "batch" ? BcaI18n.t("所选的记录都没有 BV/av 号，无法更新状态。") : BcaI18n.t("这条记录没有 BV/av 号，无法更新状态。"));
@@ -1605,7 +1623,8 @@ function openStatusConfirm(videos, source) {
   statusConfirmProgress.hidden = true;
   statusConfirmProgress.textContent = "";
   statusConfirmGo.disabled = false;
-  statusConfirmCancel.disabled = false;
+  // 文案与状态一起复位（P2-14：等待后台期间它叫「不再等待」）
+  setStatusCancelWaiting(false);
   statusConfirmGo.textContent = BcaI18n.t("开始更新");
   statusConfirm.showModal();
 }
@@ -1666,6 +1685,35 @@ function sendMessageWatched(message, timeoutMs) {
   });
 }
 
+/* P2-14：更新状态这一批是后台在跑，界面**拦不住它** —— 消息协议里没有「取消这批更新」，
+   加一个要前后台同时上线（这一版不做，也不新增消息类型）。所以按钮不能叫「取消」：
+   等待后台期间它如实改叫「不再等待」，点了就关掉对话框，并明说后台仍会继续、
+   这一批结束前不能再发起新的更新。看门狗不动：后台真吊死时 60 秒后仍会给一条超时说明。 */
+let statusWaitingForBackground = false;
+
+// 文案跟着状态走。data-i18n 一起改掉：切语言时 BcaI18n.apply 会按它重写 textContent，
+// 不改就会被切回「取消」；词典里查不到这个新键时 t() 原样返回，显示的仍是中文原文。
+function setStatusCancelWaiting(waiting) {
+  statusWaitingForBackground = waiting;
+  statusConfirmCancel.disabled = false;
+  if (waiting) {
+    statusConfirmCancel.dataset.i18n = "不再等待";
+    statusConfirmCancel.textContent = BcaI18n.t("不再等待");
+  } else {
+    statusConfirmCancel.dataset.i18n = "取消";
+    statusConfirmCancel.textContent = BcaI18n.t("取消");
+  }
+}
+
+/* 「不再等待」只有一个出口：复位状态 + 关掉对话框 + 如实说明后台还在跑。
+   按钮点击与 Esc 都走这里；不在等待状态时是空操作，重复调用安全。 */
+function abandonStatusWait() {
+  if (!statusWaitingForBackground) return;
+  setStatusCancelWaiting(false);
+  if (statusConfirm.open) statusConfirm.close();
+  showToast(BcaI18n.t("已不再等待：后台仍会继续处理这一批，结束后才能发起新的更新；完成后点右上角的「刷新」查看结果。"));
+}
+
 async function runStatusRefresh() {
   if (statusRefreshInProgress || !statusPendingTargets.length) return;
   // 已经出结果时，这个按钮变成「完成」
@@ -1676,7 +1724,9 @@ async function runStatusRefresh() {
   const detailButton = detailContent.querySelector(".refresh-status");
   statusRefreshInProgress = true;
   statusConfirmGo.disabled = true;
-  statusConfirmCancel.disabled = true;
+  // P2-14：请求一旦发出去就拦不住了，不能把「取消」禁用着摆样子 —— 改成如实、可点的
+  // 「不再等待」（见 setStatusCancelWaiting 的注释）。
+  setStatusCancelWaiting(true);
   statusConfirmGo.textContent = BcaI18n.t("正在更新…");
   resetStatusProgress();
   statusConfirmProgress.hidden = false;
@@ -1689,6 +1739,9 @@ async function runStatusRefresh() {
       type: "bca-refresh-video-stats",
       data: { targets, limit: STATUS_BATCH_LIMIT }
     }, STATUS_REFRESH_IDLE_TIMEOUT_MS);
+    // 后台已经回话：从这一刻起「不再等待」不再成立，剩下的只是本地重新渲染列表
+    setStatusCancelWaiting(false);
+    statusConfirmCancel.disabled = true;
     if (!result?.ok) throw new Error(result?.message || BcaI18n.t("更新失败。"));
     const summary = targets.length === 1 ? statusDetailText(result) : statusSummaryText(result);
     const remaining = Number(result.remaining) || 0;
@@ -1727,7 +1780,7 @@ async function runStatusRefresh() {
     disarmStatusRefreshWatchdog();
     statusRefreshInProgress = false;
     statusConfirmGo.disabled = false;
-    statusConfirmCancel.disabled = false;
+    setStatusCancelWaiting(false);
     if (detailButton) detailButton.disabled = false;
   }
 }
@@ -1820,6 +1873,42 @@ async function restoreImportHint() {
 function dismissImportHint() {
   if (importHint) importHint.hidden = true;
   chrome.storage.local.set({ importHintDismissed: true }).catch(() => {});
+}
+
+/* ---------------- P2-8：导入进行中 / 暂停中的提示条 ----------------
+
+   后台（background.js）把导入状态写在 storage.local.importState 上：
+   { running, paused, updatedAt, text?, summary?, finishedAt? }，running === true 表示
+   正在进行**或**正暂停。收藏库和导入会同时改同一批归档：导入期间在这里移动、
+   删除、标记「已下载」，轻则被本轮判成缺失、重则把后台正在写的目录删掉记一条失败。
+   所以这里只做「看得见」这件事 —— 不禁用任何按钮、不弹对话框（用户可能就是想边导
+   边整理），状态自己在结束时收起。 */
+let lastImportState = null;
+let importWasRunning = false;
+
+function applyImportState(state) {
+  if (!importRunningNotice) return;
+  lastImportState = state || null;
+  const running = state?.running === true;
+  // 导入刚结束：归档里可能多出了封面 / 媒体文件，体积缓存作废（条数可能没变）
+  if (importWasRunning && !running) invalidateStorageUsageCache();
+  importWasRunning = running;
+  importRunningNotice.classList.toggle("is-paused", running && state?.paused === true);
+  if (!running) { importRunningNotice.hidden = true; return; }
+  importRunningText.textContent = state.paused === true
+    ? BcaI18n.t("导入已暂停：这期间在收藏库里移动、删除或标记「已下载」可能与它互相影响，建议等它结束后再操作。")
+    : BcaI18n.t("导入正在进行：这期间在收藏库里移动、删除或标记「已下载」可能与它互相影响，建议等它结束后再操作。");
+  importRunningNotice.hidden = false;
+}
+
+async function restoreImportState() {
+  if (!importRunningNotice) return;
+  try {
+    const saved = await chrome.storage.local.get("importState");
+    applyImportState(saved?.importState || null);
+  } catch (_) {
+    // 读不到就不显示：提示条是附加信息，不能因此让页面初始化失败
+  }
 }
 
 function compactDate(value) {
@@ -2042,16 +2131,56 @@ async function directorySize(directory) {
 
 /* ---------------- 4.2：顶部“本地收藏夹占用” ---------------- */
 
+/* P2-12：递归累加整个根目录的字节数是纯「后台跑腿」的活，三条约束：
+   1) 延后 —— 列表渲染完再排队，交给 requestIdleCallback（没有就退化成 setTimeout），
+      不和首屏抢主线程；页面在后台时干脆不打盘，等回到前台再补算；
+   2) 单飞 + 合并 —— 同一时刻只跑一次，期间再来请求只记下最新根目录，本轮结束后补算；
+   3) 结果缓存 —— 按根目录缓存「字节数 + 档案签名（记录条数/收藏夹数）」，签名没变直接复用。
+   扫描那条路（readArchiveRecord / inspectDownloadDirectory）只读 视频信息.txt、只看有没有
+   文件，拿不到单个文件的大小，所以没法直接复用它的结果，只能用签名 + 显式作废代替：
+   导入结束、下载目录 revision 变化都会作废缓存 —— 那两种情况下条数可能没变，但磁盘上
+   确实多出了封面 / 媒体文件。 */
+const storageUsageCache = new Map(); // rootKey -> { total, signature }
+
+function archiveSignature() {
+  return `${allVideos().length}:${collections.length}`;
+}
+
+function invalidateStorageUsageCache() {
+  storageUsageCache.clear();
+}
+
+// 让出主线程，等浏览器空闲再开始递归（走缓存时也走这里，保证顺序稳定）
+function whenIdle() {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 1000 });
+    else setTimeout(resolve, 0);
+  });
+}
+
 // 统计放在 displayRoot() 渲染之后异步跑，先出界面再慢慢算。
 // 同一时刻只允许一次递归扫描：期间再来请求只记下最新根目录，等本轮结束后补算。
 async function updateStorageUsage(handle) {
   if (!storageUsage) return;
   if (!handle) { storageUsage.textContent = "—"; return; }
+  // 页面在后台：不打盘，回到前台时 visibilitychange 会再调一次
+  if (document.hidden) return;
   if (storageUsageRunning) { storageUsageQueuedRoot = handle; return; }
   storageUsageRunning = true;
   storageUsage.textContent = BcaI18n.t("正在计算…");
   try {
-    const total = await directorySize(handle);
+    await whenIdle();
+    const key = rootCacheKey(handle);
+    const signature = archiveSignature();
+    const cached = storageUsageCache.get(key);
+    let total;
+    if (cached && cached.signature === signature) {
+      total = cached.total; // 同一份档案：直接复用上次的结果
+    } else {
+      total = await directorySize(handle);
+      storageUsageCache.set(key, { total, signature: archiveSignature() });
+    }
+    // 统计期间可能已经换了根目录：只给还是当前根目录的那个写结果
     if (rootHandle === handle) storageUsage.textContent = formatBytes(total);
   } catch (_) {
     if (rootHandle === handle) storageUsage.textContent = BcaI18n.t("统计失败");
@@ -3085,7 +3214,7 @@ collectionForm.addEventListener("submit", async (event) => {
     await rootHandle.getDirectoryHandle(name, { create: true });
     collectionDialog.close();
     collectionForm.reset();
-    await displayRoot(rootHandle, name);
+    await displayRoot(rootHandle, name, BcaI18n.t("已读取"), { allowDuringWrite: true });
     showToast(BcaI18n.t("已新建收藏夹“{name}”", { name }));
   } catch (error) {
     showToast(BcaI18n.t("创建失败：{message}", { message: error?.message || BcaI18n.t("本地文件夹操作失败。") }));
@@ -3118,7 +3247,7 @@ videoForm.addEventListener("submit", async (event) => {
     videoDialog.close();
     videoForm.reset();
     const collectionToSelect = collectionNames.includes(selectedCollection) ? selectedCollection : collectionNames[0];
-    await displayRoot(rootHandle, collectionToSelect);
+    await displayRoot(rootHandle, collectionToSelect, BcaI18n.t("已读取"), { allowDuringWrite: true });
     showToast(result.message ? BcaI18n.t(result.message) : BcaI18n.t("视频已添加到本地收藏夹"));
   } catch (error) {
     showToast(BcaI18n.t("添加失败：{message}", { message: error?.message || BcaI18n.t("无法解析或保存视频。") }));
@@ -3133,7 +3262,13 @@ videoForm.addEventListener("submit", async (event) => {
 collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInProgress) event.preventDefault(); });
 videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
 
-async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n.t("已读取")) {
+async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n.t("已读取"), options = {}) {
+  /* V1.4.3：写入路径（添加视频 / 新建收藏夹 / 删除 / 刷新扫描）各有一套 inProgress 标记，
+     与 setBusy 互不知情。两轮扫描撞在一起会互相用旧快照覆盖新快照，还会把对方正在
+     显示的封面 blob: URL 撤掉 —— 表现是列表少一批记录 + 封面裂图，只能刷新页面恢复。
+     所以除「自己刚写完、由自己发起的这一次刷新」外，写入期间一律不重画。 */
+  if (!options.allowDuringWrite &&
+      (busyNow || videoAddInProgress || deleteInProgress || collectionCreateInProgress)) return;
   // 封面 blob: URL 现在跟着缓存条目走，这里不再整批 revoke —— 缓存未命中的条目
   // 会在下次扫描时被新 URL 取代，复用中的条目则必须保留原来的 URL。
   const preserveDownloadStatuses = rootHandle === handle;
@@ -3163,7 +3298,7 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
     if (breadcrumbRoot) setDynamicText(breadcrumbRoot, handle.name);
   statusDot.classList.add("ready");
   refreshLibraryButton.disabled = false;
-  diffLibraryButton.disabled = false;
+  syncDiffButton();
   // 扫描期间的「正在读取 N/M…」在这里收尾，换成缓存命中统计与读取失败清单
   refreshScanNotice();
   welcome.hidden = true;
@@ -3221,8 +3356,10 @@ async function confirmLibraryRiskySpeed() {
   const label = speed === "high" ? "高" : "较高";
   diffRiskyText.textContent = BcaI18n.t("当前是「{speed}」档，而这个收藏夹线上有 {total} 条。建议先到插件弹窗里改用「较低」档位。",
     { speed: label, total });
-  settleDiffRisky(false); // 上一次的等待先结掉，避免留下悬空的 Promise
-  if (diffRiskyDialog.open) diffRiskyDialog.close();
+  // P2-10：槽位只有一个。第二次占用以前只是把新的 waiter 放进去，上一次的 await 就
+  // 永远不返回（对话框看着卡死、后面的流程再也走不下去）。现在先把上一次 resolve 成
+  // 「取消」再换人 —— 先取走槽位再 resolve，重复调用天然安全。
+  closeDiffRisky(false);
   diffRiskyDialog.showModal();
   return new Promise((resolve) => { diffRiskyResolve = resolve; });
 }
@@ -3237,19 +3374,70 @@ function settleDiffRisky(confirm) {
   if (resolve) resolve(confirm);
 }
 
+/* 关掉对话框并结算等待者：所有「这次等待已经没有意义」的出口都走这里
+   （点取消 / 点照当前档位继续 / 被下一次调用顶掉 / 页面卸载）。
+   先取走槽位再 resolve，所以 waiter 恰好被结算一次。 */
+function closeDiffRisky(confirm) {
+  settleDiffRisky(confirm);
+  if (diffRiskyDialog.open) diffRiskyDialog.close();
+}
+
 diffRiskyDialog.addEventListener("cancel", () => settleDiffRisky(false));
 diffRiskyDialog.addEventListener("close", () => {
   // 已经重新打开（极短时间里又发起了一次对比）说明这条 close 属于上一次，别误杀新的等待
   if (!diffRiskyDialog.open) settleDiffRisky(false);
 });
-document.getElementById("diffRiskyCancel").addEventListener("click", () => {
-  settleDiffRisky(false);
-  diffRiskyDialog.close();
-});
-document.getElementById("diffRiskyGo").addEventListener("click", () => {
-  settleDiffRisky(true);
-  diffRiskyDialog.close();
-});
+document.getElementById("diffRiskyCancel").addEventListener("click", () => closeDiffRisky(false));
+document.getElementById("diffRiskyGo").addEventListener("click", () => closeDiffRisky(true));
+/* 页面被卸载 / 进 bfcache（关标签页、整页导航）时，这条等待不可能再有答案了：
+   就地结算成「取消」，绝不留一个永远挂着的 await。
+   故意**不**监听 visibilitychange —— 这个弹窗本身就在建议用户去插件弹窗里改档位，
+   切窗口是预期操作，一 hidden 就取消会把它打断。 */
+window.addEventListener("pagehide", () => closeDiffRisky(false));
+
+/* P2-9：「与 B 站对比」必须单飞。真正发起对比的是确认框里的「开始对比」，
+   而旧代码禁用的却是列表面板上的入口按钮（diffLibraryButton）—— 于是两次点击能各起
+   一条 bca-fav-diff：两条都往同一个 diffDialogBody 里写，慢的那条最后 replaceChildren()
+   会把快的那条已经渲染好的结果整块清掉（用户看到空白或对不上的结果）。
+   现在点下「开始对比」就置位并禁用入口（含风险档确认那一段等待），成功 / 失败 / 取消
+   都在 finally 里复位。 */
+const diffConfirmGo = document.getElementById("diffConfirmGo");
+let diffInFlight = false;
+
+/* diffLibraryButton 同时受「扫描/刷新中」（setBusy）与「对比进行中」两处控制，
+   状态只能由一处算出来 —— 两处各自快照会在交叉时错位（对比中被刷新后按钮恢复成可点，
+   或者扫描结束后按钮卡在禁用）。 */
+function syncDiffButton() {
+  if (!diffLibraryButton) return;
+  diffLibraryButton.disabled = busyNow || diffInFlight;
+}
+
+function setDiffInFlight(running) {
+  diffInFlight = running;
+  /* 「开始对比」只受这里控制，按原样记下 / 还回即可 */
+  if (diffConfirmGo) {
+    if (running) {
+      diffConfirmGo.dataset.diffWasDisabled = diffConfirmGo.disabled ? "1" : "0";
+      diffConfirmGo.disabled = true;
+    } else if (diffConfirmGo.dataset.diffWasDisabled !== undefined) {
+      diffConfirmGo.disabled = diffConfirmGo.dataset.diffWasDisabled === "1";
+      delete diffConfirmGo.dataset.diffWasDisabled;
+    }
+  }
+  syncDiffButton();
+}
+
+async function startDiffWithBilibili() {
+  diffConfirm.close(); // 这次点击无论会不会被丢掉，确认框都该收起来
+  if (diffInFlight) return; // 已经在对比中：这次点击直接丢掉，绝不起第二条 bca-fav-diff
+  setDiffInFlight(true);
+  try {
+    if (!await confirmLibraryRiskySpeed()) return; // 用户在风险档确认里选了「取消」
+    await diffWithBilibili();
+  } finally {
+    setDiffInFlight(false);
+  }
+}
 
 diffLibraryButton.addEventListener("click", () => {
   if (selectedCollection === "*") {
@@ -3269,12 +3457,10 @@ document.getElementById("diffConfirmCancel").addEventListener("click", () => dif
 // 结果对话框的「关闭」按钮。V1.1.0 加这个对话框时同样漏了绑定 ——
 // 和 diffLibraryButton 是同一个错误，所以测试里加了一条专门查"对话框里的按钮有没有被引用"。
 document.getElementById("diffDialogClose").addEventListener("click", () => diffDialog.close());
-document.getElementById("diffConfirmGo").addEventListener("click", async () => {
-  diffConfirm.close();
-  if (!await confirmLibraryRiskySpeed()) return;
-  diffWithBilibili();
-});
+// 「开始对比」只走 startDiffWithBilibili（单飞、立刻进入对比中都在那里，见 P2-9 的注释）
+diffConfirmGo.addEventListener("click", () => { startDiffWithBilibili(); });
 
+// 只允许由 startDiffWithBilibili 调用：单飞保证同一时间只有一条 bca-fav-diff 在跑
 async function diffWithBilibili() {
   if (selectedCollection === "*") {
     showToast(BcaI18n.t("请先在左侧选择一个收藏夹，再与 B 站对比。"));
@@ -3284,7 +3470,6 @@ async function diffWithBilibili() {
   diffDialogBody.replaceChildren();
   diffDialogStatus.hidden = false;
   diffDialogStatus.textContent = BcaI18n.t("正在读取 B 站收藏夹列表…");
-  diffLibraryButton.disabled = true;
   try {
     const response = await chrome.runtime.sendMessage({
       type: "bca-fav-diff",
@@ -3294,8 +3479,6 @@ async function diffWithBilibili() {
     renderDiffDialog(response);
   } catch (error) {
     diffDialogStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("对比差异失败。");
-  } finally {
-    diffLibraryButton.disabled = false;
   }
 }
 
@@ -3411,6 +3594,21 @@ function setBusy(isBusy, busyKey = "reading") {
   refreshLibraryButton.disabled = isBusy || !rootHandle;
   refreshLibraryButton.classList.toggle("is-loading", isBusy);
   welcomeChoose.disabled = isBusy;
+  /* V1.4.3：扫描/刷新期间禁止再发起写入类操作 ——「添加视频」与扫描互踩会丢条目、封面还会裂图。
+     禁用时记下原状态，解除时按原样还回去（这个按钮平时由「选中了收藏夹」等条件控制启用，
+     不能一律设成可用）。「与 B 站对比」放在 syncDiffButton 里统一算，见那里的注释。 */
+  if (addVideoButton) {
+    if (isBusy) {
+      if (addVideoButton.dataset.busyWasDisabled === undefined) {
+        addVideoButton.dataset.busyWasDisabled = addVideoButton.disabled ? "1" : "0";
+      }
+      addVideoButton.disabled = true;
+    } else if (addVideoButton.dataset.busyWasDisabled !== undefined) {
+      addVideoButton.disabled = addVideoButton.dataset.busyWasDisabled === "1";
+      delete addVideoButton.dataset.busyWasDisabled;
+    }
+  }
+  syncDiffButton();
   // 大目录扫描时给一条进度提示，而不是只有按钮文字变化
   scanProgress.hidden = !isBusy;
   showChooseRootLabel(isBusy ? busyKey : "idle");
@@ -3532,8 +3730,16 @@ deleteSelectedButton.addEventListener("click", () => askToDeleteBatch(selectedRe
   // 4.5.1：批量更新状态——用勾选的记录，不是当前收藏夹的全部视频
   updateSelectedButton.addEventListener("click", () => openStatusConfirm(selectedRecords(), "batch"));
   statusConfirmGo.addEventListener("click", () => { runStatusRefresh().catch(() => {}); });
-  statusConfirmCancel.addEventListener("click", () => { if (!statusRefreshInProgress) statusConfirm.close(); });
-  statusConfirm.addEventListener("cancel", (event) => { if (statusRefreshInProgress) event.preventDefault(); });
+  statusConfirmCancel.addEventListener("click", () => {
+    // 等待后台时它写的是「不再等待」，这里如实按那个语义走（P2-14）
+    if (statusWaitingForBackground) { abandonStatusWait(); return; }
+    if (!statusRefreshInProgress) statusConfirm.close();
+  });
+  statusConfirm.addEventListener("cancel", (event) => {
+    // Esc 同样是「不再等待」：等待期间不再把用户锁在模态框里（P2-14 之前这里一律 preventDefault）
+    if (statusWaitingForBackground) { abandonStatusWait(); return; }
+    if (statusRefreshInProgress) event.preventDefault();
+  });
 // 4.9：搜索输入加 250ms 防抖。原来每敲一个字符就同步跑一整遍：全量筛选 + 排序 + 重画
 // 卡片 + 重建上千个 <option>，10000 条时每次按键要卡 0.5~3 秒。防抖后一次连续输入
 // 只在停下来之后跑一次。**语义不变**：停止输入 250ms 后必然渲染一次，最终结果与原来一致。
@@ -3606,6 +3812,8 @@ function relabelAfterLocaleChange() {
   refreshVideoFilterOptions();
   renderVideos();
   renderFailures();
+  // 导入提示条的文案是 JS 写进去的，切语言也要跟着换（P2-8）
+  applyImportState(lastImportState);
   const current = detailVideo();
   // 详情重开时不要再叠一层焦点陷阱
   if (current) openDetail(current, null, { trap: false });
@@ -3722,7 +3930,12 @@ window.addEventListener("beforeunload", () => {
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  if (changes.downloadRevision && rootHandle) refreshDownloadStatuses();
+  // P2-8：后台把导入状态写在 importState 上，订阅它就能在收藏库里给出「导入进行中」的提示
+  if (changes.importState) applyImportState(changes.importState.newValue);
+  if (changes.downloadRevision && rootHandle) {
+    invalidateStorageUsageCache(); // 下载目录变了：体积统计的缓存作废（P2-12）
+    refreshDownloadStatuses();
+  }
   /* 在弹窗里换了备份文件夹：本页面开着的时候不会自己知道，靠这个信号叫醒。
      之前只读一次句柄就再也不看，于是弹窗和收藏库会各显示一个目录名。 */
   if (changes.rootHandleRevision) syncRootFromStorage();
@@ -3745,7 +3958,10 @@ function reportLocaleSwitchFailure(error) {
 }
 window.addEventListener("focus", refreshDownloadStatuses);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refreshDownloadStatuses();
+  if (document.visibilityState !== "visible") return;
+  refreshDownloadStatuses();
+  // 在后台被跳过的那次体积统计在这里补上（走缓存，签名没变不会重算，见 P2-12）
+  if (rootHandle) updateStorageUsage(rootHandle);
 });
 // 4.9：这里原来有一个 60 秒的 window.setInterval，只要页面在前台就整树重扫一遍
 // 000视频下载。递归扫描是文件系统调用，10000 条记录时相当于每分钟上万次，页面
@@ -3759,6 +3975,7 @@ BcaI18n.init().catch(() => {}).then(() => Promise.all([
   restoreCollectionOrder().catch(() => { collectionOrder = []; }),
   restoreViewSettings(),
   restoreImportHint(),
+  restoreImportState(),
   clearLegacySafetyDismissed(),
   restoreGithubBanner()
 ])).finally(() => {

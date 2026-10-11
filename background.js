@@ -40,6 +40,13 @@ const COVER_WIDTH = 320;
 const COVER_HEIGHT = 180;
 const COVER_MIME_TYPE = "image/webp";
 const COVER_QUALITY = 0.8;
+/* V1.4.3（P2-15 / P2-17）：封面下载曾经是唯一一条不限速、不带超时、并发 4 的出网路径，
+   而且直接用上游给的地址（页面给的 og:image、本地旧记录、候选列表都可能带脏值）。
+   现在两件事一起收紧：域名只允许 B 站图床，且必须走限速与超时。
+   白名单只放这两个图床域名，1.3.0 删掉的那三条视频流域名权限一律不许加回来
+   （见 AI_HANDOFF 红线第 4 条，那里写清了是哪三条）。 */
+const COVER_HOST_SUFFIXES = [".hdslb.com", ".bilibili.com"];
+const COVER_FETCH_TIMEOUT_MS = 20000;
 
 // 4.5.1：工具栏图标的观感对齐网页/弹窗里的 logo——更大的圆角比例、
 // 竖直渐变、大尺寸下加一圈白色高光。关闭自动归档时整体转灰（保持原有行为）。
@@ -168,6 +175,21 @@ function safeSegment(input, fallback = "未命名收藏夹") {
   return value.slice(0, 120);
 }
 
+/* V1.4.3（P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
+   原来这份名单在两个地方各写一遍（手动添加、导入），自动归档那条链路漏了 ——
+   B 站收藏夹真叫「001错误报告」时，视频会被写进错误报告目录里。 */
+const RESERVED_COLLECTION_NAMES = new Set([
+  "错误报告",
+  "001错误报告",
+  "002同步报告",
+  "视频下载",
+  "000视频下载"
+]);
+
+function collectionNameIsReserved(name) {
+  return RESERVED_COLLECTION_NAMES.has(safeSegment(name));
+}
+
 function normalizeUrl(value) {
   if (!value) return "";
   return String(value).startsWith("//") ? `https:${value}` : String(value);
@@ -245,22 +267,46 @@ function coverSourceRect(width, height) {
   return { x: 0, y: Math.max(0, Math.round((height - cropHeight) / 2)), width, height: cropHeight };
 }
 
+function coverUrlAllowed(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    return COVER_HOST_SUFFIXES.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix));
+  } catch (_) {
+    return false;
+  }
+}
+
 async function loadCoverPng(url) {
   const normalized = normalizeUrl(url);
   if (!normalized) throw new Error("网页没有提供封面地址。");
-  const response = await fetch(normalized, { credentials: "omit", cache: "no-store" });
-  if (!response.ok) throw new Error(`封面下载失败：HTTP ${response.status}`);
-  const source = await response.blob();
-  const bitmap = await createImageBitmap(source);
+  // V1.4.3（P2-17）：不在白名单里的封面地址直接跳过，绝不向任意域名发请求
+  if (!coverUrlAllowed(normalized)) throw new Error("封面地址不在允许的域名里，已跳过。");
+  // V1.4.3（P2-15）：封面下载也要限速，并且必须带超时 —— 一次连接卡住会让整批
+  // Promise.all 不返回（进度冻结），取消也要等这批。
+  // 超时从「真正开始发请求」那一刻起算：排限速队列的时间不算进去（默认档一次最多等 7 秒左右，
+  // 但不该把等待时间算进网络超时里）。
+  await biliThrottleWait();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), COVER_FETCH_TIMEOUT_MS);
   try {
-    const canvas = new OffscreenCanvas(COVER_WIDTH, COVER_HEIGHT);
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) throw new Error("无法创建封面转换画布。");
-    const rect = coverSourceRect(bitmap.width, bitmap.height);
-    context.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, COVER_WIDTH, COVER_HEIGHT);
-    return await canvas.convertToBlob({ type: COVER_MIME_TYPE, quality: COVER_QUALITY });
+    const response = await fetch(normalized, { credentials: "omit", cache: "no-store", signal: controller.signal });
+    if (!response.ok) throw new Error(`封面下载失败：HTTP ${response.status}`);
+    const source = await response.blob();
+    const bitmap = await createImageBitmap(source);
+    try {
+      const canvas = new OffscreenCanvas(COVER_WIDTH, COVER_HEIGHT);
+      const context = canvas.getContext("2d", { alpha: false });
+      if (!context) throw new Error("无法创建封面转换画布。");
+      const rect = coverSourceRect(bitmap.width, bitmap.height);
+      context.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height, 0, 0, COVER_WIDTH, COVER_HEIGHT);
+      return await canvas.convertToBlob({ type: COVER_MIME_TYPE, quality: COVER_QUALITY });
+    } finally {
+      bitmap.close();
+    }
   } finally {
-    bitmap.close();
+    clearTimeout(timer);
   }
 }
 
@@ -407,7 +453,7 @@ async function addManualVideo(data) {
   let metadata = {};
   try {
     if (!collectionNames.length) throw new Error("请至少选择一个目标收藏夹。");
-    if (collectionNames.some((name) => safeSegment(name) !== name || ["错误报告", "001错误报告", "002同步报告", "000视频下载"].includes(name))) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
+    if (collectionNames.some((name) => safeSegment(name) !== name || collectionNameIsReserved(name))) throw new Error("目标收藏夹名称无效，请重新选择收藏夹。");
     const root = await getRootHandle();
     if (!root) throw new Error("尚未设置本地备份文件夹，请先选择本地备份文件夹。");
     await ensureWritePermission(root);
@@ -515,6 +561,35 @@ function reportText(error, context = {}) {
   ].join("\n").slice(0, 16000);
 }
 
+// V1.4.3（P2-19）：报告目录原来只增不减 —— 每次失败都新建一份，用户又没有清理入口。
+// 写完新报告后按文件名里的时间戳保留最新 N 份，多出来的删掉（删不掉就算了，下次再试）。
+const REPORT_KEEP_FILES = 50;
+
+async function trimReportDirectory(directory, keep, suffix) {
+  const entries = [];
+  try {
+    for await (const entry of directory.values()) {
+      if (entry.kind !== "file" || !entry.name.endsWith(suffix)) continue;
+      const stamp = Number((entry.name.match(/_(\d{10,})_/) || [])[1] || 0);
+      entries.push({ name: entry.name, stamp });
+    }
+  } catch (_) {
+    return 0;
+  }
+  if (entries.length <= keep) return 0;
+  entries.sort((a, b) => b.stamp - a.stamp || b.name.localeCompare(a.name));
+  let removed = 0;
+  for (const stale of entries.slice(keep)) {
+    try {
+      await directory.removeEntry(stale.name);
+      removed += 1;
+    } catch (_) {
+      // 留着它不致命：下次写报告时还会再试一遍
+    }
+  }
+  return removed;
+}
+
 async function persistErrorReport(text) {
   try {
     const root = await getRootHandle();
@@ -524,6 +599,7 @@ async function persistErrorReport(text) {
     // 统一在落盘前补上提示行，避免各调用方漏写
     const body = String(text || "").includes(ERROR_REPORT_NOTICE) ? text : `${text}\n\n${ERROR_REPORT_NOTICE}\n`;
     await writeFile(directory, filename, body);
+    await trimReportDirectory(directory, REPORT_KEEP_FILES, "错误报告.txt");
     return `${root.name}/001错误报告/${filename}`;
   } catch (_) {
     return "";
@@ -572,7 +648,13 @@ async function saveFavorite(data) {
     const savedAt = new Date();
     const savedFolders = [];
     for (const folder of folders) {
-      const collectionFolder = await root.getDirectoryHandle(safeSegment(folder.name), { create: true });
+      // V1.4.3（P2-3）：自动归档这条链路原来漏了保留目录名的检查 ——
+      // 收藏夹真叫「001错误报告」时，视频会被写进报告目录里。
+      const folderName = safeSegment(folder.name);
+      if (collectionNameIsReserved(folderName)) {
+        throw new Error(`收藏夹名「${folderName}」和插件自己用的目录重名，为免写乱本地文件，这次没有保存到本地。`);
+      }
+      const collectionFolder = await root.getDirectoryHandle(folderName, { create: true });
       const recordFolder = await uniqueTimeFolder(collectionFolder, dateFolderName);
       try {
         // 4.9：先封面、后 txt（txt 即完成标记），失败时把整个目录清掉，不留半截记录
@@ -753,13 +835,28 @@ function importIsRateLimitedError(error) {
 }
 
 function biliImportPageApiGet(tabId, url, timeoutMs) {
+  /* V1.4.3：后台侧必须自己带一个兜底超时。内容脚本那边（favorites-import.js）的超时只在
+     消息送达时才生效；用户把收藏夹标签页关掉/刷新掉之后，回调可能再也不会触发，
+     于是详情抓取（并发 = 1）的那个 await 永远挂着 —— 整轮导入卡死，点取消也没用，
+     只能重载扩展。这里给消息回调加一层保险，晚一点（+2s）就按失败返回、退回后台直连。 */
+  const guardMs = Math.max(1000, (Number(timeoutMs) || 15000) + 2000);
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      finish(reject, new Error("B 站收藏夹页面没有响应（可能已关闭或正在刷新）。"));
+    }, guardMs);
     chrome.tabs.sendMessage(tabId, { type: "bca-page-api-get", url, timeoutMs }, (response) => {
       const error = chrome.runtime.lastError;
-      if (error) return reject(new Error(error.message || "无法从 B 站收藏夹页面请求接口。"));
-      if (!response) return reject(new Error("B 站收藏夹页面没有响应接口请求。"));
-      if (!response.ok) return reject(new Error(response.message || "B 站页面接口请求失败。"));
-      resolve({ status: response.status, payload: response.payload });
+      if (error) return finish(reject, new Error(error.message || "无法从 B 站收藏夹页面请求接口。"));
+      if (!response) return finish(reject, new Error("B 站收藏夹页面没有响应接口请求。"));
+      if (!response.ok) return finish(reject, new Error(response.message || "B 站页面接口请求失败。"));
+      finish(resolve, { status: response.status, payload: response.payload });
     });
   });
 }
@@ -1551,10 +1648,9 @@ const IMPORT_RUN_PUBLISH_INTERVAL_MS = 5000;                    // 断点落盘�
 // 永远显示"更新中"）。超过这个时长就明确回一句"队列被占用"，而不是无限等待。
 // 取 30 秒是刻意的：service worker 的空闲回收阈值就是约 30 秒。
 const IMPORT_QUEUE_WAIT_TIMEOUT_MS = 30000;
-// local 里的 importState 超过这么久没更新，才认定它是"被回收前的残影"。
-// 正常跑着的时候每 500ms 就会刷一次 updatedAt，所以 90 秒足够区分
-// "刚刚正常结束还没落盘" 与 "进程早就没了"。
-const IMPORT_STALE_STATE_MS = 90000;
+// V1.4.3（P2-6）：以前这里还有一个 IMPORT_STALE_STATE_MS = 90000，用来判断
+// local 里的 importState 是不是"被回收前的残影"。现在判据换成了 session 里有没有
+// active 快照（见 importReconcileState），残影可以立刻复位，不必再等 90 秒。
 // chrome.storage.session 默认配额 10MB。被改写的 视频信息.txt 原文只保留这么多字节，
 // 超出后只记名字：回滚时这类文件无法还原内容，会在结果里如实报出来。
 const IMPORT_JOURNAL_TEXT_BUDGET_BYTES = 2 * 1024 * 1024;
@@ -1796,9 +1892,18 @@ async function importReconcileState() {
     return { active: false, reset: false };
   }
   const orphan = leftover?.active === true;
-  const staleRunning = storedState?.running === true
-    && (!Number(storedState?.updatedAt) || Date.now() - Number(storedState.updatedAt) > IMPORT_STALE_STATE_MS);
-  if (!orphan && !staleRunning) return { active: false, reset: false };
+  // V1.4.3（P2-6）：浏览器重启后 chrome.storage.session 会被清空，只剩 local 里一份
+  // running:true 的残影。原来要等 updatedAt 超过 IMPORT_STALE_STATE_MS（90 秒）才复位，
+  // 这 90 秒里弹窗照旧显示"导入中"、暂停/取消按钮都在，点了却只回"当前没有正在进行的导入"。
+  // 其实判据可以更紧：内存里的 importRun.active 才是"这一轮真的在跑"（上面刚判过），
+  // 而 session 里没有 active 快照就说明上一轮的进程已经没了 —— 立刻复位，不必等 90 秒。
+  if (!orphan) {
+    if (storedState?.running === true) {
+      importState = { ...importState, running: false, paused: false, updatedAt: Date.now() };
+      await chrome.storage.local.set({ importState }).catch(() => {});
+    }
+    return { active: false, reset: false };
+  }
   await importAnnounceInterruption(leftover);
   // V1.4.2：以前这里还会把这份快照挪到 bcaInterruptedImport 键上留作"可回滚"的一份，
   // 但没有任何界面会去回滚它（见 importInterruptedSummary 上方的说明），所以不再留。
@@ -2478,7 +2583,7 @@ async function importBiliFavorites(data, tabId = null) {
       const folderLog = [];
     activeFolderTitle = folder.title;
     activeFolderLog = folderLog;
-      if (["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载"].includes(safeSegment(folder.title))) {
+      if (collectionNameIsReserved(folder.title)) {
         failed += 1;
         hasIssues = true;
         reportLines.push("", `收藏夹：${folder.title}`, "收藏夹名称与插件保留目录冲突，已跳过。请先在 B 站重命名该收藏夹后重试。");
@@ -3254,6 +3359,8 @@ async function persistDiffReport(text) {
     const directory = await root.getDirectoryHandle(DIFF_REPORT_DIR, { create: true });
     const filename = `${timestampFolder(new Date())}_${Date.now()}_同步差异报告.txt`;
     await writeFile(directory, filename, text);
+    // V1.4.3（P2-19）：和错误报告一样只增不减，同样保留最新 N 份
+    await trimReportDirectory(directory, REPORT_KEEP_FILES, "同步差异报告.txt");
     return `${root.name}/${DIFF_REPORT_DIR}/${filename}`;
   } catch (_) {
     return "";
@@ -3288,7 +3395,9 @@ function sendDiffProgress(text) {
      1) 调用方给了 uid → 用它，并记下来
      2) 没给 → 找一个已打开的收藏夹页，连 uid 带 tabId 一起用（页面代取更稳）
      3) 还没有 → 用上次记下的 uid，走后台直连
-     4) 都没有 → 明确告诉用户先打开一次收藏夹页 */
+     4) 都没有 → 让用户先做一次导入，插件会在那一步记住 UID（V1.4.3 P2-18：
+        原来这里写的是「请先打开一次 B 站收藏夹页面」，但 tabs.query 这条路在
+        manifest 没有 tabs 权限时拿不到 url，照做也没用 —— 换成真的能做到的说法） */
 async function resolveDiffUid(uid, tabId) {
   const given = importClean(uid);
   if (/^\d+$/.test(given)) {
@@ -3310,7 +3419,7 @@ async function resolveDiffUid(uid, tabId) {
   const saved = await chrome.storage.local.get("lastImportUid");
   const cached = importClean(saved?.lastImportUid);
   if (/^\d+$/.test(cached)) return { uid: cached, tabId: null };
-  throw new Error("对比差异需要知道你的 B 站 UID。请先打开一次自己的 B 站收藏夹页面。");
+  throw new Error("对比差异需要知道你的 B 站 UID，插件还没有记过。请在 B 站收藏夹页面打开插件并开始一次导入（这一步会记住 UID），再回收藏库重试。");
 }
 
 async function diffBiliFavorites(data, tabId = null) {
@@ -3405,7 +3514,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({
             ok: false,
             busy: true,
-            message: "本地队列正忙（很可能有导入正在暂停或进行中），本次状态更新已取消，请稍后重试；导入结束后会自动恢复正常。"
+            message: "本地队列正忙（很可能有导入正在暂停或进行中），这次不再等它了。状态更新已经排在队列里，导入继续或结束后仍会写回本地文件，届时刷新收藏库就能看到。"
           });
           return;
         }

@@ -3957,3 +3957,121 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
       `README 版本小节必须从新到旧：${sections[i - 1]} 之后出现了 ${sections[i]}`);
   }
 });
+
+test("上线前审查第二批：保留目录名、导入残影、队列文案、报告轮转、封面出网都钉住了（V1.4.3）", () => {
+  const backgroundRaw = readProjectFile("background.js");
+  const background = stripComments(backgroundRaw);
+
+  // P2-3：保留目录名收成一份名单，三条链路（手动添加 / 导入 / 自动归档）都要挡
+  assert.ok(background.includes("const RESERVED_COLLECTION_NAMES = new Set(["), "保留目录名应该只有一份名单");
+  assert.ok((background.match(/collectionNameIsReserved\(/g) || []).length >= 4,
+    "保留目录名的判断应该在定义之外至少被三个入口用到（手动添加 / 导入 / 自动归档）");
+  assert.ok(!background.includes('["错误报告", "001错误报告", "002同步报告", "000视频下载"].includes(name)'),
+    "手动添加不该再自己写一份名单");
+  assert.ok(!background.includes('"视频下载", "000视频下载"].includes(safeSegment(folder.title))'),
+    "导入不该再自己写一份名单");
+  assert.ok(background.includes("const folderName = safeSegment(folder.name);"),
+    "自动归档那条链路必须先把收藏夹名算出来再判保留名");
+  assert.ok(background.includes("和插件自己用的目录重名，为免写乱本地文件，这次没有保存到本地。"),
+    "自动归档撞保留名时要给出能看懂的失败原因");
+
+  // P2-6：残影复位不再等时间窗口
+  assert.ok(!background.includes("IMPORT_STALE_STATE_MS"), "时间窗口判据已经删掉，别引回来");
+  assert.ok(background.includes("running: false, paused: false, updatedAt: Date.now() }"),
+    "残影复位要就地把 running 置回 false");
+  assert.ok(backgroundRaw.includes("而 session 里没有 active 快照就说明上一轮的进程已经没了"),
+    "残影复位的判据要写在注释里，避免以后又被改回时间窗口");
+
+  // P2-7：队列超时的文案不许声称「已取消」，任务其实还在队列里
+  assert.ok(!background.includes("本次状态更新已取消"), "队列超时的文案不能再声称「已取消」");
+  assert.ok(background.includes("这次不再等它了"), "要如实说明只是不再等待、任务仍在队列里");
+
+  // P2-18：tabs.query 在缺 tabs 权限时拿不到 url，提示必须换成真能做到的动作
+  assert.ok(!background.includes("请先打开一次自己的 B 站收藏夹页面"),
+    "这条提示照做也没用（没有 tabs 权限），不许再出现");
+  assert.ok(background.includes("请在 B 站收藏夹页面打开插件并开始一次导入（这一步会记住 UID）"),
+    "缺 UID 的提示要指向真的能解决它的动作");
+
+  // P2-19：两个报告目录都要有上限，别随失败次数无限堆积
+  assert.ok(background.includes("const REPORT_KEEP_FILES = 50;"), "报告目录要有保留上限常量");
+  assert.ok((background.match(/trimReportDirectory\(/g) || []).length >= 3,
+    "trimReportDirectory 应该有 1 处定义 + 错误报告与同步报告各 1 处调用");
+  assert.ok(background.includes('await trimReportDirectory(directory, REPORT_KEEP_FILES, "错误报告.txt");'));
+  assert.ok(background.includes('await trimReportDirectory(directory, REPORT_KEEP_FILES, "同步差异报告.txt");'));
+
+  // P2-15 / P2-16 / P2-17：封面出网与页面代取的兜底
+  assert.ok(background.includes("const COVER_FETCH_TIMEOUT_MS = 20000;"), "封面下载必须有超时");
+  assert.ok(background.includes('const COVER_HOST_SUFFIXES = [".hdslb.com", ".bilibili.com"];'),
+    "封面域名白名单只允许 B 站图床");
+  assert.ok(!/COVER_HOST_SUFFIXES[\s\S]{0,200}(bilivideo|akamaized)/.test(background),
+    "白名单里不许出现 bilivideo / akamaized（1.3.0 已删掉的三条权限）");
+  assert.ok(background.includes('if (!coverUrlAllowed(normalized)) throw new Error("封面地址不在允许的域名里，已跳过。");'),
+    "不在白名单里的封面地址要直接跳过，不许发请求");
+  assert.ok(background.includes("await biliThrottleWait();"),
+    "封面下载要与 B 站接口共用同一个限速器");
+  assert.ok(background.includes("const guardMs = Math.max(1000, (Number(timeoutMs) || 15000) + 2000);"),
+    "页面代取必须有后台侧兜底超时，否则关掉收藏夹标签页会卡死整轮导入");
+
+  // P2-3 的保留目录名单在 library.js 里还有两份副本（两个页面脚本没法共享常量），
+  // 这里钉住它们必须和 background.js 的完全一致 —— 防以后改一处漏一处。
+  const libraryForNames = stripComments(readProjectFile("library.js"));
+  const reservedLists = [...libraryForNames.matchAll(/\[("(?:错误报告|001错误报告|002同步报告|000视频下载|视频下载)"(?:,\s*"[^"]+")*)\]/g)];
+  const namesOf = (literal) => [...literal.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+  const expectedReserved = ["000视频下载", "001错误报告", "002同步报告", "视频下载", "错误报告"];
+  assert.ok(reservedLists.length >= 2,
+    `library.js 里应该能找到保留目录名名单，实际 ${reservedLists.length} 处`);
+  for (const [literal] of reservedLists) {
+    assert.deepEqual(namesOf(literal), expectedReserved, `library.js 的保留目录名要和 background.js 一致：${literal}`);
+  }
+});
+
+test("上线前审查第二批（收藏库侧）：导入提示、单飞对比、风险确认与体积统计都钉住了（V1.4.3）", () => {
+  const library = stripComments(readProjectFile("library.js"));
+  const html = readProjectFile("library.html");
+
+  // P2-8：导入期间只给提示，不禁用按钮、不弹对话框
+  assert.ok(html.includes('id="importRunningNotice"'), "收藏库要有「导入进行中」的提示条容器");
+  assert.ok(html.includes('id="importRunningText"'), "提示条要有可写的文案节点");
+  assert.match(html, /id="importRunningNotice"[^>]*\bhidden\b/, "提示条默认必须是隐藏的");
+  assert.ok(library.includes("changes.importState"), "要订阅 importState 才跟得上后台的导入状态");
+  assert.ok(library.includes("function applyImportState("), "显不显示提示条要由一个地方统一决定");
+  assert.ok(library.includes("restoreImportState()"), "打开收藏库时要先读一次当前导入状态");
+  assert.ok(library.includes('BcaI18n.t("导入正在进行：这期间在收藏库里移动、删除或标记「已下载」可能与它互相影响，建议等它结束后再操作。")'),
+    "导入进行中要说明它与收藏库操作的关系");
+  assert.ok(library.includes('BcaI18n.t("导入已暂停：这期间在收藏库里移动、删除或标记「已下载」可能与它互相影响，建议等它结束后再操作。")'),
+    "导入已暂停是另一种说法，不能和进行中共用一句");
+
+  // P2-9：对比必须单飞，第二次点击直接丢掉
+  assert.ok(library.includes("if (diffInFlight) return;"), "第二次点「与 B 站对比」要直接丢掉");
+  assert.ok(library.includes("function setDiffInFlight("), "进出对比中的按钮状态要统一改");
+  assert.ok(library.includes('diffConfirmGo.addEventListener("click", () => { startDiffWithBilibili(); })'),
+    "「开始对比」必须走同一条单飞入口，否则连点两次会发两条请求");
+
+  // P2-10：风险档确认的等待者恰好被结算一次
+  assert.ok(library.includes("function closeDiffRisky("), "关对话框与结算等待者要合成一个出口");
+  assert.ok(library.includes("closeDiffRisky(false);"), "新的确认到来前，先把上一次按「取消」结算掉");
+
+  // P2-13：换页滚动尊重系统的「减少动态效果」
+  assert.ok(library.includes('behavior: prefersReducedMotion() ? "auto" : "smooth"'),
+    "换页不许无条件平滑滚动");
+
+  // P2-14：等待后台时如实说「不再等待」，并且真的能退出等待
+  assert.ok(library.includes('BcaI18n.t("不再等待")'), "等待期间的按钮文案要如实");
+  assert.ok(library.includes("function abandonStatusWait("), "要有「不再等待」的出口");
+  assert.ok(library.includes("if (statusWaitingForBackground) { abandonStatusWait(); return; }"),
+    "「取消」与 Esc 都要走「不再等待」，不能把用户锁在模态框里");
+  assert.ok(library.includes('BcaI18n.t("已不再等待：后台仍会继续处理这一批，结束后才能发起新的更新；完成后点右上角的「刷新」查看结果。")'),
+    "结果文案要说清后台仍会继续写回文件");
+
+  // P2-12：体积统计不挡首屏、能复用就复用
+  assert.ok(library.includes("function whenIdle("), "体积统计要等浏览器空闲再跑");
+  assert.ok(library.includes("if (document.hidden) return;"), "页面在后台时不要打盘");
+  assert.ok(library.includes("const storageUsageCache = new Map();"), "体积统计要有结果缓存");
+  assert.ok(library.includes("storageUsageCache.get(key)"), "档案签名没变就直接复用上次结果");
+  assert.ok(library.includes("invalidateStorageUsageCache();"), "下载目录变化时要作废缓存");
+
+  // 「与 B 站对比」的按钮禁用状态只能有一处算出来 —— 两处各自快照会在交叉时错位
+  assert.ok(library.includes("function syncDiffButton("), "对比按钮的状态要统一算");
+  assert.equal((library.match(/diffLibraryButton\.disabled/g) || []).length, 1,
+    "diffLibraryButton.disabled 只允许在 syncDiffButton 里出现一次");
+});

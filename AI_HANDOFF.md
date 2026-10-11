@@ -345,8 +345,8 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **导入的保活是显式行为，不是副作用**：`keepServiceWorkerAlive()`（background.js:1357，调 `chrome.runtime.getPlatformInfo()`，内部 20 秒节流）。MV3 的 Service Worker 只认"扩展 API 调用/事件"来重置空闲计时器，**纯 `await` 不算**。原来唯一的"保活"是 `publishImportState` 每 500ms 写 storage 的副作用——没有任何一行声明这个意图，暂停态与超长 `await` 段都会失去保护。**改导入主循环时不要把这个调用删掉。**
 - **`IMPORT_KEEPALIVE_INTERVAL_MS` 的余量很紧**：20 秒是审计给的保守值，而单次 `biliImportApiGet` 最坏是"页面代取 15s + 直连 15s"。已在每次请求结束补一次保活，把最坏间隙压到 15+20 秒内。**若真机上出现后台被回收，优先把这个常量调到 12000~15000**（一个常量，不影响任何测试）。
 - **`importRun` 是内存态，`importState` 是落盘态，两者会不同步**。判据只有一条：**内存里的 `importRun.active` 才算"真的在跑"**。`importState.running === true` 只是残影，必须复位。复位有三重入口（`get-status` 自愈 / `bca-import-probe` / `onStartup`·`onInstalled`），**新增任何读取导入状态的地方都要走同一套复位**，否则又会锁死 UI。
-- **纯 local 残影的复位要求 `importState.updatedAt` 超过 90 秒**，避免把"刚正常结束还没落盘"误判成中断。有 session 断点时立即复位、不受这个窗口影响。
-- **回滚日志（journal）现在跨进程存活**：存在 `chrome.storage.session`，只存**名字**（收藏夹名/目录名/文件名/被改写原文），回滚时按名字重取句柄——句柄不能序列化。原文总预算 2MB，超出的标 `textUnavailable` 并如实报数。**没有做"自动续跑"**：SW 被回收后 Promise 链、句柄与调用作用域全没了，无法原地恢复。交付的是"精确告知断点 + 重新导入按 BV/av 跳过已写入 + 按名字回滚"。
+- **残影复位不需要再等时间窗**（1.4.3 起）：判据是「session 里有没有 `active: true` 的快照」——没有就是上一轮的进程已经没了，立刻复位。**不要**再引入「`updatedAt` 超过 N 秒才算残影」那类时间窗口，那会让浏览器重启后的前 N 秒里弹窗一直显示"导入中"、暂停/取消按钮点了只回"当前没有正在进行的导入"（1.4.3 修的就是这个）。
+- **回滚功能已在 1.4.2 整体移除**（`rollbackInterruptedImport`、`bca-import-rollback-recovered`、`markImportRunInterrupted`、`IMPORT_INTERRUPTED_SESSION_KEY` 都没了）。快照（`chrome.storage.session`）现在只剩一个用途：中断时写一份"停在哪、写了多少"的报告，以及收尾时把 `active` 置成 false 再删键（`finishImportRunSnapshot`）。**中断时写进本地的记录本身就是完整记录，重新导入会按 BV/av 跳过，不需要回滚** —— 所以别再给用户任何"可以一键还原"的承诺。
 - **风控识别是导入链路的新防线**：HTTP 412 / `code === -412` / `-352` → `error.rateLimited`。**分页与失效恢复接口一旦 412 会立即中止整轮**（不走"连续 5 条"阈值），只有逐条详情走阈值。判断依据是"被限流还继续翻几百页"更危险。连带修掉一个数据损失风险：`refreshOneArchiveStatus` 以前把**任何**数字 `apiCode` 当"视频已失效"，而限流 `-412` 也带 `apiCode` → 会把整批还能看的视频错标成「已失效视频」。现在限流先 rethrow。
 - **封面是 320×180 WebP，文件名 `封面.webp`**。4.9 前写的 `封面.png`（真 PNG，均值 1.6 MB）**原样保留、不迁移、不重下**；读取侧优先 `封面.webp`、退回 `封面.png`，存在性检查两个名字都认。**注意**：不要为了"打开旧封面"而把 WebP 字节写回 `封面.png` —— 那样 MIME 会按扩展名推断成 `image/png`，只能指望浏览器嗅探内容，是审计点名的唯一跨文件语义风险。
 - **`saveImportedItem` 是先封面、后 `视频信息.txt`**，让 txt 充当"完成标记"。中途被杀只会留下没有 txt 的目录，下次导入会重做，而不是留下"有 txt 没封面"被当成完整记录。`recordNeedsRefresh` 增加了封面存在性判据。
@@ -594,7 +594,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:189 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:191 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -818,4 +818,12 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     5. **纯本地的长循环也要保活**（P1-4：`keepServiceWorkerAlive("scan"/"refresh")`），`uniqueTimeFolder` 撞到同名**文件**（`TypeMismatchError`）要换后缀继续而不是抛错（P1-6），风控码 `IMPORT_RATE_LIMIT_CODES` 是 `{-412, -352, -509, -799}` 而恢复扫描撞上要整轮停（P1-8）。
     6. **发分发包用 `pack.ps1`，别手工压 zip**（P2-21）：它排掉 `.git` / `test/` / 三份 md / `release.ps1` / `pack.ps1` / `.node-path`，并在打包前断言「清单完整、开发文件没混进去」。
     7. **`release.ps1` 的 README 小节守卫是拿 `git tag` 全量比对的**（不只是本次要发的版本）—— 起因是 V1.4.0 的整节标题被一次编辑误删，而当时发的是 V1.4.1，隔了两个版本才发现。**编辑 README 时不要动 `## V<版本>：` 这一整行**；`test/stability.test.cjs` 里另有一条断言要求这些小节从新到旧排列、且 `## V1.4.0：` 必须存在。
+25. **「同一件判断散在多处」与「给用户看的假状态」是第二批审查里两种反复出现的病。**（V1.4.3 修上线前审查第二批时定。）
+    1. **同一份名单/同一类判断只能有一处。**（P2-3）「保留目录名」原来在手动添加、导入两处各写一遍，自动归档那条链路就漏了 —— B 站收藏夹真叫「001错误报告」时，视频会被写进报告目录。现在只有 `RESERVED_COLLECTION_NAMES` + `collectionNameIsReserved()` 一处，**新增任何「写进用户备份文件夹」的入口时，先 grep 这个函数**。
+    2. **判断「某件事还在不在跑」要用最紧的那条依据，不要用时间窗口。**（P2-6）内存里的 `importRun.active` 才是真相，`chrome.storage.local` 里的 `running: true` 只是残影。原来要求残影的 `updatedAt` 超过 90 秒才复位，于是浏览器重启后的前 90 秒里，弹窗一直显示「导入中」、暂停/取消按钮都在，点了却只回「当前没有正在进行的导入」—— **恰恰在最需要自愈的那段时间里给用户看假状态**。现在的判据是「`chrome.storage.session` 里有没有 `active: true` 的快照」，没有就立刻复位。
+    3. **文案不许把「不再等待」说成「已取消」。**（P2-7）`withQueueDeadline` 超时只是不等了，任务仍然在队列里、仍然会写回 `视频信息.txt`。原来说「本次状态更新已取消」，用户以为没发生，其实稍后就改了盘。**凡是「放弃等待但任务还在」的情况，文案必须写清它还会继续。**
+    4. **一条注定无效的提示等于没有提示，而且比没有更糟。**（P2-18）对比差异缺 UID 时，原来的提示是「请先打开一次自己的 B 站收藏夹页面」——但 `chrome.tabs.query({url})` 在 manifest 没有 `tabs` 权限时拿不到标签页 URL，照做也没用。**提示必须指向一个真的能改变结果的动作**（现在是「先做一次导入，那一步会记住 UID」）。同类问题别用「加权限」解决，除非那条权限本身就是必需的。
+    5. **凡是「每次失败就新建一个文件」的地方都要有上限。**（P2-19）`001错误报告` 与 `002同步报告` 都属于这类：正文截断到 16000 字符撑不爆磁盘，但用户没有清理入口。现在统一走 `trimReportDirectory(directory, REPORT_KEEP_FILES, "…报告.txt")`，按文件名里 `_<毫秒时间戳>_` 保留最新 50 份，删不掉就下次再试。
+    6. **唯一一条不限速的出网路径，迟早会变成最危险的那条。**（P2-15 / P2-16 / P2-17）封面下载原来「不限速 + 无超时 + 并发 4 + 域名来者不拒」，而全仓只有它这样：现在 `loadCoverPng` 与 B 站接口**共用同一个 `biliThrottleWait()` 限速器**、带 `COVER_FETCH_TIMEOUT_MS` 的 `AbortController`，并且 `coverUrlAllowed()` 只放行 `COVER_HOST_SUFFIXES`（`.hdslb.com` / `.bilibili.com`；1.3.0 删掉的那三条视频流域名权限不在里面，也不许加回来）。跨进程等待同理：`biliImportPageApiGet` 加了后台侧兜底超时，否则关掉/刷新收藏夹标签页会让详情抓取的 `await` 永远挂着、整轮导入卡死且取消无效。
+    7. **收藏库和导入之间没有锁，只能靠「让用户看见」。**（P2-8）后台把导入状态写在 `chrome.storage.local` 的 `importState` 里，收藏库读它并显示一条提示；**不要**去禁用按钮或弹对话框 —— 用户可能就是想边导边整理，我们能做的是别让他以为两边互不干扰。
 

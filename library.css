@@ -613,6 +613,13 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .import-hint-icon { display: inline-flex; color: var(--brand); font-size: var(--fs-md); }
 .import-hint .text-button { flex: 0 0 auto; margin-left: auto; }
 
+/* P2-8：导入进行中 / 暂停中的常驻提示条（状态来自 storage.local.importState）。
+   直接复用 .import-hint 的信息条外观：它是流内元素，不盖顶栏按钮，也碰不到右下角的齿轮；
+   暂停态换一套色，和「正在进行」区分开。 */
+.import-running-notice { align-items: flex-start; }
+.import-running-notice p { flex: 1; min-width: 0; }
+.import-running-notice.is-paused { border-color: var(--warning-line); color: var(--warning); background: var(--warning-soft); }
+
 /* 扫描进度条：大目录读取时不再只有按钮文字变化 */
 .scan-progress { position: relative; height: 3px; margin: 0 0 var(--sp-4); overflow: hidden; border-radius: var(--r-pill); background: var(--surface-sunken); }
 .scan-progress::after {
