@@ -1,10 +1,11 @@
 /* ==========================================================================
    宠物挂件（BcaPet）
    --------------------------------------------------------------------------
-   形态参考 DeepSeek-Balance-Whale-Widget（MeteorNOX），美术与代码均为本项目自绘/自写。
+   形态参考 DeepSeek-Balance-Whale-Widget（MeteorNOX）：「右下角常驻挂件 + 点击序列
+   气泡 + 按压 Q 弹」。代码全部重写，没有引用它的任何文件、素材或代码。
    （那个仓库的代码是 MIT，但 assets/ 下的美术素材不在 MIT 覆盖范围内、不授予再许可，
-     所以这里的小鲸鱼是照「右下角常驻挂件 + 点击序列气泡 + 按压 Q 弹」这个形态
-     自己画的 SVG，代码也全部重写，没有引用它的任何文件、素材或代码。）
+     所以宠物是按这个形态自己做的，也不内联任何图形：姿态画在随包发布的位图精灵
+     pet-cat.png 里（6 列 × 5 行的帧表），CSS 只负责「露哪一格」。）
 
    约定：
    1. 这一页的数据都由别处算好、写进 chrome.storage.local，本文件只做消费：
@@ -12,8 +13,9 @@
         bcaStats     : 统计快照，字段见 bubbleLines()
       自己再算一遍的话，两个地方的口径早晚会对不上。
    2. 颜色 / 圆角 / 阴影 / 字号 / 间距全部走 theme.css 的令牌，见 pet.css；
-      小鲸鱼统一用 currentColor 上色，深色主题下自动跟着换代币走。
-   3. 不发网络请求、不加权限、不引入外部资源：图形是内联自绘，动画是 CSS + SVG SMIL。
+      宠物自身的颜色画在 pet-cat.png 里，CSS 不参与上色。
+   3. 不发网络请求、不加权限、不引入外部资源：图形是随包发布的位图精灵，
+      动画是 CSS 的 steps() 逐帧（见 pet.css 的 .bca-pet-sprite / @keyframes bca-pet-idle）。
    4. 自启，library.js 一个字都不用改。外层容器 #bcaPet，气泡 #bcaPetBubble，
       宠物本体是 <button type="button" aria-label="宠物">。
    ========================================================================== */
@@ -35,28 +37,10 @@
   const STATS_KEY = "bcaStats";
   const TOUCH_MESSAGE = "bca-pet-touch";
 
-  // 自绘小鲸鱼：92×92，圆润极简（椭圆身体 + 尾巴 + 眼睛 + 腮红）。
-  // 身体、尾巴、眼睛都继承 currentColor（= 令牌 --brand），腮红与高光是半透明的同一色，
-  // 所以主题换成深色时它自己就跟着变亮，这里不需要判断深浅色。
-  const WHALE_SVG = [
-    '<svg class="' + PET_CLASS + '-svg" viewBox="0 0 92 92" width="92" height="92" aria-hidden="true" focusable="false">',
-    '  <g class="' + PET_CLASS + '-tail">',
-    '    <path d="M62 50C73 43 81 36 88 28c3 9 1 18-6 25-6 6-14 7-20 3Z"/>',
-    '    <path d="M62 52C73 58 81 66 87 75c-9 3-18 0-24-7-6-6-6-13-1-16Z"/>',
-    '  </g>',
-    '  <g class="' + PET_CLASS + '-body">',
-    '    <ellipse class="' + PET_CLASS + '-blob" cx="49" cy="43" rx="28" ry="24"/>',
-    '    <path class="' + PET_CLASS + '-belly" d="M42 70c-10-6-15-16-14-27 1-11 9-19 21-19s20 8 21 19c1 11-4 21-14 27-4 2-10 2-14 0Z"/>',
-    '    <path class="' + PET_CLASS + '-belly" d="M36 50c-4-2-8-7-8-13 0-3 1-6 2-8 3 1 5 3 7 6 2 5 1 11-1 15Z"/>',
-    '    <circle class="' + PET_CLASS + '-blush" cx="30" cy="52" r="5.2"/>',
-    '    <g class="' + PET_CLASS + '-eye">',
-    '      <circle cx="64" cy="40" r="4.6"/>',
-    '      <circle class="' + PET_CLASS + '-spark" cx="65.8" cy="38.2" r="1.4"/>',
-    '    </g>',
-    '  </g>',
-    '  <path class="' + PET_CLASS + '-spout" d="M52 15c-4-4-8-5-12-3" fill="none" stroke-linecap="round"/>',
-    '</svg>'
-  ].join("\n");
+  // 宠物本体 = 一格位图精灵。pet-cat.png 是 6 列 × 5 行的帧表，这里只放一个空壳，
+  // 「露哪一格、多久换一帧」全在 pet.css 的 .bca-pet-sprite / @keyframes bca-pet-idle 里。
+  // 换动作（行走 / 睡觉那几行）也是改 CSS，不用动这个文件。
+  const PET_SPRITE = '<span class="' + PET_CLASS + '-sprite" aria-hidden="true"></span>';
 
   /* ------------------------------ 状态 ------------------------------ */
 
@@ -295,7 +279,7 @@
     // 无障碍名就用「宠物」这条词条本身（走 translate()，切语言时会跟着变）
     button.setAttribute("aria-label", translate("宠物"));
     button.setAttribute("aria-expanded", "false");
-    button.innerHTML = WHALE_SVG;
+    button.innerHTML = PET_SPRITE;
 
     container.appendChild(bubble);
     container.appendChild(button);

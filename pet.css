@@ -1,16 +1,23 @@
 /* ==========================================================================
-   pet.css —— 宠物挂件（BcaPet）的自绘样式
+   pet.css —— 宠物挂件（BcaPet）的样式
    --------------------------------------------------------------------------
    约定：
    1. 这里是全项目唯一允许引用令牌、却**不新增色值**的地方：颜色 / 圆角 / 阴影 /
       字号 / 间距全部走 theme.css 的 :root，深色主题下自动跟着换（令牌换一组即可）。
-      只有尺寸（92px、48px、260px …）是写死的像素，它们与主题无关。
+      宠物本体是一张随包发布的位图精灵（pet-cat.png），颜色画在图里、CSS 不参与上色，
+      所以这份样式表一个色值都没有，只有尺寸（48px、260px …）是真写死的像素，
+      它们与主题无关。
    2. 位置：右下角浮标（.floating-dock / #scrollTopFab / #settingsFab，在 library.css 里）
       一点都不能碰 —— 那条带子是 right: var(--sp-5)（22）+ 48 宽。这里把挂件摆在
       它**左侧**同一水平带（right: 82px，对齐同一个 bottom），z-index 同为 6，
       两者不重叠，所以既同层又不会盖住浮标。
-   3. 动画只有三处：轻微上下浮动、点击 Q 弹、眨眼（眨眼走 SVG 的 SMIL）。
+   3. 动画只有两处：位图精灵的四帧待机（CSS steps 逐帧）与点击 Q 弹。
       末尾统一切断，尊重系统的「减少动态效果」。
+   4. 精灵图 pet-cat.png 是 6 列 × 5 行的帧表（每格 222×211，含 2px 内边距）：
+      row0 坐姿 4 帧 —— 就是现在的待机动画；row1 行走 6 帧、row2 镜像行走 6 帧、
+      row3 另一组坐姿 4 帧、row4 睡觉 4 帧。后四行留着备用：要接新动作，
+      照 row0 的写法再加一组关键帧即可 —— 别去裁图，更别删行（row0 的第 5/6 格是空的，
+      所以待机只走 0% / 20% / 40% / 60% 四格，多走一格就会露白）。
    ========================================================================== */
 
 /* 挂件外壳：不画任何东西，只负责定位与层叠，避免几个 transform 动画互相打架 */
@@ -20,9 +27,9 @@
   bottom: calc(var(--sp-6) + var(--sp-5));
   z-index: 6;
   display: grid;
-  width: 92px;
-  height: 92px;
-  pointer-events: none; /* 外壳不吃点击，只有鲸鱼和气泡吃 */
+  width: 48px;
+  height: 48px;
+  pointer-events: none; /* 外壳不吃点击，只有宠物和气泡吃 */
 }
 
 .bca-pet-dock.is-hidden {
@@ -32,12 +39,11 @@
 /* 宠物本体：<button type="button" aria-label="宠物">，@keyframes 的 Q 弹挂在这一层 */
 .bca-pet {
   display: block;
-  width: 92px;
-  height: 92px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   border: 0;
   border-radius: var(--r-pill);
-  color: var(--brand);
   background: transparent;
   transform-origin: center bottom;
   -webkit-user-select: none;
@@ -45,28 +51,33 @@
   pointer-events: auto;
 }
 
-.bca-pet-svg {
+/* —— 位图精灵 —— 一张 6 列 × 5 行的帧表当背景，一屏只露一格。
+   background-size: 600% 500% = 列数×100% / 行数×100%（图被撑到 6×5 个元素那么大）；
+   第 c 列第 r 格的 background-position 是 x = c/(6-1)×100%、y = r/(5-1)×100%。
+   row0（坐姿 4 帧）就是 y=0%、x = 0% / 20% / 40% / 60%，见下面的 bca-pet-idle。
+   image-rendering: pixelated 保住像素画的硬边，别改成 auto。 */
+.bca-pet-sprite {
   display: block;
-  width: 92px;
-  height: 92px;
-  overflow: visible;
-  filter: drop-shadow(var(--shadow-md));
+  width: 48px;
+  height: 48px;
+  background-image: url("pet-cat.png");
+  background-repeat: no-repeat;
+  background-size: 600% 500%;
+  background-position: 0% 0%;
+  image-rendering: pixelated;
+  animation: bca-pet-idle 2.4s steps(1, end) infinite;
 }
 
-/* 呼吸式浮动：整只鲸鱼轻轻上下，尾巴反向摆一点，别像贴纸一样钉在屏幕上 */
-@keyframes bca-pet-bob {
-  from { transform: translateY(-3px); }
-  to   { transform: translateY(3px); }
-}
-
-@keyframes bca-pet-tail {
-  from { transform: rotate(3deg); }
-  to   { transform: rotate(-3deg); }
-}
-
-@keyframes bca-pet-blink {
-  0%, 88%, 100% { transform: scaleY(1); }
-  92%           { transform: scaleY(.08); }
+/* 四帧逐帧循环：每帧 600ms（2.4s ÷ 4）。steps(1, end) 让每段都停在段首、
+   到段尾才跳，所以中间不会插值滑过去 —— 这就是「一屏一格」的换帧。
+   （换图之前它是一只内联自绘的小鲸鱼，浮动 / 摆尾 / 眨眼三条动画随这次换图一起下线：
+     像素画在非整数像素的位移里会一格一格地抖，待机交给这四帧眨眼更干净。） */
+@keyframes bca-pet-idle {
+  0%   { background-position: 0% 0%; }
+  25%  { background-position: 20% 0%; }
+  50%  { background-position: 40% 0%; }
+  75%  { background-position: 60% 0%; }
+  100% { background-position: 0% 0%; }
 }
 
 @keyframes bca-pet-pop {
@@ -76,64 +87,12 @@
   100% { transform: scale(1); }
 }
 
-/* transform-box: fill-box：SVG 里没有 CSS 盒模型，不写的话 rotate/scale 的原点
-   会落到整个 viewBox 的原点上，眨眼会变成「整只眼睛飞出去」。 */
-.bca-pet-body,
-.bca-pet-tail,
-.bca-pet-eye {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.bca-pet-body {
-  animation: bca-pet-bob 3.6s var(--ease) infinite alternate;
-}
-
-.bca-pet-tail {
-  animation: bca-pet-tail 3.6s var(--ease) infinite alternate;
-}
-
-.bca-pet-eye {
-  animation: bca-pet-blink 6.2s var(--ease) infinite;
-}
-
 .bca-pet.is-popping {
   animation: bca-pet-pop 380ms var(--ease);
 }
 
-/* —— 小鲸鱼自己 —— 颜色一律继承 currentColor（= --brand），
-   只有腮红与眼睛里的小高光是同一色的半透明版本，深浅主题都成立。 */
-.bca-pet-blob { fill: currentColor; }
-
-.bca-pet-tail path { fill: currentColor; }
-
-.bca-pet-belly {
-  fill: var(--surface);
-  opacity: .22;
-}
-
-.bca-pet-blush {
-  fill: currentColor;
-  opacity: .32;
-}
-
-/* 眼睛用 --ink —— 它的定义就是「正文/前景色」，在浅色主题下是深色、深色主题下是浅色，
-   正好与 --brand 的身体相反，两种主题下都读得出来。瞳孔里的小高光用底色。 */
-.bca-pet-eye { fill: var(--ink); }
-
-.bca-pet-spark {
-  fill: var(--surface);
-  opacity: .85;
-}
-
-.bca-pet-spout {
-  stroke: currentColor;
-  stroke-width: 3.2;
-  opacity: .5;
-}
-
-/* —— 气泡 —— 出现在宠物左上方：外壳只有 92 宽，right: 0 就会向左边长出去，
-   bottom: 100% 让它停在鲸鱼上方。 */
+/* —— 气泡 —— 出现在宠物左上方：外壳只有 48 宽，right: 0 就会向左边长出去，
+   bottom: 100% 让它停在宠物上方。 */
 .bca-pet-bubble {
   position: absolute;
   right: 0;
@@ -158,7 +117,7 @@
   word-break: break-word;
 }
 
-/* 指向鲸鱼的小尖角，和气泡同一张脸（用边框拼出来，不引入图片） */
+/* 指向宠物的小尖角，和气泡同一张脸（用边框拼出来，不引入图片） */
 .bca-pet-bubble::after {
   position: absolute;
   right: 32px;
@@ -175,8 +134,8 @@
 
 /* 悬停 / 键盘聚焦时给一点「活着」的反馈；按压态由 @keyframes 负责，
    这里不要写 transform，否则会把动画整个盖掉。 */
-.bca-pet:hover .bca-pet-svg { filter: drop-shadow(var(--shadow-md)) brightness(1.06); }
-.bca-pet:active .bca-pet-svg { filter: drop-shadow(var(--shadow-md)) brightness(.96); }
+.bca-pet:hover .bca-pet-sprite { filter: brightness(1.06); }
+.bca-pet:active .bca-pet-sprite { filter: brightness(.96); }
 
 /* 键盘用户看不到 :hover，得单独给焦点一个可见标记（只有 Tab 过来才出现） */
 .bca-pet:focus-visible {
@@ -185,12 +144,10 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 32%, transparent);
 }
 
-/* 尊重系统的「减少动态效果」：浮动、摆尾、眨眼、Q 弹全部关掉，
+/* 尊重系统的「减少动态效果」：换帧与 Q 弹全部关掉（精灵就停在 0% 那一帧），
    只保留 hover / active 那一层静态反馈。 */
 @media (prefers-reduced-motion: reduce) {
-  .bca-pet-body,
-  .bca-pet-tail,
-  .bca-pet-eye,
+  .bca-pet-sprite,
   .bca-pet.is-popping {
     animation: none;
   }
