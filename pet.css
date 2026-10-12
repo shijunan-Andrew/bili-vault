@@ -12,10 +12,12 @@
       它**左侧**同一水平带（right: 82px，对齐同一个 bottom），z-index 同为 6，
       两者不重叠，所以既同层又不会盖住浮标。z-index 别再往上加：确认弹窗是 8/10，
       压过它就会挡住对话。
-   3. 动画分两类：换帧（steps 逐帧，挂在 .bca-pet-sprite 上）与位移（transform 过渡，
-      挂在 .bca-pet-dock 上），以及按下的弹性（关键帧，挂在 .bca-pet 上）。
-      三者各占一个元素，谁也不覆盖谁 —— 别把它们合到同一个元素上。
-      末尾统一切断，尊重系统的「减少动态效果」。
+   3. 动画分四类，各占一个元素，谁也不覆盖谁 —— 别把它们合到同一个元素上：
+      换帧（steps 逐帧，挂在 .bca-pet-sprite 的 background-position 上）、
+      位移（transform 过渡，挂在 .bca-pet-dock 上）、
+      坐下的压扁（transform 过渡，挂在 .bca-pet-sprite 上，由 .is-sit-down 触发）、
+      按下的弹性（关键帧，挂在 .bca-pet 上）。
+      末尾统一切断，尊重系统的「减少动态效果」（只掐动画，状态机照旧按时间走）。
    4. 精灵图 pet-cat.png 是 6 列 × 5 行的帧表，**每格 48×48 逻辑像素**（V1.5.2 重做：
       从原图按统一比例 LANCZOS 降采样到 48 见方，保留 RGBA、不做调色板量化）：
       图总尺寸 288×240。row0 坐姿 4 帧（含 2 帧闭眼，用于眨眼）、row1 向右走 6 帧、
@@ -41,15 +43,18 @@
            row4  1209 1164 1127 1172    0    0
          V1.5.2 的坐姿写的是 80% 75% 与 100% 75% —— 正好是 row3 那两个空格：
          于是**只要进入「坐姿」整只猫就 100% 透明**。而「坐姿」是拖动（pointerdown 先坐好）、
-         「暂停走动」（settle() 坐好）、以及每次动画结束后的落点 —— 这就是用户报的
+         「暂停走动」与菜单动作 / 隐藏 / 重置位置（settle() 坐好）、以及每次动画结束后的落点 —— 这就是用户报的
          「一拖就没了」「点暂停走动就没了」的真正成因（不是 transform 包含块、也不是拖拽坐标系）。
          往后退帧 / 加状态之前，先确认目标格在上表的非零列里。
    ========================================================================== */
 
 /* 挂件外壳：不画任何东西，只负责定位、层叠与位移，避免几个 transform 动画互相打架。
-   --bca-pet-size 是唯一的尺寸来源（JS 写在行内），下面的宽高全从它推。 */
+   --bca-pet-size 是唯一的尺寸来源（JS 每次换档都会重写这个行内变量，见 pet.js 的
+   applyBox()），下面的宽高全从它推。这里的 96px 只是「JS 还没跑起来」时的初值，
+   默认档与 pet.js 的 SIZE_DEFAULT / 设置页的 PET_SIZE_DEFAULT 三处保持一致，
+   但任何跟尺寸有关的算式（停靠的 right/bottom、拖拽的边界）都不许写死它。 */
 .bca-pet-dock {
-  --bca-pet-size: 144px;
+  --bca-pet-size: 96px;
   position: fixed; /* 气泡与右键菜单靠这个当包含块，别删 */
   right: 82px;
   bottom: calc(var(--sp-6) + var(--sp-5));
@@ -108,11 +113,17 @@
   background-size: 600% 500%;
   background-position: 0% 0%;
   image-rendering: pixelated;
+  /* 坐下 / 站起来的那一段压扁过渡（见下面的 .is-sit-down）。时长只有一个源：
+     pet.js 把 SIT_MS 写进 --bca-sit-ms，它等这么久才切下一段状态。 */
+  transform-origin: center bottom;
+  transition: transform var(--bca-sit-ms, 360ms) var(--ease);
 }
 
-/* —— 状态机 —— JS 只写 data-bca-state（行走时另外写一帧一帧的 background-position），
+/* —— 状态机 —— JS 只写 data-bca-state（外加一个 .is-sit-down 坐姿类），
    换帧动画全在这里接。一屏一格是 steps(1, end) 的功劳：每段都停在段首、到段尾才跳，
-   中间不插值。下面每个状态用到的格都必须是文件头第 5 条那张表里的**非零列**。 */
+   中间不插值。下面每个状态用到的格都必须是文件头第 5 条那张表里的**非零列**。
+   V1.5.4 起 JS 再也不写行内 background-position（走路整段移除），所以「画的是第几格」
+   100% 由这份样式表决定。 */
 
 /* 坐姿（sit）：row0 第 1 格，静止不动。
    这是所有动作的落点（做完动作坐好、拖动松手、暂停走动、重置位置都回到这里），
@@ -123,11 +134,16 @@
   animation: none;
 }
 
-/* 坐姿变体（sitAlt）：row3 那组坐姿，四帧慢呼吸（2s 一轮）。
-   roulette 里抽到的「坐一会儿」，与 sit 同属坐姿、只是换一组形体。 */
-.bca-pet[data-bca-state="sitAlt"] .bca-pet-sprite {
-  background-position: 0% 75%;
-  animation: bca-pet-sit 2000ms steps(1, end) infinite;
+/* —— 坐下 / 站起来（V1.5.4，用户第 2 条）——
+   精灵表里**没有**真的「坐下 / 站起来」过渡帧（row0 / row3 的那几格是近乎重复的姿势），
+   所以这里绝不伪造帧：坐下 = 整只猫下压 2px + 轻微压扁（横向 1.03、纵向 .94），
+   站起来 = 把 .is-sit-down 摘掉，**同一段过渡反向播放**。
+   时长与 JS 共用一个源（--bca-sit-ms，pet.js 在 build() 里写入 SIT_MS），
+   它等这么久才进下一段，所以不会出现「过渡还在滑、状态已经切走」。
+   过渡属性挂在 .bca-pet-sprite 上：与 .bca-pet-dock 的位移过渡、
+   .bca-pet 的按压弹性各占一个元素，互不覆盖。 */
+.bca-pet.is-sit-down .bca-pet-sprite {
+  transform: translateY(2px) scale(1.03, .94);
 }
 
 /* 眨眼（blink）：一次调用 = 一次眨眼，整段 150ms（时长由 JS 通过 --bca-blink-ms 写进来，
@@ -150,22 +166,12 @@
   animation: none;
 }
 
-/* 向右走（walkRight）：row1，6 帧。
-   **换帧由 JS 按「已经走过多少距离」算**（pet.js 的 walkLoop 往行内写 background-position），
-   不在这里写 animation：一个步态周期 = 6 帧 = 30px（144px 档）是写死的常量，
-   把换帧权和位移权交给同一个循环，才能保证「动画在跑、位置也在同步走」而不是各跑各的。
-   这里只留一个兜底格，万一 JS 那一拍没跟上也不会露白。 */
-.bca-pet[data-bca-state="walkRight"] .bca-pet-sprite {
-  background-position: 0% 25%;
-  animation: none;
-}
-
-/* 向左走（walkLeft）：row2 是镜像行，帧从第 6 格（100%）往第 1 格退，迈腿方向才是朝左。
-   同样由 JS 推帧。 */
-.bca-pet[data-bca-state="walkLeft"] .bca-pet-sprite {
-  background-position: 100% 50%;
-  animation: none;
-}
+/* 走路（walkRight / walkLeft）与另一组坐姿（sitAlt）在 V1.5.4 随「移除走路」一起删掉了
+   （用户第 1 条）：JS 再也不发这三个状态名，留着只会让「状态表」和代码对不上。
+   它们是当时**唯二**由 JS 写行内 background-position 的状态 —— 那套「就地写行内帧」
+   的机制也一并没了，现在没有代码能越过这份样式表改帧。要恢复走路：从 git 历史取回
+   pet.js 的 stepPx / rafId / walkLoop / setFrame，并把下面两段规则与
+   @keyframes bca-pet-sit 一起搬回来（注意行位：row1 = 25%、row2 = 50%、row3 = 75%）。 */
 
 /* 睡觉（sleep）：row4 四帧，呼吸比行走慢一档（2.4s 一轮） */
 .bca-pet[data-bca-state="sleep"] .bca-pet-sprite {
@@ -173,24 +179,14 @@
   animation: bca-pet-sleep 2400ms steps(1, end) infinite;
 }
 
-/* 行走那两行**刻意没有关键帧**：换帧由 pet.js 按「走过的距离」逐帧写在行内
+/* 行走那两行**刻意没有关键帧**：换帧当时由 pet.js 按「走过的距离」逐帧写在行内
    background-position 上（一个步态周期固定 6 帧 / 30px，见 DESIGN-PET.md 的状态表）。
    原因见文件头第 5 条 a)：曾经这里有两组 8 段的关键帧（间隔 12.5%，按 4 列图写的），
    落到 6 列图上每帧都停两格之间，屏幕上就是整只猫在横着滑 —— 用户报的
    「走动时是直接平移、没有动画交替」。要么按 20% 重写、要么交给 JS，
-   V1.5.3 选后者：位移和换帧必须由同一个循环驱动才可能真正同步。 */
+   V1.5.3 选后者；V1.5.4 走路整段移除，这段历史只留在这里当参考。 */
 
-/* 坐姿变体（row3 的前 4 格）：0% / 20% / 40% / 60% 四帧，2s 一轮。
-   第 5、6 格（80% / 100%）是空格，这里一格都不能出现。 */
-@keyframes bca-pet-sit {
-  0%   { background-position: 0% 75%; }
-  25%  { background-position: 20% 75%; }
-  50%  { background-position: 40% 75%; }
-  75%  { background-position: 60% 75%; }
-  100% { background-position: 0% 75%; }
-}
-
-/* 睡觉（row4 的前 4 格）：同样是四帧，但整体放慢到 2.4s 一轮 */
+/* 睡觉（row4 的前 4 格）：四帧，整体放慢到 2.4s 一轮 */
 @keyframes bca-pet-sleep {
   0%   { background-position: 0% 100%; }
   25%  { background-position: 20% 100%; }
@@ -348,16 +344,23 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 32%, transparent);
 }
 
-/* 尊重系统的「减少动态效果」：换帧、位移、气泡渐入、按下的 Q 弹全部关掉
+/* 尊重系统的「减少动态效果」：换帧、位移、气泡渐入、按下的 Q 弹、坐下的压扁过渡全部关掉
    （精灵就停在当前状态帧上），只保留 hover / active 那一层静态反馈。
    位置仍然会跟着拖动即时更新 —— 那是指针的直接反馈，不是动画。
-   注意：行走的换帧是 JS 写在行内 background-position 上的，CSS 关不掉它，
-   由 pet.js 的 stateReady() 在 reduced 时直接不进入行走状态、并清掉行内那一格
-   （见 pet.js 的 watchReducedMotion / settle）。两边都要管，少一边就会「系统说别动、
-   猫还在走」。设置页为此专门写了一句提示（用户第 4 条）。 */
+   V1.5.4 的边界很干净：这里只管「不播动画」，**状态本身照旧按时间推进**
+  （眨眼 180ms、坐下 360ms、睡 10–30s 一个不少，只是屏幕上不动）——
+   pet.js 的 stateReady() 里故意不含 reduced 判断，见那边的注释。 */
 @media (prefers-reduced-motion: reduce) {
-  .bca-pet-dock {
+  .bca-pet-dock,
+  .bca-pet-sprite {
     transition: none;
+  }
+
+  /* V1.5.5：坐下的「压一下」是一段 transition。transition 关掉之后这里不会自己动，
+     但把目标值写死更干脆：reduce 下坐/站这一对**同一个样子**，不会有「压下去了
+     再也弹不回来」这种残留形态（真机报的「卡在坐姿那一帧」里最难解释的就是它）。 */
+  .bca-pet.is-sit-down .bca-pet-sprite {
+    transform: none;
   }
 
   .bca-pet-sprite,

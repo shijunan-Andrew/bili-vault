@@ -200,6 +200,34 @@ function flashRow(row) {
   setTimeout(() => row.classList.remove("row-flash"), 1500);
 }
 
+// V1.5.4：挂件右键菜单的「宠物设置」用 settings.html#pet 打开本页，这里负责把那一组
+// 滚进视口并高亮。hash 里的名字就是 <section data-group="..."> 的那个值，所以
+// pet.js 里拼的 URL 和 settings.html 的 data-group 是一对，改一边就得改另一边。
+// 高亮比搜索命中那一行长一点（2.6s）：搜索是「点完就在眼前」，这是**新开一个标签页**，
+// 还要等加载 + 滚动动画，1.5s 太容易在用户看见之前就消失了。
+function flashGroup(card) {
+  card.classList.add("group-flash");
+  setTimeout(() => card.classList.remove("group-flash"), 2600);
+}
+
+function focusGroupFromHash() {
+  let name = "";
+  try {
+    name = decodeURIComponent(String(window.location.hash || "").replace(/^#/, ""));
+  } catch (_) {
+    name = "";
+  }
+  if (!name) return false;
+  const card = cards.find((candidate) => candidate.dataset.group === name);
+  if (!card) return false;
+  // 先把导航与面包屑切过去：滚动动画要几百毫秒，不等 observer 自己发现
+  setNavGroup(name);
+  // 不用浏览器自带的锚点跳转（那个不躲顶栏），走搜索用的同一套偏移计算
+  scrollToTarget(card);
+  flashGroup(card);
+  return true;
+}
+
 function focusRow(row) {
   // 先把输入框的焦点收掉：切换语言后 apply() 会重写所有 data-i18n 节点，
   // 焦点留在那里容易让人以为下拉还开着
@@ -307,6 +335,11 @@ async function boot() {
   buildSearchIndex();
   observeGroups();
   wireNav();
+  // 带 #pet 打开（挂件右键菜单的「宠物设置」）就直接落到那一组；认不出的 hash 什么都不做。
+  focusGroupFromHash();
+  // 页面已经开着时再点一次「宠物设置」（#pet 重复跳过来）交给浏览器自己处理：
+  // chrome.tabs.create 每次都是新标签页，这里补一条 hashchange 只是顺手。
+  window.addEventListener("hashchange", focusGroupFromHash);
 
   // 主题：BcaTheme.use 自己会写 localStorage、镜像到 chrome.storage 并通知监听者，
   // 别的页面改主题时 theme.js 的 storage 事件也会走到这里，所以只挂一个 onChange 就够
@@ -366,8 +399,26 @@ async function boot() {
   // enabled 与 size 两项，x / y / paused 由挂件自己维护 —— 所以下面每次写盘都是
   // 「读现有的、合上自己那一项、整份写回」，绝不能整份覆盖：覆盖会把位置和
   // 「暂停走动」一起抹掉。缺字段的旧数据也要能读（size 缺失就按默认档）。
-  const PET_SIZE_DEFAULT = 144;
+  //
+  // V1.5.4：默认档 144 → 96。三处必须一致：pet.js 的 SIZE_DEFAULT、这里的
+  // PET_SIZE_DEFAULT、pet.css 里 --bca-pet-size 的初值（选项表本来就是同一份）。
+  const PET_SIZE_DEFAULT = 96;
   const PET_SIZE_OPTIONS = [96, 144, 192, 240];
+
+  // 写盘前比较（V1.5.4「144 和 96 之间疯狂闪动」的另一半）：值没变就一个字节都不写。
+  // 同一个档位点第二下、位置本来就在默认位，都不该产生一次 chrome.storage 写入 ——
+  // 每一次写入都会在挂件那边触发 onChanged（写入方自己的页面里也会触发）。
+  function petConfigEquals(current, next) {
+    for (const key of Object.keys(next)) {
+      // size 可能以数字 / 字符串两种形态存着，比数值；其余字段直接比
+      if (key === "size") {
+        if (Number(current[key]) !== Number(next[key])) return false;
+      } else if (current[key] !== next[key]) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   const petToggle = $("petToggle");
   const petSizeButtons = [...document.querySelectorAll("#petSizeGroup button[data-pet-size]")];
@@ -430,14 +481,22 @@ async function boot() {
       const size = Number(button.dataset.petSize);
       renderPetSizes(size);
       // 换档以后挂件会按新尺寸把位置夹回视口内，所以不用在这里动 x / y
-      patchPetConfig((current) => chrome.storage.local.set({ interfacePet: Object.assign({}, current, { size }) }));
+      patchPetConfig((current) => {
+        const next = Object.assign({}, current, { size });
+        if (petConfigEquals(current, next)) return undefined; // 点的就是当前档 = 不写
+        return chrome.storage.local.set({ interfacePet: next });
+      });
     });
   }
 
   $("petResetPosition")?.addEventListener("click", () => {
     // x = 0 才是停靠位（右下角），y 置 null = 交回挂件自己算默认高度
     // （不写死，免得换尺寸档之后对不上）
-    patchPetConfig((current) => chrome.storage.local.set({ interfacePet: Object.assign({}, current, { x: 0, y: null }) }));
+    patchPetConfig((current) => {
+      const next = Object.assign({}, current, { x: 0, y: null });
+      if (petConfigEquals(current, next)) return undefined; // 已经在默认位 = 不写
+      return chrome.storage.local.set({ interfacePet: next });
+    });
   });
 
   const search = $("settingsSearch");

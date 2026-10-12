@@ -71,6 +71,10 @@
           <span class="nav-icon" data-icon="chart"></span>
           <span class="nav-text" data-i18n="数据统计">数据统计</span>
         </button>
+        <button type="button" class="nav-item" data-group="pet">
+          <span class="nav-icon" data-icon="user"></span>
+          <span class="nav-text" data-i18n="宠物">宠物</span>
+        </button>
       </nav>
     </aside>
 
@@ -232,6 +236,15 @@
             <button type="button" class="button button-quiet" id="openStats" data-i18n="点击查看最近收藏统计">点击查看最近收藏统计</button>
           </div>
         </div>
+      </section>
+
+      <!-- V1.5.4：宠物挂件从「数据统计」卡里独立成一组。挂件右键菜单的「宠物设置」
+           会用 settings.html#pet 打开本页 —— hash 里的 pet 就是这张卡的 data-group，
+           两处必须一起改（settings.js 的 focusGroupFromHash 按 data-group 找卡）。
+           这一卡暂时没有 card-lead 那一句：新句子要进 locales/，而本次改动不许动词典，
+           等词条补上再照别的卡补一句。 -->
+      <section class="settings-card" id="group-pet" data-group="pet">
+        <h2 data-i18n="宠物">宠物</h2>
 
         <div class="setting-row">
           <div class="setting-row-text">

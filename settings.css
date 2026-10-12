@@ -242,6 +242,10 @@
 /* 搜索命中那一行的短暂高亮，1.5s 后由 settings.js 摘掉 */
 .setting-row.row-flash { border-radius: var(--r-sm); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-ring); }
 
+/* 挂件右键菜单的「宠物设置」带 #pet 跳进来时，整组卡片的高亮（2.6s 后由 settings.js 摘掉）。
+   同一个品牌色，但落在卡片自己的边框上：卡片比一行大得多，铺满底色会把内容压住。 */
+.settings-card.group-flash { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+
 /* 页脚说明也做成一张卡：铺了背景图以后，凡是贴在卡片外的文字都会直接压在照片上，
    滚动时更是糊在照片里。要出现在页面上的文字，就得先有自己的一层底色。 */
 .settings-foot {
