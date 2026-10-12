@@ -236,10 +236,42 @@
         <div class="setting-row">
           <div class="setting-row-text">
             <p class="setting-row-title" data-i18n="宠物挂件">宠物挂件</p>
-            <p class="setting-row-desc" data-i18n="收藏库右下角的一只小鲸鱼，点一下会说句话。">收藏库右下角的一只小鲸鱼，点一下会说句话。</p>
+            <p class="setting-row-desc" data-i18n="收藏库右下角的一只像素小猫，点一下会说句话，按住可以拖到别处。">收藏库右下角的一只像素小猫，点一下会说句话，按住可以拖到别处。</p>
           </div>
           <div class="setting-row-control">
             <button type="button" class="toggle-switch" id="petToggle" aria-pressed="true" aria-label="宠物挂件" data-i18n-aria="宠物挂件"><span></span></button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="宠物大小">宠物大小</p>
+            <p class="setting-row-desc" data-i18n="四档可选，数字越大猫越大。都是像素画逻辑分辨率的整数倍，放大也不会发虚。">四档可选，数字越大猫越大。都是像素画逻辑分辨率的整数倍，放大也不会发虚。</p>
+          </div>
+          <div class="setting-row-control">
+            <div class="segmented" role="group" id="petSizeGroup" data-i18n-aria="宠物大小" aria-label="宠物大小">
+              <button type="button" class="segmented-button" data-pet-size="96" aria-pressed="false" title="小" data-i18n-title="小">96px</button>
+              <button type="button" class="segmented-button" data-pet-size="144" aria-pressed="false" title="中" data-i18n-title="中">144px</button>
+              <button type="button" class="segmented-button" data-pet-size="192" aria-pressed="false" title="大" data-i18n-title="大">192px</button>
+              <button type="button" class="segmented-button" data-pet-size="240" aria-pressed="false" title="特大" data-i18n-title="特大">240px</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="宠物位置">宠物位置</p>
+            <p class="setting-row-desc" data-i18n="也可以直接在收藏库里拖动小猫，或右键它打开菜单。">也可以直接在收藏库里拖动小猫，或右键它打开菜单。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="petResetPosition" data-i18n="重置位置">重置位置</button>
+          </div>
+        </div>
+
+        <div class="setting-row" id="petAnimationRow">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="看不到宠物动画？">看不到宠物动画？</p>
+            <p class="setting-row-desc" data-i18n="若看不到动画效果，请在 Windows → 辅助功能 → 视觉效果里开启「动画效果」；浏览器开启「减少动态效果」时，宠物会安静地待着不动。">若看不到动画效果，请在 Windows → 辅助功能 → 视觉效果里开启「动画效果」；浏览器开启「减少动态效果」时，宠物会安静地待着不动。</p>
           </div>
         </div>
       </section>

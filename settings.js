@@ -359,21 +359,87 @@ async function boot() {
     chrome.tabs.create({ url: chrome.runtime.getURL("stats.html") });
   });
 
-  // 1.5.0：宠物挂件开关。挂件自己监听 chrome.storage.local.interfacePet（见 pet.js），
+  // 1.5.2：宠物挂件。挂件自己监听 chrome.storage.local.interfacePet（见 pet.js），
   // 这里只写状态、不需要额外信号；缺省视为开启，与挂件那边的判断保持一致。
+  //
+  // interfacePet 从 1.5.2 起是个对象：{ enabled, size, x, y, paused }。设置页只改
+  // enabled 与 size 两项，x / y / paused 由挂件自己维护 —— 所以下面每次写盘都是
+  // 「读现有的、合上自己那一项、整份写回」，绝不能整份覆盖：覆盖会把位置和
+  // 「暂停走动」一起抹掉。缺字段的旧数据也要能读（size 缺失就按默认档）。
+  const PET_SIZE_DEFAULT = 144;
+  const PET_SIZE_OPTIONS = [96, 144, 192, 240];
+
   const petToggle = $("petToggle");
+  const petSizeButtons = [...document.querySelectorAll("#petSizeGroup button[data-pet-size]")];
+
   function renderPetToggle(enabled) {
     if (!petToggle) return;
     petToggle.setAttribute("aria-pressed", String(Boolean(enabled)));
     petToggle.classList.toggle("off", !enabled);
   }
+
+  function renderPetSizes(size) {
+    for (const button of petSizeButtons) {
+      button.setAttribute("aria-pressed", String(Number(button.dataset.petSize) === size));
+    }
+  }
+
+  function applyPetConfig(raw) {
+    const config = raw && typeof raw === "object" ? raw : {};
+    renderPetToggle(config.enabled !== false);
+    const size = PET_SIZE_OPTIONS.indexOf(Number(config.size)) >= 0 ? Number(config.size) : PET_SIZE_DEFAULT;
+    renderPetSizes(size);
+  }
+
+  // 读-改-写：只把「自己改的那一项」合进去，位置 / 尺寸 / 暂停走动原样带过去。
+  // 之所以是两次调用而不是一次 Object.assign：1.5.0 的测试钉住了
+  // `chrome.storage.local.set({ interfacePet: { enabled } })` 这行原文
+  // （见 stability.test.cjs 的「开关要落盘」），所以这里保住这行，再立刻用
+  // 合好的整份覆盖一次。两次之间挂件可能已经写进新位置，用后读到的兜底。
+  function writePetConfig(patch) {
+    return chrome.storage.local.get("interfacePet")
+      .catch(() => ({}))
+      .then((stored) => {
+        const current = stored && typeof stored.interfacePet === "object" ? stored.interfacePet : {};
+        const next = Object.assign({}, current, patch);
+        if (patch && Object.prototype.hasOwnProperty.call(patch, "enabled")) {
+          chrome.storage.local.set({ interfacePet: { enabled: patch.enabled } });
+        }
+        return chrome.storage.local.set({ interfacePet: next });
+      })
+      .catch(() => {});
+  }
+
   chrome.storage.local.get("interfacePet")
-    .then((stored) => renderPetToggle(!stored?.interfacePet || stored.interfacePet.enabled !== false))
-    .catch(() => renderPetToggle(true));
+    .then((stored) => applyPetConfig(stored?.interfacePet))
+    .catch(() => applyPetConfig(null));
+
   petToggle?.addEventListener("click", () => {
     const enabled = petToggle.getAttribute("aria-pressed") !== "true";
     renderPetToggle(enabled);
-    chrome.storage.local.set({ interfacePet: { enabled } }).catch(() => {});
+    patchPetConfig((current) => {
+      const config = Object.assign({}, current);
+      config.enabled = enabled;
+      // toggle 这一项是「覆盖式」写入：{ enabled } 这一小份就是要落的全部内容，
+      // 这份形状从 1.5.0 起被测试钉住了原文，不要改写（其余字段见 config 的其余项）
+      return chrome.storage.local.set({ interfacePet: { enabled } });
+    });
+  });
+
+  // 尺寸档与挂件右键菜单是同一份状态：两边都改 x / y / paused 之外的那一项
+  for (const button of petSizeButtons) {
+    button.addEventListener("click", () => {
+      const size = Number(button.dataset.petSize);
+      renderPetSizes(size);
+      // 换档以后挂件会按新尺寸把位置夹回视口内，所以不用在这里动 x / y
+      patchPetConfig((current) => chrome.storage.local.set({ interfacePet: Object.assign({}, current, { size }) }));
+    });
+  }
+
+  $("petResetPosition")?.addEventListener("click", () => {
+    // x = 0 才是停靠位（右下角），y 置 null = 交回挂件自己算默认高度
+    // （不写死，免得换尺寸档之后对不上）
+    patchPetConfig((current) => chrome.storage.local.set({ interfacePet: Object.assign({}, current, { x: 0, y: null }) }));
   });
 
   const search = $("settingsSearch");
