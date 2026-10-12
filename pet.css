@@ -15,7 +15,9 @@
    3. 动画分四类，各占一个元素，谁也不覆盖谁 —— 别把它们合到同一个元素上：
       换帧（steps 逐帧，挂在 .bca-pet-sprite 的 background-position 上）、
       位移（transform 过渡，挂在 .bca-pet-dock 上）、
-      坐下的压扁（transform 过渡，挂在 .bca-pet-sprite 上，由 .is-sit-down 触发）、
+      坐/站那一下的骨架弹动（一次性关键帧，挂在 .bca-pet-sprite 的 transform 上，
+      由 .is-sit-down / .is-sit-up 触发；**段尾回到 none，绝不常驻** ——
+      V1.5.4 曾把它写成常驻的 transform，于是从坐下到睡醒整段都被压扁 6%），
       按下的弹性（关键帧，挂在 .bca-pet 上）。
       末尾统一切断，尊重系统的「减少动态效果」（只掐动画，状态机照旧按时间走）。
    4. 精灵图 pet-cat.png 是 6 列 × 5 行的帧表，**每格 48×48 逻辑像素**（V1.5.2 重做：
@@ -134,16 +136,35 @@
   animation: none;
 }
 
+/* 保持坐姿（hold）的那条规则**在下面** —— 特意摆在 blink 与 drag 之间，
+   靠源码顺序决定它压过谁、让给谁。为什么要挪到那儿、选择器为什么必须写成
+   .bca-pet.is-sit-hold，写在规则自己的注释里（搜索 bca-pet-hold）。 */
+
 /* —— 坐下 / 站起来（V1.5.4，用户第 2 条）——
-   精灵表里**没有**真的「坐下 / 站起来」过渡帧（row0 / row3 的那几格是近乎重复的姿势），
-   所以这里绝不伪造帧：坐下 = 整只猫下压 2px + 轻微压扁（横向 1.03、纵向 .94），
-   站起来 = 把 .is-sit-down 摘掉，**同一段过渡反向播放**。
+   精灵表里**没有**「坐下 / 站起来」的中间过渡帧，所以这里绝不伪造帧，
+   只允许 ≤2% 的缩放 / 极轻的整体位移，而且必须是**一次性**动画：
+   段尾自动回到 transform: none（animation-fill-mode 默认 none），
+   于是 sitDown / hold / sleep 的稳定形态一律不带 transform。
+   为什么必须是一次性的：V1.5.4 这里是常驻的
+   `.is-sit-down { transform: translateY(2px) scale(1.03, .94) }`，
+   而 .is-sit-down 从 sitDown 一直挂到 standUp（保持 4–8s + 睡觉 10–30s），
+   所以整段坐姿都被永久压扁 6% —— 用户报的「被压缩的一帧」就是它。
    时长与 JS 共用一个源（--bca-sit-ms，pet.js 在 build() 里写入 SIT_MS），
-   它等这么久才进下一段，所以不会出现「过渡还在滑、状态已经切走」。
-   过渡属性挂在 .bca-pet-sprite 上：与 .bca-pet-dock 的位移过渡、
+   它等这么久才进下一段，所以不会出现「动画还在跑、状态已经切走」。
+   动画挂在 .bca-pet-sprite 上：与 .bca-pet-dock 的位移过渡、
    .bca-pet 的按压弹性各占一个元素，互不覆盖。 */
+/* 缓动**绝不裸写** var(--ease)：--ease 只定义在 library 页的 theme.css:86，
+   而宠物是挂在**任意网页**上的内容脚本，那些页面里没有 theme.css —— 裸 var(--ease)
+   会让整条 animation 简写变成「计算值无效」（IACVT），animation-name 直接塌成
+   none、动画根本不跑（V1.5.4 的 bca-pet-pop / bca-pet-bubble-in 就是这样在库页
+   之外哑掉的，本次只在自己这两条上带兜底，不动别人那三条）。
+   var() 的第二个参数就是兜底：库页仍用主题那条曲线，别处用同一个值。 */
 .bca-pet.is-sit-down .bca-pet-sprite {
-  transform: translateY(2px) scale(1.03, .94);
+  animation: bca-pet-sit-down var(--bca-sit-ms, 360ms) var(--ease, cubic-bezier(.2, .8, .2, 1)) 1;
+}
+
+.bca-pet.is-sit-up .bca-pet-sprite {
+  animation: bca-pet-sit-up var(--bca-sit-ms, 360ms) var(--ease, cubic-bezier(.2, .8, .2, 1)) 1;
 }
 
 /* 眨眼（blink）：一次调用 = 一次眨眼，整段 150ms（时长由 JS 通过 --bca-blink-ms 写进来，
@@ -159,6 +180,47 @@
   animation-iteration-count: 1;
 }
 
+/* 保持坐姿（hold）：切到 row3 那一组**真坐姿帧** —— 这一段才是屏幕上「坐着」的样子。
+   两件事一起修掉「坐下一张被压缩的静止图」：
+   a) 换格。V1.5.4 的保持相位什么都不做，于是它一直画 row0 第 1 格 —— 那一格就是待机格，
+      所以「坐下」在画面上等于什么都没发生；
+   b) 落座那一下做成一次性动画、段尾回到 none（见上面的 .is-sit-down）。
+   row3 有像素的是**第 1–4 格**（x = 0% / 20% / 40% / 60%），第 5、6 格实测非透明像素为 0
+   —— V1.5.2 的 sit 就写在 80% 75%（= 第 5 格，空格）上，整只猫一坐下就透明。
+   「row0 / row3 那几格是近乎重复的姿势」这条 V1.5.4 的理由**实测不成立**：
+   row3 四帧两两的平均绝对差是 39.6 / 40.7 / 69.9 / 77.6，比 row0（20.2–30.3）
+   和 row4（17.1–31.4）都大，四帧是四个真的不同的坐姿（看尾巴与身体的收缩）。
+
+   —— 权重必须数到后代那一级 ——
+   整条选择器是三段，缺一段都要算错：
+       .bca-pet (0,1,0) + 状态或类 (0,1,0) + .bca-pet-sprite (0,1,0) = **(0,3,0)**
+   所以 sit / is-sit-down / is-sit-up / blink / 本规则 / drag / sleep
+   **七条一模一样都是 (0,3,0)**，谁画哪一格只由源码顺序决定，一条链看得清：
+       sit < is-sit-down < is-sit-up < blink < 本规则 < drag < sleep
+   攥在 blink 之后、drag 之前这一个位置，能同时拿到四件事：
+     · 压过 .is-sit-down —— 那个类从 sitDown 一直挂到 standUp，它自己那条
+       bca-pet-sit-down 是一次性动画；不压过它，保持相位就换不了帧；
+     · 压过 [data-bca-state="sit"] —— 保持相位期间属性值一直是 sit（V1.5.4 如此），
+        它那条把帧钉死在 0% 0%；压不过它，整段保持就还是待机那一格；
+     · 让给 drag —— 拖的时候要露 row0 那一格，绝不能是空帧；
+     · 让给 sleep —— 这个类在进 sleep 之前已由 JS 摘掉，sleep 又排在本规则之后。
+   **踩过的坑（第一版就栽在这里）**：第一版为了「既压过 .is-sit-down、又不压
+   drag/sleep」把这条写成 .bca-pet:where(.is-sit-hold) .bca-pet-sprite，以为
+   :where() 把它降到 (0,2,0) 就能靠源码顺序跟人平起平坐。**算错了**：:where()
+   只把**它自己括起来的那一段**清零，第一段的 .bca-pet 仍是 (0,1,0)，再加上后代的
+   .bca-pet-sprite 一共也就是 (0,2,0)，反而**低于**上面五条的 (0,3,0)。
+   实测症状：类明明挂上了（class="bca-pet is-sit-down is-sit-hold"），计算值却
+   纹丝不动 —— background-position 仍是 0% 0%、animation-name 仍是 none，
+   hold 整段画到的格子只有 {"0,0"}。修法就是老实写回 (0,3,0)，靠源码顺序排座次。
+
+   为什么这个类在保持相位之外也留着、不靠属性兜底：坐下做完、拖动松手、暂停走动、
+   重置位置这些**落点**路径全都只写 data-bca-state="sit"，类还挂着才能让它们落回
+   「坐姿」而不是站姿。 */
+.bca-pet.is-sit-hold .bca-pet-sprite {
+  background-position: 0% 75%;
+  animation: bca-pet-hold 1600ms steps(1, end) 1 forwards;
+}
+
 /* 拖动（drag）：按住 / 拖动中仍然露 row0 第 1 格（有像素的一格）。
    拖动绝不允许换成空帧 —— 「一拖就消失」有一半就是拖到空帧上。 */
 .bca-pet[data-bca-state="drag"] .bca-pet-sprite {
@@ -166,12 +228,15 @@
   animation: none;
 }
 
-/* 走路（walkRight / walkLeft）与另一组坐姿（sitAlt）在 V1.5.4 随「移除走路」一起删掉了
-   （用户第 1 条）：JS 再也不发这三个状态名，留着只会让「状态表」和代码对不上。
+/* 走路（walkRight / walkLeft）与另一个状态名 sitAlt 在 V1.5.4 随「移除走路」一起删掉了
+   （用户第 1 条）：JS 再也不发这两个名字，留着只会让「状态表」和代码对不上。
    它们是当时**唯二**由 JS 写行内 background-position 的状态 —— 那套「就地写行内帧」
    的机制也一并没了，现在没有代码能越过这份样式表改帧。要恢复走路：从 git 历史取回
-   pet.js 的 stepPx / rafId / walkLoop / setFrame，并把下面两段规则与
-   @keyframes bca-pet-sit 一起搬回来（注意行位：row1 = 25%、row2 = 50%、row3 = 75%）。 */
+   pet.js 的 stepPx / rafId / walkLoop / setFrame，并把那两段规则搬回来
+   （注意行位：row1 = 25%、row2 = 50%）。
+   注意 row3 那一组坐姿**已经回来了**：不是用 sitAlt 这个名字，而是「保持坐姿」相位
+   （.is-sit-hold + @keyframes bca-pet-hold，见上面）—— 所以不要再按「sitAlt 已删除」
+   去把 row3 的帧当成没人用的素材。 */
 
 /* 睡觉（sleep）：row4 四帧，呼吸比行走慢一档（2.4s 一轮） */
 .bca-pet[data-bca-state="sleep"] .bca-pet-sprite {
@@ -185,6 +250,44 @@
    落到 6 列图上每帧都停两格之间，屏幕上就是整只猫在横着滑 —— 用户报的
    「走动时是直接平移、没有动画交替」。要么按 20% 重写、要么交给 JS，
    V1.5.3 选后者；V1.5.4 走路整段移除，这段历史只留在这里当参考。 */
+
+/* 坐下去那一下：从 none 出发、回到 none。峰值只有 2px 位移 + 2% 缩放（1.02 / .98）。
+   --ease = cubic-bezier(.2, .8, .2, 1)，两个控制点的 y 都 ≤ 1 不会过冲，
+   所以 2% 是硬上限，不会「弹过头」。fill 默认 none —— 段尾确实回到 none。
+   **88% 处再钉一个 none**：动画时长与 SIT_MS 共用一个值，相位正好在 360ms 切走，
+   采到的最后一个样本会落在 99.9% 上（实测 matrix(0.999995, …, -0.00047)）——
+   屏幕上完全看不出，但「进入下一相位前必须回到 none」就成了空话。
+   加一段 88%→100% 恒为 none，最后 40ms 起计算值就是字面量 none。 */
+@keyframes bca-pet-sit-down {
+  0%   { transform: none; }
+  40%  { transform: translateY(2px) scale(1.02, .98); }
+  88%  { transform: none; }
+  100% { transform: none; }
+}
+
+/* 站起来那一下：同一副骨架反向弹一下，同样从 none 回到 none、同样 ≤2%。 */
+@keyframes bca-pet-sit-up {
+  0%   { transform: none; }
+  40%  { transform: translateY(-2px) scale(.98, 1.02); }
+  88%  { transform: none; }
+  100% { transform: none; }
+}
+
+/* 保持坐姿（row3 的第 1–4 格）：一次性把姿势一级一级放下来，然后停在最后一格。
+   1600ms ÷ 4 段 = 每格 400ms，steps(1, end) 保证每段停在段首、中间不插值。
+   时长刻意写死在这里而不跟 JS 共用一个值：JS 那边只关心「保持 4–8s」（SIT_HOLD_MIN），
+   1600ms 远小于它，所以这段落座动作一定在保持相位里跑完，不需要两边对齐。
+   **刻意不做无限循环**：row3 里 c3 → c0 是最大的一跳（实测 77.6），
+   循环播放会变成「趴下去又猛地坐直」，比原来那张静止图还怪；
+   停在 c3（那副「揣着手趴好」的样子）才是「坐定了」。
+   fill: forwards 只钉住 background-position，不碰 transform —— 稳定形态仍然是 none。 */
+@keyframes bca-pet-hold {
+  0%   { background-position: 0% 75%; }
+  25%  { background-position: 20% 75%; }
+  50%  { background-position: 40% 75%; }
+  75%  { background-position: 60% 75%; }
+  100% { background-position: 60% 75%; }
+}
 
 /* 睡觉（row4 的前 4 格）：四帧，整体放慢到 2.4s 一轮 */
 @keyframes bca-pet-sleep {
@@ -344,7 +447,7 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 32%, transparent);
 }
 
-/* 尊重系统的「减少动态效果」：换帧、位移、气泡渐入、按下的 Q 弹、坐下的压扁过渡全部关掉
+/* 尊重系统的「减少动态效果」：换帧、位移、气泡渐入、按下的 Q 弹、坐/站那两下全部关掉
    （精灵就停在当前状态帧上），只保留 hover / active 那一层静态反馈。
    位置仍然会跟着拖动即时更新 —— 那是指针的直接反馈，不是动画。
    V1.5.4 的边界很干净：这里只管「不播动画」，**状态本身照旧按时间推进**
@@ -356,17 +459,32 @@
     transition: none;
   }
 
-  /* V1.5.5：坐下的「压一下」是一段 transition。transition 关掉之后这里不会自己动，
-     但把目标值写死更干脆：reduce 下坐/站这一对**同一个样子**，不会有「压下去了
-     再也弹不回来」这种残留形态（真机报的「卡在坐姿那一帧」里最难解释的就是它）。 */
-  .bca-pet.is-sit-down .bca-pet-sprite {
-    transform: none;
-  }
-
   .bca-pet-sprite,
   .bca-pet.is-popping,
   .bca-pet-bubble:not([hidden]) {
     animation: none;
+  }
+
+  /* 保持相位（hold）在 reduce 下不动：只留 row3 第 1 格那一个静止坐姿
+     （与 V1.5.4 的 reduce 行为一致 —— 那时也是「一动不动」，只是画的是待机格）。
+     这一条**只写 .is-sit-hold**：这个类只在保持相位存在，进 sleep 前就被 JS 摘掉，
+     所以它掐不到任何别的相位。 */
+  .bca-pet.is-sit-hold .bca-pet-sprite {
+    animation: none;
+    transform: none;
+  }
+
+  /* 坐/站那两下（≤2% 的形变）在 reduce 下改成「全程 none」的空动画。
+     **不能**写成 `.bca-pet.is-sit-down .bca-pet-sprite { animation: none }`：
+     .is-sit-down 从 sitDown 一直挂到 standUp，整段 sleep 都带着它，而本块在文件最末、
+     选择器同样是 (0,3,0)，会顺手把 sleep 的换帧一起压掉 —— 实测就是这样：reduce 组
+     sleep 只剩 {"4,0"} 一格冻了一整段，而 V1.5.4 的 reduce 下 sleep 是照常 4 格轮播的。
+     重定义关键帧只影响这两个动画名本身，不碰任何状态规则。 */
+  @keyframes bca-pet-sit-down {
+    0%, 100% { transform: none; }
+  }
+  @keyframes bca-pet-sit-up {
+    0%, 100% { transform: none; }
   }
 
   .bca-pet.is-pressing {

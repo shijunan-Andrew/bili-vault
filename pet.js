@@ -16,8 +16,8 @@
       宠物自身的颜色画在 pet-cat.png 里，CSS 不参与上色。
    3. 不发网络请求、不加权限、不引入外部资源：图形是随包发布的位图精灵，
       换帧是 CSS 的 steps() 逐帧（见 pet.css 的 .bca-pet-sprite 与几个 @keyframes），
-      「坐下 / 站起来」是一段 CSS transform 过渡（.is-sit-down）——两边都不碰对方的属性
-      （换帧只动 background-position，坐姿只动 transform）。
+      「坐下 / 站起来」各是一段**一次性**的 CSS transform 动画（.is-sit-down / .is-sit-up）
+      ——两边都不碰对方的属性（换帧只动 background-position，坐姿只动 transform）。
    4. 自启，library.js 一个字都不用改。外层容器 #bcaPet，气泡 #bcaPetBubble，
       宠物本体是 <button type="button" aria-label="宠物">。
 
@@ -27,26 +27,31 @@
    ├────────────┼──────────────────────┼───────────┼────────────────┼──────────────┤
    │ 待机 blink │ 每轮循环的起点        │ 4–8s 窗口 │ row0 第1格     │ 不动         │
    │            │ 窗口内随机眨 1–3 次   │ 每次180ms │ 眨眼=第2格     │              │
-   │ sitDown    │ 待机窗口走完          │ 360ms     │ row0 第1格     │ 下压 3px +   │
-   │            │                      │（CSS 过渡）│ 静止           │ 压扁 3%      │
-   │ hold       │ 坐下过渡结束          │ 4–8s      │ row0 第1格     │ 保持压着     │
-   │ sleep      │ 保持结束（过了不应期）│ 10–30s    │ row4 第1–4 帧  │ 保持压着     │
-   │ standUp    │ 睡够时长 / 被点醒     │ 360ms     │ row0 第1格     │ 同一段过渡   │
-   │            │                      │（CSS 过渡）│ 静止           │ 反向播放     │
+   │ sitDown    │ 待机窗口走完          │ 360ms     │ row0 第1格     │ 压一下：     │
+   │            │                      │（CSS 动画）│ 静止           │ 2px / 2%     │
+   │ hold       │ 坐下过渡结束          │ 4–8s      │ row3 第1–4 帧  │ 落座后 none  │
+   │ sleep      │ 保持结束（过了不应期）│ 10–30s    │ row4 第1–4 帧  │ none         │
+   │ standUp    │ 睡够时长 / 被点醒     │ 360ms     │ row0 第1格     │ 弹一下：     │
+   │            │                      │（CSS 动画）│ 静止           │ 2px / 2%     │
    └────────────┴──────────────────────┴───────────┴────────────────┴──────────────┘
    顺序是**写死的**，没有随机轮盘：待机 → 坐下 → 保持 → 睡觉 → 站起来 → 待机 ……
    眨眼不再是独立一档，而是待机窗口里的高频小动作（用户第 1 条只留三个动作）。
-   「坐下 / 站起来」在精灵表里**没有真实过渡帧**（row0/row3 的几格是近乎重复的姿势），
-   所以只用一段 transform 过渡表达：整体下压 3px + 轻微压扁；站起来就是把同一段
-   过渡反向弹回。时长来自 --bca-sit-ms（JS 写、CSS 读，和 --bca-blink-ms 一个规矩）。
+   「坐下 / 站起来」在精灵表里**没有中间过渡帧**，所以只用 ≤2% 的缩放 + 2px 的整体位移
+   表达那一下：动画是**一次性**的，段尾自动回到 transform: none（fill 默认 none），
+   于是 sitDown / hold / sleep 的**稳定形态一律不带 transform**。
+   时长来自 --bca-sit-ms（JS 写、CSS 读，和 --bca-blink-ms 一个规矩）。
+   注意「保持坐姿」不再画 row0 第 1 格：那一格就是待机格，保持相位画它 = 一动不动；
+   现在保持相位画 row3 的四帧真坐姿（见 pet.css 的 .is-sit-hold），
+   避开 row3 的第 5、6 格 —— 那两格实测非透明像素为 0（空格）。
    走路（row1/row2）整段移除：位移、rAF、步态常量、撞边回头一概没有了，
    猫永远停在用户放下的位置，水平方向一个像素都不动。
    气泡自己会走：出现后 5s 自动收起，每次点击重新计时（用户第 4 条）。
 
    状态与 CSS 的分工：JS 管「现在是哪个阶段、要不要挪位置」，
    把状态名写成 data-bca-state（sit / blink / sleep / drag），换帧由 pet.css 按属性
-   选择器接；坐姿是按钮上的 .is-sit-down 类，位移动画也在 CSS（transform + transition），
-   两边都不碰对方的属性。
+   选择器接；坐姿相关的是按钮上的三个类 —— .is-sit-down（坐下那一下）、
+   .is-sit-up（站起来那一下）、.is-sit-hold（保持相位换成 row3 的真坐姿），
+   动画也全在 CSS，两边都不碰对方的属性。
    ========================================================================== */
 (function attachPet(global) {
   "use strict";
@@ -66,9 +71,22 @@
   const MENU_LABEL_CLASS = "bca-pet-menu-label";
   const PRESS_CLASS = "is-pressing";
   const DRAGGING_CLASS = "is-dragging";
-  // 「坐下去」这个姿势：加在按钮上，pet.css 用它把精灵压下去一点点。
-  // 站起来 = 把这个类摘掉，同一段 transition 反向播放（用户的美术现实那一条）。
+  // 「坐下去 / 站起来」这两下：加在按钮上，pet.css 各接一段**一次性**动画
+  // （压一下 bca-pet-sit-down / 弹一下 bca-pet-sit-up，时长都是 --bca-sit-ms）。
+  // V1.5.4 这里是一段常驻 transform + transition，而 .is-sit-down 从 sitDown 一直挂到
+  // standUp（最长 31s+），于是整段坐姿都是「同一格被永久压扁 6%」——这就是用户报的
+  // 「坐下一张被压缩的静止图」。现在两个类各自只在它那一段里存在，动画段尾自动回到
+  // transform: none（animation-fill-mode 默认 none），任何相位的稳定形态都不带 transform。
   const SIT_CLASS = "is-sit-down";
+  const RISE_CLASS = "is-sit-up";
+  // 「保持坐姿」换帧用：加在按钮上，pet.css 把精灵切到 row3 那组**真坐姿帧**。
+  // 为什么用「另一个类」而不再往 data-bca-state 里加一个值：那个属性是**所有落点**的
+  // 唯一事实来源（坐下做完、拖动松手、暂停走动、重置位置都写它），多一个值就意味着
+  // 每一条落点路径都得记得写对，漏一条就会「坐着的时候拖一下、猫就变回站姿」。
+  // 类不一样：它只由相位切换开合，上面那些落点路径谁都不用知道它存在。
+  // 注意特异性 —— pet.css 那边用 :where() 把它压回 (0,2,0)，与 sit / drag / sleep 同级，
+  // 靠源码顺序定胜负；直接写 .bca-pet.is-sit-hold 会是 (0,3,0)，反过来压过睡觉那条。
+  const HOLD_CLASS = "is-sit-hold";
   const STATE_ATTR = "data-bca-state";
 
   const PET_KEY = "interfacePet";
@@ -108,8 +126,9 @@
   // 一个窗口眨 1–3 次 —— 场面上仍然是最常见的动作（用户第 5 条）。
   const BLINK_GAP_MIN = 1200;
   const BLINK_GAP_MAX = 2600;
-  // 坐下 / 站起来是一段 CSS transition（用户要求 300–400ms），这里写进 --bca-sit-ms：
-  // 状态机用它算「过渡什么时候结束」，CSS 用它当动画时长，一个值两处用。
+  // 坐下 / 站起来各是一段**一次性**的 CSS transform 动画（用户要求 300–400ms），
+  // 这里写进 --bca-sit-ms：状态机用它算「这一段什么时候结束」，CSS 用它当动画时长，
+  // 一个值两处用。动画段尾自己回到 transform: none，所以它同时也是「稳定形态」的保证。
   const SIT_MS = 360;
   // 刚被吵醒后的不应期（用户第 3 条）：这段时间内即使走到「睡觉」那一步也先坐一会儿，
   // 免得刚醒就立刻又睡。
@@ -432,11 +451,27 @@
     if (button) button.setAttribute(STATE_ATTR, name);
   }
 
-  // 坐姿：往按钮上加 / 摘 .is-sit-down，pet.css 用一段 transition 把精灵压下去再弹回来。
-  // 坐下与站起来就是同一段过渡的两个方向 —— 精灵表里没有真的过渡帧，也不伪造。
+  // 坐姿：往按钮上加 / 摘 .is-sit-down。它现在只负责「坐下去那一下」的一次性动画
+  // （pet.css 的 bca-pet-sit-down，段尾自动回 none），不再是常驻的压扁形态。
+  // 站起来那一下走 .is-sit-up（bca-pet-sit-up），两个方向各一段，互不覆盖。
+  // 精灵表里没有真的过渡帧，也不伪造 —— 骨架的下降感只允许 ≤2% 的缩放 / 极轻位移。
   function setPose(down) {
     if (!button) return;
     button.classList.toggle(SIT_CLASS, Boolean(down));
+  }
+
+  function setRising(on) {
+    if (!button) return;
+    button.classList.toggle(RISE_CLASS, Boolean(on));
+  }
+
+  // 「保持坐姿」用 row3 那组真坐姿帧（pet.css 的 .is-sit-hold 规则 + @keyframes bca-pet-hold）。
+  // 只在 hold 相位开着：睡觉要回 row4、站起来要回 row0，都靠摘掉这个类。
+  // 它同时也是「拖了一下猫」之后能坐回去的原因 —— 落点路径写 data-bca-state="sit"
+  // 的时候这个类还在，于是画出来的仍然是 row3 那张坐姿，不会闪回站姿。
+  function setHolding(on) {
+    if (!button) return;
+    button.classList.toggle(HOLD_CLASS, Boolean(on));
   }
 
   // 当前实际画出来的那一格（给 snapshot() 用）。
@@ -804,6 +839,8 @@
     if (!stateReady()) return;
     phase = "idle";
     setPose(false);
+    setRising(false);
+    setHolding(false);
     setState("sit");
     const startedAt = nowMs();
     const windowMs = randInt(IDLE_MIN, IDLE_MAX);
@@ -832,20 +869,29 @@
     nextTick();
   }
 
-  // 坐下：精灵表里没有真的过渡帧，就是一份 CSS transform 过渡（压下去），
-  // 过渡走完（SIT_MS，和 --bca-sit-ms 同一个值）开始「保持」。
+  // 坐下：画的是 row0 第 1 格（setState("sit")），同时起一段一次性的「压一下」
+  // （.is-sit-down → pet.css 的 bca-pet-sit-down，时长就是 SIT_MS）。
+  // 动画段尾自己回到 transform: none，所以「保持」的稳定形态不带任何 transform。
   function enterSitDown() {
     if (!stateReady()) return;
     phase = "sitDown";
     setState("sit");
+    setHolding(false);
+    setRising(false);
     setPose(true);
     after(SIT_MS, enterHold);
   }
 
   // 保持坐姿：坐下之后先坐一会儿（4–8s），然后再往睡觉走。
+  // 这一段才是屏幕上真正「坐着」的样子：状态机写下的 data-bca-state="hold"
+  // 就是 pet.css 切到 row3 那四帧真坐姿的开关（不需要额外的类）。
+  // V1.5.4 这里什么都不做，于是整个保持相位都画 row0 第 1 格（= 待机那一格），
+  // 再叠上一直没摘掉的 .is-sit-down 压扁，就是「坐下只有一张被压缩的静止图」。
   function enterHold() {
     if (!stateReady()) return;
     phase = "hold";
+    setRising(false);
+    setHolding(true);
     after(randInt(SIT_HOLD_MIN, SIT_HOLD_MAX), enterSleep);
   }
 
@@ -855,22 +901,29 @@
     if (!stateReady()) return;
     const wait = sleepReadyAt - nowMs();
     if (wait > 0) {
+      // 这一趟没进睡，相位仍然是 hold —— 坐姿类得留着，否则这几秒会闪回 row0 那一格。
       phase = "hold";
+      setHolding(true);
       after(wait + 60, enterSleep);
       return;
     }
     phase = "sleep";
     setState("sleep");
+    // row4 由 pet.css 的 [data-bca-state="sleep"] 那条规则负责，坐姿类必须摘掉。
+    setHolding(false);
     after(randInt(SLEEP_MIN, SLEEP_MAX), () => standUp(false));
   }
 
-  // 站起来 = 把 .is-sit-down 摘掉，同一段过渡反向播放；过渡走完回到待机。
+  // 站起来 = 先起一段一次性的「弹一下」（.is-sit-up → bca-pet-sit-up），段尾自动回 none；
+  // SIT_MS 之后回待机，待机入口再把这个类摘掉。
   // eager 会一路传进待机窗口：被叫醒时要把那一下眨眼尽快补上。
   function standUp(eager) {
     if (!stateReady()) return;
     phase = "standUp";
     setState("sit");
     setPose(false);
+    setHolding(false);
+    setRising(true);
     after(SIT_MS, () => enterIdle(Boolean(eager)));
   }
 
@@ -974,8 +1027,8 @@
     event.stopPropagation(); // 否则会被下面那条「点空白处收起」当场关掉
     pop();
 
-    // 用户第 3 条：点在正在睡觉的猫身上 = 唤醒它。站起来（把 .is-sit-down 反向弹回，
-    // 360ms）之后马上眨一下眼，再回到正常循环。不应期在 onPointerDown 里就已经设好了
+    // 用户第 3 条：点在正在睡觉的猫身上 = 唤醒它。站起来（播一次 .is-sit-up 的
+    // 「弹一下」，360ms）之后马上眨一下眼，再回到正常循环。不应期在 onPointerDown 里就已经设好了
     // （sleepReadyAt），所以它绝不会醒过来立刻又睡。
     if (wakeOnClick) {
       wakeOnClick = false;
@@ -1349,13 +1402,15 @@
     // CSS 的眨眼时长与 JS 的 BLINK_MS 共用一个值：两边各写各的就会出现
     // 「动画还在跑、状态已经切走」（V1.5.2 两边都是 1500ms 只是巧合，不是机制）。
     container.style.setProperty("--bca-blink-ms", BLINK_MS + "ms");
-    // 同理，坐下的过渡时长也只有这一个源：JS 等 SIT_MS 之后才进「保持」，
-    // CSS 用 --bca-sit-ms 做那 360ms 的 transform 过渡。两边不一致就会出现
-    // 「过渡还在滑、状态已经切走」（正是 V1.5.2 眨眼那个 bug 的形态）。
+    // 同理，坐/站那一下的时长也只有这一个源：JS 等 SIT_MS 之后才进「保持」，
+    // CSS 用 --bca-sit-ms 做那 360ms 的「压一下 / 弹一下」。两边不一致就会出现
+    // 「动画还在跑、状态已经切走」（正是 V1.5.2 眨眼那个 bug 的形态）。
     container.style.setProperty("--bca-sit-ms", SIT_MS + "ms");
     state = "idle";
     phase = "idle";
     setPose(false);
+    setRising(false);
+    setHolding(false);
     setState("sit");
     button.addEventListener("click", onButtonClick);
     button.addEventListener("contextmenu", onContextMenu);
@@ -1432,6 +1487,8 @@
     statsLoaded = true;
     phase = "idle";
     setPose(false);
+    setRising(false);
+    setHolding(false);
     setState("sit");
     applyVisibility();
     watchReducedMotion();
@@ -1479,7 +1536,12 @@
       rearmWait: Math.max(0, Math.round((rearmDueAt || 0) - nowMs())),
       // .is-sit-down 挂在按钮上（pet.css 的 `.bca-pet.is-sit-down .bca-pet-sprite`），
       // 所以这里必须读按钮 —— 读容器会永远是 false。
+      // 注意它的含义是「这一轮在坐着的整段时间里」（sitDown + hold + sleep 都为 true），
+      // 不是「这一刻正在播坐下那一下的动画」。
       pose: button ? button.classList.contains(SIT_CLASS) : null,
+      // 保持相位专用的坐姿类：为 true 时 pet.css 画的是 row3 那组真坐姿。
+      // 「坐下只有一张被压缩的静止图」那类故障，看这个比看 phase 更直接。
+      holding: button ? button.classList.contains(HOLD_CLASS) : null,
       stateWait: Math.max(0, Math.round((timerDueAt || 0) - nowMs())),
       // 气泡自动收起的剩余毫秒（0 = 没挂计时器）。用户第 4 条的「5 秒自动收起」
       // 只能靠这个字段量，光看 bubble: true 分不清「该收了没」。
