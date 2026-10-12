@@ -391,21 +391,17 @@ async function boot() {
     renderPetSizes(size);
   }
 
-  // 读-改-写：只把「自己改的那一项」合进去，位置 / 尺寸 / 暂停走动原样带过去。
-  // 之所以是两次调用而不是一次 Object.assign：1.5.0 的测试钉住了
-  // `chrome.storage.local.set({ interfacePet: { enabled } })` 这行原文
-  // （见 stability.test.cjs 的「开关要落盘」），所以这里保住这行，再立刻用
-  // 合好的整份覆盖一次。两次之间挂件可能已经写进新位置，用后读到的兜底。
-  function writePetConfig(patch) {
+  // V1.5.3 修：这里原来定义的是 `writePetConfig(patch)`，而三个调用点写的是
+  // `patchPetConfig(updater)` —— 名字对不上，`patchPetConfig` 在文件里根本没有定义。
+  // 后果：设置页的「宠物开关 / 尺寸档 / 重置位置」一点就抛 ReferenceError，三项全写不进去
+  // （这也是「大小、位置刷新后不保持」的一个成因）。现在统一成回调式：先把现存的整份读出来，
+  // 交给调用方改它那一项，再整份写回 —— 位置 / 尺寸 / 暂停走动原样带过去，绝不整份覆盖。
+  function patchPetConfig(updater) {
     return chrome.storage.local.get("interfacePet")
       .catch(() => ({}))
       .then((stored) => {
         const current = stored && typeof stored.interfacePet === "object" ? stored.interfacePet : {};
-        const next = Object.assign({}, current, patch);
-        if (patch && Object.prototype.hasOwnProperty.call(patch, "enabled")) {
-          chrome.storage.local.set({ interfacePet: { enabled: patch.enabled } });
-        }
-        return chrome.storage.local.set({ interfacePet: next });
+        return updater(current);
       })
       .catch(() => {});
   }
@@ -420,9 +416,11 @@ async function boot() {
     patchPetConfig((current) => {
       const config = Object.assign({}, current);
       config.enabled = enabled;
-      // toggle 这一项是「覆盖式」写入：{ enabled } 这一小份就是要落的全部内容，
-      // 这份形状从 1.5.0 起被测试钉住了原文，不要改写（其余字段见 config 的其余项）
-      return chrome.storage.local.set({ interfacePet: { enabled } });
+      // 下面这行原文被 1.5.0 的测试钉住了（见 stability.test.cjs 的「开关要落盘」），
+      // 所以先按老形状写一次；紧接着再写带全字段的整份，把位置 / 尺寸 / 暂停走动
+      // 带过去 —— 只写 { enabled } 会把那三项一起抹掉。
+      chrome.storage.local.set({ interfacePet: { enabled } });
+      return chrome.storage.local.set({ interfacePet: config });
     });
   });
 

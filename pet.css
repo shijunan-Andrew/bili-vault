@@ -18,12 +18,32 @@
       末尾统一切断，尊重系统的「减少动态效果」。
    4. 精灵图 pet-cat.png 是 6 列 × 5 行的帧表，**每格 48×48 逻辑像素**（V1.5.2 重做：
       从原图按统一比例 LANCZOS 降采样到 48 见方，保留 RGBA、不做调色板量化）：
-      图总尺寸 288×240。row0 坐姿 4 帧（眨眼）、row1 向右走 6 帧、row2 向左走 6 帧、
-      row3 另一组坐姿 4 帧、row4 睡觉 4 帧。row0 / row3 / row4 的第 5、6 格是空的，
-      所以那几行动画只走到第 4 帧 —— 多走一格就会露白（.bca-pet-sprite 下面
-      用 :nth-child(n+5) 把这两格挡掉了）。
+      图总尺寸 288×240。row0 坐姿 4 帧（含 2 帧闭眼，用于眨眼）、row1 向右走 6 帧、
+      row2 向左走 6 帧、row3 另一组坐姿 4 帧、row4 睡觉 4 帧。
       尺寸档只取 48 的整数倍（96/144/192/240）：非整数倍会让像素画出现粗细不匀的格子，
       那也是一种「糊」。
+
+   5. 【V1.5.3 修正 —— 两条必须记住的帧表算术，写错任何一条都会「猫没了 / 猫在平移」】
+      a) **百分比停靠点：6 列的间隔是 20%，不是 12.5%。**
+         background-position 的百分比不是「第几格」而是「图上的 p 点对齐容器的 p 点」，
+         位移 = p × (容器宽 − 图宽) = p × (1 − 6) × 格宽 = −5p 格。所以第 c 列要写
+         c/(6−1)×100% = 0% / 20% / 40% / 60% / 80% / 100%（正整数格才算落在格子里）。
+         V1.5.2 的走路动画写的是 25% / 37.5% / 50% / 62.5% / 75% / 87.5% ——
+         那是 **4 列图**的公式（间隔 12.5%），落到 6 列图上就是「每帧都停在两格之间」：
+         屏幕上是「左半只猫 + 半只猫」拼在一起，整只猫横着滑，所以看起来「走路是直接平移、
+         没有动画交替」。行位同理：5 行的间隔是 25%。
+      b) **row0 / row3 / row4 只有前 4 格有像素，第 5、6 格（80% / 100%）是全透明的。**
+         实测网格（每格 48×48，非透明像素数 / 2304）：
+           row0  1433 1480 1457 1480    0    0
+           row1  1012 1053 1027 1057 1055 1005
+           row2   994 1028 1006 1007  987  942
+           row3  1393 1405 1387 1334    0    0
+           row4  1209 1164 1127 1172    0    0
+         V1.5.2 的坐姿写的是 80% 75% 与 100% 75% —— 正好是 row3 那两个空格：
+         于是**只要进入「坐姿」整只猫就 100% 透明**。而「坐姿」是拖动（pointerdown 先坐好）、
+         「暂停走动」（settle() 坐好）、以及每次动画结束后的落点 —— 这就是用户报的
+         「一拖就没了」「点暂停走动就没了」的真正成因（不是 transform 包含块、也不是拖拽坐标系）。
+         往后退帧 / 加状态之前，先确认目标格在上表的非零列里。
    ========================================================================== */
 
 /* 挂件外壳：不画任何东西，只负责定位、层叠与位移，避免几个 transform 动画互相打架。
@@ -72,8 +92,11 @@
 /* —— 位图精灵 —— 一张 6 列 × 5 行的帧表当背景，一屏只露一格。
    background-size: 600% 500% = 列数×100% / 行数×100%（图被撑到 6×5 个元素那么大）；
    第 c 列第 r 格的 background-position 是 x = c/(6-1)×100%、y = r/(5-1)×100%。
-   列位 = 0% / 20% / 40% / 60% / 80% / 100%，行位 = 0% / 25% / 50% / 75% / 100%。
+   列位 = 0% / 20% / 40% / 60% / 80% / 100%，行位 = 0% / 25% / 50% / 75% / 100%
+   （为什么是 20% 而不是 12.5%，见文件头第 5 条 —— 这是本文件最容易写错的一行）。
    换帧动画按 data-bca-state 接（见下面的状态段），这里只出默认的一格。
+   默认格刻意选 row0 第 1 格（睁眼坐姿，实测 1433 个非透明像素）：这样即使某个状态名
+   漏了对应规则、或者将来加状态时写错了格，露出来的也还是一只完整的猫，绝不会「整只透明」。
    image-rendering: pixelated 保住像素画的硬边，别改成 auto —— 素材已经是逻辑分辨率，
    显示尺寸永远是 48 的整数倍（1:1 / 2:1 / 3:1 …），放大不会插值。 */
 .bca-pet-sprite {
@@ -87,96 +110,105 @@
   image-rendering: pixelated;
 }
 
-/* —— 状态机 —— JS 只写 data-bca-state，换帧动画全在这里接。
-   一屏一格是 steps(1, end) 的功劳：每段都停在段首、到段尾才跳，中间不插值。
-   注意「4 帧」不是靠隐藏格子实现的：精灵只有一个背景，露哪一格完全由
-   background-position 决定，所以下面凡是用到 4 帧行的动画都只写 4 个位置。 */
+/* —— 状态机 —— JS 只写 data-bca-state（行走时另外写一帧一帧的 background-position），
+   换帧动画全在这里接。一屏一格是 steps(1, end) 的功劳：每段都停在段首、到段尾才跳，
+   中间不插值。下面每个状态用到的格都必须是文件头第 5 条那张表里的**非零列**。 */
 
-/* 坐姿：row3 那组坐姿（与 row0 的待机帧略不同），0.8s 一轮的轻呼吸 */
+/* 坐姿（sit）：row0 第 1 格，静止不动。
+   这是所有动作的落点（做完动作坐好、拖动松手、暂停走动、重置位置都回到这里），
+   所以它必须是「一定有像素」的一格 —— V1.5.2 这里写的是 row3 的 80% 75%（空格），
+   于是每次回到坐姿整只猫就透明了。 */
 .bca-pet[data-bca-state="sit"] .bca-pet-sprite {
-  background-position: 80% 75%;
-  animation: bca-pet-sit 800ms steps(1, end) infinite;
+  background-position: 0% 0%;
+  animation: none;
 }
 
-/* 眨眼：一次调用 = 一次眨眼。整段 1.5s 里眼睛只在最后 200ms 合上，
-   所以是「睁眼 → 过几秒眨一下 → 睁眼」，而不是原来 2.4s 一轮的慢循环。
-   JS 每次重新赋一遍动画名（换一次动画名就是重新开始），间隔随机。 */
+/* 坐姿变体（sitAlt）：row3 那组坐姿，四帧慢呼吸（2s 一轮）。
+   roulette 里抽到的「坐一会儿」，与 sit 同属坐姿、只是换一组形体。 */
+.bca-pet[data-bca-state="sitAlt"] .bca-pet-sprite {
+  background-position: 0% 75%;
+  animation: bca-pet-sit 2000ms steps(1, end) infinite;
+}
+
+/* 眨眼（blink）：一次调用 = 一次眨眼，整段 150ms（时长由 JS 通过 --bca-blink-ms 写进来，
+   两边共用一个值，不会出现「动画还在跑、状态已经切走」）。
+   row0 里第 2 格（20%）与第 4 格（60%）都是闭眼帧 —— 实测绿眼像素 0（另两格是 32），
+   所以关键帧里**只能出现闭眼帧一次**；V1.5.2 写的是 1→2→3→4→1（闭→开→闭），
+   1.5s 里连合两次眼，正是用户报的「连眨两次」。 */
 .bca-pet[data-bca-state="blink"] .bca-pet-sprite {
   background-position: 0% 0%;
   animation-name: bca-pet-blink;
-  animation-duration: 1500ms;
+  animation-duration: var(--bca-blink-ms, 150ms);
   animation-timing-function: steps(1, end);
   animation-iteration-count: 1;
 }
 
-/* 向右走：row1，6 帧逐帧 */
+/* 拖动（drag）：按住 / 拖动中仍然露 row0 第 1 格（有像素的一格）。
+   拖动绝不允许换成空帧 —— 「一拖就消失」有一半就是拖到空帧上。 */
+.bca-pet[data-bca-state="drag"] .bca-pet-sprite {
+  background-position: 0% 0%;
+  animation: none;
+}
+
+/* 向右走（walkRight）：row1，6 帧。
+   **换帧由 JS 按「已经走过多少距离」算**（pet.js 的 walkLoop 往行内写 background-position），
+   不在这里写 animation：一个步态周期 = 6 帧 = 30px（144px 档）是写死的常量，
+   把换帧权和位移权交给同一个循环，才能保证「动画在跑、位置也在同步走」而不是各跑各的。
+   这里只留一个兜底格，万一 JS 那一拍没跟上也不会露白。 */
 .bca-pet[data-bca-state="walkRight"] .bca-pet-sprite {
   background-position: 0% 25%;
-  animation: bca-pet-walk-right 500ms steps(1, end) infinite;
+  animation: none;
 }
 
-/* 向左走：row2，镜像行，从 100% 往 0% 倒着走，看起来才是朝左迈腿 */
+/* 向左走（walkLeft）：row2 是镜像行，帧从第 6 格（100%）往第 1 格退，迈腿方向才是朝左。
+   同样由 JS 推帧。 */
 .bca-pet[data-bca-state="walkLeft"] .bca-pet-sprite {
-  background-position: 0% 50%;
-  animation: bca-pet-walk-left 500ms steps(1, end) infinite;
+  background-position: 100% 50%;
+  animation: none;
 }
 
-/* 睡觉：row4，呼吸比行走慢一档 */
+/* 睡觉（sleep）：row4 四帧，呼吸比行走慢一档（2.4s 一轮） */
 .bca-pet[data-bca-state="sleep"] .bca-pet-sprite {
   background-position: 0% 100%;
-  animation: bca-pet-sleep 1900ms steps(1, end) infinite;
+  animation: bca-pet-sleep 2400ms steps(1, end) infinite;
 }
 
-/* row1 / row2：6 帧逐帧。8 个停靠点里前 6 个是「往右走」，后面回到 0% 收尾 ——
-   1 → 2 → 3 → 4 → 5 → 6 → 1。 */
-@keyframes bca-pet-walk-right {
-  0%     { background-position: 25% 25%; }
-  14.28% { background-position: 37.5% 25%; }
-  28.57% { background-position: 50% 25%; }
-  42.85% { background-position: 62.5% 25%; }
-  57.14% { background-position: 75% 25%; }
-  71.42% { background-position: 87.5% 25%; }
-  85.71% { background-position: 0% 25%; }
-  100%   { background-position: 0% 25%; }
-}
+/* 行走那两行**刻意没有关键帧**：换帧由 pet.js 按「走过的距离」逐帧写在行内
+   background-position 上（一个步态周期固定 6 帧 / 30px，见 DESIGN-PET.md 的状态表）。
+   原因见文件头第 5 条 a)：曾经这里有两组 8 段的关键帧（间隔 12.5%，按 4 列图写的），
+   落到 6 列图上每帧都停两格之间，屏幕上就是整只猫在横着滑 —— 用户报的
+   「走动时是直接平移、没有动画交替」。要么按 20% 重写、要么交给 JS，
+   V1.5.3 选后者：位移和换帧必须由同一个循环驱动才可能真正同步。 */
 
-/* row2 是镜像行：帧 1 在最右（100%），往左一帧一帧退，退到 0% 再回到 100% ——
-   6 → 5 → 4 → 3 → 2 → 1 → 6。位置是反的，迈腿的方向才是正的。 */
-@keyframes bca-pet-walk-left {
-  0%     { background-position: 100% 50%; }
-  14.28% { background-position: 87.5% 50%; }
-  28.57% { background-position: 75% 50%; }
-  42.85% { background-position: 62.5% 50%; }
-  57.14% { background-position: 50% 50%; }
-  71.42% { background-position: 37.5% 50%; }
-  85.71% { background-position: 25% 50%; }
-  100%   { background-position: 25% 50%; }
-}
-
-/* 坐姿（row3）：两帧交替，尾巴与耳朵的轻微位移 */
+/* 坐姿变体（row3 的前 4 格）：0% / 20% / 40% / 60% 四帧，2s 一轮。
+   第 5、6 格（80% / 100%）是空格，这里一格都不能出现。 */
 @keyframes bca-pet-sit {
-  0%   { background-position: 80% 75%; }
-  50%  { background-position: 100% 75%; }
-  100% { background-position: 80% 75%; }
+  0%   { background-position: 0% 75%; }
+  25%  { background-position: 20% 75%; }
+  50%  { background-position: 40% 75%; }
+  75%  { background-position: 60% 75%; }
+  100% { background-position: 0% 75%; }
 }
 
-/* 睡觉（row4）：两帧交替，看的是呼吸那点起伏 */
+/* 睡觉（row4 的前 4 格）：同样是四帧，但整体放慢到 2.4s 一轮 */
 @keyframes bca-pet-sleep {
   0%   { background-position: 0% 100%; }
+  25%  { background-position: 20% 100%; }
   50%  { background-position: 40% 100%; }
+  75%  { background-position: 60% 100%; }
   100% { background-position: 0% 100%; }
 }
 
-/* 眨眼（row0）：1 → 2 → 3 → 4 → 1。1/3 是睁眼、2/4 是闭眼。
-   把睁眼撑满 1.2s、闭合压缩到 200ms，是因为这个动画每播完一次就算「眨了一次」，
-   而两次之间的间隔由 JS 随机决定 —— 于是看到的节奏就是「过几秒眨一下」。 */
+/* 眨眼（row0）：睁眼（第 1 格）→ **闭眼一次**（第 2 格）→ 睁眼（第 1 格）。
+   整段 150ms、用 steps(1, end)：0%~40% 是睁眼（60ms），40%~100% 是闭眼（90ms），
+   加上闭合本身约 90ms，观感就是「啪」地眨一下。总共只合一次眼，且首尾都是第 1 格，
+   所以与 sit 的静止格完全一致 —— 眨完眼睛不会有任何跳变。
+   注意闭眼只能出现一次：row0 的第 2 格与第 4 格都是闭眼帧，写成 1→2→3→4→1
+   就是「连眨两次」（V1.5.2 的 bug）。 */
 @keyframes bca-pet-blink {
-  0%    { background-position: 0% 0%; }
-  80%   { background-position: 0% 0%; }
-  87.5% { background-position: 20% 0%; }
-  92.5% { background-position: 40% 0%; }
-  96.5% { background-position: 60% 0%; }
-  100%  { background-position: 0% 0%; }
+  0%   { background-position: 0% 0%; }
+  40%  { background-position: 20% 0%; }
+  100% { background-position: 0% 0%; }
 }
 
 /* 按下的 Q 弹（squash & stretch）：按下先压扁（由 .is-pressing 负责，见下），
@@ -319,7 +351,10 @@
 /* 尊重系统的「减少动态效果」：换帧、位移、气泡渐入、按下的 Q 弹全部关掉
    （精灵就停在当前状态帧上），只保留 hover / active 那一层静态反馈。
    位置仍然会跟着拖动即时更新 —— 那是指针的直接反馈，不是动画。
-   设置页为此专门写了一句提示（用户第 4 条）。 */
+   注意：行走的换帧是 JS 写在行内 background-position 上的，CSS 关不掉它，
+   由 pet.js 的 stateReady() 在 reduced 时直接不进入行走状态、并清掉行内那一格
+   （见 pet.js 的 watchReducedMotion / settle）。两边都要管，少一边就会「系统说别动、
+   猫还在走」。设置页为此专门写了一句提示（用户第 4 条）。 */
 @media (prefers-reduced-motion: reduce) {
   .bca-pet-dock {
     transition: none;

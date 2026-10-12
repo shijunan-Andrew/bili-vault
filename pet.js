@@ -20,18 +20,31 @@
    4. 自启，library.js 一个字都不用改。外层容器 #bcaPet，气泡 #bcaPetBubble，
       宠物本体是 <button type="button" aria-label="宠物">。
 
-   V1.5.2 的三件事（用户原话见需求书）：
-   a) 素材：pet-cat.png 重做成「逻辑分辨率 48 × 无量化」的 RGBA 帧表（图另说，
-      这里只关心它的几何：每格 48×48，6 列 × 5 行，CSS 的 background-size 仍是
-      600% / 500%）。所以尺寸档只取 48 的整数倍 —— 非整数倍会让像素画出现
-      粗细不匀的格子，这是「糊」的另一种形态。
-   b) 交互：拖动 / 右键菜单 / 尺寸档 / 位置持久化（都落在 interfacePet 里）。
-   c) 状态机：待机时在「眨眼 / 向右走 / 向左走 / 坐姿 / 睡觉」之间随机切换，
-      眨眼权重最高 —— 这是用户最在意的一条，所以权重表写在 WEIGHTS 里、一眼能改。
+   V1.5.3 的状态机（重做，设计说明见 DESIGN-PET.md，状态表照抄一份在这里）：
+   ┌──────────┬──────────────────┬──────┬───────────┬────────────┬──────────────┐
+   │ 状态     │ 触发             │ 权重 │ 最短时长  │ 动画（行/格）│ 移动与边界   │
+   ├──────────┼──────────────────┼──────┼───────────┼────────────┼──────────────┤
+   │ sit      │ 每个动作的落点    │  —   │ 4–8s      │ row0 第1格  │ 不动         │
+   │          │ （空隙期）        │      │ (IDLE)    │ 静止        │              │
+   │ blink    │ 轮盘             │  46  │ 180ms     │ row0 1→2→1  │ 不动         │
+   │          │                  │      │ +不应期3–7s│ 只合一次眼  │              │
+   │ sitAlt   │ 轮盘             │  14  │ 4–8s      │ row3 1–4 帧 │ 不动         │
+   │ walkRight│ 轮盘             │  34  │ 4–8s      │ row1 1–6 帧 │ 逐帧推进，    │
+   │ walkLeft │ （左右各半）      │ 共用 │ 共用      │ row2 6–1 帧 │ 撞边→停→回头 │
+   │ sleep    │ 轮盘             │   6  │ 10–18s    │ row4 1–4 帧 │ 不动         │
+   └──────────┴──────────────────┴──────┴───────────┴────────────┴──────────────┘
+   轮盘四档权重之和 = 100（blink 46 最高，用户第 5 条），改 WEIGHTS 即可。
+   「走路 4–8s / 坐姿 4–8s / 睡觉 ≥10s」是用户第 3 条给的硬下限：
+   本轮改成「动作 → 坐姿停顿(4–8s) → 动作」，所以两个动作之间最短也有 4s，
+   再没有「1 秒一换」；起步/收尾各有 600ms（= 一个步态周期）的加减速过渡。
+   走路的节奏定死成一个常量：一个步态周期（6 帧）走一个 48px 逻辑格、每帧 100ms
+   → 144px 档每帧 8px、周期 600ms、巡航 80px/s（96px 档 53px/s）。
 
-   状态与 CSS 的分工：JS 只管「现在是哪个状态、要不要挪位置」，把状态名写成
-   data-bca-state，换帧动画全部由 pet.css 按属性选择器接。这样时序（JS 的
-   定时器）和观感（CSS 的关键帧）各管一头，不会互相踩。
+   状态与 CSS 的分工：JS 管「现在是哪个状态、要不要挪位置、走到第几帧」，
+   把状态名写成 data-bca-state，坐/睡/眨的换帧由 pet.css 按属性选择器接，
+   **行走的换帧由本文的 walkLoop 按「走过的距离」写行内 background-position** ——
+   位移与换帧必须在同一个循环里算，否则「一个步态周期走多少像素」就没人保证了
+   （V1.5.2 就是 CSS 管换帧、CSS 过渡管位移，两边各跑各的）。
    ========================================================================== */
 (function attachPet(global) {
   "use strict";
@@ -70,28 +83,41 @@
   const SIZE_DEFAULT = 144;
 
   // 待机权重（用户第 5 条：眨眼频率最高）。相对权重，改数字即可，不用动逻辑。
-  const WEIGHTS = { blink: 60, sit: 20, walk: 15, sleep: 5 };
+  // 四档之和 = 100，读起来就是百分比：blink 46 / sitAlt 14 / walk 34（左右各半）/ sleep 6。
+  const WEIGHTS = { blink: 46, sitAlt: 14, walk: 34, sleep: 6 };
 
-  // 待机延时：下一件事发生前等多久
-  const PAUSE_MIN = 1400;
-  const PAUSE_MAX = 5200;
-  const SLEEP_MIN = 9000;
-  const SLEEP_MAX = 16000;
-  // 眨眼：一次眨眼动画的总时长（CSS 的 bca-pet-blink 也是这个值，两边必须一致，
-  // 否则「眨眼结束」的回调会在动画还在跑时就切状态）。
-  const BLINK_MS = 1500;
-  // 坐姿停顿：挑一个坐姿帧定住一会儿（row3 那组坐姿，与 row0 的待机帧略不同）
-  const SIT_MIN = 2600;
-  const SIT_MAX = 5200;
-  // 一次连续行走（含往返）的总时长上限，避免宠物一直走个不停
-  const WALK_MIN = 1600;
-  const WALK_MAX = 3600;
-  // 步伐速度（px/秒）与「撞到边界后停顿回头」的时长
-  const WALK_SPEED = 46;
-  const TURN_MS = 420;
-  const WALK_STEP_MAX_MS = 9000;
-  const EDGE_PAD = 8;        // 离视口边缘留一点，别贴着边
-  const DRAG_THRESHOLD = 4;  // 位移超过它才算拖动，否则算点击（用户第 2 条）
+  // —— 时序：用户第 3 条给的硬下限（行走 4–8s、坐姿 4–8s、睡觉 ≥10s）。
+  // 「动作 → 坐姿停顿 → 动作」这个结构本身就把两个动作之间撑到了 4s 以上，
+  // 所以下面每一个常量都必须 ≥ 它对应的下限，改小之前先回读需求。
+  const IDLE_MIN = 4000;          // 坐姿停顿（每个动作的落点）：4–8s
+  const IDLE_MAX = 8000;
+  const SIT_ALT_MIN = 4000;       // 坐姿变体（row3 四帧）也是坐姿，同样 4–8s
+  const SIT_ALT_MAX = 8000;
+  const WALK_MIN = 4000;          // 一次连续行走（含往返）4–8s
+  const WALK_MAX = 8000;
+  const SLEEP_MIN = 10000;        // 睡觉 ≥10s
+  const SLEEP_MAX = 18000;
+  // 眨眼：一次性的快速动作，总时长必须落在 120–180ms（用户第 5 条）。
+  // 这个值同时写进 CSS（--bca-blink-ms）与状态机回调，两边不会各算各的。
+  const BLINK_MS = 140;           // 闭合时长：140ms 动画 + 40ms 归位 = 180ms（用户第 5 条 120–180ms）
+  // 不应期：眨完这一次之后，这几秒内轮盘不再抽到眨眼。这是「连眨两次」的第二道保险
+  // （第一道是关键帧里只允许出现一次闭眼格）。
+  const BLINK_REFRACTORY_MIN = 3000;
+  const BLINK_REFRACTORY_MAX = 7000;
+  const BLINK_SETTLE_MS = 40;     // 回调比动画晚一点点，别让动画还在跑就切走
+
+  // —— 行走：位移与换帧由同一个循环算，下面两个常量就是「步态」的全部定义。
+  const FRAME_MS = 100;           // 巡航时每帧 100ms → 一个步态周期（6 帧）= 600ms
+  const STEP_RATIO = 1;           // 一个步态周期（6 帧）前进几个逻辑格（48px），再按尺寸档缩放
+  const WALK_RAMP_MS = 600;       // 起步加速 / 收尾减速各占一个步态周期（过渡，用户第 3 条）
+  const MIN_RAMP = 0.35;          // 加减速时的最低速度系数（0 会让最后几帧原地不动）
+  const TURN_MS = 420;            // 撞到边界后先停一下再回头
+  const EDGE_PAD = 8;             // 离视口边缘留一点，别贴着边
+  const DRAG_THRESHOLD = 4;       // 位移超过它才算拖动，否则算点击（用户第 2 条）
+
+  // 读 chrome.storage 的兜底超时：接口不回调时不能让宠物一直不出现
+  // （用户底线：enabled === true 时宠物任何时刻都必须可见，所以这里必须 fail-open）。
+  const STORAGE_TIMEOUT_MS = 1500;
 
   const PET_DEFAULTS = { enabled: true, size: SIZE_DEFAULT, x: 0.5, y: null, paused: false };
 
@@ -139,7 +165,6 @@
   // 状态机的两个把手：state = 现在是什么，timer = 下一个转换
   let state = "sit";
   let timer = null;
-  let segTimer = null;
   let popTimer = null;
   let reduced = false;
 
@@ -165,9 +190,22 @@
   const randInt = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
-  // 往右走：25% 起走，12.5% 一格（8 格），末格回到 0% 收尾 —— 与视觉顺序一致。
-  // 往左走（row2，镜像行）正好相反，所以 CSS 里是从 100% 往 0% 倒着走。
-  const COL_STOPS_6 = ["25%", "37.5%", "50%", "62.5%", "75%", "87.5%", "0%"];
+  // —— 帧表几何（用户钉死的行含义，不许改）——
+  //   row0 坐姿（第 1/3 格睁眼、第 2/4 格闭眼，眨眼用）/ row1 向右走 6 帧 /
+  //   row2 向左走 6 帧 / row3 坐姿变体 4 帧 / row4 睡觉 4 帧。
+  // 每格 48×48 逻辑像素；row0 / row3 / row4 只有前 4 格有像素，第 5、6 格是全透明的空格。
+  //
+  // background-position 的百分比**不是「第几格」**：它是「图上的 p 点对齐容器的 p 点」，
+  // 位移 = p × (容器宽 − 图宽) = p × (1 − 6) × 格宽 = −5p 格。所以第 c 列要写
+  // c/(6−1)×100% = 0/20/40/60/80/100%，行位是 0/25/50/75/100%。
+  // V1.5.2 的走路关键帧写成 12.5% 一档（那是 4 列图的公式），落到 6 列图上每一帧都停在
+  // 两格之间的接缝上 —— 屏幕上就是整只猫横着滑，即用户报的「走路是直接平移」。
+  const COL_PCT = [0, 20, 40, 60, 80, 100];
+  const ROW_PCT = { sit: 0, drag: 0, blink: 0, walkRight: 25, walkLeft: 50, sitAlt: 75, sleep: 100 };
+  const WALK_FRAMES = 6;
+  // row1 / row2 一个步态周期 6 帧；row0 / row3 / row4 只有前 4 格有像素，第 5、6 格
+  // （80% / 100%）是全透明的空格 —— 坐 / 睡 / 眨眼用到的格永远落在前 4 格之内。
+  const framePos = (rowPct, col) => COL_PCT[col % WALK_FRAMES] + "% " + rowPct + "%";
 
   /* ------------------------------ 数据 ------------------------------ */
 
@@ -295,17 +333,28 @@
 
   /* ------------------------------ 位置与尺寸 ------------------------------ */
 
-  // 停止换帧动画：位移做过渡时必须把 steps() 逐帧动画收起来，否则过渡会一格一格地跳。
-  function frostSprite() {
-    if (sprite) sprite.style.animation = "none";
+  // 行走的换帧入口：只改 background-position，不碰 animation。
+  // col 对 6 取模，走多远都落在有像素的格上（走到第 6 格回到第 1 格）。
+  let frameCol = -1;
+
+  function setFrame(stateName, col) {
+    if (!sprite) return;
+    const index = ((col % WALK_FRAMES) + WALK_FRAMES) % WALK_FRAMES;
+    if (index === frameCol && sprite.style.backgroundPosition) return; // 同一格不重复写
+    frameCol = index;
+    sprite.style.backgroundPosition = framePos(ROW_PCT[stateName] || 0, index);
   }
 
-  function thawSprite() {
-    if (sprite) sprite.style.animation = "";
+  // 清掉行内帧，换帧权交回 pet.css 的属性选择器。离开行走状态时必须清，
+  // 否则行内那一格会一直压着 CSS，坐姿会被定在走路的一帧上。
+  function clearFrame() {
+    frameCol = -1;
+    if (sprite) sprite.style.backgroundPosition = "";
   }
 
   function setState(name) {
     if (state === name) return;
+    clearFrame();
     state = name;
     if (button) button.setAttribute(STATE_ATTR, name);
   }
@@ -426,10 +475,6 @@
     if (timer) { global.clearTimeout(timer); timer = null; }
   }
 
-  function clearSegment() {
-    if (segTimer) { global.clearTimeout(segTimer); segTimer = null; }
-  }
-
   function after(ms, fn) {
     clearTimer();
     timer = global.setTimeout(() => { timer = null; fn(); }, ms);
@@ -439,100 +484,177 @@
     return visible && !reduced && !dragging;
   }
 
-  // 一次眨眼：CSS 播 bca-pet-blink（1.5s，眼睛在最后 200ms 才合上），
-  // 播完就切回坐姿。间隔是随机的，所以看起来是「过几秒眨一下」。
+  // 眨眼：一次调用 = 一次闭合（140ms 动画 + 40ms 归位 = 180ms），眨完进不应期。
+  // 「连眨两次」有两道防线：(1) pet.css 的 bca-pet-blink 里只出现一格闭眼帧；
+  // (2) 这里的 blinkReadyAt —— 不应期内轮盘抽到眨眼就改成坐一会儿。
+  // 落点固定回 sit（row0 第 1 格）：眨眼首尾也都是这一格，所以不会有跳变。
+  let blinkReadyAt = 0;
+
   function blink() {
     setState("blink");
-    after(BLINK_MS, () => { setState("sit"); schedule(); });
+    blinkReadyAt = nowMs() + BLINK_MS + randInt(BLINK_REFRACTORY_MIN, BLINK_REFRACTORY_MAX);
+    after(BLINK_MS + BLINK_SETTLE_MS, () => {
+      setState("sit");
+      idling(IDLE_MIN, IDLE_MAX);
+    });
   }
+
+  // 坐姿停顿：每个动作的落点。两个动作之间因此至少隔 IDLE_MIN(4s) —— 这是
+  // 「每组动画间隔太短、像瞬移」的结构性修法：不再是「动作 → 立刻动作」。
   function sitStill() {
     setState("sit");
-    after(randInt(SIT_MIN, SIT_MAX), schedule);
+    idling(IDLE_MIN, IDLE_MAX);
+  }
+
+  // row3 的四个坐姿变体（pet.css 的 bca-pet-sit，2s 一轮）：停留 4–8s，
+  // 至少是 CSS 一轮的两倍，不会在半个循环上被切走。
+  function sitAlt() {
+    setState("sitAlt");
+    idling(SIT_ALT_MIN, SIT_ALT_MAX);
   }
 
   function sleep() {
     setState("sleep");
-    after(randInt(SLEEP_MIN, SLEEP_MAX), () => { setState("sit"); schedule(); });
+    after(randInt(SLEEP_MIN, SLEEP_MAX), () => {
+      setState("sit");
+      idling(IDLE_MIN, IDLE_MAX);
+    });
   }
 
-  // 走一段：从当前位置走到这一段的终点。撞到边界就停下换向 —— 绝不越界。
-  // 位移交给 CSS 的 transition（linear，时长按距离算），JS 只管「这一步走多久」。
-  function walkStep(direction, budget) {
-    const range = warpRange();
-    const step = Math.min(budget, randInt(WALK_MIN, WALK_MAX));
-    const span = direction > 0 ? -petX : (petX - range.max);   // direction>0 = 往右
-    const distance = Math.min(span, step * WALK_SPEED / 1000);
-    const duration = clamp(Math.round(distance / WALK_SPEED * 1000), 180, WALK_STEP_MAX_MS);
+  // 唯一的「等一会儿再看看干什么」出口：时长一律有下限，杜绝 1 秒一换。
+  function idling(min, max) {
+    after(randInt(min, max), schedule);
+  }
 
+  // 一步能走多远（= 每换一帧走多少像素）。逻辑格 48px × STEP_RATIO × 尺寸档 ÷ 6 帧：
+  //   144px 档 → 一周期 48px，每帧 8px；FRAME_MS=100 → 巡航 80px/s。
+  //   96px 档  → 一周期 32px，每帧 5.33px；巡航 53px/s。
+  // 定死它 = 定死「一个步态周期走多少像素」。「走多远」由时长（WALK_MIN..MAX）决定，
+  // 「走多快」是这个常量；帧号 = 已走距离 ÷ stepPx()，动画与位移同源，
+  // 所以不可能出现「动画在跑、位置匀速滑」。
+  function stepPx() {
+    return 48 * STEP_RATIO * (petSize / SIZE_DEFAULT) / WALK_FRAMES;
+  }
+
+  let rafId = null;
+
+  function stopWalk() {
+    if (rafId !== null) { global.cancelAnimationFrame(rafId); rafId = null; }
+  }
+
+  // 走 totalMs 这么久，方向 +1 往右 / -1 往左。位移与换帧都由这一个循环推进：
+  //   · 每帧按「已走过的距离 ÷ 每帧距离」算帧号 —— 帧号与位置一一对应；
+  //   · 用每帧的实测时间差积分，掉帧不会让猫走慢（夹 64ms：标签页切回来不瞬移）；
+  //   · 起步 / 收尾各 WALK_RAMP_MS 的线性加减速（用户第 3 条要的过渡）；
+  //   · 撞到边界就停下、按 TURN_MS 回头，把剩余时长交给新方向，绝不越界；
+  //   · 期间**不写** CSS transition：位置每帧都是最终值，交给过渡只会拖拍子。
+  function walkLoop(direction, totalMs) {
+    const started = nowMs();
+    let last = started;
+    let walked = 0;
+    if (container) container.style.transition = "none";
     setState(direction > 0 ? "walkRight" : "walkLeft");
-    const target = clamp(petX + direction * distance, range.max, 0);
-    frostSprite();          // 位移这一段不换帧，别让像素画在过渡里抖
-    container.style.transition = "transform " + duration + "ms linear";
-    petX = target;
-    applyTransform(true);
 
-    clearSegment();
-    segTimer = global.setTimeout(() => {
-      segTimer = null;
-      // 这一步到点时宠物可能已经被藏起来 / 被拖住 / 系统要求减弱动画了：
-      // 清定时器是主路径，这里再挡一道，别让老定时器去改已经不该动的位置。
+    const stopSitting = () => {
       if (!stateReady()) return;
-      // 到点了：夹一次边界（窗口在走的过程中被改小也安全），再决定下一步
-      const now = warpRange();
-      petX = clamp(petX, now.max, 0);
-      applyTransform(false);
-      thawSprite();
-      setState("sit");
       persistPosition();
+      setState("sit");
+      idling(IDLE_MIN, IDLE_MAX);
+    };
 
-      const hitLeft = petX <= now.max + 0.5;
-      const hitRight = petX >= -0.5;
-      const remaining = step - duration;
-      if (remaining > 260) {
-        if (hitLeft || hitRight) {
-          // 停在边界上：等 TURN_MS 再回头，剩下的时间从新的方向起算
-          setState("sit");
-          after(TURN_MS, () => {
-            if (!stateReady()) return;
-            walkStep(hitLeft ? 1 : -1, remaining - TURN_MS);
-          });
-        } else {
-          walkStep(direction, remaining);
-        }
-      } else {
-        schedule();
+    const frame = (ts) => {
+      const now = typeof ts === "number" ? ts : nowMs();
+      const dt = Math.min(64, Math.max(0, now - last));
+      last = now;
+      // 走到一半被拖住 / 被藏起来 / 系统要求减弱动画：就地停住，别继续挪它
+      if (!stateReady()) { rafId = null; clearFrame(); return; }
+
+      const range = warpRange();
+      const elapsed = now - started;
+      if (elapsed >= totalMs) {
+        petX = clamp(petX, range.max, 0);
+        applyTransform(false);
+        rafId = null;
+        clearFrame();
+        stopSitting();
+        return;
       }
-    }, duration + 30);
+
+      // 撞到边界：停 TURN_MS 再回头，剩下的时间从新方向起算
+      const atEdge = direction > 0 ? petX >= -0.5 : petX <= range.max + 0.5;
+      if (atEdge) {
+        petX = clamp(petX, range.max, 0);
+        applyTransform(false);
+        rafId = null;
+        clearFrame();
+        const rest = totalMs - elapsed;
+        after(TURN_MS, () => {
+          if (!stateReady()) return;
+          // 剩余时间太短就别回头了（回头只剩 1 秒不到会看着像「抖一下」）
+          if (rest > TURN_MS + 1200) walkLoop(-direction, rest - TURN_MS);
+          else stopSitting();
+        });
+        return;
+      }
+
+      // 速度系数：两端各 WALK_RAMP_MS 线性起落，MIN_RAMP 保证不会原地踏步
+      const edgeMs = Math.min(elapsed, totalMs - elapsed);
+      const speed = clamp(edgeMs / WALK_RAMP_MS, MIN_RAMP, 1);
+      const want = stepPx() * dt / FRAME_MS * speed;
+      const span = direction > 0 ? -petX : petX - range.max;
+      const delta = Math.min(want, Math.max(0, span));
+      petX = clamp(petX + direction * delta, range.max, 0);
+      walked += delta;
+      setFrame(direction > 0 ? "walkRight" : "walkLeft", Math.floor(walked / stepPx()));
+      applyTransform(false);
+      rafId = global.requestAnimationFrame(frame);
+    };
+
+    stopWalk();
+    rafId = global.requestAnimationFrame(frame);
   }
 
   function walk() {
     const range = warpRange();
     // 空间不够（窗口很窄 / 尺寸档很大）就不走了，直接坐一会儿
     if (-range.max < petSize * 0.6) { sitStill(); return; }
-    walkStep(Math.random() < 0.5 ? 1 : -1, randInt(WALK_MIN, WALK_MAX));
+    // 贴着某一边时优先朝有空间的那一侧走，免得一开步就撞墙
+    let direction = Math.random() < 0.5 ? 1 : -1;
+    if (petX >= -EDGE_PAD * 2) direction = -1;
+    else if (petX <= range.max + EDGE_PAD * 2) direction = 1;
+    walkLoop(direction, randInt(WALK_MIN, WALK_MAX));
   }
 
-  // 权重表：眨眼最高（用户第 5 条）。「暂停走动」只把行走那一档的权重让掉，
-  // 剩下的按比例重新归一，所以暂停以后眨眼依旧是最频繁的那个动作。
+  // 权重轮盘：眨眼最高（用户第 5 条）。
+  // 「暂停走动」只把行走那一档的权重让掉，剩下的按比例重新归一 —— 暂停以后眨眼依旧
+  // 最频繁，而且**任何一档都不会把宠物藏起来**（藏起来只有菜单里那一条会做）。
+  // 不应期内抽到眨眼就改成坐一会儿：sitStill 的下限（4s）大于不应期上限（7s）？
+  // 不一定够，但下下轮一定过 —— 无论如何都不会「连眨两次」。
   function schedule() {
     if (!stateReady()) return;
     const walkWeight = paused ? 0 : WEIGHTS.walk;
-    const total = WEIGHTS.blink + WEIGHTS.sit + walkWeight + WEIGHTS.sleep;
+    const total = WEIGHTS.blink + WEIGHTS.sitAlt + walkWeight + WEIGHTS.sleep;
     const roll = Math.random() * total;
-    if (roll < WEIGHTS.blink) { blink(); return; }
-    if (roll < WEIGHTS.blink + WEIGHTS.sit) { sitStill(); return; }
-    if (roll < WEIGHTS.blink + WEIGHTS.sit + walkWeight) { walk(); return; }
+    if (roll < WEIGHTS.blink) {
+      if (nowMs() >= blinkReadyAt) blink();
+      else sitStill();
+      return;
+    }
+    if (roll < WEIGHTS.blink + WEIGHTS.sitAlt) { sitAlt(); return; }
+    if (roll < WEIGHTS.blink + WEIGHTS.sitAlt + walkWeight) { walk(); return; }
     sleep();
   }
 
-  // 非待机原因（拖拽、隐藏、减少动态、暂停走动）→ 先坐好，别把定时器留在半路
+  // 非待机原因（拖拽、隐藏、减少动态、暂停走动、任何菜单动作）→ 先坐好，别把
+  // 定时器 / rAF 留在半路。这也是「任何菜单动作都不会让宠物消失」的兜底：
+  // 落点永远是 sit（row0 第 1 格，一定有线像素），只坐不动，绝不写 enabled。
   function settle() {
     clearTimer();
-    clearSegment();
+    stopWalk();
     // 先撤掉在飞的 transition 再定位：不走这一步的话，下一次 syncPosition() 写进去的
     // 目标值会继续按旧过渡滑过去，看起来就是「松手以后猫自己又溜走了」。
     if (container) container.style.transition = "none";
-    thawSprite();
+    clearFrame();
     setState("sit");
     syncPosition();
     if (stateReady()) schedule();
@@ -648,6 +770,23 @@
   let dragOriginY = 0;
   let moved = false;
 
+  // 「猫现在真正画在哪」：拖动必须以此为基准，**不能**拿 petX / petY 当基准。
+  // 别的路径（换尺寸档、窗口 resize、状态切换里的 syncPosition）都会让 .bca-pet-dock
+  // 用 CSS transition 滑过去，而那段时间里 petX 是**过渡的目标值**，和屏幕上的位置差着
+  // 几十像素。拿目标值算 dragOrigin，指针一动猫就会先「跳」到目标位置 —— 这正是用户
+  // 报的「一拖动它就跳走 / 像消失了一样」。行走是 rAF 逐帧写的，本来就是渲染值；
+  // matrix 读的是**动画中的实时值**（getComputedStyle 返回当前插值，不是目标值）。
+  function renderedPx() {
+    const range = lastRange || warpRange();
+    if (!container) return { x: petX, y: petY };
+    const style = global.getComputedStyle(container);
+    const matched = style.transform && style.transform !== "none" ? style.transform.match(/matrix\(([^)]+)\)/i) : null;
+    if (!matched) return { x: clamp(petX, range.max, 0), y: clamp(petY, 0, range.yMax) };
+    const parts = matched[1].split(",").map((part) => parseFloat(part));
+    if (parts.length < 6 || !isFinite(parts[4]) || !isFinite(parts[5])) return { x: petX, y: petY };
+    return { x: clamp(parts[4], range.max, 0), y: clamp(parts[5], 0, range.yMax) };
+  }
+
   function onPointerDown(event) {
     if (!visible || event.button !== 0) return;
     if (dragging) return;  // 已经有一根指头在拖了，后来的忽略
@@ -657,20 +796,28 @@
     moved = false;
     dragStartX = event.clientX;
     dragStartY = event.clientY;
+    // 先把状态机与行走停掉：rAF 还挂着的话，下一帧就会把猫从冻住的位置上再挪走
+    clearTimer();
+    stopWalk();
+    // 把「现在画在哪」冻成 JS 的坐标。顺序是「先写 petX/petY，再撤过渡」——
+    // 反过来的话，指定值与渲染值不等，撤掉过渡的那一瞬猫会直接跳到过渡目标上。
+    const frozen = renderedPx();
+    const range = warpRange();
+    petX = frozen.x;
+    petY = frozen.y;
+    petXPct = range.max === 0 ? 0 : clamp(petX / range.max, 0, 1);
+    if (petYPct !== null) petYPct = range.yMax === 0 ? 0 : clamp(petY / range.yMax, 0, 1);
     dragOriginX = petX;
     dragOriginY = petY;
+    applyTransform(false);   // 撤过渡 + 把冻住的位置写进 DOM（值相等，所以画面不动）
     if (button) {
       button.classList.add(PRESS_CLASS);
       // 指针捕获：手滑出宠物外面也不会丢事件（触屏同样适用）
       try { button.setPointerCapture(event.pointerId); } catch (_) {}
     }
-    // 按住就停下：停掉状态机与行走过渡，但不冻结逐帧动画 ——
-    // frostSprite() 是给「位移过渡」用的（位移时换帧会一格格跳），拖动是跟手更新，
-    // 冻结反而会把坐姿定格在走路那一帧上，看起来像没了脚。
-    clearTimer();
-    clearSegment();
-    if (container) container.style.transition = "none";
-    setState("sit");
+    // 按住就坐下：拖动期间只露 sit（row0 第 1 格，一定有像素），绝不落到空帧上 ——
+    // 这是「一拖就消失」的另一半成因。拖动期间状态机被 stateReady() 挡住，不会抢状态。
+    setState("drag");
   }
 
   function onPointerMove(event) {
@@ -751,7 +898,11 @@
     return item;
   }
 
-  function renderMenu() {
+  // renderMenu() 只负责把「菜单里的内容」重画一遍。**要不要把菜单打开是调用方的事**：
+  // 只有右键（onContextMenu）与菜单里的点击能打开它。1.5.2 这里无条件写
+  // `menu.hidden = false`，而 onChanged / setSize / 拖动落盘都会走到这里，于是
+  // 「拖一下猫，右键菜单自己弹出来」—— 属于同一类「菜单动作会改变宠物状态」的缺陷。
+  function renderMenu(show) {
     if (!menu) return;
     menu.replaceChildren();
 
@@ -775,16 +926,18 @@
         } else {
           schedule();
         }
-        renderMenu();
+        renderMenu(true);
       }
     ));
 
     menu.appendChild(menuItem(translate("重置位置"), false, () => {
-      petXPct = PET_DEFAULTS.x;
+      // 与设置页的「重置位置」保持同一个语义：x = 0 就是右下角停靠位
+      // （PET_DEFAULTS.x 只用于「从没存过位置」的首次安装），y = null 交回 CSS 的停靠高度。
+      petXPct = 0;
       petYPct = null;
       petX = 0;
       petY = 0;
-      syncPosition();
+      settle();          // 先停掉在飞的行走（rAF）与定时器，否则它下一帧就把猫又挪走
       persistPosition();
       clampBubble();
     }));
@@ -795,7 +948,7 @@
       applyVisibility();
     }));
 
-    menu.hidden = false;
+    if (show) menu.hidden = false;
     clampMenu();
   }
 
@@ -816,7 +969,7 @@
     if (!visible) return;
     event.preventDefault();
     event.stopPropagation();
-    renderMenu();
+    renderMenu(true);
   }
 
   /* ------------------------------ 显隐 ------------------------------ */
@@ -884,6 +1037,9 @@
     doc.body.appendChild(container);
 
     applyBox();
+    // CSS 的眨眼时长与 JS 的 BLINK_MS 共用一个值：两边各写各的就会出现
+    // 「动画还在跑、状态已经切走」（V1.5.2 两边都是 1500ms 只是巧合，不是机制）。
+    container.style.setProperty("--bca-blink-ms", BLINK_MS + "ms");
     setState("sit");
     button.addEventListener("click", onButtonClick);
     button.addEventListener("contextmenu", onContextMenu);
@@ -920,6 +1076,21 @@
     }
   }
 
+  // 读盘兜底：chrome.storage 万一不回调（扩展刚启动 / 上下文失效），也不能让宠物
+  // 永远不出现 —— 超时就按默认值（enabled = true）先把猫放出来。用户底线：
+  // enabled === true 时宠物任何时刻都必须可见，所以这一层必须是 fail-open。
+  function withTimeout(promise, ms, fallback) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (value) => { if (!settled) { settled = true; resolve(value); } };
+      const handle = global.setTimeout(() => done(fallback), ms);
+      Promise.resolve(promise).then(
+        (value) => { global.clearTimeout(handle); done(value); },
+        () => { global.clearTimeout(handle); done(fallback); }
+      );
+    });
+  }
+
   async function boot() {
     if (!doc.body) return;
     build();
@@ -929,17 +1100,19 @@
     // 重新 boot 前先把自己停干净：把在飞的 transition 收回来（否则它会在几秒后
     // 继续往旧目标滑，画面和 JS 记的位置就对不上了），再把状态机链标成未启动。
     clearTimer();
-    clearSegment();
+    stopWalk();
     if (container) container.style.transition = "none";
     running = false;
-    const config = await readConfig();
+    // 读盘一律带超时兜底：chrome.storage 万一不回调（扩展刚启动 / 上下文失效），
+    // 也不能让宠物永远不出现 —— 超时就按默认值（enabled=true）先把猫放出来。
+    const config = await withTimeout(readConfig(), STORAGE_TIMEOUT_MS, normalizeConfig(null));
     configEnabled = config.enabled;
     paused = config.paused;
     petXPct = config.x;
     petYPct = config.y;
     petSize = config.size;
     applyBox();
-    stats = await readStats();
+    stats = await withTimeout(readStats(), STORAGE_TIMEOUT_MS, null);
     statsLoaded = true;
     if (button) button.setAttribute(STATE_ATTR, "sit");
     state = "sit";
@@ -976,10 +1149,24 @@
       dragging: dragging,
       menuOpen: Boolean(menu && !menu.hidden),
       bubble: Boolean(bubble && !bubble.hidden),
+      // 换帧与行走：验收「走路时帧号在变、位置也在同步变」靠这两项 + px
+      frame: frameCol,
+      walking: rafId !== null,
+      blinkWait: Math.max(0, Math.round(blinkReadyAt - nowMs())),
+      framePos: sprite ? sprite.style.backgroundPosition : "",
+      // 行内帧必须为空才说明当前状态由 CSS 管（坐/睡/眨），不是残留的行走帧
+      inlineFrame: Boolean(sprite && sprite.style.backgroundPosition),
       // 只在测试页里看：可用范围与「停靠时的右边缘」，用来判断边界是不是按预期算的
       maxLeft: lastRange ? Math.round(lastRange.max) : null,
       yMax: lastRange ? Math.round(lastRange.yMax) : null,
-      dockBottom: container ? parseFloat(global.getComputedStyle(container).bottom) || 0 : null
+      dockBottom: container ? parseFloat(global.getComputedStyle(container).bottom) || 0 : null,
+      // 可见性的硬指标：外壳的 rect 与 sprite 背景图是否真的画出了像素。
+      // 「宠物是不是消失了」只有量这个才说得清（display / 尺寸 / 是否在视口内）。
+      rect: container ? (() => {
+        const box = container.getBoundingClientRect();
+        return { left: Math.round(box.left), top: Math.round(box.top), w: Math.round(box.width), h: Math.round(box.height) };
+      })() : null,
+      viewport: (() => { const v = viewport(); return { w: Math.round(v.w), h: Math.round(v.h) }; })()
     };
   }
 
