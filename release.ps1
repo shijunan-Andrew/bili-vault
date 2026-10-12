@@ -210,6 +210,11 @@ Say "  纯函数单元测试（真执行 archive-core.js）…" $C_DIM
 Invoke-Native $Node @('test/archive-core.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
 if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 单元测试未全过" $C_RED; $failed = $true }
 
+# 1.5.0 起本地数据库的纯逻辑单独一套：它不碰浏览器 API，可以在 node 里真跑。
+Say "  纯函数单元测试（真执行 stats-core.js）…" $C_DIM
+Invoke-Native $Node @('test/stats-core.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
+if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 数据库单元测试未全过" $C_RED; $failed = $true }
+
 Say "  词典覆盖…" $C_DIM
 $i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }
@@ -262,6 +267,7 @@ Say "    [ ] 4. 标记一条「已下载」，000视频下载 被创建"
 Say "    [ ] 5. 打开本地视频目录（本地目录打开助手可用）"
 Say "    [ ] 6. 点右下角齿轮进设置页：切外观与语言立即生效；「自定义」选张图、拉遮罩与模糊、开毛玻璃，回收藏库看效果"
 Say "    [ ] 7. 选一个收藏夹点「先看差异」，一两分钟出结果、报告写进 002同步报告"
+Say "    [ ] 8. 跑一次导入后打开 003database 里的 database.json（纯文本可读）；设置页「数据统计」进统计页，四个数字与 14 天柱状图是真实值；收藏库右下角小鲸鱼点一下会说话，设置页关掉开关后它消失"
 Say ""
 Say "  前置：已在 chrome://extensions 点过「重新加载」" $C_YELLOW
 Say ""
@@ -269,7 +275,7 @@ Say "  版本：$oldVersion → $版本（界面显示 $Tag）"
 Say "  提交：$msg"
 Say "  tag ：$Tag → 推送到 origin/main"
 if (-not $Yes) {
-  $ans = Read-Host "`n上面 6 项都验证过了吗？确认发布？(y/N)"
+  $ans = Read-Host "`n上面 8 项都验证过了吗？确认发布？(y/N)"
   if ($ans -notmatch '^[yY]') { & $rollback; Say "`n已取消，版本号改动已回滚。" $C_YELLOW; exit 0 }
 }
 

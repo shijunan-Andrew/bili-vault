@@ -34,6 +34,8 @@
 4. 把外部下载好的视频放进收藏夹：在详情里点「将下载到本地的视频放入收藏夹中」，插件按与下载器相同的规则建好目录，你把文件放进去，卡片就显示「已下载」。（1.3.0 起不再内置下载器。）
 5. 通过可选的 Windows Native Messaging 辅助程序，在文件资源管理器打开视频目录。
 6. 外观可选「自定义」（1.4.0）：整页铺一张本机图片，可调遮罩透明度 / 背景模糊，并可开启毛玻璃（强度可调）；图片存 IndexedDB 的 Blob，不进 `chrome.storage`。
+7. 本地数据库与数据统计（1.5.0）：导入与扫描会把每条视频记进 `003database/database.json`，设置页「数据统计」打开统计页（数字卡 + 最近 14 天柱状图 + 收藏夹排行）。
+8. 宠物挂件（1.5.0）：收藏库右下角一只自绘的小鲸鱼，点一下冒气泡说一句话（陪伴天数 / 帮你保存了多少 / 今日新增 / 最近最常收藏的收藏夹），互动次数落进数据库当亲密度；设置页可开关。
 
 ## 路线图（用户 2026-10-10 确认的方向）
 
@@ -73,6 +75,24 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 ### 明确不做的事（用户已否决，别自作主张加回来）
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
+
+## 1.5.0：本地数据库（003database）与宠物挂件
+
+用户要求（2026-10-12）：新增 `003database` 作为**数据库根目录**，能统计「共收藏了多少 / 今日新增多少 / 累计 / 近期收藏最多的收藏夹」；设置页「使用说明」下方加「数据统计」入口（按钮文案「点击查看最近收藏统计」），点开是一个带图表与表格的统计页；再加一个**宠物挂件**（参考 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的气泡形态），气泡显示「已陪伴你 x 天 / 帮你保存了 x 个视频 / 今日新增收藏视频 x 个 / 你近期保存最多的收藏夹是 x」，并且**可以互动**。
+
+**只借形态，不抄素材。** 那个仓库的代码是 MIT，但 `assets/` 里的美术素材**不在 MIT 覆盖范围内**（PROVENANCE.md 另行声明），所以鲸鱼是我们自己用内联 SVG 画的（`pet.js` 里 `.bca-pet-body/-blob/-belly/-blush/-eye/-spark/-tail/-spout`），一个字节的素材都没复用。1.4.0 参考 BewlyCat 时也是同一套做法。
+
+**数据库是「明细」，统计全是现算的。** `stats-core.js`（IIFE + `module.exports`，浏览器与 node 两用）里没有任何「汇总字段」：
+
+- 文件是 `003database/database.json`，形状 `{ version, createdAt, updatedAt, videos: { <键>: { at, day, collection, title, bvid, aid } }, pet: { affinity, day, todayTouch, totalTouch } }`。
+- 键优先 BV 号、其次 av 号、最后「收藏夹 + 标题」（`videoKey()`）；**重复导入不会变成两行**，同一条视频再出现时**保留最早的收藏时间**、但收藏夹跟着最新走（「移到另一个收藏夹」之后排行榜要反映新位置）。
+- 分天一律按**本地日**（`localDayKey()`），不是 UTC —— 否则晚上八点以后收藏的会被算进第二天。
+- `snapshot()` 一次算好给界面用的全部数字（`videos / collections / savedToday / savedLast7 / topCollection / days / pet`），`recentDays()` 负责把没有收藏的日子补成 0（柱状图不能有断口）。
+- **不要在数据库里另存一份汇总**：汇总与明细一定会不同步，最后变成没人能解释的「图表和列表对不上」。
+
+**数据是怎么进来的**：导入时后台每存下一条就 `statsPendingRecords.push(statsRecordForItem(...))`，一个收藏夹跑完再 `writeStatsDatabase()` 落盘（`favoriteAtText` 与写进 `视频信息.txt` 的那行时间**同源**）；收藏库扫描完调 `syncStatsDatabase()` **整份重建**（`databaseFromVideos(videos, { previous })`，只保留 `createdAt` 与宠物状态）——扫描看得到的才算数，用户在收藏库里删掉的视频不该继续留在统计里。
+
+**宠物挂件的契约**（三处都要对上）：`pet.js` 读 `chrome.storage.local.bcaStats` 显示；显隐由 `chrome.storage.local.interfacePet = { enabled }` 控制（设置页那个开关写它）；点一下发 `{ type: "bca-pet-touch" }`，后台 `touchPetInDatabase()` 把它落进数据库（`touchPet()`，每天最多 20 次、亲密度上限 9999）并回 `{ ok, lineIndex, affinity, todayTouch, totalTouch, capped }`。**后台只回下标、不拼中文**（service worker 里没有词典），四句台词在 `pet.js` 里逐个 `translate("…")`。
 
 ## 1.4.0：自定义外观（背景图 / 毛玻璃）
 
@@ -132,6 +152,9 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
 ├── archive-core.js               # 可复用的纯逻辑：安全名称、下载目录匹配、下载路径、视频信息解析、页码序列
+├── stats-core.js                 # 1.5.0：本地数据库的纯逻辑（明细读写、按本地日分天、快照与排行、宠物亲密度）。浏览器挂 globalThis，node 里能 require
+├── pet.js / pet.css              # 1.5.0：宠物挂件（自绘内联 SVG + 气泡轮播 + 点击互动），只读 chrome.storage 里的快照
+├── stats.html/js/css             # 1.5.0：数据统计页（数字卡 + 最近 14 天柱状图 + 收藏夹排行），入口在设置页
 ├── theme.css / theme.js          # 4.0 / 4.5：唯一的设计令牌来源；theme.js 在 <head> 同步应用主题。1.4.0 起 theme.js 还管自定义外观（背景图层 + 毛玻璃变量，图片存 IndexedDB）
 ├── i18n.js                       # 4.5：以中文原文为 key 的翻译层
 ├── icons.js                      # 4.0：线性 SVG 图标，替代字符图标
@@ -139,7 +162,7 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 │   ├── zh-TW.json                # 繁体词典（简体中文不需要词典，查不到就原样返回）
 │   └── en.json                   # 英文词典
 ├── popup.html/js/css             # 插件弹窗：自动归档开关、本地备份文件夹、导入界面、语言（1.4.0 起弹窗不再有主题滑块）
-├── settings.html/js/css          # 1.3.2：设置页（外观 / 语言 / 使用说明）；1.4.0 起外观含自定义背景与毛玻璃
+├── settings.html/js/css          # 1.3.2：设置页（外观 / 语言 / 使用说明）；1.4.0 起外观含自定义背景与毛玻璃；1.5.0 起多一组「数据统计」（统计页入口 + 宠物挂件开关）
 ├── library.html/js/css           # 本地收藏库页面
 ├── guide.html / tutorial.html     # 使用说明页 / 安装教程页（两页共用 tutorial.js、page.css、mockup.css）
 ├── tutorial.js                    # 上面两页共用的关窗按钮脚本
@@ -154,6 +177,7 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── test/
 │   ├── stability.test.cjs        # Node 内置测试（项数以 `node test/stability.test.cjs` 的实际输出为准）：静态回归断言 + 并进来的单元测试
 │   ├── archive-core.test.cjs     # 59 项真执行单元测试：require archive-core.js 真的调用它
+│   ├── stats-core.test.cjs       # 1.5.0：31 项真执行单元测试：require stats-core.js（固定时间戳，绝不用真实 Date.now）
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
 │   ├── archive-audit.cjs         # 本地归档的标签/简介覆盖情况体检
@@ -594,7 +618,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:194 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:195 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -738,6 +762,8 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
    $t = [System.IO.File]::ReadAllText($p, [System.Text.Encoding]::UTF8)
    [System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UTF8Encoding($true)))
    ```
+    **用 node 脚本重写 `.ps1` 时要当心「BOM 变成两个」**：`fs.readFileSync(p).toString("utf8")` **会把 BOM 留在字符串里**，再 `Buffer.concat([BOM, Buffer.from(text)])` 就写出两个 BOM —— PowerShell 5.1 会把多余的 BOM 当正文，整份脚本报一串 `Unexpected token`（1.5.0 发布时踩过，`release.ps1` 直接跑不起来）。正确做法是**先把字符串开头的 `\uFEFF` 去掉、再补一个 BOM**。检查时除了「前 3 字节是 `239,187,191`」，还要看**第 4 个字节不是 239**（连续两个 BOM 的判据）。
+
 11. 完成后报告改动内容、检查方式和未验证的真实环境行为。
 
 12. **要画界面示意图（教程页、帮助页）时，按真实截图的细节画，不要在这些地方省。**（用户 2026-10-10 定的标准）
@@ -852,4 +878,11 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     1. **症状**：用户在导入途中关掉 B 站收藏夹页面（这是 1.4.3 起明确支持的用法）→ 后台正常跑完、报告与封面都正常，但弹窗既不弹完成提示，还可能显示「请先打开并刷新收藏夹页面，再试一次。」这种假错误。
     2. **判据**：任何「A 等 B 干活」的地方，B 消失时都要区分「B 没干」和「B 把活交出去了」。这里用 `chrome.storage.local.get("importState")` 的 `running` 判断：还在跑就改口径（`页面已关闭，导入仍在后台继续；完成后这里会提示。`），并且**直接订阅结果**（`importDone` 落地即提示），而不是继续等那条已经断掉的通道。`startedAt` 要用 `Date.now()` 记下来，免得把上一轮的旧结果当成这一轮。
     3. **别把结果通道绑在发起方身上**：真正干活的是后台，结果就必须能从后台直接到达界面（1.4.3 起 `importDone` 就是这条通道）。否则「关掉发起页面也能继续跑」只做了一半 —— 活是跑完了，用户却看不到。
+
+30. **跨进程只传「下标」，不传给用户看的文字；派生统计不要另存一份汇总。**（V1.5.0 做本地数据库与宠物挂件时定。）
+    1. **service worker 里没有词典**：`background.js` 拿不到 `BcaI18n` 的词典（它只管 storage 与网络），所以宠物互动这条消息只回 `{ ok, lineIndex, affinity, todayTouch, totalTouch, capped }`，四句台词写在 `pet.js` 里逐个 `translate("…")`。**后台一旦自己拼中文，等于绕过整套 i18n**；而且后台拼的字符串也没法随切语言更新。
+    2. **台词必须写成一条条 `translate("…")` 调用**：`pet.js` 一开始把四句塞进 `const TOUCH_LINES = [...]` 数组字面量，`test/i18n-extract.cjs` 只认调用点，这四句就永远不进词典（缺了不报错，只是切语言那四句不翻译）。抽取器现在也认 `translate(` 这层包装 —— 但**新写的包装函数要同步告诉抽取器**，否则又是一个静默漏翻。
+    3. **数据库只存明细**：`003database/database.json` 里只有「一条视频一条记录」，总数 / 今日 / 近 7 天 / 排行榜 / 柱状图全部由 `stats-core.js` 现算（`snapshot()`）。存了汇总就一定要同步更新，早晚会出现「图表和列表对不上」这类无法解释的 bug。
+    4. **纯函数模块要能被 node `require`**：`stats-core.js` 与 `archive-core.js` 一样，IIFE 挂 `globalThis` 给浏览器、末尾 `module.exports = api` 给 node —— 这样 `test/stats-core.test.cjs` 能在 node 里真跑（31 条），而不是只做文本断言。`release.ps1` 里这两套都要跑。
+    5. **整份重建而不是增量合并**：收藏库扫描完调 `syncStatsDatabase()`，用 `databaseFromVideos(videos, { previous })` 把数据库整份重写（只保留 `createdAt` 与宠物状态）。扫描看得到的才算数 —— 用户在收藏库里删掉的视频不该继续留在统计里。
 

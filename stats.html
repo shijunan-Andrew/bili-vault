@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#00a1d6">
+  <title data-i18n="哔哩藏库 · 数据统计">哔哩藏库 · 数据统计</title>
+  <!-- 和设置页同一套：先令牌（theme.css），再本页排版（只吃令牌，自己不写颜色） -->
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="stats.css">
+  <script src="theme.js"></script>
+  <script src="i18n.js"></script>
+  <script src="icons.js"></script>
+</head>
+<body>
+  <!-- 顶部固定条：左边标题 + 一行说明，右边一个「返回设置」。
+       条上必须有底色 —— 铺了背景图以后，粘性条里的文字不能直接压在照片上滚过去。 -->
+  <header class="stats-topbar">
+    <div class="stats-topbar-lead">
+      <h1 data-i18n="哔哩藏库 · 数据统计">哔哩藏库 · 数据统计</h1>
+      <p class="stats-sub" data-i18n="收了多少、最近在收什么，这一页都从本机的 003database 现算。">收了多少、最近在收什么，这一页都从本机的 003database 现算。</p>
+    </div>
+    <!-- 这一页是新开的一个标签：能关就直接关掉回到设置页那个标签，
+         关不掉（用户手输地址进来）才退回导航过去。绝不做成链接 ——
+         链接会把当前这个标签直接换成别的页面。 -->
+    <button id="statsBack" class="button button-quiet" type="button" data-i18n="返回设置">返回设置</button>
+  </header>
+
+  <main class="stats-shell" id="statsShell" aria-label="收藏数据统计" data-i18n-aria="收藏数据统计">
+    <!-- 四个数字卡。值由脚本填（先写「—」，加载完再换成真数字）。 -->
+    <section class="stats-card" id="statsOverview" hidden>
+      <h2 data-i18n="总览">总览</h2>
+      <div class="stats-tiles">
+        <div class="stats-tile">
+          <p class="stats-tile-head">
+            <span class="stats-tile-icon" data-icon="tv"></span>
+            <span data-i18n="视频总数">视频总数</span>
+          </p>
+          <p class="stats-tile-value tnum" id="statVideos">—</p>
+        </div>
+        <div class="stats-tile">
+          <p class="stats-tile-head">
+            <span class="stats-tile-icon" data-icon="plus"></span>
+            <span data-i18n="今日新增">今日新增</span>
+          </p>
+          <p class="stats-tile-value tnum" id="statSavedToday">—</p>
+        </div>
+        <div class="stats-tile">
+          <p class="stats-tile-head">
+            <span class="stats-tile-icon" data-icon="calendar"></span>
+            <span data-i18n="近 7 天新增">近 7 天新增</span>
+          </p>
+          <p class="stats-tile-value tnum" id="statSavedLast7">—</p>
+        </div>
+        <div class="stats-tile">
+          <p class="stats-tile-head">
+            <span class="stats-tile-icon" data-icon="collection"></span>
+            <span data-i18n="收藏夹个数">收藏夹个数</span>
+          </p>
+          <p class="stats-tile-value tnum" id="statCollections">—</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 柱状图：纯内联 SVG，脚本按容器宽度现画，不引任何图表库、不引外部地址。
+         #statsChartLead / #statsChartNote 的文字随数据形态变，所以标在脚本里。 -->
+    <section class="stats-card" id="statsChartCard" hidden>
+      <h2 data-i18n="最近每天的收藏数">最近每天的收藏数</h2>
+      <p class="stats-lead" id="statsChartLead"></p>
+      <div class="stats-chart" id="statsChart"></div>
+      <p class="stats-note" id="statsChartNote" data-i18n="暂时拿不到每天的明细数据。" hidden>暂时拿不到每天的明细数据。</p>
+      <p class="stats-caption" id="statsChartCaption" data-i18n="最右边空心的那根是今天。" hidden>最右边空心的那根是今天。</p>
+    </section>
+
+    <!-- 排行榜要的数据（每个收藏夹各有多少）不在快照里，所以这里只展示快照里有的那一个：
+         近期保存最多的收藏夹（含近 30 天保存数）。快照里没有就读不到，不自己去碰文件系统。 -->
+    <section class="stats-card" id="statsTopCard" hidden>
+      <h2 data-i18n="近期保存最多的收藏夹">近期保存最多的收藏夹</h2>
+      <p class="stats-lead" id="statsTopLead"></p>
+      <p class="stats-top-row">
+        <span class="stats-top-icon" data-icon="collection-open"></span>
+        <span class="stats-top-name" id="statsTopName">—</span>
+        <span class="stats-top-count tnum" id="statsTopCount">—</span>
+      </p>
+    </section>
+
+    <!-- 读不到 bcaStats（还没导入过、也还没在收藏库里扫描过）时只显示这一句，
+         不能摆一堆 0 让人以为界面坏了。 -->
+    <section class="stats-card stats-empty" id="statsEmpty" hidden>
+      <span class="stats-empty-icon" data-icon="info"></span>
+      <p class="stats-empty-text" data-i18n="还没有数据：先在收藏库里扫描一次，或导入一次收藏夹。">还没有数据：先在收藏库里扫描一次，或导入一次收藏夹。</p>
+    </section>
+
+    <!-- 小字：更新时间（脚本填）+ 数据只在本地这一句。
+         没有可用的更新时间时整行藏起来，只留下面那句。 -->
+    <footer class="stats-foot">
+      <p class="stats-updated" id="statsUpdated" hidden>
+        <span class="stats-updated-icon" data-icon="clock"></span>
+        <span data-i18n="数据更新时间">数据更新时间</span>
+        <span class="stats-updated-value tnum" id="statsUpdatedValue">—</span>
+      </p>
+      <p class="stats-local">
+        <span class="stats-local-icon" data-icon="shield"></span>
+        <span data-i18n="数据来自本地数据库 003database，只存在这台机器上。">数据来自本地数据库 003database，只存在这台机器上。</span>
+      </p>
+    </footer>
+  </main>
+
+  <script src="stats-core.js"></script>
+  <script src="stats.js"></script>
+</body>
+</html>

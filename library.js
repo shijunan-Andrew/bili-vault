@@ -669,7 +669,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   // 目录列表本身每次重新枚举，缓存只省文件读取，所以新增/删除目录一定反映得出来
   const collections = [];
   for await (const collectionEntry of handle.values()) {
-    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载"].includes(collectionEntry.name)) continue;
+    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database"].includes(collectionEntry.name)) continue;
     collections.push(collectionEntry);
   }
   for (const collectionEntry of collections) {
@@ -3173,7 +3173,7 @@ function validateCollectionName(rawName) {
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
     throw new Error(BcaI18n.t("这个名称是 Windows 保留名称，请换一个名称。"));
   }
-  if (["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
+  if (["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
   return name;
 }
 
@@ -3262,6 +3262,39 @@ videoForm.addEventListener("submit", async (event) => {
 collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInProgress) event.preventDefault(); });
 videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
 
+/* 1.5.0：把这次扫描的结果同步进本地数据库（003database/database.json）。
+   一次完整扫描就是一次权威重建 —— 扫描看得到的才算数（用户删掉的视频不该继续
+   留在统计里），所以整份重写，只把旧库的 createdAt 与宠物状态带过来
+   （见 stats-core.js 的 databaseFromVideos）。导入时后台写进去的那几行也在归档里，
+   扫描一样看得见，两条路径不会互相打架。
+   数据库是派生视图，写不进去（只读权限、磁盘满）不影响收藏库本身。 */
+async function syncStatsDatabase(handle) {
+  const core = globalThis.BcaStatsCore;
+  if (!handle || !core) return;
+  const videos = allVideos();
+  if (!videos.length) return;
+  try {
+    const directory = await handle.getDirectoryHandle(core.DATABASE_FOLDER_NAME, { create: true });
+    const file = await directory.getFileHandle(core.DATABASE_FILE_NAME, { create: true });
+    let previous = null;
+    try {
+      const text = await (await file.getFile()).text();
+      if (text.trim()) previous = JSON.parse(text);
+    } catch (_) { /* 旧库坏了就当没有，下面整份重建 */ }
+    const database = core.databaseFromVideos(videos, { previous });
+    const writable = await file.createWritable();
+    await writable.write(JSON.stringify(database));
+    await writable.close();
+    // 1.5.0：和 background.js 的 publishStatsSnapshot 保持同一形状 —— snapshot() 的
+    // days.days 是「库里有几天」的数字，每日明细另算一份 daily 给统计页画柱子。
+    await chrome.storage.local.set({
+      bcaStats: Object.assign(core.snapshot(database), { daily: core.recentDays(database) })
+    });
+  } catch (error) {
+    console.warn("同步本地数据库失败（收藏库不受影响）", error);
+  }
+}
+
 async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n.t("已读取"), options = {}) {
   /* V1.4.3：写入路径（添加视频 / 新建收藏夹 / 删除）各有一套 inProgress 标记，
      与扫描互不知情。两轮扫描撞在一起会互相用旧快照覆盖新快照，还会把对方正在
@@ -3316,6 +3349,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: allVideos().length }));
   // 大目录的递归体积统计很慢，放在渲染之后异步跑，不阻塞界面
   updateStorageUsage(handle);
+  // 1.5.0：数据库同步也放在渲染之后，同样是「慢活不挡界面」
+  syncStatsDatabase(handle);
 }
 
 function syncDetailDownloadAction() {
@@ -3639,9 +3674,10 @@ async function refreshCurrentRoot() {
 /* V1.4.4：选完目录后把插件自己的三个固定目录建出来。
    以前只有弹窗会建 000视频下载，收藏库什么都不建 —— 选一个空文件夹进来，
    目录树是空的，「标记已下载」还会撞上一句指错方向的提示。
-   这三个名字必须与 background.js 的 RESERVED_COLLECTION_NAMES 以及本文件里
-   扫描时跳过的那份名单一致。创建失败（只读权限、用户拒绝）不影响主流程。 */
-const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告"];
+   这四个名字必须与 background.js 的 RESERVED_COLLECTION_NAMES 以及本文件里
+   扫描时跳过的那份名单一致。创建失败（只读权限、用户拒绝）不影响主流程。
+   1.5.0：多了 003database（本地数据库根目录，BcaStatsCore 负责读写它）。 */
+const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告", "003database"];
 
 async function ensureRootStructure(handle) {
   if (!handle) return;

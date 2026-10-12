@@ -1,0 +1,362 @@
+/* ==========================================================================
+   stats.css —— 数据统计页（1.5.0 新增）自己的排版
+   页面骨架与设置页同一套观感，但这里不加载 page.css / settings.css：
+   那两个文件一个是长文教程页的骨架、一个带着侧边栏与分组面板的布局，
+   本页只有「一条顶栏 + 一列卡片」，与其继承一堆用不上的规则，不如自己写一份。
+   顶上那个条与卡片盒的尺寸刻意抄了 settings.css 的 .settings-topbar / .settings-card，
+   两页来回切的时候顶栏高度、卡片间距、圆角都不会跳。
+
+   颜色/圆角/字号/间距/阴影全部来自 theme.css 的令牌：本文件不写死任何色值，
+   也不用强制覆盖去抢优先级 —— 深浅两套主题靠令牌替换自动完成，一行都不用改。
+   图表的柱子上色走 SVG 的 fill 属性（不是 color），所以颜色写在 .stats-bar 这类
+   class 里，脚本只负责几何。
+
+   定义在别处的类不在这里重复：图标尺寸在 theme.css 的 .icon，数字对齐用它的 .tnum，
+   元素隐藏由 theme.css 统一管（本文件不写 display:none 去抢）。
+   ========================================================================== */
+
+/* 顶栏高度：和 settings.css 的 --topbar-h 取同一个值（56px）*/
+:root { --topbar-h: 56px; }
+
+/* ── 页面骨架 ──
+   body 这三条与 page.css:21 逐字对齐：铺了背景图时底色交给 wallpaper 那层去画，
+   这里只保证不出现白边、字体字号与仓库其它页面一致。 */
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.75 var(--font-sans);
+}
+
+/* ── 顶栏：标题 + 一行说明，右边「返回设置」──
+   粘在顶上（本页会比一屏长），所以必须自带底色：铺了背景图以后
+   滚过去的文字不能直接压在照片上。 */
+.stats-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: var(--topbar-h);
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.stats-topbar-lead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  min-width: 0;
+}
+.stats-topbar-lead h1 {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.stats-sub {
+  margin: 0;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+/* 顶栏里的按钮比正文按钮矮一号（和设置页 .topbar-tools .button 一致） */
+.stats-topbar .button {
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  flex: 0 0 auto;
+}
+
+/* ── 内容列 ──
+   单列 + 卡片间距；最大宽度抄设置页的 1120px，两页内容区左缘对齐。 */
+.stats-shell {
+  display: grid;
+  gap: var(--sp-4);
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--sp-5) var(--sp-5) var(--sp-6);
+}
+
+.stats-card {
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.stats-card h2 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+.stats-lead {
+  margin: 0 0 var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+.stats-note {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+.stats-caption {
+  margin: var(--sp-2) 0 0;
+  color: var(--faint);
+  font-size: var(--fs-sm);
+}
+
+/* ── 四个数字卡 ──
+   窗口越窄列数越少（见文件末尾的媒体查询），minmax(0, 1fr) 保证长数字不会把格子撑破。 */
+.stats-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.stats-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-soft);
+}
+.stats-tile-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+.stats-tile-icon {
+  display: inline-flex;
+  color: var(--brand);
+  font-size: var(--fs-md);
+}
+.stats-tile-value {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* ── 柱状图 ──
+   内联 SVG，脚本按容器实测宽度画（所以这里只给容器一个最小高度防跳动）。
+   图里没有文字节点时也该有个高度，否则加载中卡片会瘪下去。 */
+.stats-chart { min-height: 220px; }
+.stats-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--font-sans);
+  overflow: visible;
+}
+/* 柱子：默认实心品牌色；今天那根画成空心（浅底 + 描边），
+   这样深浅两套主题下都一眼能认出来 —— 只靠「更深/更浅」在深色主题里会反过来。 */
+.stats-bar {
+  fill: var(--brand);
+  transition: fill var(--dur) var(--ease);
+}
+.stats-bar-today {
+  fill: var(--brand-soft);
+  stroke: var(--brand-strong);
+  stroke-width: 1.5;
+}
+/* 坐标轴与网格：一律走 --line / --line-soft，深色主题自动变浅 */
+.stats-axis-line {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+}
+.stats-grid-line {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.stats-axis-label {
+  fill: var(--muted);
+  font-size: var(--fs-sm);
+}
+.stats-axis-label-today {
+  fill: var(--ink);
+  font-weight: 600;
+}
+.stats-scale-label {
+  fill: var(--faint);
+  font-size: var(--fs-sm);
+}
+.stats-bar-value {
+  fill: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* ── 近期保存最多的收藏夹 ── */
+.stats-top-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-soft);
+}
+.stats-top-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--brand);
+  font-size: var(--fs-lg);
+}
+/* 收藏夹名字可能很长：占满剩余宽度、超长省略号，别把右边的数字挤走 */
+.stats-top-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-top-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+
+/* ── 空状态 ──
+   读不到快照时只显示这一块（脚本把其它卡片 hidden 掉）。
+   注意这里的 display:flex 不会盖掉 [hidden]：theme.css 里那条带了强制覆盖。 */
+.stats-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.stats-empty-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--brand);
+  font-size: var(--fs-xl);
+}
+.stats-empty-text {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+
+/* ── 页脚小字 ── */
+.stats-foot {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--fs-sm);
+}
+.stats-foot p {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.stats-foot p + p { margin-top: var(--sp-1); }
+.stats-foot [data-icon] {
+  display: inline-flex;
+  color: var(--faint);
+  font-size: var(--fs-md);
+}
+.stats-foot .stats-updated-value { color: var(--ink); }
+
+/* ── 按钮 ──
+   本页不加载 page.css / settings.css（.button 与 .button-quiet 分别在 page.css:106
+   和 settings.css:236），所以在这里复制同样一份，尺寸逐条对齐：
+   高 40px、左右 --sp-4、圆角 --r-sm、字号 --fs-base、悬停上浮 1px。
+   「返回设置」用 .button-quiet：浅蓝底 + 品牌色字，和设置页那个返回按钮一样。 */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  background: var(--surface-soft);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 650;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.button:hover:not(:disabled) { transform: translateY(-1px); }
+.button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  transform: none;
+}
+.button-quiet {
+  color: var(--brand-deep);
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+.button-quiet:hover:not(:disabled) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+
+/* ── 毛玻璃 ──
+   「设置 → 外观 → 自定义外观」铺了背景图并且开了毛玻璃时，theme.css 会把收藏库与
+   设置页的卡片换成半透明底（它那份清单里是本页的类名没有的，见 theme.css:356）。
+   本页和设置页同属「设置」这一家，一样跟着透，用的还是它那几个令牌，没有新颜色。
+   长正文页（教程/说明）刻意不做毛玻璃，本页是卡片式的，文字都有自己的底色，透得起。 */
+html.bca-glass :is(.stats-topbar, .stats-card, .stats-foot) {
+  background: var(--bca-glass-surface);
+  border-color: var(--bca-glass-line);
+  backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
+}
+html.bca-glass .stats-tile,
+html.bca-glass .stats-top-row {
+  background: var(--bca-glass-surface);
+  border-color: var(--bca-glass-line);
+}
+/* 顶栏比卡片再糊一点：它是粘性的，底下滚过的内容更多（同 theme.css:365 的 .topbar） */
+html.bca-glass .stats-topbar {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  backdrop-filter: blur(calc(var(--bca-glass-blur) + 6px)) saturate(170%);
+  -webkit-backdrop-filter: blur(calc(var(--bca-glass-blur) + 6px)) saturate(170%);
+}
+
+/* ── 窄窗口 ──
+   1366 的笔记本、半屏贴靠、以及小屏平板都会撞到这里：
+   四列 → 两列 → 一列，副说明在手机上让位给标题和返回按钮。 */
+@media (max-width: 900px) {
+  .stats-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .stats-shell { padding: var(--sp-4) var(--sp-3) var(--sp-5); }
+  .stats-topbar { padding: var(--sp-2) var(--sp-3); }
+  .stats-topbar-lead h1 { font-size: var(--fs-md); }
+  .stats-sub { display: none; }
+}
+@media (max-width: 520px) {
+  .stats-tiles { grid-template-columns: minmax(0, 1fr); }
+}

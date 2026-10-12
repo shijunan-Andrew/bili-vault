@@ -67,6 +67,10 @@
           <span class="nav-icon" data-icon="info"></span>
           <span class="nav-text" data-i18n="使用说明">使用说明</span>
         </button>
+        <button type="button" class="nav-item" data-group="stats">
+          <span class="nav-icon" data-icon="chart"></span>
+          <span class="nav-text" data-i18n="数据统计">数据统计</span>
+        </button>
       </nav>
     </aside>
 
@@ -215,7 +219,32 @@
         </div>
       </section>
 
-      <p class="settings-foot" data-i18n="外观、语言和使用说明都在这里改，改完立即生效。">外观、语言和使用说明都在这里改，改完立即生效。</p>
+      <section class="settings-card" id="group-stats" data-group="stats">
+        <h2 data-i18n="数据统计">数据统计</h2>
+        <p class="card-lead" data-i18n="收了多少、最近在收什么，插件都记在本机的 003database 里。">收了多少、最近在收什么，插件都记在本机的 003database 里。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="最近收藏统计">最近收藏统计</p>
+            <p class="setting-row-desc" data-i18n="总数、今日新增、最近 14 天柱状图和收藏夹排行。">总数、今日新增、最近 14 天柱状图和收藏夹排行。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="openStats" data-i18n="点击查看最近收藏统计">点击查看最近收藏统计</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="宠物挂件">宠物挂件</p>
+            <p class="setting-row-desc" data-i18n="收藏库右下角的一只小鲸鱼，点一下会说句话。">收藏库右下角的一只小鲸鱼，点一下会说句话。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="toggle-switch" id="petToggle" aria-pressed="true" aria-label="宠物挂件" data-i18n-aria="宠物挂件"><span></span></button>
+          </div>
+        </div>
+      </section>
+
+      <p class="settings-foot" data-i18n="外观、语言、数据统计和使用说明都在这里改，改完立即生效。">外观、语言、数据统计和使用说明都在这里改，改完立即生效。</p>
     </main>
   </div>
 

@@ -354,6 +354,28 @@ async function boot() {
     BcaTheme.setAppearance({ glass: !BcaTheme.appearance().glass });
   });
 
+  // 1.5.0：数据统计页（与设置页一样是新标签页，随时能关回来）
+  $("openStats")?.addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("stats.html") });
+  });
+
+  // 1.5.0：宠物挂件开关。挂件自己监听 chrome.storage.local.interfacePet（见 pet.js），
+  // 这里只写状态、不需要额外信号；缺省视为开启，与挂件那边的判断保持一致。
+  const petToggle = $("petToggle");
+  function renderPetToggle(enabled) {
+    if (!petToggle) return;
+    petToggle.setAttribute("aria-pressed", String(Boolean(enabled)));
+    petToggle.classList.toggle("off", !enabled);
+  }
+  chrome.storage.local.get("interfacePet")
+    .then((stored) => renderPetToggle(!stored?.interfacePet || stored.interfacePet.enabled !== false))
+    .catch(() => renderPetToggle(true));
+  petToggle?.addEventListener("click", () => {
+    const enabled = petToggle.getAttribute("aria-pressed") !== "true";
+    renderPetToggle(enabled);
+    chrome.storage.local.set({ interfacePet: { enabled } }).catch(() => {});
+  });
+
   const search = $("settingsSearch");
   search?.addEventListener("input", (event) => renderSearchResults(event.target.value));
   // 点结果之前会先 blur，所以这里不能用 blur 收起下拉，只能点空白处收

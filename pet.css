@@ -1,0 +1,197 @@
+/* ==========================================================================
+   pet.css —— 宠物挂件（BcaPet）的自绘样式
+   --------------------------------------------------------------------------
+   约定：
+   1. 这里是全项目唯一允许引用令牌、却**不新增色值**的地方：颜色 / 圆角 / 阴影 /
+      字号 / 间距全部走 theme.css 的 :root，深色主题下自动跟着换（令牌换一组即可）。
+      只有尺寸（92px、48px、260px …）是写死的像素，它们与主题无关。
+   2. 位置：右下角浮标（.floating-dock / #scrollTopFab / #settingsFab，在 library.css 里）
+      一点都不能碰 —— 那条带子是 right: var(--sp-5)（22）+ 48 宽。这里把挂件摆在
+      它**左侧**同一水平带（right: 82px，对齐同一个 bottom），z-index 同为 6，
+      两者不重叠，所以既同层又不会盖住浮标。
+   3. 动画只有三处：轻微上下浮动、点击 Q 弹、眨眼（眨眼走 SVG 的 SMIL）。
+      末尾统一切断，尊重系统的「减少动态效果」。
+   ========================================================================== */
+
+/* 挂件外壳：不画任何东西，只负责定位与层叠，避免几个 transform 动画互相打架 */
+.bca-pet-dock {
+  position: fixed; /* 气泡靠这个当包含块，别删 */
+  right: 82px;
+  bottom: calc(var(--sp-6) + var(--sp-5));
+  z-index: 6;
+  display: grid;
+  width: 92px;
+  height: 92px;
+  pointer-events: none; /* 外壳不吃点击，只有鲸鱼和气泡吃 */
+}
+
+.bca-pet-dock.is-hidden {
+  display: none;
+}
+
+/* 宠物本体：<button type="button" aria-label="宠物">，@keyframes 的 Q 弹挂在这一层 */
+.bca-pet {
+  display: block;
+  width: 92px;
+  height: 92px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--brand);
+  background: transparent;
+  transform-origin: center bottom;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.bca-pet-svg {
+  display: block;
+  width: 92px;
+  height: 92px;
+  overflow: visible;
+  filter: drop-shadow(var(--shadow-md));
+}
+
+/* 呼吸式浮动：整只鲸鱼轻轻上下，尾巴反向摆一点，别像贴纸一样钉在屏幕上 */
+@keyframes bca-pet-bob {
+  from { transform: translateY(-3px); }
+  to   { transform: translateY(3px); }
+}
+
+@keyframes bca-pet-tail {
+  from { transform: rotate(3deg); }
+  to   { transform: rotate(-3deg); }
+}
+
+@keyframes bca-pet-blink {
+  0%, 88%, 100% { transform: scaleY(1); }
+  92%           { transform: scaleY(.08); }
+}
+
+@keyframes bca-pet-pop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(.84); }
+  70%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* transform-box: fill-box：SVG 里没有 CSS 盒模型，不写的话 rotate/scale 的原点
+   会落到整个 viewBox 的原点上，眨眼会变成「整只眼睛飞出去」。 */
+.bca-pet-body,
+.bca-pet-tail,
+.bca-pet-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.bca-pet-body {
+  animation: bca-pet-bob 3.6s var(--ease) infinite alternate;
+}
+
+.bca-pet-tail {
+  animation: bca-pet-tail 3.6s var(--ease) infinite alternate;
+}
+
+.bca-pet-eye {
+  animation: bca-pet-blink 6.2s var(--ease) infinite;
+}
+
+.bca-pet.is-popping {
+  animation: bca-pet-pop 380ms var(--ease);
+}
+
+/* —— 小鲸鱼自己 —— 颜色一律继承 currentColor（= --brand），
+   只有腮红与眼睛里的小高光是同一色的半透明版本，深浅主题都成立。 */
+.bca-pet-blob { fill: currentColor; }
+
+.bca-pet-tail path { fill: currentColor; }
+
+.bca-pet-belly {
+  fill: var(--surface);
+  opacity: .22;
+}
+
+.bca-pet-blush {
+  fill: currentColor;
+  opacity: .32;
+}
+
+/* 眼睛用 --ink —— 它的定义就是「正文/前景色」，在浅色主题下是深色、深色主题下是浅色，
+   正好与 --brand 的身体相反，两种主题下都读得出来。瞳孔里的小高光用底色。 */
+.bca-pet-eye { fill: var(--ink); }
+
+.bca-pet-spark {
+  fill: var(--surface);
+  opacity: .85;
+}
+
+.bca-pet-spout {
+  stroke: currentColor;
+  stroke-width: 3.2;
+  opacity: .5;
+}
+
+/* —— 气泡 —— 出现在宠物左上方：外壳只有 92 宽，right: 0 就会向左边长出去，
+   bottom: 100% 让它停在鲸鱼上方。 */
+.bca-pet-bubble {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  z-index: 1;
+  margin-bottom: 10px;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 96px));
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  pointer-events: auto;
+}
+
+.bca-pet-bubble-text {
+  margin: 0;
+  word-break: break-word;
+}
+
+/* 指向鲸鱼的小尖角，和气泡同一张脸（用边框拼出来，不引入图片） */
+.bca-pet-bubble::after {
+  position: absolute;
+  right: 32px;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-bottom-right-radius: var(--r-xs);
+  background: var(--surface);
+  content: "";
+  transform: rotate(45deg);
+}
+
+/* 悬停 / 键盘聚焦时给一点「活着」的反馈；按压态由 @keyframes 负责，
+   这里不要写 transform，否则会把动画整个盖掉。 */
+.bca-pet:hover .bca-pet-svg { filter: drop-shadow(var(--shadow-md)) brightness(1.06); }
+.bca-pet:active .bca-pet-svg { filter: drop-shadow(var(--shadow-md)) brightness(.96); }
+
+/* 键盘用户看不到 :hover，得单独给焦点一个可见标记（只有 Tab 过来才出现） */
+.bca-pet:focus-visible {
+  outline: none;
+  border-radius: var(--r-lg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 32%, transparent);
+}
+
+/* 尊重系统的「减少动态效果」：浮动、摆尾、眨眼、Q 弹全部关掉，
+   只保留 hover / active 那一层静态反馈。 */
+@media (prefers-reduced-motion: reduce) {
+  .bca-pet-body,
+  .bca-pet-tail,
+  .bca-pet-eye,
+  .bca-pet.is-popping {
+    animation: none;
+  }
+}

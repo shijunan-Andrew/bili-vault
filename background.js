@@ -1,5 +1,12 @@
+// 1.5.0：本地数据库（`003database/database.json`）的纯逻辑直接复用 stats-core.js ——
+// background.js 是模块化 service worker（manifest 里 "type": "module"），
+// 静态 import 一个经典脚本是合法的：它执行时把 BcaStatsCore 挂在 globalThis 上，
+// 所以后台、收藏库页面、数据统计页用的是同一份实现，不会各写一套。
+import "./stats-core.js";
+
 const DB_NAME = "bili-fav-archiver";
 const DB_STORE = "settings";
+const BcaStatsCore = globalThis.BcaStatsCore;
 let saveQueue = Promise.resolve();
 
 // 4.9：background.js 是模块化 service worker，加载不了 i18n.js（红线第 5 条：不引远程代码，
@@ -183,7 +190,9 @@ const RESERVED_COLLECTION_NAMES = new Set([
   "001错误报告",
   "002同步报告",
   "视频下载",
-  "000视频下载"
+  "000视频下载",
+  // 1.5.0：本地数据库根目录（003database），收藏夹不许占用
+  "003database"
 ]);
 
 function collectionNameIsReserved(name) {
@@ -2516,6 +2525,85 @@ function importIdentifierKeys(item) {
   ].filter(Boolean);
 }
 
+/* ---------- 1.5.0：本地数据库（003database/database.json） ----------
+   纯逻辑在 stats-core.js（顶部 import）。数据库只记「一条视频一条记录」，
+   统计全部现算 —— 所以这里只做两件事：把刚存下的记录追加进去、把算好的快照
+   塞进 chrome.storage.local.bcaStats 给宠物挂件和数据统计页读。
+   数据库坏了、没权限、写不进去都不影响归档本身 —— 归档才是这个插件的正事。 */
+const statsPendingRecords = [];
+
+async function readStatsDatabase(root) {
+  const directory = await root.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: true });
+  const file = await directory.getFileHandle(BcaStatsCore.DATABASE_FILE_NAME, { create: true });
+  try {
+    const text = await (await file.getFile()).text();
+    if (text.trim()) return { file, database: BcaStatsCore.normalizeDatabase(JSON.parse(text)) };
+  } catch (_) { /* 文件坏了或还是空的：下面整份重写 */ }
+  return { file, database: BcaStatsCore.emptyDatabase() };
+}
+
+async function publishStatsSnapshot(database) {
+  // 1.5.0：snapshot() 里的 days.days 是「库里有几天」这个数字（宠物要用它数「陪伴了几天」），
+  // 每日明细得另外算 —— 统计页要画最近 14 天的柱子，所以顺手带上一份 daily。
+  const stats = Object.assign(BcaStatsCore.snapshot(database), {
+    daily: BcaStatsCore.recentDays(database)
+  });
+  await chrome.storage.local.set({ bcaStats: stats });
+  return stats;
+}
+
+async function writeStatsDatabase(root, records) {
+  if (!root || !records.length) return null;
+  try {
+    const { file, database } = await readStatsDatabase(root);
+    let next = database;
+    for (const record of records) next = BcaStatsCore.addRecord(next, record);
+    const writable = await file.createWritable();
+    await writable.write(JSON.stringify(next));
+    await writable.close();
+    await publishStatsSnapshot(next);
+    return next;
+  } catch (error) {
+    console.warn("写入本地数据库失败（归档不受影响）", error);
+    return null;
+  }
+}
+
+/* 一条刚存好的归档记录 → 数据库里的一行。时间用的就是写进 视频信息.txt 的那一串
+   （认不出来时 stats-core 会退回"现在"，与收藏库重新扫描时的口径一致）。 */
+function statsRecordForItem(item, collectionName, favoriteAtText) {
+  return BcaStatsCore.recordFromVideo({
+    bvid: item?.bvid || "",
+    aid: item?.aid || "",
+    title: item?.title || "",
+    collection: collectionName || "",
+    date: favoriteAtText || ""
+  });
+}
+
+/* 宠物被摸一下：亲密度 +1（同一天有上限），写回数据库，再把新快照发出去。
+   台词不在这里 —— service worker 里没有词典，只回一个下标，由界面侧翻译。 */
+async function touchPetInDatabase() {
+  const root = await getRootHandle().catch(() => null);
+  if (!root) return { ok: false };
+  const permission = await root.queryPermission({ mode: "readwrite" }).catch(() => "denied");
+  if (permission !== "granted") return { ok: false };
+  const { file, database } = await readStatsDatabase(root);
+  const touched = BcaStatsCore.touchPet(database);
+  const writable = await file.createWritable();
+  await writable.write(JSON.stringify(database));
+  await writable.close();
+  await publishStatsSnapshot(database);
+  return {
+    ok: true,
+    lineIndex: touched.index,
+    affinity: touched.affinity,
+    todayTouch: touched.todayTouch,
+    totalTouch: touched.totalTouch,
+    capped: touched.capped
+  };
+}
+
 async function saveImportedItem(root, folder, item, journal = null) {
   // 4.9：命中风控的条目直接拒绝落盘。写文件这里是唯一入口，再挡一道，
   // 免得以后多出别的调用点，写出"标签/简介/发布时间全是未知"的残缺记录。
@@ -2549,7 +2637,10 @@ async function saveImportedItem(root, folder, item, journal = null) {
     await collection.removeEntry(record.name, { recursive: true }).catch(() => {});
     throw error;
   }
-  return { path: `${root.name}/${collectionName}/${record.name}` };
+  // 1.5.0：把「这条记录写在目录名/视频信息.txt 里的收藏时间」一并交回去，
+  // 数据库那一行要用同一个口径的时间（口径不一致会出现「档案里是 6 月、统计算今天」）。
+  const favoriteAtText = metadata.imported && favoriteTimeUnknown ? "未知" : formatChineseDateTime(favoriteAt, true);
+  return { path: `${root.name}/${collectionName}/${record.name}`, favoriteAtText };
 }
 
 function sendImportProgress(text) {
@@ -2919,6 +3010,8 @@ async function importBiliFavorites(data, tabId = null) {
             const result = await saveImportedItem(root, folder, item, journal);
             imported += 1;
             savedPaths.push(result.path);
+            // 1.5.0：数据库那一行跟着归档走 —— 这条已经落盘了才记
+            statsPendingRecords.push(statsRecordForItem(item, folder.title, result.favoriteAtText));
             publishImportRun({ journal, cursor: { folder: folder.title, saved: offset + index + 1, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
           } catch (error) {
             importRethrowIfAbort(error);
@@ -2942,6 +3035,10 @@ async function importBiliFavorites(data, tabId = null) {
         folderLog.length = 0;   // 已渲染，别让中止路径再渲一遍
       }
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
+      // 1.5.0：一个收藏夹跑完就把数据库落一次盘（中途被取消也只丢最后这一小段）
+      if (statsPendingRecords.length) {
+        await writeStatsDatabase(root, statsPendingRecords.splice(0, statsPendingRecords.length));
+      }
     }
   } catch (error) {
     if (error?.name === "ImportCancelled") {
@@ -3651,6 +3748,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     diffBiliFavorites(message.data || message, sender?.tab?.id ?? null)
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, message: error?.message || "对比差异失败。" }));
+    return true;
+  }
+  if (message?.type === "bca-pet-touch") {
+    // 1.5.0：宠物挂件摸一下。没选目录 / 没权限时回 ok:false，界面侧照旧显示轮播台词。
+    touchPetInDatabase().then((result) => sendResponse(result)).catch(() => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === "list-bili-favorite-folders") {

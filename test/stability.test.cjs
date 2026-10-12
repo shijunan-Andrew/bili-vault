@@ -916,18 +916,33 @@ test("every shipped script actually parses", () => {
   // 4.8.2 就真的漏过一次：替换时少删了一行，留下一句孤立的 ": ..." 三元分支，
   // 104 项测试全过，而 library.js 根本跑不起来。这条断言补上那个盲区。
   const vm = require("node:vm");
+  const child = require("node:child_process");
   const scripts = [
     "archive-core.js", "background.js", "content.js",
-    "favorites-import.js", "i18n.js", "icons.js", "library.js", "popup.js", "theme.js"
+    "favorites-import.js", "i18n.js", "icons.js", "library.js", "popup.js", "theme.js",
+    "stats-core.js", "pet.js"
   ];
+  // 1.5.0：background.js 是模块 service worker（manifest 里 "type": "module"），
+  // 它用静态 `import "./stats-core.js"` 把纯函数拿进来 —— 静态 import 在脚本模式里
+  // 是语法错误，所以带 import/export 的文件改用 `node --check`（它会自己按模块语法检测）。
+  const moduleLike = [];
   for (const name of scripts) {
     const source = readProjectFile(name);
+    if (/^\s*(?:import|export)[\s{*]/m.test(source)) {
+      moduleLike.push(name);
+      continue;
+    }
     try {
       // 只解析不执行，所以 chrome.* 之类的宿主 API 不影响
       new vm.Script(source, { filename: name });
     } catch (error) {
       assert.fail(`${name} 解析失败：${error.message}`);
     }
+  }
+  assert.deepEqual(moduleLike, ["background.js"], "只有模块 service worker 才允许带 import/export");
+  for (const name of moduleLike) {
+    const result = child.spawnSync(process.execPath, ["--check", path.join(projectRoot, name)], { encoding: "utf8" });
+    assert.equal(result.status, 0, `${name} 解析失败：${result.stderr || result.stdout}`);
   }
 });
 
@@ -1210,9 +1225,10 @@ test("the default download folder is created when it is missing", () => {
   // 实测问题：000视频下载 只在真正下载时才被创建。从没下载过的用户根本没有它，
   // 「标记为已下载」直接失败，而报错说的却是"请先到下载页选择保存位置"——保存位置早就选好了。
   // ① 弹窗里选保存位置时顺手建出来（那时一定是 readwrite 权限）
-  //    V1.4.4 起三个固定目录一起建：000视频下载 / 001错误报告 / 002同步报告
+  //    V1.4.4 起固定目录一起建：000视频下载 / 001错误报告 / 002同步报告
+  //    V1.5.0 起再加 003database（本地数据库根目录）
   assert.match(popup, /const DOWNLOAD_FOLDER_NAME = "000视频下载";/);
-  assert.match(popup, /const ROOT_STRUCTURE_DIRECTORIES = \[DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告"\];/);
+  assert.match(popup, /const ROOT_STRUCTURE_DIRECTORIES = \[DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告", "003database"\];/);
   assert.match(popup, /for \(const name of ROOT_STRUCTURE_DIRECTORIES\) \{/);
   assert.match(popup, /await handle\.getDirectoryHandle\(name, \{ create: true \}\)/);
   // ② 老用户（根目录已设好但没这个文件夹）也能立刻用上：标记时按需创建
@@ -2213,7 +2229,8 @@ test("every data-i18n marker matches its element text exactly", () => {
   // 另外带子元素的元素不能直接用 data-i18n，否则子元素会被整块清掉。
   const problems = [];
   // V1.3.1：使用说明页也接进了 i18n，所以一并接受这套逐字校验
-  for (const file of ["library.html", "popup.html", "guide.html", "tutorial.html", "settings.html"]) {
+  // 1.5.0：数据统计页同理
+  for (const file of ["library.html", "popup.html", "guide.html", "tutorial.html", "settings.html", "stats.html"]) {
     const html = readProjectFile(file);
     for (const match of html.matchAll(/<([a-z0-9-]+)((?:[^>]*?))\sdata-i18n="([^"]*)"((?:[^>]*?))>([\s\S]*?)<\/\1>/gi)) {
       const [, tag, , key, , inner] = match;
@@ -2234,7 +2251,7 @@ test("the interface strings are actually marked up across every surface", () => 
   assert.ok(readProjectFile("popup.html").includes('src="i18n.js"'), "弹窗未引入 i18n.js");
   const manifest = JSON.parse(readProjectFile("manifest.json"));
   assert.ok(manifest.content_scripts[0].js.includes("i18n.js"), "内容脚本需要 i18n.js 才能翻译提示卡");
-  for (const file of ["library.html", "popup.html", "guide.html", "settings.html"]) {
+  for (const file of ["library.html", "popup.html", "guide.html", "settings.html", "stats.html"]) {
     const marked = [...readProjectFile(file).matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?="/g)].length;
     assert.ok(marked >= 15, `${file} 只标了 ${marked} 处，覆盖面明显不足`);
   }
@@ -2245,6 +2262,12 @@ test("the interface strings are actually marked up across every surface", () => 
   for (const file of ["library.js", "popup.js"]) {
     const calls = [...readProjectFile(file).matchAll(/(?:\bBcaI18n\.)?\bt\("/g)].length;
     assert.ok(calls >= 20, `${file} 只用了 ${calls} 次 t()，动态文案覆盖不足`);
+  }
+  // 1.5.0 新增的三脚本：动态文案同样必须走 t()/translate()。阈值按各自体量给：
+  // settings.js 的文案几乎全在 data-i18n 静态标记里，只有 2 处动态的，所以单列。
+  for (const [file, least] of [["settings.js", 2], ["pet.js", 4], ["stats.js", 4]]) {
+    const calls = [...readProjectFile(file).matchAll(/(?:\bBcaI18n\.)?(?:\bt|translate)\("/g)].length;
+    assert.ok(calls >= least, `${file} 只用了 ${calls} 次 t()/translate()，动态文案覆盖不足`);
   }
 });
 
@@ -4021,10 +4044,12 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
   // 这里钉住它们必须和 background.js 的完全一致 —— 防以后改一处漏一处。
   // V1.4.4 起多了一份三名字的「固定目录」名单（选完目录就建出来），所以放行两种形状。
   const libraryForNames = stripComments(readProjectFile("library.js"));
-  const reservedLists = [...libraryForNames.matchAll(/\[("(?:错误报告|001错误报告|002同步报告|000视频下载|视频下载)"(?:,\s*"[^"]+")*)\]/g)];
+  const reservedLists = [...libraryForNames.matchAll(/\[("(?:错误报告|001错误报告|002同步报告|003database|000视频下载|视频下载)"(?:,\s*"[^"]+")*)\]/g)];
   const namesOf = (literal) => [...literal.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
-  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "视频下载", "错误报告"].join("|");
-  const shapeStructure = ["000视频下载", "001错误报告", "002同步报告"].join("|");
+  // 保留目录名（扫描时要跳过的一整份名单）与固定目录名（选完目录就建出来的那几个）
+  // 是两种形状：1.5.0 起 003database 同时属于两者。
+  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "003database", "视频下载", "错误报告"].join("|");
+  const shapeStructure = ["000视频下载", "001错误报告", "002同步报告", "003database"].join("|");
   const shapes = reservedLists.map(([literal]) => namesOf(literal).join("|"));
   assert.ok(shapes.filter((shape) => shape === shapeReserved).length >= 2,
     `library.js 里应该有两份「扫描时跳过的保留目录名」，实际 ${JSON.stringify(shapes)}`);
@@ -4105,7 +4130,8 @@ test("选完目录必须真的读一次，空文件夹也要建出三个固定�
   }
 
   // 2) 收藏库：一份固定目录名单 + 一个建目录助手，选择目录与连接上次目录都要走它
-  assert.ok(library.includes('const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告"];'),
+  //    1.5.0 起多一个 003database（本地数据库根目录）
+  assert.ok(library.includes('const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告", "003database"];'),
     "收藏库要有一份固定目录名单");
   assert.ok(library.includes("async function ensureRootStructure("), "要有建目录的助手");
   assert.ok(library.includes("await ensureRootStructure(handle);"), "选择目录后要建出固定目录");
@@ -4113,14 +4139,14 @@ test("选完目录必须真的读一次，空文件夹也要建出三个固定�
   assert.ok(library.includes('showDirectoryPicker({ mode: "readwrite" })'),
     "收藏库要按读写要权限，否则建不了目录");
 
-  // 3) 弹窗：一次建三个，名字与收藏库同一份
-  assert.ok(popup.includes('const ROOT_STRUCTURE_DIRECTORIES = [DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告"];'),
+  // 3) 弹窗：一次建齐，名字与收藏库同一份
+  assert.ok(popup.includes('const ROOT_STRUCTURE_DIRECTORIES = [DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告", "003database"];'),
     "弹窗的固定目录名单要和收藏库一致");
   assert.ok(popup.includes("for (const name of ROOT_STRUCTURE_DIRECTORIES)"),
     "弹窗要按名单逐个创建");
 
-  // 4) 三个名字必须在 background.js 的保留目录名单里（三处一起改，别让名单漂移）
-  for (const name of ["000视频下载", "001错误报告", "002同步报告"]) {
+  // 4) 这些名字必须在 background.js 的保留目录名单里（几处一起改，别让名单漂移）
+  for (const name of ["000视频下载", "001错误报告", "002同步报告", "003database"]) {
     assert.ok(library.includes(`"${name}"`), `收藏库的固定目录里有 ${name}`);
     assert.ok(popup.includes(`"${name}"`), `弹窗的固定目录里有 ${name}`);
     assert.ok(background.includes(`"${name}"`), `${name} 也要在 background.js 的保留名单里`);
@@ -4179,4 +4205,73 @@ test("导入途中关掉收藏夹页面时，弹窗不许报假失败、也不�
   // 两条老路径不许被改坏：页面还在时的直接响应、以及重开弹窗时补显示
   assert.ok(popup.includes("showDoneDialog(doneText);"), "页面还在时的老路径要留着");
   assert.ok(popup.includes('chrome.storage.local.get("importDone")'), "重开弹窗时仍要读上次结果");
+});
+
+test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  const background = readProjectFile("background.js");
+  const settingsHtml = readProjectFile("settings.html");
+  const settings = readProjectFile("settings.js");
+  const pet = readProjectFile("pet.js");
+  const core = readProjectFile("stats-core.js");
+  const extractor = fs.readFileSync(path.join(__dirname, "i18n-extract.cjs"), "utf8");
+
+  // 纯函数模块：浏览器里挂全局，node 里能 require（单元测试靠这个）
+  assert.ok(core.includes("global.BcaStatsCore = api;"), "统计核心要挂到全局");
+  assert.ok(core.includes("module.exports = api;"), "node 里也要能 require");
+  assert.ok(core.includes('const DATABASE_FOLDER_NAME = "003database";'), "数据库目录名写在核心里");
+  assert.ok(core.includes('const DATABASE_FILE_NAME = "database.json";'), "库文件名写在核心里");
+
+  // 页面脚本顺序：纯函数必须排在使用它的脚本之前
+  const order = ["stats-core.js", "library.js", "pet.js"].map((name) => html.indexOf(name));
+  assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), "library.html 的脚本顺序不对");
+  assert.ok(html.includes('href="pet.css"'), "宠物样式要跟着加载");
+
+  // 后台：模块 service worker import 纯函数，写库，接宠物互动
+  assert.ok(background.includes('import "./stats-core.js";'), "后台要 import 统计核心");
+  assert.ok(background.includes("const BcaStatsCore = globalThis.BcaStatsCore;"), "后台从全局取它");
+  assert.ok(background.includes("async function readStatsDatabase("), "要有读库助手");
+  assert.ok(background.includes("async function writeStatsDatabase("), "要有写库助手");
+  assert.ok(background.includes("BcaStatsCore.snapshot(database)"), "写完要把快照算出来");
+  assert.ok(background.includes("chrome.storage.local.set({ bcaStats:"), "快照的键名是 bcaStats");
+  // 1.5.0：snapshot() 的 days.days 是「库里有几天」这个数字（宠物拿它数陪伴天数），
+  // 统计页画柱子要的是每日明细，必须另带一份 daily；两边发布点形状要一致。
+  assert.ok(background.includes("daily: BcaStatsCore.recentDays(database)"), "后台快照要带上每日明细");
+  assert.ok(library.includes("daily: core.recentDays(database)"), "收藏库快照也要带每日明细");
+  assert.ok(background.includes('message?.type === "bca-pet-touch"'), "宠物互动要有消息分支");
+  assert.ok(background.includes("BcaStatsCore.touchPet(database)"), "互动要落进数据库");
+  // service worker 里没有词典：后台只回下标，翻译留在界面侧
+  assert.ok(background.includes("lineIndex"), "后台回的是台词下标");
+  assert.ok(!/bca-pet-touch[\s\S]{0,600}?BcaI18n/.test(background), "后台不许翻译台词");
+
+  // 收藏库：扫描完把数据库整份重建（看得到的才算数，删掉的视频不该留在统计里）
+  assert.ok(library.includes("async function syncStatsDatabase("), "收藏库要有同步助手");
+  assert.ok(library.includes("core.databaseFromVideos(videos, { previous })"), "要整份重建并保留宠物状态");
+  assert.ok(library.includes("bcaStats: Object.assign(core.snapshot(database)"), "同步完也要发同形状的快照");
+  assert.ok(library.includes("syncStatsDatabase(handle)"), "同步助手要真的被调用");
+
+  // 设置页：数据统计与宠物挂件两个入口
+  assert.ok(settingsHtml.includes('data-group="stats"'), "左导航要有数据统计这一项");
+  assert.ok(settingsHtml.includes('id="openStats"'), "要有「点击查看最近收藏统计」按钮");
+  assert.ok(settingsHtml.includes("点击查看最近收藏统计"), "按钮文案要对");
+  assert.ok(settingsHtml.includes('id="petToggle"'), "要有宠物挂件开关");
+  assert.ok(settings.includes('chrome.runtime.getURL("stats.html")'), "按钮要打开统计页");
+  assert.ok(settings.includes("interfacePet"), "开关要写 interfacePet");
+  assert.ok(settings.includes("chrome.storage.local.set({ interfacePet: { enabled } })"), "开关要落盘");
+
+  // 宠物：读快照、受开关控制、点一下发消息、台词按下标翻译
+  assert.ok(pet.includes('const STATS_KEY = "bcaStats";'), "宠物要读统计快照");
+  assert.ok(pet.includes("interfacePet"), "宠物要受开关控制");
+  assert.ok(pet.includes('const TOUCH_MESSAGE = "bca-pet-touch";'), "点一下要发消息");
+  assert.ok(pet.includes("function touchLine(index)"), "台词要按下标取");
+  // 四句台词必须写成 translate("…") 调用：塞进数组字面量的话 i18n 抽取器看不见，
+  // 缺了也不报错，只是切语言那四句永远不翻译。
+  for (const line of ["摸摸头～", "今天也要记得备份哦", "收藏得越多，我越有精神", "又见面啦"]) {
+    assert.ok(pet.includes(`translate("${line}")`), `台词「${line}」要写成 translate("…") 调用`);
+  }
+
+  // i18n 抽取器要把这两件新事算进去
+  assert.ok(extractor.includes('"pet.js"'), "pet.js 要进 i18n 的扫描清单");
+  assert.ok(extractor.includes("|translate)"), "抽取器要认得 translate() 这层包装");
 });

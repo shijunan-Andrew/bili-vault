@@ -28,6 +28,9 @@ const SOURCE_FILES = [
   // V1.3.2：三个悬浮球合成右下角的齿轮，主题 / 语言 / 使用说明都搬进了设置页。
   // 不写进来的话，设置页缺词条不会报错，只会静默退回中文。
   "settings.html", "settings.js",
+  // 1.5.0：数据统计页与宠物挂件。不写进来的话，它们缺词条不会报错，
+  // 只会静默退回中文 —— 使用说明页当初就是这样漏掉的。
+  "stats.html", "stats.js", "pet.js",
   "content.js",
   // 4.9：把后台纳入扫描。background.js 是模块化 service worker，加载不了 i18n.js，
   // 所以自己做了个存在性兜底；新增的界面文案仍写成 BcaI18n.t("字面量")。
@@ -77,9 +80,11 @@ function extractFrom(file) {
       add(match[1], true);
     }
   } else {
-    // t("...") / BcaI18n.t("...")，双引号与单引号都收
-    for (const match of source.matchAll(/(?:\bBcaI18n\.)?\bt\(\s*"((?:[^"\\]|\\.)*)"/g)) add(match[1], false);
-    for (const match of source.matchAll(/(?:\bBcaI18n\.)?\bt\(\s*'((?:[^'\\]|\\.)*)'/g)) add(match[1], false);
+    // t("...") / BcaI18n.t("...") / translate("...")，双引号与单引号都收。
+    // translate 是 pet.js 里那层薄包装（词典坏了也要让挂件显示原文），
+    // 不认它的话挂件那 5 条词条永远扫不到。
+    for (const match of source.matchAll(/(?:\bBcaI18n\.)?(?:\bt|translate)\(\s*"((?:[^"\\]|\\.)*)"/g)) add(match[1], false);
+    for (const match of source.matchAll(/(?:\bBcaI18n\.)?(?:\bt|translate)\(\s*'((?:[^'\\]|\\.)*)'/g)) add(match[1], false);
     // HTML 字符串模板里的 data-i18n="..."
     for (const match of source.matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?=\\?"([^"\\]*)"/g)) add(match[1], true);
 
