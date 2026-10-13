@@ -464,14 +464,14 @@ async function boot() {
   petToggle?.addEventListener("click", () => {
     const enabled = petToggle.getAttribute("aria-pressed") !== "true";
     renderPetToggle(enabled);
+    // 1.5.9：只写一次盘，而且必须是「读现有的 → 合上自己这一项 → 整份写回」。
+    // 原来先按老形状 set({ interfacePet: { enabled } }) 再 set 整份：第一写会把
+    // size / x / y / paused 一起抹掉，挂件当场按默认 96 重排（在 96 与 144 之间闪一下，
+    // 位置还被挪回屏幕水平正中）。与下面的尺寸档/重置位置保持同一套写法。
     patchPetConfig((current) => {
-      const config = Object.assign({}, current);
-      config.enabled = enabled;
-      // 下面这行原文被 1.5.0 的测试钉住了（见 stability.test.cjs 的「开关要落盘」），
-      // 所以先按老形状写一次；紧接着再写带全字段的整份，把位置 / 尺寸 / 暂停走动
-      // 带过去 —— 只写 { enabled } 会把那三项一起抹掉。
-      chrome.storage.local.set({ interfacePet: { enabled } });
-      return chrome.storage.local.set({ interfacePet: config });
+      const next = Object.assign({}, current, { enabled });
+      if (petConfigEquals(current, next)) return undefined; // 值没变 = 不写盘
+      return chrome.storage.local.set({ interfacePet: next });
     });
   });
 

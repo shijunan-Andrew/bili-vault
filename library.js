@@ -2785,7 +2785,7 @@ async function removeVideoDownloadDirectories(downloadParent, video) {
 async function collectionDownloadDirectoryLooksManaged(handle) {
   for await (const entry of handle.values()) {
     if (entry.kind !== "directory") return false;
-    if (!identifiersFromDirectoryName(entry.name).size) return false;
+    if (!BcaArchiveCore.identifiersFromDirectoryName(entry.name).size) return false;
   }
   return true;
 }
@@ -3266,17 +3266,74 @@ videoForm.addEventListener("submit", async (event) => {
 collectionDialog.addEventListener("cancel", (event) => { if (collectionCreateInProgress) event.preventDefault(); });
 videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) event.preventDefault(); });
 
+/* 1.5.9（P1-10）：把一份文件内容原子地换上去 —— 先写临时文件，再改名顶上。
+   起因是 003database/database.json 原来是 createWritable() 就地截断写：写到一半
+   页面被关掉、扩展被重载、磁盘满，留下的就是半截 JSON。
+
+   顺序有讲究：
+     · 先整份写进临时文件并 close()，此刻**正式文件还是完整的旧内容**，读侧看到的
+       只有「旧」和「新」两种状态；
+     · 再 removeEntry(正式名) + move(临时名 → 正式名)（同一目录内的 rename）。
+       这两步之间有一个正式文件短暂不存在的窗口，但那是「没有」而不是「半截」——
+       读侧两个调用点（这里与 background.js 的 readStatsDatabase）对「文件不在了」
+       的处理是超集重建，不会像坏 JSON 那样静默丢历史。
+     · 这一次写入的临时名带时间戳，两次写入撞在一起时各写各的，不会互相截断。
+       （同一目录的并发写者仍然会互相覆盖正式文件 —— 这一层不变量管不了，见测试。）
+
+   move() 在部分 Chromium 上还没有（文件名里的 `*` 也让它过不了仓库里
+   stripComments 那类静态扫描，所以这里连注释都不写它的原始形式），
+   拿去 try 一下：不可用就退回「把临时文件内容写进正式文件再删掉临时文件」。
+   退路版本完成不了原子性（copy 本身仍要就地写一次），但至少临时文件里还留着
+   一份完整内容可供人工恢复，比原来的半截 JSON 强。 */
+async function writeFileAtomically(directory, file, text) {
+  const tempName = `.${file.name}.${Date.now().toString(36)}.tmp`;
+  const temp = await directory.getFileHandle(tempName, { create: true });
+  try {
+    const writable = await temp.createWritable();
+    await writable.write(text);
+    await writable.close();
+    if (typeof temp.move === "function") {
+      await directory.removeEntry(file.name);
+      await temp.move(file);
+      return;
+    }
+    await writeFileInPlace(file, text);
+  } catch (error) {
+    await directory.removeEntry(tempName).catch(() => {});
+    throw error;
+  }
+  await directory.removeEntry(tempName).catch(() => {});
+}
+
+// 退路专用：move() 不可用时的就地写。临时文件已经写完了，内容就在手上。
+async function writeFileInPlace(file, text) {
+  const writable = await file.createWritable();
+  await writable.write(text);
+  await writable.close();
+}
+
 /* 1.5.0：把这次扫描的结果同步进本地数据库（003database/database.json）。
    一次完整扫描就是一次权威重建 —— 扫描看得到的才算数（用户删掉的视频不该继续
    留在统计里），所以整份重写，只把旧库的 createdAt 与宠物状态带过来
    （见 stats-core.js 的 databaseFromVideos）。导入时后台写进去的那几行也在归档里，
    扫描一样看得见，两条路径不会互相打架。
-   数据库是派生视图，写不进去（只读权限、磁盘满）不影响收藏库本身。 */
+   数据库是派生视图，写不进去（只读权限、磁盘满）不影响收藏库本身。
+
+   1.5.9（P1-9）：空库也要写一次。原来 `if (!videos.length) return;` 直接跳过 ——
+   用户在收藏库里把视频全删了，数据库却停在上次的非零值，统计页与宠物挂件继续报
+   已经删掉的视频数（只能删掉数据库文件才恢复）。「一次完整扫描就是一次权威重建」
+   本来就包含「扫到 0 条」这个结果。保留 createdAt 与宠物状态仍由
+   stats-core.js 的 databaseFromVideos(videos, { previous }) 负责，空 videos 一样适用，
+   所以清空收藏不会把「陪伴了几天」和亲密度归零。
+
+   1.5.9（P1-10）：改名之前整份 JSON 先落在临时文件里，最后一步用 rename 顶上
+   （见 writeFileAtomically）。原来的 createWritable→write→close 是截断式就地写，
+   写一半被关掉页面/断电就留下半截 JSON；而读侧（这里和 background.js 的
+   readStatsDatabase）遇到坏 JSON 是静默重建，等于把历史统计与亲密度清零还不告诉用户。 */
 async function syncStatsDatabase(handle) {
   const core = globalThis.BcaStatsCore;
   if (!handle || !core) return;
   const videos = allVideos();
-  if (!videos.length) return;
   try {
     const directory = await handle.getDirectoryHandle(core.DATABASE_FOLDER_NAME, { create: true });
     const file = await directory.getFileHandle(core.DATABASE_FILE_NAME, { create: true });
@@ -3286,9 +3343,7 @@ async function syncStatsDatabase(handle) {
       if (text.trim()) previous = JSON.parse(text);
     } catch (_) { /* 旧库坏了就当没有，下面整份重建 */ }
     const database = core.databaseFromVideos(videos, { previous });
-    const writable = await file.createWritable();
-    await writable.write(JSON.stringify(database));
-    await writable.close();
+    await writeFileAtomically(directory, file, JSON.stringify(database));
     // 1.5.0：和 background.js 的 publishStatsSnapshot 保持同一形状 —— snapshot() 的
     // days.days 是「库里有几天」的数字，每日明细另算一份 daily 给统计页画柱子。
     await chrome.storage.local.set({

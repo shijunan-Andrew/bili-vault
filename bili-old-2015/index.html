@@ -7885,7 +7885,17 @@ img[data-empty]{ background:linear-gradient(135deg,#e7ebef 0%,#dbe0e6 60%,#d3d9e
 // Anchors already carry href="https://www.bilibili.com/" + target="_blank", so they need no help;
 // this handler covers every element that is NOT a link (banner dots, tabs, buttons, list rows, the
 // search box, blank areas) — the original page routed all of those through page.core.js handlers.
+//
+// 彩蛋对话框那一段（本文件末尾的 EGG_DIALOG）在 window 捕获阶段注册了一层 click 守卫。
+// 捕获阶段的传播路径是 window -> document -> ...，所以那层守卫一定比这里的 document 捕获先跑：
+// 它遇到对话框范围内的点击就 preventDefault + stopImmediatePropagation，这里根本不会被调用。
+// 下面两条判断是留给「守卫没装上」这种情况的兜底，不影响正常路径。
 document.addEventListener('click', function (e) {
+  var et = e.target;
+  if (et && et.nodeType === 1 && et.closest && et.closest('[data-egg-dialog]')) return;
+  // 对话框是在 pointerdown 里就摘掉的，所以「知道啦 / 点遮罩」那一次 click 的落点已经变成
+  // 底下的页面元素了；对话框在 pointerdown 时留下的记号能把这最后一次 click 认出来。
+  if (document.documentElement.hasAttribute('data-egg-dismissed')) return;
   var t = e.target;
   while (t && t !== document.body) {
     if (t.tagName === 'A' && t.getAttribute('href')) return;   // let the anchor do its own job
@@ -7900,7 +7910,7 @@ document.addEventListener('submit', function (e) {
 }, true);
 </script>
 <style>a{cursor:pointer}.index-nav .n-i,.b-slt-tab li,.b-slt .list li,.b-slt,.page,.i-link,.more-link,.b-head-t,.top-list li,.v,.rlist li,.rm-list li,.slider-bar li,.search-keyword{cursor:pointer}</style>
-
+</body>
 <style>
 /* 彩蛋对话框：页面一打开就出现的独立弹层，只服务这一个对话框，不碰页面原有布局。 */
 /* 遮罩与卡片都用 position: fixed，高 z-index 把它们压在最上面，不参与页面原有布局。 */
@@ -7998,21 +8008,57 @@ document.addEventListener('submit', function (e) {
   function closeEggDialog() {
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
   }
-  // 页面自带一个 document 级的捕获监听，会把任何非链接上的点击变成跳去 B 站。
-  // 捕获阶段从 window 往下走，window 上的捕获监听一定先于 document 上那一个跑到，
-  // 所以在这里拦下对话框范围内的点击，它就永远到不了页面的监听。
-  window.addEventListener('click', function (e) {
-    var el = e.target;
-    if (!el || el.nodeType !== 1 || !el.closest) return;
-    if (!el.closest('[data-egg-dialog]')) return;
-    e.preventDefault();
-    e.stopPropagation();
+  var ok = document.getElementById('eggDialogOk');
+  var box = document.getElementById('eggDialogBox');
+
+  // 摘掉之后，这一次手势的 click 会落在它底下的页面元素上（遮罩已经没了），页面 catch-all
+  // 光看“点击目标在不在对话框里”认不出来。所以在 pointerdown 时留一个记号，catch-all 看到
+  // 记号就放过这一次 click，并在同一个任务里把记号清掉 —— 只有这一次 click 被放过，之后
+  // 点页面任何地方照常跳转。
+  var docEl = document.documentElement;
+  var markDismissed = function () {
+    docEl.setAttribute('data-egg-dismissed', '1');
+    setTimeout(function () { docEl.removeAttribute('data-egg-dismissed'); }, 0);
+  };
+  // 只有这两种点击才是「关掉对话框」：按钮，或遮罩空白（卡片外面的半透明区域）。
+  var isCloseTarget = function (el) {
+    return el === ok || el === overlay || el === box;
+  };
+
+  // 关闭动作挂在「按下」这一步：pointerdown 一触发，对话框就已经从文档里摘掉了，
+  // 后面 click 走到谁那里都改不了「已经关掉」这个结果，也就与捕获/冒泡顺序无关了。
+  overlay.addEventListener('pointerdown', function (e) {
+    if (!isCloseTarget(e.target)) return;
+    markDismissed();
     closeEggDialog();
   }, true);
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' || e.keyCode === 27) closeEggDialog();
-  });
+
+  // 这一层在 window 捕获阶段，页面 catch-all 在 document 捕获阶段：window 先于 document，所以
+  // 它总能把 click 按死。它同时是 pointerdown 那条主路径的退路：不管是「刚才按下的是关闭点，
+  // 但 click 的落点已经换了（记号还在）」，还是「click 直接落在对话框范围内」，都在这里把这一次
+  // click 按死；落在卡片里的 click 则原样放过。
+  window.addEventListener('click', function (e) {
+    var el = e.target;
+    var marked = docEl.hasAttribute('data-egg-dismissed');
+    var inDialog = !!(el && el.nodeType === 1 && el.closest && el.closest('[data-egg-dialog]'));
+    if (!marked && !inDialog) return;            // 页面自己的点击：一律不管
+    if (isCloseTarget(el) || marked) {           // 关闭点 / 上一次 pointerdown 留下的记号
+      markDismissed();
+      closeEggDialog();
+    }
+    e.preventDefault();                          // 卡片内部的点击：对话框留着，但也不能变成跳转
+    e.stopImmediatePropagation();
+  }, true);
+
+  // Esc：挂 window 捕获，杜绝被中途的 stopPropagation 截掉；只在对话框还在时处理。
+  window.addEventListener('keydown', function (e) {
+    if (!overlay.parentNode) return;
+    if (e.key === 'Escape' || e.keyCode === 27) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeEggDialog();
+    }
+  }, true);
 })();
 </script>
-</body>
 </html>

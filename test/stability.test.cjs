@@ -115,11 +115,131 @@ test("native host reads its UTF-8 settings with an explicit encoding", () => {
 
 // 1.3.0 删掉了下载页：download.html / download.js / download.css 已整体移除，
 // 下面这些清单里不再有它们（「下载功能已经整体移除」那条测试盯着别回来）。
-const PAGE_STYLES = ["library.css", "popup.css", "settings.css"];
-const PAGE_SCRIPTS = ["library.js", "popup.js", "content.js", "settings.js"];
+// 1.6.0 补上后来新增的页面与脚本：宠物挂件（pet.css / pet.js）、数据统计页（stats.css / stats.js）、
+// 主题引擎（theme.js）。之前这几个文件不在清单里，等于「11px 字号下限」「不许用字符当图标」
+// 「图标名必须存在」三条守卫对它们完全失明（外观审查把这条列为 P1-2）。
+const PAGE_STYLES = ["library.css", "popup.css", "settings.css", "pet.css", "stats.css"];
+const PAGE_SCRIPTS = ["library.js", "popup.js", "content.js", "settings.js", "theme.js", "pet.js", "stats.js"];
 
-// 去掉注释后再扫，避免把说明文字里的示例字符当成真实用法
-const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\r\n]*/g, "$1");
+/* 去掉注释后再扫，避免把说明文字里的示例字符当成真实用法。
+
+   原来这里是一行正则：`replace(/\/\*[\s\S]*?\*\//g, "")` 再删行注释。它不认识字符串 ——
+   看到「星号加斜杠」就当中块注释开始，于是 background.js:3654 那个字符串字面量
+   （匹配串是 https://space.bilibili.com 加一个星号、再加 /favlist 和星号）里的那一对
+   字符与 :3662 注释结尾的「星号加斜杠」配成了一对，**3654-3662 九行整段被吃掉**。
+   用剥离文本做的断言对那一段完全失明，而且里面原本通过的断言只是碰巧
+   （正好没有断言落在那一块）。
+
+   注意 `//` 也在这类字符串里出现过（URL 的 `https://`）—— 行注释那一步用
+   `(?<!:)` 绕开它，所以两种注释都必须按「当前是否在字符串/模板/正则里」判断，
+   不能只靠正则。这里改成一次逐字符扫描的状态机：
+
+     · 在字符串（单/双引号，含 \ 转义）、模板字面量、正则字面量、正则字符组里
+       一律原样拷贝，所以字符串里的块注释起止符与双斜杠都不再被当成注释；
+     · 注释只把注释体换成空格，**换行原样保留**，所以剥离前后的行号与行数完全一致，
+       正则里带 `m` 标志的断言、以及靠 `\r?\n` 对齐的断言都还照旧工作；
+     · 长度也保持一致（替换的是等长空白），所以字符串里的坐标不会整体前移。
+       代价是注释体本身仍然留在文本里（变成空白），要断言「某句话只在注释里」
+       的测试请用 readProjectFile 的原文，别用剥离后的结果。
+
+   正则字面量的开头靠「前一个非空字符」判定：`=`、`(`、`,`、`return` 这类位置后面
+   的 `/` 是正则开头，标识符或 `)`、`]` 后面的 `/` 是除号。判错的直接后果是多余的
+   空白（测试会报出来），不会把代码当成注释 —— 这也是它比原实现安全的地方。 */
+const REGEX_CAN_START_BEFORE = "([{=,:;!&|?+-*%~^<>";
+const stripComments = (text) => {
+  const out = [];
+  let state = "code";
+  let quote = "";
+  let prev = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const ch = text[index];
+    const next = text[index + 1];
+    if (state === "string" || state === "template" || state === "regex") {
+      out.push(ch);
+      if (ch === "\\") { out.push(next === undefined ? "" : next); index += 1; continue; }
+      if (state === "string" && ch === quote) state = "code";
+      else if (state === "template" && ch === "`") state = "code";
+      else if (state === "regex" && ch === "/") state = "code";
+      if (ch !== "\r" && ch !== "\n") prev = ch;
+      continue;
+    }
+    if (state === "charclass") {
+      out.push(ch);
+      if (ch === "\\") { out.push(next === undefined ? "" : next); index += 1; continue; }
+      if (ch === "]") state = "regex";
+      prev = ch;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      out.push(" ", " ");
+      index += 1;
+      while (index + 1 < text.length && !(text[index] === "*" && text[index + 1] === "/")) {
+        index += 1;
+        const inner = text[index];
+        out.push(inner === "\r" || inner === "\n" ? inner : " ");
+      }
+      if (index + 1 < text.length) { index += 1; out.push(" "); }
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      out.push(" ", " ");
+      index += 1;
+      while (index + 1 < text.length && text[index + 1] !== "\n" && text[index + 1] !== "\r") {
+        index += 1;
+        out.push(" ");
+      }
+      continue;
+    }
+    if (ch === "/" && (REGEX_CAN_START_BEFORE.includes(prev) || /[\w$)\]]/.test(prev) === false)) {
+      state = "regex";
+      out.push(ch);
+      continue;
+    }
+    out.push(ch);
+    if (ch === '"' || ch === "'") { state = "string"; quote = ch; }
+    else if (ch === "`") state = "template";
+    if (ch !== "\r" && ch !== "\n") prev = ch;
+  }
+  return out.join("");
+};
+
+/* stripComments 自己的守卫。P3-32：background.js:3654 的字符串
+   `"https://space.bilibili.com/" + BLOCK_END + "favlist" + BLOCK_END` 里那个「星号加斜杠」
+   与 :3662 注释结尾的「星号加斜杠」凑成一对，把 3654-3662 九行整段藏起来 —— 而那一块里有
+   tabs.query 的 URL 匹配、URL 正则解析和 uid 回退，凡用剥离文本做的断言对它都是失明的。
+   下面钉住三件事：函数名与匹配串在剥离后仍然看得见、行数不变、长度不变。
+
+   注意这份文件自己也不能写出那两个字面字符（写在注释里同样会把注释提前收尾，
+   直接 SyntaxError），所以下面用 BLOCK_END 拼出来。 */
+test("stripComments 不许把字符串里的块注释起止符当成注释（P3-32）", () => {
+  const raw = readProjectFile("background.js");
+  const stripped = stripComments(raw);
+  const BLOCK_END = "*" + "/";
+  // 匹配串是 https:// 加 space.bilibili.com，再加一个斜杠、一个星号，然后是 /favlist 和星号。
+  // 本文件里不能写出「星号紧跟斜杠」那两个字符（写在哪都是块注释收尾，直接 SyntaxError），
+  // 所以用字符码拼出来 —— 下面第一条断言就是为了防止这里退化成拼错、永远匹配不上的字面量。
+  const matcher = "space.bilibili.com/" + BLOCK_END + "favlist*";
+  assert.ok(!stripped.includes("space.bilibili.com" + "BLOCK_END"),
+    "前提：剥离后的文本里不该出现拼接用的占位名字，否则下面的断言是空转");
+  assert.ok(stripped.includes(matcher),
+    "background.js:3654 的 tabs.query 匹配串必须能在剥离后看到（它整个落在块注释盲区里）");
+  assert.ok(stripped.includes("async function resolveDiffUid("),
+    "紧随其后的函数名也必须看得见");
+  assert.ok(stripped.includes("return { uid: found, tabId: tab.id ?? null };"),
+    "3659 那行（字符串里的块注释结束符之后的内容）也要看得见");
+  // 字符串里的双斜杠（URL 的 https 后那两撇）同样不算行注释
+  assert.ok(stripped.includes("https://" + matcher),
+    "URL 里的双斜杠不能被当成行注释");
+  assert.ok(!stripped.includes("space.bilibili.com/favlist"),
+    "前提：匹配串里那对「斜杠 + 星号」不能被扫描器吃掉，否则上一条断言是空转");
+  assert.equal(stripped.split("\n").length, raw.split("\n").length,
+    "注释体只换成空白，行数必须一致（否则带 m 的断言会整体错位）");
+  assert.equal(stripped.length, raw.length,
+    "注释体换成等长空白，长度必须一致（否则区间断言会整体前移）");
+  // 换行本身不能被子串替换吃掉：拿一个真实块注释确认它内部的 \r\n 还在
+  assert.ok(/\/\*[\s\S]{0,80}\r\n[\s\S]{0,80}\*\//.test(raw), "前提：仓库里块注释确实跨行");
+  assert.ok(/[^\s]/.test(stripped), "剥离后不该变成全空白");
+});
 
 test("every page loads the shared design tokens and the icon set", () => {
   for (const page of ["library.html", "popup.html", "settings.html"]) {
@@ -147,7 +267,16 @@ test("theme.css owns the design tokens and the reduced-motion fallback", () => {
 test("theme.css keeps the global [hidden] override", () => {
   assert.match(readProjectFile("theme.css"), /\[hidden\]\s*\{\s*display:\s*none\s*!important/);
   for (const file of PAGE_STYLES) {
-    assert.equal(/\[hidden\]\s*\{/.test(readProjectFile(file)), false, `${file} 不应再重复定义 [hidden]`);
+    // 只盯「全局重定义」：选择器必须是一条独立的 [hidden]（行首，或跟在 , { } ; 后面）。
+    // 原来的 /\[hidden\]\s*\{/ 会误伤 `.bca-pet-menu[hidden] { … }` 这种作用域内的正常写法 ——
+    // 1.6.0 把 pet.css 收进清单后它立刻误报（pet.css 三处 [hidden] 全是带前缀的），
+    // 于是把这条守卫收紧，而不是把 pet.css 从清单里拿掉（那等于退回失明）。
+    const css = stripComments(readProjectFile(file));
+    assert.equal(
+      /(?:^|[\s,{};])\[hidden\]\s*\{/m.test(css),
+      false,
+      `${file} 不应再重复定义全局 [hidden]`
+    );
   }
 });
 
@@ -2855,11 +2984,11 @@ test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
   // 白名单：低频调用或 CDN 图片。
   // 新增裸 fetch 必须来这里登记 —— 这是"忘了加限速"的唯一防线。
   //   biliImportApiGet        —— 限速器所在的唯一出网口
-  //   fetchManualVideoMetadata —— 手动添加单个视频，用户点一次才发
   //   loadCoverPng            —— 封面图走图片 CDN（credentials: omit），
   //                              且被详情循环的 IMPORT_DETAIL_DELAY_MS 带着走，不会快
-  //   （下载链路 getDownloadWbiKey / biliDownloadApi 已随 1.3.0 整体删除，不再登记）
-  const allowlist = ["biliImportApiGet", "fetchManualVideoMetadata", "loadCoverPng"];
+  //   （fetchManualVideoMetadata 在 1.6.0 的 P0-2 里改走 biliImportApiGet，已撤下豁免；
+  //     下载链路 getDownloadWbiKey / biliDownloadApi 已随 1.3.0 整体删除，不再登记）
+  const allowlist = ["biliImportApiGet", "loadCoverPng"];
   const offenders = [];
   let current = "(顶层)";
   for (const line of src.split("\n")) {
@@ -3923,7 +4052,25 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   assert.match(libraryCode, /async function collectionDownloadDirectoryLooksManaged\(handle\)/);
   assert.match(libraryCode, /if \(!await collectionDownloadDirectoryLooksManaged\(handle\)\)/);
   assert.match(libraryCode, /目录里有不是本插件写入的内容，为了安全没有删除。/);
-  assert.match(libraryCode, /identifiersFromDirectoryName\(entry\.name\)\.size/);
+  assert.match(libraryCode, /BcaArchiveCore\.identifiersFromDirectoryName\(entry\.name\)/,
+    "认归属要用带命名空间的写法，archive-core 的成员在 library.js 里没有解构出来");
+  // P0-1：这条断言原来钉的是**裸调用**原文 `identifiersFromDirectoryName(entry.name).size`，
+  // 于是那个 ReferenceError 被测试保护了下来（删除收藏夹 + 同时删下载文件 + 子目录 → 必抛）。
+  // 除了上面那条正向断言，再加一条反向的：不许再出现不带 BcaArchiveCore. 的裸调用。
+  const bareCoreCall = (name) => new RegExp(`^\\s*${name}\\(`, "m");
+  for (const name of ["identifiersFromDirectoryName", "parseInfoFile", "descriptionFromInfo",
+    "tagsFromInfo", "pageSequence", "safeCollectionName", "withSourceCollection", "downloadIndexKey",
+    "findDownloadMatch", "downloadStateFromIndex", "isMediaFileName", "splitShareText", "parseShareStats"]) {
+    assert.equal(bareCoreCall(name).test(libraryCode), false,
+      `library.js 里 ${name}(…) 少了 BcaArchiveCore. 前缀，会直接抛 ReferenceError`);
+  }
+  // 上面这条按「行首」判定，是为了放过两处合法的同名写法：archive-core.js 里的函数**定义**，
+  // 以及 library.js 顶部的**局部别名** `const pageSequence = BcaArchiveCore.pageSequence;` ——
+  // 别名是赋值不是调用，所以行首不会出现 `名字(`。真正会漏掉的是嵌在表达式里的裸调用，
+  // 这里再补一条不锚行首的扫描，把「前面不是点也不是标识符字符」的调用一并挡下。
+  assert.equal(/(^|[^\w.$])identifiersFromDirectoryName\s*\(/m.test(
+    libraryCode.split("\n").filter((line) => !/^\s*const\s/.test(line)).join("\n")), false,
+    "identifiersFromDirectoryName 必须带 BcaArchiveCore. 前缀（局部别名行除外）");
 
   // P1-3：排队等待加上限；去重表只在真的归档成功之后才记
   assert.match(backgroundCode, /async function runInSaveQueueWithDeadline\(task, label\)/);
@@ -4258,7 +4405,14 @@ test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {
   assert.ok(settingsHtml.includes('id="petToggle"'), "要有宠物挂件开关");
   assert.ok(settings.includes('chrome.runtime.getURL("stats.html")'), "按钮要打开统计页");
   assert.ok(settings.includes("interfacePet"), "开关要写 interfacePet");
-  assert.ok(settings.includes("chrome.storage.local.set({ interfacePet: { enabled } })"), "开关要落盘");
+  assert.ok(settings.includes("chrome.storage.local.set({ interfacePet: next })"), "开关要落盘（整份合并写）");
+  // 1.6.0：原来这里钉的是「只带 enabled 的局部对象」那次写入 —— 那一写会把 size/x/y/paused
+  // 全抹回默认（96↔144 闪动、位置回屏幕正中），测试等于在保护 bug。现在反过来盯它别回来。
+  assert.equal(
+    /chrome\.storage\.local\.set\(\{ interfacePet: \{ enabled \} \}\)/.test(settings),
+    false,
+    "不许再写只带 enabled 的局部对象（会抹掉 size/x/y/paused）"
+  );
 
   // 宠物：读快照、受开关控制、点一下发消息、台词按下标翻译
   assert.ok(pet.includes('const STATS_KEY = "bcaStats";'), "宠物要读统计快照");

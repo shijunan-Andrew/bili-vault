@@ -27,7 +27,8 @@
   </header>
 
   <main class="stats-shell" id="statsShell" aria-label="收藏数据统计" data-i18n-aria="收藏数据统计">
-    <!-- 四个数字卡。值由脚本填（先写「—」，加载完再换成真数字）。 -->
+    <!-- 四个数字卡。值由脚本填（先写「—」，加载完再换成真数字）。
+         后两张跟着上面选的区间走，标签里不写死天数。 -->
     <section class="stats-card" id="statsOverview" hidden>
       <h2 data-i18n="总览">总览</h2>
       <div class="stats-tiles">
@@ -41,14 +42,14 @@
         <div class="stats-tile">
           <p class="stats-tile-head">
             <span class="stats-tile-icon" data-icon="plus"></span>
-            <span data-i18n="今日新增">今日新增</span>
+            <span data-i18n="区间内新增">区间内新增</span>
           </p>
           <p class="stats-tile-value tnum" id="statSavedToday">—</p>
         </div>
         <div class="stats-tile">
           <p class="stats-tile-head">
             <span class="stats-tile-icon" data-icon="calendar"></span>
-            <span data-i18n="近 7 天新增">近 7 天新增</span>
+            <span data-i18n="区间天数">区间天数</span>
           </p>
           <p class="stats-tile-value tnum" id="statSavedLast7">—</p>
         </div>
@@ -62,18 +63,81 @@
       </div>
     </section>
 
+    <!-- 时间维度：一个下拉（今天 / 昨天 / 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义区间）。
+         列表项由脚本按预置清单生成（文案走 t()），所以这里只有一个空槽；
+         选「自定义区间」时才展开这本两个月并排的日历（表格是静态的，日期由脚本填）。 -->
+    <section class="stats-card" id="statsRangeCard" hidden>
+      <h2 data-i18n="时间范围">时间范围</h2>
+      <p class="stats-lead" id="statsRangeSummary">—</p>
+      <div class="stats-range" id="statsRangePicker">
+        <button class="stats-picker-button" type="button" id="statsRangeButton"
+          aria-haspopup="true" aria-expanded="false" aria-controls="statsRangeMenu">
+          <span class="stats-picker-icon" data-icon="calendar"></span>
+          <span class="stats-picker-label" id="statsRangeLabel">—</span>
+          <span class="stats-picker-caret" data-icon="chevron-down"></span>
+        </button>
+        <div class="stats-picker-menu" id="statsRangeMenu" role="listbox" aria-label="选择时间范围" data-i18n-aria="选择时间范围" hidden>
+          <div class="stats-picker-list" id="statsRangeList"></div>
+          <div class="stats-calendar" id="statsCalendar" hidden>
+            <div class="stats-calendar-head">
+              <button class="stats-calendar-nav" type="button" id="statsCalPrev"
+                aria-label="上个月" data-i18n-aria="上个月">
+                <span data-icon="chevron-right" aria-hidden="true"></span>
+              </button>
+              <span class="stats-calendar-month" id="statsCalMonthA">—</span>
+              <span class="stats-calendar-month" id="statsCalMonthB">—</span>
+              <button class="stats-calendar-nav" type="button" id="statsCalNext"
+                aria-label="下个月" data-i18n-aria="下个月">
+                <span data-icon="chevron-right"></span>
+              </button>
+            </div>
+            <div class="stats-calendar-grid" id="statsCalGridA" role="grid"
+              aria-label="第一个月" data-i18n-aria="第一个月"></div>
+            <div class="stats-calendar-grid" id="statsCalGridB" role="grid"
+              aria-label="第二个月" data-i18n-aria="第二个月"></div>
+            <p class="stats-calendar-hint" data-i18n="点第一下定起点，第二下定终点；起止点反了会自动归一。">点第一下定起点，第二下定终点；起止点反了会自动归一。</p>
+            <p class="stats-calendar-warn" id="statsCalendarWarn" hidden></p>
+            <div class="stats-calendar-actions">
+              <button class="button stats-calendar-reset" type="button" id="statsCalReset" data-i18n="清空">清空</button>
+              <button class="stats-calendar-apply" type="button" id="statsCalApply" data-i18n="确定">确定</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- 柱状图：纯内联 SVG，脚本按容器宽度现画，不引任何图表库、不引外部地址。
+         柱子是可聚焦的按钮（Enter / 空格），点一下在下面的饼图里看那一天的收藏夹构成。
          #statsChartLead / #statsChartNote 的文字随数据形态变，所以标在脚本里。 -->
     <section class="stats-card" id="statsChartCard" hidden>
-      <h2 data-i18n="最近每天的收藏数">最近每天的收藏数</h2>
+      <h2 data-i18n="每日新增收藏数">每日新增收藏数</h2>
       <p class="stats-lead" id="statsChartLead"></p>
       <div class="stats-chart" id="statsChart"></div>
       <p class="stats-note" id="statsChartNote" data-i18n="暂时拿不到每天的明细数据。" hidden>暂时拿不到每天的明细数据。</p>
       <p class="stats-caption" id="statsChartCaption" data-i18n="最右边空心的那根是今天。" hidden>最右边空心的那根是今天。</p>
+      <p class="stats-caption" id="statsChartHint" data-i18n="点一下柱子，下面就会列出那一天的收藏夹构成。" hidden>点一下柱子，下面就会列出那一天的收藏夹构成。</p>
     </section>
 
-    <!-- 排行榜要的数据（每个收藏夹各有多少）不在快照里，所以这里只展示快照里有的那一个：
-         近期保存最多的收藏夹（含近 30 天保存数）。快照里没有就读不到，不自己去碰文件系统。 -->
+    <!-- 饼图：只在点了某根柱子之后出现。手写 SVG 扇形 + 图例（名称 / 条数 / 占比）。
+         一个收藏夹都没有（或点的那天没有新增）时只说一句，不画一个整圆。 -->
+    <section class="stats-card" id="statsPieCard" hidden>
+      <h2 data-i18n="收藏夹构成">收藏夹构成</h2>
+      <p class="stats-lead" id="statsPieLead"></p>
+      <div class="stats-pie" id="statsPie"></div>
+      <ul class="stats-legend" id="statsPieLegend"></ul>
+      <p class="stats-note" id="statsPieEmpty" hidden></p>
+    </section>
+
+    <!-- 年份时间轴：快照里没有 yearly 就整块藏起来（不留空壳）。 -->
+    <section class="stats-card" id="statsYearCard" hidden>
+      <h2 data-i18n="按年份累计">按年份累计</h2>
+      <p class="stats-lead" id="statsYearLead"></p>
+      <div class="stats-chart stats-year-chart" id="statsYearChart"></div>
+      <p class="stats-note" id="statsYearNote" hidden></p>
+    </section>
+
+    <!-- 近期保存最多的收藏夹：快照里只有 topCollection 一个，没有整张排行，
+         所以这里只展示这一行，不自己造排行、也不去碰文件系统。 -->
     <section class="stats-card" id="statsTopCard" hidden>
       <h2 data-i18n="近期保存最多的收藏夹">近期保存最多的收藏夹</h2>
       <p class="stats-lead" id="statsTopLead"></p>

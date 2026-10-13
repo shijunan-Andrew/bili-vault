@@ -14,9 +14,17 @@
   const DATABASE_FILE_NAME = "database.json";
   const DATABASE_VERSION = 1;
   // 「近期」的窗口：宠物那句「你近期保存最多的收藏夹是」与排行榜的「近期」列都用它。
-  const RECENT_WINDOW_DAYS = 30;
+  // 1.5.9：窗口统一成近 7 天（原来 30 天，用户报「显示近 30 天 15 个、我实际有 84 个」）。
+  // 这样「近期」列、宠物那句「你近期保存最多的收藏夹是」与柱状图/近 7 天新增同一个口径。
+  const RECENT_WINDOW_DAYS = 7;
   // 数据统计页的默认柱状图天数。
   const DAILY_CHART_DAYS = 14;
+  // 快照里那份「按天紧凑表」（dailyRows）覆盖的天数。180 天 ≈ 半年，
+  // 足够统计页做「上月 / 近 30 天 / 近半年」这类区间，又不至于把快照撑大。
+  const DAILY_ROWS_DAYS = 180;
+  // 日期区间的天数上限（约两年）。既挡住 `new Date(...)` 的越界年份，
+  // 也挡住界面上一次要画几万个柱子。
+  const MAX_RANGE_DAYS = 730;
   // 宠物台词条数（index 由 touchPet 返回，具体文案在界面侧，后台不碰 i18n）。
   const PET_LINE_COUNT = 4;
   // 同一天最多把亲密度加这么多次 —— 防止「一直点一直涨」。
@@ -31,6 +39,15 @@
 
   function pad2(value) {
     return String(value).padStart(2, "0");
+  }
+
+  // 区间的毫秒边界专用：空值 / 空串一律当「没给」。
+  // 不能直接用 numberOr，因为 Number(null) === 0 —— 那样 `null` 会变成一个合法的
+  // 1970-01-01 区间，而不是「这个区间是坏的」。0 本身仍然是合法时间戳（1970 年）。
+  function timeOr(value) {
+    if (value === null || value === undefined || value === "") return NaN;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : NaN;
   }
 
   // 一律用**本地时间**分天：用户看到的「今日」就是挂钟上的今日，不是 UTC 的。
@@ -94,8 +111,10 @@
     return {
       version: DATABASE_VERSION,
       createdAt: new Date(time).toISOString(),
+      firstSeenAt: new Date(time).toISOString(),
       updatedAt: new Date(time).toISOString(),
       videos: {},
+      totals: { savedTotal: 0 },
       pet: { affinity: 0, day: localDayKey(time), todayTouch: 0, totalTouch: 0 }
     };
   }
@@ -141,6 +160,18 @@
       const normalized = normalizeEntry(entry);
       if (normalized) database.videos[key] = normalized;
     }
+    // 首次启用时间：老库没这个字段时退到 createdAt（数据库文件诞生的那一刻，
+    // 也就是用户第一次导入 / 第一次存档，比「最早一条收藏」小得多）。
+    const firstSeenAt = Date.parse(String(raw.firstSeenAt || ""));
+    const createdTime = Date.parse(String(database.createdAt || ""));
+    database.firstSeenAt = new Date(
+      Number.isFinite(firstSeenAt) ? firstSeenAt : (Number.isFinite(createdTime) ? createdTime : time)
+    ).toISOString();
+    // 累计保存数只增不减：字段缺失（老库升级上来）时拿现有条数当起点，
+    // 免得刚升级就让用户看到「帮你保存了 0 个视频」。
+    const savedTotal = numberOr(raw.totals && raw.totals.savedTotal, NaN);
+    const known = Object.keys(database.videos).length;
+    database.totals = { savedTotal: Number.isFinite(savedTotal) ? Math.max(known, Math.floor(savedTotal)) : known };
     database.pet = normalizePet(raw.pet, time);
     return database;
   }
@@ -171,6 +202,10 @@
         bvid: String(record.bvid || ""),
         aid: String(record.aid || "")
       };
+      // 累计保存数：只有「新的一条入库」才 +1，同一条重扫 / 改收藏夹都不加，所以它单调递增、
+      // 删视频也不会回退（用户要的正是「自首次启用以来的累计」）。
+      if (!database.totals || typeof database.totals !== "object") database.totals = { savedTotal: 0 };
+      database.totals.savedTotal = Math.max(0, numberOr(database.totals.savedTotal, 0)) + 1;
     }
     database.updatedAt = new Date(numberOr(now, Date.now())).toISOString();
     return database;
@@ -199,9 +234,16 @@
     const database = emptyDatabase(now);
     if (previous) {
       database.createdAt = previous.createdAt;
+      database.firstSeenAt = previous.firstSeenAt;
       database.pet = previous.pet;
     }
     for (const video of videos || []) addRecord(database, recordFromVideo(video, now), now);
+    // 整份重建会把每条都当「新插入」，所以累计数只能取「重建出来的条数」与「重建前的峰值」
+    // 里更大的那个 —— 一旦重建就把历史累计抹平，用户删过的那些就白算了。
+    database.totals.savedTotal = Math.max(
+      numberOr(database.totals && database.totals.savedTotal, 0),
+      previous ? numberOr(previous.totals && previous.totals.savedTotal, 0) : 0
+    );
     database.updatedAt = new Date(now).toISOString();
     return database;
   }
@@ -218,14 +260,238 @@
     return Object.values(videos).filter((entry) => entry && Number.isFinite(numberOr(entry.at, NaN)));
   }
 
+  // 某天 00:00:00.000 的本地毫秒时间戳。与 localDayKey / dayKeyToTime 同一套本地日口径。
+  function dayStartTime(year, month, day) {
+    return new Date(year, month, day).getTime();
+  }
+
+  // 从 endTime 那天往回数 count 天的 day key 列表，升序。
+  // 注意不能用 `time - offset * 86400000`：少数时区（澳大利亚 Lord Howe 的夏令时只挪半小时）
+  // 会让 dayKeyToTime 得到的「午夜」和真实午夜差一截，固定毫秒步进每天漂半小时，
+  // 攒够几天就会整天错位。用日期构造一天一天地走，则任何时区都对。
+  function localDayList(endTime, count) {
+    const total = Math.max(0, Math.floor(numberOr(count, 0)));
+    const days = [];
+    for (let offset = total - 1; offset >= 0; offset -= 1) {
+      const day = localDayKey(dayStartTime(endTime.getFullYear(), endTime.getMonth(), endTime.getDate() - offset));
+      if (!day) continue;
+      days.push(day);
+    }
+    return days;
+  }
+
+  function dayStartOf(time) {
+    const date = new Date(numberOr(time, NaN));
+    if (Number.isNaN(date.getTime())) return NaN;
+    return dayStartTime(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  // 结束日的 23:59:59.999。用「下一天 00:00 减 1 毫秒」而不是加 86399999，
+  // 夏令时那天才不会偏一小时。
+  function dayEndOf(time) {
+    const start = dayStartOf(time);
+    if (!Number.isFinite(start)) return NaN;
+    const date = new Date(start);
+    return dayStartTime(date.getFullYear(), date.getMonth(), date.getDate() + 1) - 1;
+  }
+
+  // 区间最多跨 MAX_RANGE_DAYS 个「日历日」。用日期构造递增，越界（undefined）时停手，
+  // 免得遇到 275760 年那种会变成 NaN 的年份。
+  function clampSpan(fromStart, toEnd) {
+    if (!Number.isFinite(fromStart) || !Number.isFinite(toEnd)) return { from: fromStart, to: toEnd };
+    const end = new Date(toEnd);
+    let limit = dayStartTime(end.getFullYear(), end.getMonth(), end.getDate());
+    for (let i = 1; i < MAX_RANGE_DAYS; i += 1) {
+      const start = dayStartTime(end.getFullYear(), end.getMonth(), end.getDate() - i);
+      if (!Number.isFinite(start)) break;
+      limit = start;
+    }
+    return { from: Math.max(fromStart, limit), to: toEnd };
+  }
+
+  // 两个**本地日**之间隔了几天（含头含尾）。夏令时那两天不相等，所以用 UTC 归一化再相减。
+  function dayCountBetween(from, to) {
+    const first = new Date(from);
+    const last = new Date(to);
+    if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime())) return NaN;
+    const firstUtc = Date.UTC(first.getFullYear(), first.getMonth(), first.getDate());
+    const lastUtc = Date.UTC(last.getFullYear(), last.getMonth(), last.getDate());
+    return Math.floor((lastUtc - firstUtc) / DAY_MS) + 1;
+  }
+
+  // 统计页能选的区间。键是给程序用的预设名，值是给界面兜底用的中文名
+  // （界面自己会走 i18n，这里的 label 只在词典缺项时垫底）。
+  const RANGE_PRESETS = {
+    today: "今天",
+    yesterday: "昨天",
+    last7: "近 7 天",
+    last30: "近 30 天",
+    thisMonth: "本月",
+    lastMonth: "上个月",
+    custom: "自定义"
+  };
+
+  function hasPreset(name) {
+    return typeof name === "string" && Object.prototype.hasOwnProperty.call(RANGE_PRESETS, name);
+  }
+
+  function rangeObject(preset, from, to, label) {
+    const days = dayCountBetween(from, to);
+    if (!Number.isFinite(days) || days < 1) return null;
+    return { preset, from, to, days, label: label || RANGE_PRESETS[preset] || RANGE_PRESETS.custom };
+  }
+
+  // 把两个毫秒值收敛成「整日区间」：from 落到当天 00:00:00.000、to 落到当天 23:59:59.999，
+  // 两端都含。from > to（或认不出的值）返回 null —— 宁可不画，也不要画出一段反向的区间。
+  function normalizeDayRange(fromValue, toValue, preset = "custom") {
+    const fromTime = timeOr(fromValue);
+    const toTime = timeOr(toValue);
+    if (!Number.isFinite(fromTime) || !Number.isFinite(toTime)) return null;
+    const fromStart = dayStartOf(fromTime);
+    const toEnd = dayEndOf(toTime);
+    if (!Number.isFinite(fromStart) || !Number.isFinite(toEnd) || fromStart > toEnd) return null;
+    const clamped = clampSpan(fromStart, toEnd);
+    return rangeObject(preset, clamped.from, clamped.to);
+  }
+
+  // 近 days 天（含今天）。days 被夹到 1 ~ MAX_RANGE_DAYS，坏输入退成「今天」。
+  // preset 只是给返回值贴的标签：last7 / last30 也走这里，但它们要报自己的名字。
+  function rangeFromDays(days, now = Date.now(), preset = "custom") {
+    const time = new Date(timeOr(now));
+    const safe = Number.isNaN(time.getTime()) ? new Date() : time;
+    const span = Math.max(1, Math.min(MAX_RANGE_DAYS, Math.floor(numberOr(days, 1))));
+    const start = dayStartTime(safe.getFullYear(), safe.getMonth(), safe.getDate() - (span - 1));
+    const end = dayStartTime(safe.getFullYear(), safe.getMonth(), safe.getDate() + 1) - 1;
+    return rangeObject(hasPreset(preset) ? preset : "custom", start, end);
+  }
+
+  // 预设区间 → 具体的毫秒边界。`now` 一律由调用方传进来（测试里是固定值），
+  // 这样「今天」是哪一天是确定的，不受函数内部读时钟影响。
+  function rangeFor(preset, now = Date.now(), custom = null) {
+    // 认不出的 now（含 null：Number(null) 是 0，那不是「现在」）退成真实的当下，
+    // 而不是把用户送到 1970 年去。
+    const time = timeOr(now);
+    const today = new Date(Number.isFinite(time) ? time : Date.now());
+    const safe = Number.isNaN(today.getTime()) ? new Date() : today;
+    const timeMs = safe.getTime();
+    const year = safe.getFullYear();
+    const month = safe.getMonth();
+    const day = safe.getDate();
+    const name = hasPreset(preset) ? preset : "custom";
+    if (name === "custom") {
+      const source = custom && typeof custom === "object" ? custom : {};
+      return normalizeDayRange(source.from, source.to, "custom");
+    }
+    if (name === "today") return rangeObject(name, dayStartTime(year, month, day), dayEndOf(timeMs));
+    if (name === "yesterday") return rangeObject(name, dayStartTime(year, month, day - 1), dayEndOf(dayStartTime(year, month, day) - 1));
+    if (name === "last7") return rangeFromDays(7, timeMs, name);
+    if (name === "last30") return rangeFromDays(30, timeMs, name);
+    if (name === "thisMonth") {
+      return rangeObject(name, dayStartTime(year, month, 1), dayEndOf(timeMs));
+    }
+    // 上个月：1 号 00:00 ~ 月末 23:59:59.999。month - 1 为负时 Date 会自动退到去年 12 月。
+    return rangeObject(name, dayStartTime(year, month - 1, 1), dayEndOf(dayStartTime(year, month, 0)));
+  }
+
+  // 按天分桶，桶里顺手记下收藏夹构成（点柱子看当天饼图就靠它）。
+  // 分天用条目自己的 `day` 字段，与 recentDays / collectionRows 同一口径；
+  // 老库缺 `day` 时现算 localDayKey(entry.at)。
+  function bucketByDay(database) {
+    const buckets = new Map();
+    for (const entry of entriesOf(database)) {
+      const day = entry.day || localDayKey(entry.at);
+      if (!day) continue;
+      let bucket = buckets.get(day);
+      if (!bucket) {
+        bucket = { count: 0, byCollection: new Map() };
+        buckets.set(day, bucket);
+      }
+      const name = entry.collection || "未分类收藏";
+      bucket.count += 1;
+      bucket.byCollection.set(name, numberOr(bucket.byCollection.get(name), 0) + 1);
+    }
+    return buckets;
+  }
+
+  // 区间内**每一天都出现**（没记录的那天补 0），按时间升序。
+  // 图表要的是连续的柱子，缺天不补就会出现「10-05 挨着 10-07」这种假相邻。
+  function seriesInRange(database, range) {
+    const from = timeOr(range && range.from);
+    const to = timeOr(range && range.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return [];
+    const buckets = bucketByDay(database);
+    const rows = [];
+    // 用日期构造逐日推进（而不是 from + i * DAY_MS），夏令时那天也不会错位。
+    let cursor = from;
+    for (let guard = 0; guard <= MAX_RANGE_DAYS && cursor <= to; guard += 1) {
+      const day = localDayKey(cursor);
+      if (!day) break;
+      const bucket = buckets.get(day);
+      rows.push({ day, count: bucket ? bucket.count : 0 });
+      const date = new Date(cursor);
+      cursor = dayStartTime(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+    }
+    return rows;
+  }
+
+  // 区间内的总收藏数。等于 seriesInRange 各柱之和（统计页顶上的大数字）。
+  function totalInRange(database, range) {
+    const from = timeOr(range && range.from);
+    const to = timeOr(range && range.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return 0;
+    let total = 0;
+    for (const entry of entriesOf(database)) {
+      if (entry.at >= from && entry.at <= to) total += 1;
+    }
+    return total;
+  }
+
+  // 区间内的收藏夹构成（饼图）。count 降序，同数按名字本地化排序（"zh-CN" 才排得出中文顺序）。
+  // count 为 0 的收藏夹**不出现** —— 空空一个「0 条」的扇区既没信息量又挤占图例。
+  function collectionBreakdown(database, range) {
+    const from = timeOr(range && range.from);
+    const to = timeOr(range && range.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return [];
+    const counts = new Map();
+    for (const entry of entriesOf(database)) {
+      if (entry.at < from || entry.at > to) continue;
+      const name = entry.collection || "未分类收藏";
+      counts.set(name, numberOr(counts.get(name), 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .filter(([, count]) => count > 0)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"));
+  }
+
+  // 按年份汇总，升序、只列有记录的年份（年份时间轴上不该出现空年份）。
+  function yearlySeries(database) {
+    const counts = new Map();
+    for (const entry of entriesOf(database)) {
+      const year = new Date(entry.at).getFullYear();
+      if (!Number.isFinite(year)) continue;
+      counts.set(year, numberOr(counts.get(year), 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([year, count]) => ({ year, count }))
+      .sort((a, b) => a.year - b.year);
+  }
+
   // 界面与宠物要的那一小包数字。所有字段都是现算的，没有缓存。
   function snapshot(database, now = Date.now()) {
     const time = numberOr(now, Date.now());
     const today = localDayKey(time);
     const todayTime = dayKeyToTime(today);
-    const last7Time = todayTime - 6 * DAY_MS;
-    const recentTime = todayTime - (RECENT_WINDOW_DAYS - 1) * DAY_MS;
+    // 三个「近 N 天」的口径都从同一份按天列表上切，免得各算各的又被固定毫秒步进带偏
+    // （见 localDayList 的注释）。RECENT_WINDOW_DAYS 目前正好是 7，所以近 7 天与
+    // 「近期」是同一段；哪天有人改回 30，两个起点会各自跟着变。
+    const todayDate = new Date(todayTime);
+    const recentDayList = localDayList(todayDate, RECENT_WINDOW_DAYS);
+    const last7From = dayKeyToTime(recentDayList[0]);
+    const recentTime = last7From;
     const entries = entriesOf(database);
+    const buckets = bucketByDay(database);
+    const dailyRows = dailyRowsFrom(buckets, localDayList(todayDate, DAILY_ROWS_DAYS));
     const collections = new Set();
     const recentByCollection = new Map();
     const totalByCollection = new Map();
@@ -239,7 +505,7 @@
       totalByCollection.set(name, numberOr(totalByCollection.get(name), 0) + 1);
       if (at < firstAt) firstAt = at;
       if (entry.day === today) savedToday += 1;
-      if (at >= last7Time) savedLast7 += 1;
+      if (at >= last7From) savedLast7 += 1;
       if (at >= recentTime) recentByCollection.set(name, numberOr(recentByCollection.get(name), 0) + 1);
     }
     let topCollection = null;
@@ -251,8 +517,18 @@
     }
     const sinceTime = Number.isFinite(firstAt) ? firstAt : numberOr(Date.parse(String((database && database.createdAt) || "")), time);
     const since = localDayKey(sinceTime);
-    const sinceDayTime = dayKeyToTime(since);
-    const days = Number.isFinite(sinceDayTime) ? Math.max(1, Math.floor((todayTime - sinceDayTime) / DAY_MS) + 1) : 1;
+    // 用「本地日之间隔几天」来算，而不是 (todayTime - sinceTime) / DAY_MS：
+    // 两个端点各自的 UTC 偏移可能不同，少数时区（Lord Howe 夏令时只挪半小时）
+    // 天天累加半小时，攒几天就会少数一天。dayCountBetween 归一化到 UTC 再相减，任何时区都对。
+    const days = Math.max(1, numberOr(dayCountBetween(dayStartOf(sinceTime), dayStartOf(time)), NaN) || 1);
+    // 陪伴天数：从**插件首次启用**算起（firstSeenAt），不是从最早一条收藏算起。
+    // days 那一项仍然是「库里有几天记录」，被统计页的文案和测试钉着，不动它。
+    const firstSeenTime = numberOr(
+      Date.parse(String((database && database.firstSeenAt) || "")),
+      numberOr(Date.parse(String((database && database.createdAt) || "")), time)
+    );
+    const firstSeen = localDayKey(firstSeenTime);
+    const firstSeenDays = Math.max(1, numberOr(dayCountBetween(dayStartOf(firstSeenTime), dayStartOf(time)), NaN) || 1);
     return {
       version: DATABASE_VERSION,
       updatedAt: time,
@@ -261,9 +537,40 @@
       savedToday,
       savedLast7,
       topCollection,
+      savedTotal: Math.max(entries.length, numberOr(database && database.totals && database.totals.savedTotal, 0)),
+      firstSeen: { since: firstSeen, days: firstSeenDays },
       days: { since, days },
-      pet: normalizePet(database && database.pet, time)
+      pet: normalizePet(database && database.pet, time),
+      dailyRows,
+      // 年份时间轴。跟着快照走，统计页就不必为了「按年看」再去碰数据库。
+      yearly: yearlySeries(database)
     };
+  }
+
+  // 快照里的「按天紧凑表」：最近 DAILY_ROWS_DAYS 天，每天 { day, count, byCollection }，
+  // 缺的天补 { day, count: 0, byCollection: {} }。
+  //
+  // 它必须由 snapshot() 带出去：数据库本体在用户的备份文件夹（FSA）里，
+  // 统计页根本读不到，它只有 chrome.storage.local.bcaStats 这一份快照
+  // （background.js 的 publishStatsSnapshot 与 library.js 的 syncStatsDatabase 发的就是
+  // `Object.assign(snapshot(database), { daily: recentDays(database) })`）。
+  // 所以统计页要「任意区间 + 点柱子看当天构成」，这份按天表只能是快照的一部分 ——
+  // 放进 snapshot() 之后那两个写入方原样发布即可，一行都不用改。
+  //
+  // `byCollection` 只写非零项：180 天 × 十几个收藏夹，逐天把每个收藏夹都写一遍
+  // 会让键名重复几千次，而这份快照是要 JSON 序列化后进 chrome.storage.local 的
+  // （用户设备上还有配额）。空的天写成 {} 也一样能让界面区分「0 条」与「没有这项」。
+  function dailyRowsFrom(buckets, dayList) {
+    return dayList.map((day) => {
+      const bucket = buckets.get(day);
+      const byCollection = {};
+      if (bucket) {
+        for (const [name, count] of bucket.byCollection) {
+          if (count > 0) byCollection[name] = count;
+        }
+      }
+      return { day, count: bucket ? bucket.count : 0, byCollection };
+    });
   }
 
   // 最近 days 天的每日柱：从最早到最近，缺的日子补 0（图表要连续）。
@@ -277,8 +584,7 @@
       buckets.set(day, numberOr(buckets.get(day), 0) + 1);
     }
     const rows = [];
-    for (let offset = total - 1; offset >= 0; offset -= 1) {
-      const day = localDayKey(todayTime - offset * DAY_MS);
+    for (const day of localDayList(new Date(todayTime), total)) {
       rows.push({ day, count: numberOr(buckets.get(day), 0) });
     }
     return rows;
@@ -288,7 +594,8 @@
   function collectionRows(database, now = Date.now()) {
     const time = numberOr(now, Date.now());
     const todayTime = dayKeyToTime(localDayKey(time));
-    const recentTime = todayTime - (RECENT_WINDOW_DAYS - 1) * DAY_MS;
+    // 「近期」起点同样按天走，不用 todayTime - (N-1) * DAY_MS（理由见 localDayList）。
+    const recentTime = dayKeyToTime(localDayList(new Date(todayTime), RECENT_WINDOW_DAYS)[0]);
     const rows = new Map();
     for (const entry of entriesOf(database)) {
       const name = entry.collection || "未分类收藏";
@@ -336,8 +643,19 @@
     DATABASE_VERSION,
     RECENT_WINDOW_DAYS,
     DAILY_CHART_DAYS,
+    DAILY_ROWS_DAYS,
+    MAX_RANGE_DAYS,
     PET_LINE_COUNT,
     PET_DAILY_TOUCH_LIMIT,
+    // 区间选择：预设表 + 预设 → 毫秒边界。界面按 RANGE_PRESETS 的键渲染下拉框。
+    RANGE_PRESETS,
+    rangeFor,
+    rangeFromDays,
+    // 区间聚合：柱状图（seriesInRange）、大数字（totalInRange）、饼图（collectionBreakdown）。
+    seriesInRange,
+    totalInRange,
+    collectionBreakdown,
+    yearlySeries,
     localDayKey,
     dayKeyToTime,
     parseFavoriteTime,

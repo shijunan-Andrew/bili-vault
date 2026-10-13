@@ -296,7 +296,17 @@ const SCRIPT = `<script>
 // Anchors already carry href="https://www.bilibili.com/" + target="_blank", so they need no help;
 // this handler covers every element that is NOT a link (banner dots, tabs, buttons, list rows, the
 // search box, blank areas) — the original page routed all of those through page.core.js handlers.
+//
+// 彩蛋对话框那一段（本文件末尾的 EGG_DIALOG）在 window 捕获阶段注册了一层 click 守卫。
+// 捕获阶段的传播路径是 window -> document -> ...，所以那层守卫一定比这里的 document 捕获先跑：
+// 它遇到对话框范围内的点击就 preventDefault + stopImmediatePropagation，这里根本不会被调用。
+// 下面两条判断是留给「守卫没装上」这种情况的兜底，不影响正常路径。
 document.addEventListener('click', function (e) {
+  var et = e.target;
+  if (et && et.nodeType === 1 && et.closest && et.closest('[data-egg-dialog]')) return;
+  // 对话框是在 pointerdown 里就摘掉的，所以「知道啦 / 点遮罩」那一次 click 的落点已经变成
+  // 底下的页面元素了；对话框在 pointerdown 时留下的记号能把这最后一次 click 认出来。
+  if (document.documentElement.hasAttribute('data-egg-dismissed')) return;
   var t = e.target;
   while (t && t !== document.body) {
     if (t.tagName === 'A' && t.getAttribute('href')) return;   // let the anchor do its own job
@@ -335,6 +345,171 @@ window.addEventListener('load', function () {
 });
 </script>` : '';
 
+// ---------------------------------------------------------------- 彩蛋对话框（自包含）
+// 生成结果 index.html 末尾的独立弹层：遮罩 #eggDialogOverlay / 卡片 #eggDialogCard /
+// 文案 #eggDialogText / 免责声明 #eggDialogNote / 按钮 #eggDialogOk。
+// 关闭路径有两条，都不依赖捕获取冒泡的顺序：
+//   1) pointerdown 上直接关：遮罩一按就从文档里摘掉，后面的 click 落到哪都无所谓；
+//   2) 同在 window 捕获阶段的 click 守卫，注册在页面 catch-all 之前，先跑并
+//      stopImmediatePropagation，把这一次 click 按死。
+// 两条路径都会在 <html> 上留一次性的 data-egg-dismissed 记号，让页面 catch-all 也放行。
+// 生成结果 index.html 里的对话框结构本身。它必须和下面的 EGG_DIALOG 脚本一起输出：
+// 少一段网页上就没有那个弹层，#eggDialogOverlay 找不到，脚本会直接 return。
+// 对话框自己的样式，必须一起出现在生成结果里：少了它遮罩不是 fixed、按钮没有尺寸，
+// 弹层会落进页面正文，点哪儿都关不掉。
+const EGG_CSS = `<style>
+/* 彩蛋对话框：页面一打开就出现的独立弹层，只服务这一个对话框，不碰页面原有布局。 */
+/* 遮罩与卡片都用 position: fixed，高 z-index 把它们压在最上面，不参与页面原有布局。 */
+#eggDialogOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2147483000;
+  background: rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+#eggDialogBox {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2147483001;
+  border-radius: 6px;
+  text-align: center;
+}
+#eggDialogCard {
+  width: 90%;
+  max-width: 420px;
+  padding: 20px;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 6px;
+  color: #444444;
+  font-size: 14px;
+  line-height: 1.9;
+  text-align: center;
+  box-sizing: border-box;
+}
+/* 这一层只负责把卡片摆在正中；摆不了就退化成卡片贴在窗口顶部，不会跑出屏幕。 */
+@supports (display: flex) {
+  #eggDialogBox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+#eggDialogText {
+  margin: 0 0 20px 0;
+  font-size: 14px;
+  line-height: 1.9;
+  text-align: center;
+}
+#eggDialogOk {
+  float: none;
+  width: auto;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 0 18px;
+  height: 27px;
+  line-height: 27px;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+#eggDialogText {
+  margin: 0 0 20px 0;
+  font-size: 14px;
+  line-height: 1.9;
+  text-align: center;
+}
+#eggDialogOk {
+  float: none;
+  width: auto;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 0 18px;
+  height: 27px;
+  line-height: 27px;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+</style>`;
+
+const EGG_MARKUP = `<div id="eggDialogOverlay" data-egg-dialog role="dialog" aria-modal="true" aria-label="彩蛋">
+  <div id="eggDialogBox" data-egg-dialog>
+    <div id="eggDialogCard" data-egg-dialog>
+      <p id="eggDialogText">恭喜你发现彩蛋！这个界面有没有勾起你的回忆呢？这是2015年的b站怀旧复刻页面，也是插件作者第一次入站的时间，屏幕前的你们又是在哪一年第一次进入b站的呢？</p>
+        <p id="eggDialogNote" style="margin:12px 0 0;font-size:12px;line-height:1.7;color:#888;text-align:center;word-break:break-all;">本怀旧网站为粉丝向b站怀旧页面复刻，所有网页数据均来自互联网档案馆的：http://web.archive.org/web/20150701082208/http://www.bilibili.com/，仅作为怀旧和欣赏使用，请勿将其用于商业或其他作用。</p>
+      <button id="eggDialogOk" type="button">知道啦</button>
+    </div>
+  </div>
+</div>`;
+
+const EGG_DIALOG = `<script>
+(function () {
+  var overlay = document.getElementById('eggDialogOverlay');
+  if (!overlay) return;
+  function closeEggDialog() {
+    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+  var ok = document.getElementById('eggDialogOk');
+  var box = document.getElementById('eggDialogBox');
+
+  // 摘掉之后，这一次手势的 click 会落在它底下的页面元素上（遮罩已经没了），页面 catch-all
+  // 光看“点击目标在不在对话框里”认不出来。所以在 pointerdown 时留一个记号，catch-all 看到
+  // 记号就放过这一次 click，并在同一个任务里把记号清掉 —— 只有这一次 click 被放过，之后
+  // 点页面任何地方照常跳转。
+  var docEl = document.documentElement;
+  var markDismissed = function () {
+    docEl.setAttribute('data-egg-dismissed', '1');
+    setTimeout(function () { docEl.removeAttribute('data-egg-dismissed'); }, 0);
+  };
+  // 只有这两种点击才是「关掉对话框」：按钮，或遮罩空白（卡片外面的半透明区域）。
+  var isCloseTarget = function (el) {
+    return el === ok || el === overlay || el === box;
+  };
+
+  // 关闭动作挂在「按下」这一步：pointerdown 一触发，对话框就已经从文档里摘掉了，
+  // 后面 click 走到谁那里都改不了「已经关掉」这个结果，也就与捕获/冒泡顺序无关了。
+  overlay.addEventListener('pointerdown', function (e) {
+    if (!isCloseTarget(e.target)) return;
+    markDismissed();
+    closeEggDialog();
+  }, true);
+
+  // 这一层在 window 捕获阶段，页面 catch-all 在 document 捕获阶段：window 先于 document，所以
+  // 它总能把 click 按死。它同时是 pointerdown 那条主路径的退路：不管是「刚才按下的是关闭点，
+  // 但 click 的落点已经换了（记号还在）」，还是「click 直接落在对话框范围内」，都在这里把这一次
+  // click 按死；落在卡片里的 click 则原样放过。
+  window.addEventListener('click', function (e) {
+    var el = e.target;
+    var marked = docEl.hasAttribute('data-egg-dismissed');
+    var inDialog = !!(el && el.nodeType === 1 && el.closest && el.closest('[data-egg-dialog]'));
+    if (!marked && !inDialog) return;            // 页面自己的点击：一律不管
+    if (isCloseTarget(el) || marked) {           // 关闭点 / 上一次 pointerdown 留下的记号
+      markDismissed();
+      closeEggDialog();
+    }
+    e.preventDefault();                          // 卡片内部的点击：对话框留着，但也不能变成跳转
+    e.stopImmediatePropagation();
+  }, true);
+
+  // Esc：挂 window 捕获，杜绝被中途的 stopPropagation 截掉；只在对话框还在时处理。
+  window.addEventListener('keydown', function (e) {
+    if (!overlay.parentNode) return;
+    if (e.key === 'Escape' || e.keyCode === 27) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeEggDialog();
+    }
+  }, true);
+})();
+</script>`;
+
 // ---------------------------------------------------------------- output document
 const html = `<!DOCTYPE html>
 <html>
@@ -343,6 +518,9 @@ ${head.replace('</head>', `<style>\n${cssAll}\n/* ===== replica-only rules (see 
 ${body}
 ${SCRIPT}${QA}
 </body>
+${EGG_CSS}
+${EGG_MARKUP}
+${EGG_DIALOG}
 </html>
 `;
 fs.mkdirSync(p('build'), { recursive: true });

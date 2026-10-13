@@ -377,11 +377,13 @@ function renderDiffResult(response) {
     const name = document.createElement("strong");
     name.textContent = `「${diff.folderTitle}」`;
     // 光看「新增 1000」看不出所以然，所以把两边的条数一起摆出来
+    // 1.5.9：上面 diff 里的四项已经被 count() 归一成**数字**了，这里不能再取 .length
+    // （数字没有 length，恒为 0 —— 用户看到的「四个数字永远是 0」就是这个）。
     line.append(name, document.createTextNode(
       BcaI18n.t("线上 {remote} / 本地 {local}：新增 {added} / 线上已移除 {removed} / 新失效 {invalid} / 恢复 {recovered}",
         { remote: diff.remoteFetched || 0, local: diff.localTotal || 0,
-          added: diff.added?.length || 0, removed: diff.removed?.length || 0,
-          invalid: diff.newlyInvalid?.length || 0, recovered: diff.recovered?.length || 0 })));
+          added: Number(diff.added) || 0, removed: Number(diff.removed) || 0,
+          invalid: Number(diff.newlyInvalid) || 0, recovered: Number(diff.recovered) || 0 })));
     if (!diff.collectionExists) {
       const note = document.createElement("small");
       note.className = "diff-warn";

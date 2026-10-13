@@ -337,11 +337,14 @@
   // 4 条轮播台词。t() 的 key 必须写成字面量（i18n 的提取工具只认字面量）。
   function bubbleLines(data) {
     if (!data) return [translate("还没有数据，导入一次收藏夹就能看到统计了。")];
-    const days = data.days || {};
+    // 1.5.9：第 1 句改读 firstSeen（从**插件首次启用**算起的天数）。原来读 days.days，
+    // 那是「数据库里有几天记录」= 最早一条收藏到今天的跨度，用户真库上是 1156 天。
+    const firstSeen = data.firstSeen || {};
     const top = data.topCollection || null;
     return [
-      translate("已陪伴你 {days} 天", { days: Number(days.days) || 0 }),
-      translate("帮你保存了 {count} 个视频", { count: Number(data.videos) || 0 }),
+      translate("已陪伴你 {days} 天", { days: Number(firstSeen.days) || 1 }),
+      // 累计保存数：只增不减的 totals.savedTotal，不是当前条数（删一条也不会掉）
+      translate("帮你保存了 {count} 个视频", { count: Number(data.savedTotal) || Number(data.videos) || 0 }),
       translate("今日新增收藏视频 {count} 个", { count: Number(data.savedToday) || 0 }),
       translate("你近期保存最多的收藏夹是 {name}", { name: top && top.name ? String(top.name) : "—" })
     ];
@@ -989,11 +992,11 @@
 
   function applyTempLine(line) {
     if (!line || !visible) return;
-    if (bubble && !bubble.hidden) {
-      showBubble(line);
-    } else {
-      tempLine = line; // 气泡收着，攒到下次点开展示
-    }
+    // 1.5.9：气泡正开着时**一个字都不动**。后台的回复总在点击之后几十毫秒才到
+    // （它要先写库、再发快照），当场换字就是用户报的「点一下连出两个气泡」。
+    // 只有气泡收着的时候才攒下来，下次点开时放一次 —— 与原注释同一个语义。
+    if (bubble && !bubble.hidden) return;
+    tempLine = line;
   }
 
   // 后台只回一个下标（service worker 里没有词典，它不碰 i18n），台词在这里翻。
@@ -1494,13 +1497,19 @@
     watchReducedMotion();
   }
 
-  // 统计变了、语言切了都走这里：只重画气泡内容（气泡开着的时候），不动显隐与动画状态
+  // 统计变了、语言切了都走这里：只重画气泡内容（气泡开着的时候），不动显隐与动画状态。
+  // 1.5.9：重画的必须是**当前正显示的那一句** —— lineIndex 在画完之后已经 +1 了，所以取
+  // lineIndex - 1（和下面切语言那条路径同一套算法）。原来用 lineIndex % length，于是后台
+  // 每写一次库（点一下摸头就会写）气泡就悄悄翻到下一句，用户看到的是「点一下连出两个气泡」。
+  // 文案没变就不碰 DOM：免得重排自动收起计时器、也免得白闪一下。
   async function refresh() {
     if (!statsLoaded) return;
     stats = await readStats();
     if (!visible || !bubble || bubble.hidden) return;
     const lines = bubbleLines(stats);
-    showBubble(lines[lineIndex % lines.length]);
+    const text = lines[clamp(lineIndex - 1, 0, lines.length - 1)];
+    if (bubbleText && bubbleText.textContent === text) return;
+    showBubble(text);
   }
 
   // 只读快照：给「真浏览器里怎么验」用的。挂件的问题（拖动被当成点击、走到边界没停、

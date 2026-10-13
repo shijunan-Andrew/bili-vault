@@ -473,31 +473,29 @@ function parseManualVideoIdentifier(input) {
   throw new Error("无法识别视频编号，请检查网址、BV 号或 av 号是否完整。");
 }
 
+/* 1.5.1（P0-1）：这里原来是两处裸 fetch —— 不领限速票、也没有超时，
+   是「所有 B 站请求都必须走 biliImportApiGet」这条红线唯一的例外（见 :3378 的说明）。
+   现在两条请求都走统一出口：
+     · 限速：biliImportApiGet 一进来就 biliThrottleWait()，先占坑再等待，
+       并发调用会被排成有间隔的一串（:938）；
+     · 超时：它带 AbortController，超时抛「B站接口请求超时。」（:943 / :996）——
+       所以这条链路不可能再出现"永远挂住的 await"。这一点对手动添加也重要：
+       addManualVideo 是排在 saveQueue（串行队列）上跑的，一个永不 resolve 的请求
+       会把整条队列占死，之后的收藏、导入全部跟着卡住。
+   复用是否真的可行，两个语义都核对过：
+     · credentials / cache：出网口的两处 fetch 用的就是 { credentials: "include",
+       cache: "no-store" }（:964 / :973），与这里原来写的完全一致；
+     · 返回体：出网口返回 payload.data，非 0 错误码、非 2xx、412 风控都在内部抛错
+       （:981-:996），等价于原来手写的「code !== 0 就抛」，且风控与普通失败还能区分开。
+   唯一的取舍：不再走「页面代取」，固定传 tabId = null 走后台直连。手动添加是从弹窗发起的，
+   手上没有 B 站标签页 id，也就不为了省一次请求去引入对 sender.tab 的依赖。 */
 async function fetchManualVideoMetadata(identifier) {
-  const query = new URLSearchParams(identifier);
-  const response = await fetch(`https://api.bilibili.com/x/web-interface/view?${query}`, {
-    credentials: "include",
-    cache: "no-store"
-  });
-  if (!response.ok) throw new Error(`读取 B 站视频信息失败：HTTP ${response.status}`);
-  const payload = await response.json();
-  if (payload.code !== 0 || !payload.data) {
-    throw new Error(`B 站未返回视频信息：${payload.message || `错误码 ${payload.code ?? "未知"}`}`);
-  }
-  const video = payload.data;
-  if (!video.title || !video.pic) throw new Error("B 站返回的视频资料不完整，缺少标题或封面。");
+  const video = await biliImportApiGet("/x/web-interface/view", identifier, 15000);
+  if (!video || !video.title || !video.pic) throw new Error("B 站返回的视频资料不完整，缺少标题或封面。");
   let tags = [];
   try {
-    const tagResponse = await fetch(`https://api.bilibili.com/x/web-interface/view/detail/tag?aid=${encodeURIComponent(video.aid)}`, {
-      credentials: "include",
-      cache: "no-store"
-    });
-    if (tagResponse.ok) {
-      const tagPayload = await tagResponse.json();
-      if (tagPayload.code === 0 && Array.isArray(tagPayload.data)) {
-        tags = tagPayload.data.map((tag) => tag.tag_name).filter(Boolean);
-      }
-    }
+    const tagData = await biliImportApiGet("/x/web-interface/view/detail/tag", { aid: video.aid }, 10000);
+    if (Array.isArray(tagData)) tags = tagData.map((tag) => tag.tag_name).filter(Boolean);
   } catch (error) {
     // L14：标签接口是"能拿到就更好"，失败不该让整条视频解析失败 —— 所以照旧吞掉。
     // 但原来是个空 catch，连一行日志都不留：真机上标签集体丢失时无从判断
@@ -1354,7 +1352,12 @@ async function enrichImportedInvalidVideos(items, folder, tabId = null) {
     }, "观看历史");
   }
 
-  await importRunLimited(invalid, 3, async (item) => {
+  // 1.5.1（P1-13）：这里原来写死并发 3，绕过了 IMPORT_DETAIL_CONCURRENCY = 1（见 :1434）——
+  // 等于「详情/恢复接口串行」这条安全线在这一段完全没生效：3 个 worker 各自连续打
+  // 「视频资料 + 标签」两个接口，请求密度是主流程的 3 倍，而这段恰恰是失效视频恢复，
+  // 本来就被风控盯得最紧（IMPORT_RECOVERY_MAX_REQUESTS 就是为它加的预算）。
+  // 现在改成用常量：改并发只需要动 :1434 一处，不会再出现第二个真相。
+  await importRunLimited(invalid, IMPORT_DETAIL_CONCURRENCY, async (item) => {
     await importWaitIfPaused();
     if (!item.bvid) return;
     try {
@@ -1377,7 +1380,8 @@ async function enrichImportedInvalidVideos(items, folder, tabId = null) {
       if (importIsRateLimitedError(error)) item.rateLimited = true;
       recoveryErrors.push(`${item.title || item.bvid}：标签接口：${error.message}`);
     }
-    // 4.9：这段恢复流程是并发 3 的，计数只能算近似值，但足以在真正被限流时熔断
+    // 4.9：这段恢复流程现在跟主流程一致、并发 IMPORT_DETAIL_CONCURRENCY（=1，见 :1434）。
+    // 计数仍是近似值（一条可能打两次接口），但足以在真正被限流时熔断。
     importRateLimitStreak = item.rateLimited ? importRateLimitStreak + 1 : 0;
     importCheckRateLimitAbort();
   });
@@ -2602,14 +2606,74 @@ function importIdentifierKeys(item) {
    数据库坏了、没权限、写不进去都不影响归档本身 —— 归档才是这个插件的正事。 */
 const statsPendingRecords = [];
 
+// 1.5.1（P1-12）：坏库留档的文件名。
+// File System Access API 没有 rename，所以「改名留档」只能拆成两步：先把原文原样写进
+// 这个文件，成功之后才删掉原文件（见 archiveBrokenStatsDatabase / readStatsDatabase）。
+// 每次损坏都覆盖同一份留档：坏文件通常只坏一次，固定名字比堆一串带时间戳的文件好找，
+// 也不会在用户的备份目录里慢慢攒垃圾。
+const STATS_DATABASE_BACKUP_NAME = "database.bad.json";
+
+// 把损坏的库原文留档，返回留档文件名；写不进去就返回空串（调用方据此决定别删原文件）。
+// 写的是**原文**，一个字节都不加工：留档的意义就是事后能拿它去查"到底是哪一步写坏的"，
+// 重新序列化一遍会把证据洗掉。
+async function archiveBrokenStatsDatabase(directory, text) {
+  try {
+    const backup = await directory.getFileHandle(STATS_DATABASE_BACKUP_NAME, { create: true });
+    const writable = await backup.createWritable();
+    await writable.write(text);
+    await writable.close();
+    return STATS_DATABASE_BACKUP_NAME;
+  } catch (error) {
+    console.warn("本地数据库损坏，且留档副本写入失败：原文件保持不动。", error);
+    return "";
+  }
+}
+
 async function readStatsDatabase(root) {
   const directory = await root.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: true });
-  const file = await directory.getFileHandle(BcaStatsCore.DATABASE_FILE_NAME, { create: true });
+  let file = await directory.getFileHandle(BcaStatsCore.DATABASE_FILE_NAME, { create: true });
+  let text = "";
   try {
-    const text = await (await file.getFile()).text();
-    if (text.trim()) return { file, database: BcaStatsCore.normalizeDatabase(JSON.parse(text)) };
-  } catch (_) { /* 文件坏了或还是空的：下面整份重写 */ }
-  return { file, database: BcaStatsCore.emptyDatabase() };
+    text = await (await file.getFile()).text();
+  } catch (error) {
+    // 读不出来（权限刚被撤、文件被别的程序占着）—— 按原样返回空库，交给调用方去整份重写
+    console.warn(`本地数据库读取失败（${BcaStatsCore.DATABASE_FOLDER_NAME}/${BcaStatsCore.DATABASE_FILE_NAME}），本次按空库处理。`, error);
+    return { file, database: BcaStatsCore.emptyDatabase() };
+  }
+  // 空文件 = 还没写过的新库，不是损坏，不该触发留档
+  if (!text.trim()) return { file, database: BcaStatsCore.emptyDatabase() };
+  try {
+    return { file, database: BcaStatsCore.normalizeDatabase(JSON.parse(text)) };
+  } catch (error) {
+    // 1.5.1（P1-12）：这里以前是个空 catch，坏库被下面整份重写成空库 —— 历史统计与宠物
+    // 亲密度无声归零，用户只看到"数据没了"，事后连坏在哪都查不了（原文已经没了）。
+    // 现在：先把原文留档成 database.bad.json，留档成功才删原文件，然后才重建空库，
+    // 并且把这件事同时写进控制台和弹窗「最近状态」（lastResult）——
+    // 用户看到的是"数据没了但原文还在 003database/database.bad.json"，而不是无声归零。
+    const backupName = await archiveBrokenStatsDatabase(directory, text);
+    if (backupName) {
+      try {
+        await directory.removeEntry(BcaStatsCore.DATABASE_FILE_NAME);
+      } catch (removeError) {
+        // 删不掉也无所谓：留档已经拿到手，下面拿到的句柄会把原文件整份重写
+        console.warn("本地数据库留档成功，但删除坏文件失败（接下来会整份重写它）。", removeError);
+      }
+      try {
+        file = await directory.getFileHandle(BcaStatsCore.DATABASE_FILE_NAME, { create: true });
+      } catch (reopenError) {
+        // 拿不回新句柄就沿用旧的：它指向的仍是同一个路径，重写照样能落盘
+        console.warn("本地数据库重建文件句柄失败，沿用旧句柄继续。", reopenError);
+      }
+    }
+    const trace = backupName
+      ? `原文已留档为 ${BcaStatsCore.DATABASE_FOLDER_NAME}/${backupName}，并重建空库。`
+      : "留档副本写入失败，原文件未改动，本次仍会整份重写它（历史统计可能丢失）。";
+    console.warn(`本地数据库解析失败（${error?.message || error}）：${trace}`);
+    chrome.storage.local.set({
+      lastResult: { message: `本地数据库损坏：${trace}`, createdAt: Date.now() }
+    }).catch(() => {});
+    return { file, database: BcaStatsCore.emptyDatabase() };
+  }
 }
 
 async function publishStatsSnapshot(database) {
@@ -3255,7 +3319,27 @@ function importBiliFavoritesInOrder(data, tabId = null) {
     importPending = Math.max(0, importPending - 1);
     return importBiliFavorites(data, tabId);
   });
-  saveQueue = task.catch(() => undefined);
+  const queued = task.catch(() => undefined);
+  saveQueue = queued;
+  // 1.5.1（P0-2）：这笔账以前是"只加不减就永久锁死"的结构 —— 减 1 只发生在"任务真正出队"
+  // 那一行。一旦任务没走到出队（service worker 在排队期间被回收、调用方在入队前就抛了、
+  // 或者上一次留下的死链把队列卡住），importPending 就永久停在 ≥1，而
+  // claimImportRun()（:3303）与消息入口（:3960）都拿它当"有一轮在跑"：
+  // 之后**任何**导入都会被回「已经有一轮导入正在进行，请先等它结束或取消它。」，
+  // 用户看不到任何在跑的任务，也没有任何路径能把这笔账清掉（只能重装扩展）。
+  // 这里的自愈：这一段链子自己保证"跑完即归零"——
+  //   · 任务 settle（成功 / 失败 / 被取消都算）后再兜一次，把计数清干净；
+  //   · 只在"这一轮仍是队尾"时清（saveQueue === queued），所以不会误伤排在后面的任务；
+  //   · 正常路径下出队时那一次减 1 已经把 importPending 归零，这里的 Math.max 落在 0 上，
+  //     是空操作 —— 连点第二次仍然必被 (:3960) 拒掉（第一次点击时这一轮还没 settle）。
+  // 刻意不做"按时间判定陈旧"的启发式：importPending 只在"排着队、还没开始跑"这段非零，
+  // 而队列完全可能被一轮暂停中的导入合法地占用几小时（见 IMPORT_QUEUE_WAIT_TIMEOUT_MS 的说明），
+  // 用超时去清账会把真正的排队误判成陈旧。
+  const settlePending = () => {
+    if (saveQueue !== queued) return;
+    importPending = Math.max(0, importPending - 1);
+  };
+  task.then(settlePending, settlePending);
   return task;
 }
 
@@ -3880,8 +3964,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 入队前同步记账：任务要等 saveQueue 空了才真正开始，这段等待期里
     // importRun.active 还是 false，全靠这笔账挡住连点。出队时会由
     // importBiliFavoritesInOrder 把这笔账放掉 —— 不能记到任务结束，否则会挡住自己。
+    // 1.5.1（P0-2）：记账与入队必须成对。这两行之间只有同步代码，但真在这里抛了异常
+    // （saveQueue 被换成了非 thenable 之类），这笔账就再也没人放掉，之后每一轮导入都会被
+    // 上面那道 (:3960) 的判断拒掉，用户只能重装扩展 —— 所以同步失败时当场把账退回。
     importPending += 1;
-    importBiliFavoritesInOrder(message.data || message, sender?.tab?.id ?? null).then((result) => {
+    let importTask;
+    try {
+      // 换行是刻意的：入队这一行必须自己起一行 —— test/stability.test.cjs 用
+      // /^\s*importBiliFavoritesInOrder\(/m 钉住「先查 → 再记账 → 再入队」的顺序，
+      // 把调用挪到 `importTask =` 后面会让那条断言看不到它（真机上正是这个顺序出的问题）。
+      importTask =
+        importBiliFavoritesInOrder(message.data || message, sender?.tab?.id ?? null);
+    } catch (error) {
+      importPending = Math.max(0, importPending - 1);
+      reportImportFailure(error);
+      return true;
+    }
+    importTask.then((result) => {
       // 落盘一份完成提示：导入要跑几分钟，用户多半已经切走页面、弹窗也关了，
       // 只在 sendMessage 回调里弹的话这次提示就永远看不到了。
       if (result?.ok !== false) {

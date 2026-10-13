@@ -1,21 +1,27 @@
 /* ==========================================================================
-   stats.js —— 数据统计页（1.5.0）
+   stats.js —— 数据统计页（1.6.0）
 
    数据只有一个来路：chrome.storage.local 的 bcaStats（库页扫描完之后由
    publishStatsSnapshot() 写进去，形状见 stats-core.js 的 snapshot()）。
    页面不去碰文件系统 —— 统计页手里没有目录句柄，硬读只会多出一堆权限分支，
    拿不到就照「还没有数据」显示。
 
-   三块内容都按「快照里有什么画什么」来：
-     1) 四个数字卡：videos / savedToday / savedLast7 / collections；
-     2) 柱状图：每天新增。快照里这一项有三种可能的形态（days.days 是数组、
-        或另给了 daily / dayRows），脚本按顺序挑第一个能用的；三个都没有就
-        只给一句说明，绝不把「库里有几天」这个数字画成柱子（那是假数据）；
-     3) 近期保存最多的收藏夹：快照里只有 topCollection 一个，没有整张排行，
-        所以这里只展示这一行（含近 30 天保存数），不自己造排行。
+   1.6.0 起这一页有了时间维度：
+     1) 区间选择器：今天 / 昨天 / 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义区间。
+        区间优先问 stats-core.js 的 rangeFor()（本地日边界、两端都含）；
+        对端还没交稿时用本文件里的同口径实现兜底 —— 两个形状都必须能画。
+     2) 柱状图按所选区间画：区间里每一天都占一个槽，缺的那天补 0（不是跳过），
+        所以空白的位置本身也是一条信息。1 天时就是一根「当天」柱。
+     3) 点柱子 → 下面的饼图只显示那一天：按当天的 byCollection 画扇形 + 图例
+        （名称 / 条数 / 占比）。再点同一根收起；点空白处也收起。
+     4) 年份时间轴：快照里有 yearly 才画，没有就整块藏起来。
+     5) 四张卡里后两张跟着区间走（区间内新增 / 区间天数），标签里不写死天数。
+
+   逐条记录不在快照里，只有 dailyRows（最近 180 天，缺的天补 0）——
+   所以饼图是「区间内每天的 byCollection 相加」，绝对不去猜没有的数据。
 
    图上的一切都由脚本算：柱子高度按最大值归一化，最大值是 0 时整列都不画高
-   （不参与除法），今天的柱子画成空心好认。不引图表库、不引任何外部地址。
+   （不参与除法），今天那根画成空心好认。不引图表库、不引任何外部地址。
    ========================================================================== */
 (function () {
   "use strict";
@@ -23,6 +29,7 @@
   const STATS_KEY = "bcaStats";
   /* 图表尺寸：高度固定，宽度取容器实测宽度（所以 resize 时要按新宽度重画一遍） */
   const CHART_HEIGHT = 220;
+  const YEAR_CHART_HEIGHT = 200;
   const CHART_MIN_WIDTH = 260;
   /* 上一次量到的宽度：容器被隐藏/窗口最小化时 clientWidth 会是 0，
      这时候沿用上一帧的宽度，免得把图按 260 画完再被 CSS 拉大。 */
@@ -32,20 +39,65 @@
   const CHART_MIN_BAR = 6;
   /* 柱子超过这个数量就不再标数值，免得数字糊成一片 */
   const CHART_VALUE_LABEL_LIMIT = 20;
+  /* 横轴上最多标几个日期：再多就抽稀到「最早一根 + 今天 + 每隔几根」 */
+  const CHART_LABEL_LIMIT = 8;
+  /* 每个横轴日期至少占这么宽（「10-14」这种短标签），窄窗口自动再稀一档 */
+  const CHART_LABEL_MIN_GAP = 34;
   const RESIZE_DELAY = 160;
+  /* 自定义区间最长一年：日历只铺得下一年，超了就明说，不偷偷截断 */
+  const MAX_CUSTOM_DAYS = 400;
+  /* 扇形最多单独上色几块，剩下的并成「其他」 —— 图例太长反而看不清 */
+  const PIE_MAX_SLICES = 6;
+  const DAY_MS = 86400000;
+
+  /* 七个预置区间，顺序就是下拉里的顺序（文案由 t() 给，不在这里写死） */
+  const RANGE_PRESETS = ["today", "yesterday", "last7", "last30", "thisMonth", "lastMonth"];
+  const RANGE_ALL = RANGE_PRESETS.concat(["custom"]);
+  /* 「接近一天」的容差：两端都算的 1 天区间正好是 DAY_MS 长 */
+  const DAY_TOLERANCE = 120000;
 
   const core = (typeof BcaStatsCore === "object" && BcaStatsCore) ? BcaStatsCore : null;
+  const i18n = (typeof BcaI18n === "object" && BcaI18n) ? BcaI18n : null;
+  /* 词典由 i18n.js 管；这里只负责取词，取不到就照中文原文显示 */
+  const t = (key, params) => (i18n && typeof i18n.t === "function" ? i18n.t(key, params) : key);
 
-  /* 一次把用到的节点全取出来。id 都在 stats.html 里，脚本里写死便于对照。 */
+  /* 一次把用到的节点全取出来。id 都在 stats.html 里，脚本里写死便于对照。
+     1.6.0 新增的节点也在这里取；某个节点被删掉时下面每一处都按可选处理。 */
   const ui = {
     overview: document.getElementById("statsOverview"),
+    rangeCard: document.getElementById("statsRangeCard"),
     chartCard: document.getElementById("statsChartCard"),
+    pieCard: document.getElementById("statsPieCard"),
+    yearCard: document.getElementById("statsYearCard"),
     topCard: document.getElementById("statsTopCard"),
     empty: document.getElementById("statsEmpty"),
+    rangeButton: document.getElementById("statsRangeButton"),
+    rangeLabel: document.getElementById("statsRangeLabel"),
+    rangeSummary: document.getElementById("statsRangeSummary"),
+    rangeMenu: document.getElementById("statsRangeMenu"),
+    rangeList: document.getElementById("statsRangeList"),
+    calendar: document.getElementById("statsCalendar"),
+    calPrev: document.getElementById("statsCalPrev"),
+    calNext: document.getElementById("statsCalNext"),
+    calMonthA: document.getElementById("statsCalMonthA"),
+    calMonthB: document.getElementById("statsCalMonthB"),
+    calGridA: document.getElementById("statsCalGridA"),
+    calGridB: document.getElementById("statsCalGridB"),
+    calWarn: document.getElementById("statsCalendarWarn"),
+    calApply: document.getElementById("statsCalApply"),
+    calReset: document.getElementById("statsCalReset"),
     chart: document.getElementById("statsChart"),
     chartLead: document.getElementById("statsChartLead"),
     chartNote: document.getElementById("statsChartNote"),
     chartCaption: document.getElementById("statsChartCaption"),
+    chartHint: document.getElementById("statsChartHint"),
+    pie: document.getElementById("statsPie"),
+    pieLead: document.getElementById("statsPieLead"),
+    pieLegend: document.getElementById("statsPieLegend"),
+    pieEmpty: document.getElementById("statsPieEmpty"),
+    yearChart: document.getElementById("statsYearChart"),
+    yearLead: document.getElementById("statsYearLead"),
+    yearNote: document.getElementById("statsYearNote"),
     topLead: document.getElementById("statsTopLead"),
     topName: document.getElementById("statsTopName"),
     topCount: document.getElementById("statsTopCount"),
@@ -60,6 +112,15 @@
   let stats = null;      // 当前快照（读不到就是 null）
   let loaded = false;    // 第一次 storage 读完没有
   let resizeTimer = 0;
+  let focusedDay = "";   // 当前选中的那天（空串就是没选）
+  let dayRows = [];      // 归一化后的每天明细（升序）
+  let periods = [];      // 每个预置区间的计算结果（下拉与文案都读它）
+  let currentRange = null;   // 当前生效的区间
+
+  /* 选择器与日历的界面状态 */
+  const picker = { open: false, mode: "preset", view: null, draftFrom: "", draftTo: "" };
+  let preset = "last7";                 // 当前预置；选过自定义就留在 custom
+  const custom = { from: "", to: "" };  // 生效的自定义起止（YYYY-MM-DD）
 
   /* ── 小工具 ─────────────────────────────────────────────────────── */
 
@@ -84,7 +145,7 @@
   function formatCount(value) {
     const num = Math.max(0, numberOr(value, 0));
     try {
-      return num.toLocaleString(BcaI18n.locale());
+      return num.toLocaleString(i18n ? i18n.locale() : undefined);
     } catch (_) {
       return String(num);
     }
@@ -97,7 +158,7 @@
     const date = new Date(time);
     if (Number.isNaN(date.getTime())) return "";
     try {
-      return date.toLocaleString(BcaI18n.locale(), {
+      return date.toLocaleString(i18n ? i18n.locale() : undefined, {
         year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
       });
     } catch (_) {
@@ -113,30 +174,326 @@
     return !snapshot || numberOr(snapshot.videos, 0) <= 0;
   }
 
-  /* 每天的明细：数组形态有三种可能，按顺序挑第一个真的能用的 */
-  function dailySeries(snapshot) {
-    const candidates = [
-      snapshot.days && snapshot.days.days,
-      snapshot.daily,
-      snapshot.dayRows
-    ];
-    for (let i = 0; i < candidates.length; i += 1) {
-      const value = candidates[i];
-      if (!Array.isArray(value)) continue;
-      const rows = [];
-      value.forEach((item) => {
-        const day = String((item && item.day) || "").slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;   // 认不出的行直接跳过
-        rows.push({ day: day, count: Math.max(0, numberOr(item && item.count, 0)) });
-      });
-      if (rows.length) return rows;
+  function isDayKey(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value == null ? "" : value));
+  }
+
+  /* ── 日期与区间 ─────────────────────────────────────────────────── */
+
+  function clampInt(value, min, max) {
+    const num = Math.round(numberOr(value, min));
+    return Math.min(max, Math.max(min, num));
+  }
+
+  /* 「今天」按本地时区算：中国用户跨零点时看的是本地日期，不是 UTC */
+  function fallbackDayKey(time) {
+    const date = new Date(numberOr(time, Date.now()));
+    if (Number.isNaN(date.getTime())) return "";
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return date.getFullYear() + "-" + month + "-" + day;
+  }
+
+  /* 那一天的 00:00 本地时间（用来一天一天地挪） */
+  function fallbackDayStart(key) {
+    const parts = String(key == null ? "" : key).split("-");
+    if (parts.length !== 3) return NaN;
+    const year = Number(parts[0]);
+    const month = Number(parts[1]);
+    const day = Number(parts[2]);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return NaN;
+    const time = new Date(year, month - 1, day).getTime();
+    return Number.isFinite(time) ? time : NaN;
+  }
+
+  function localDayKey(time) {
+    if (core && typeof core.localDayKey === "function") {
+      try {
+        const key = core.localDayKey(numberOr(time, Date.now()));
+        if (isDayKey(key)) return String(key).slice(0, 10);
+      } catch (_) { /* 对端实现坏了就走下面的兜底 */ }
+    }
+    return fallbackDayKey(time);
+  }
+
+  function dayStartTime(key) {
+    if (core && typeof core.dayKeyToTime === "function") {
+      try {
+        const time = Number(core.dayKeyToTime(String(key)));
+        if (Number.isFinite(time)) return time;
+      } catch (_) { /* 同上 */ }
+    }
+    return fallbackDayStart(key);
+  }
+
+  function dayEndTime(key) {
+    const start = dayStartTime(key);
+    return Number.isFinite(start) ? start + DAY_MS - 1 : NaN;
+  }
+
+  function addMonths(time, delta) {
+    const date = new Date(time);
+    if (Number.isNaN(date.getTime())) return NaN;
+    return new Date(date.getFullYear(), date.getMonth() + delta, 1).getTime();
+  }
+
+  function monthStartTime(year, month) {
+    return new Date(year, month, 1).getTime();
+  }
+
+  /* 「N 天前」：今天减掉 N 天，仍然是本地日边界 */
+  function dayKeyMinus(days) {
+    return localDayKey(Date.now() - days * DAY_MS);
+  }
+
+  /* 本文件里的兜底实现：本地日边界、两端都含，口径与 stats-core.rangeFor 对齐。
+     preset 认不出来（或数据坏了）时给近 7 天，绝不返回空区间。 */
+  function fallbackRange(presetName, now, customIn) {
+    const stamp = numberOr(now, Date.now());
+    const today = new Date(stamp);
+    const dayName = Number.isNaN(today.getTime()) ? localDayKey(Date.now()) : localDayKey(stamp);
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const picked = { from: "", to: "" };
+    if (customIn && typeof customIn === "object") {
+      if (isDayKey(customIn.from)) picked.from = String(customIn.from).slice(0, 10);
+      if (isDayKey(customIn.to)) picked.to = String(customIn.to).slice(0, 10);
+    }
+    let from = dayName;
+    let to = dayName;
+    switch (presetName) {
+      case "yesterday":
+        from = dayKeyMinus(1);
+        to = from;
+        break;
+      case "last7":
+        from = dayKeyMinus(6);
+        break;
+      case "last30":
+        from = dayKeyMinus(29);
+        break;
+      case "thisMonth":
+        from = localDayKey(monthStartTime(year, month));
+        break;
+      case "lastMonth":
+        from = localDayKey(monthStartTime(year, month - 1));
+        to = localDayKey(monthStartTime(year, month) - DAY_MS);
+        break;
+      case "custom":
+        /* 起止点反着点也要能用：两头排序一下，缺的那头就贴到另一头上 */
+        if (picked.from && picked.to) {
+          from = picked.from <= picked.to ? picked.from : picked.to;
+          to = picked.from <= picked.to ? picked.to : picked.from;
+        } else if (picked.from) {
+          from = picked.from;
+          to = picked.from;
+        } else if (picked.to) {
+          from = picked.to;
+          to = picked.to;
+        }
+        break;
+      default:
+        break;
+    }
+    return {
+      preset: presetName,
+      from: dayStartTime(from),
+      to: dayEndTime(to),
+      days: rangeDays(dayStartTime(from), dayEndTime(to)),
+      label: ""
+    };
+  }
+
+  function rangeDays(fromTime, toTime) {
+    if (!Number.isFinite(fromTime) || !Number.isFinite(toTime) || toTime < fromTime) return 1;
+    const span = toTime - fromTime - (DAY_MS - 1);
+    return Math.max(1, Math.round(span / DAY_MS) + 1);
+  }
+
+  /* 对端给了 rangeFor 就先用它，但结果要经得起用：
+     两头必须是有限数、from 不晚于 to、days 至少 1。不合格就退回本文件的实现。 */
+  function normalizeRange(candidate, presetName, now, customIn) {
+    const fallback = () => fallbackRange(presetName, now, customIn);
+    if (!candidate || typeof candidate !== "object") return fallback();
+    const from = Number(candidate.from);
+    const to = Number(candidate.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return fallback();
+    const days = numberOr(candidate.days, 0);
+    return {
+      preset: typeof candidate.preset === "string" && candidate.preset ? candidate.preset : presetName,
+      from: from,
+      to: to,
+      days: days >= 1 ? Math.round(days) : rangeDays(from, to),
+      label: typeof candidate.label === "string" ? candidate.label : ""
+    };
+  }
+
+  function rangePresetOf(range) {
+    const name = range && typeof range.preset === "string" ? range.preset : "";
+    return RANGE_PRESETS.indexOf(name) >= 0 ? name : "custom";
+  }
+
+  /* 当前该用哪一段。now 由调用方给，保证同一次渲染里「今天」是同一个瞬间。 */
+  function computeRangeFor(presetName, now, customIn) {
+    if (core && typeof core.rangeFor === "function") {
+      try {
+        return normalizeRange(core.rangeFor(presetName, now, customIn), presetName, now, customIn);
+      } catch (_) { /* 对端实现抛错就整体走兜底 */ }
+    }
+    return fallbackRange(presetName, now, customIn);
+  }
+
+  /* 下拉里每一项：区间名 + 算出来的区间。名字走 t() 的预置文案；
+     万一对端将来加了新 preset，它给的 label（动态字符串）也能兜住。 */
+  function buildPeriods(now) {
+    const list = [];
+    RANGE_PRESETS.forEach((name) => {
+      const range = computeRangeFor(name, now, null);
+      /* 每个预置名都写成 t("字面量")：test/i18n-extract.cjs 只认字面量参数，
+         写成 t(表[name]) 的话这些文案永远进不了词典，翻译页面上会露出中文。 */
+      let text = name;
+      if (name === "today") text = t("今天");
+      else if (name === "yesterday") text = t("昨天");
+      else if (name === "last7") text = t("近 7 天");
+      else if (name === "last30") text = t("近 30 天");
+      else if (name === "thisMonth") text = t("本月");
+      else if (name === "lastMonth") text = t("上月");
+      list.push({ id: name, range: range, text: text || range.label || name });
+    });
+    const customRange = computeRangeFor("custom", now, custom);
+    list.push({
+      id: "custom",
+      range: customRange,
+      text: custom.from && custom.to ? formatSpan(custom.from, custom.to) : t("自定义区间")
+    });
+    return list;
+  }
+
+  function periodOf(name) {
+    for (let i = 0; i < periods.length; i += 1) {
+      if (periods[i].id === name) return periods[i];
     }
     return null;
   }
 
+  /* 当前生效的那一段（每次渲染都重算：跨过零点后「今天」要跟着走） */
+  function activeRange(now) {
+    const here = numberOr(now, Date.now());
+    periods = buildPeriods(here);
+    let chosen = periodOf(preset) || periodOf("last7") || periods[0];
+    if (!chosen) return fallbackRange("last7", here, null);
+    if (preset === "custom") {
+      /* 自定义区间跟着用户选的起止，但边界要按现在这个瞬间重算 */
+      chosen.range = computeRangeFor("custom", here, custom);
+      chosen.text = custom.from && custom.to ? formatSpan(custom.from, custom.to) : t("自定义区间");
+    }
+    return chosen.range;
+  }
+
+  /* 「2026-10-14 → 2026-10-20」：数字是数据，不进词典；
+     中间那个箭头只是排版用的连接符，不是界面文案。 */
+  function formatSpan(from, to) {
+    if (!isDayKey(from) || !isDayKey(to)) return "";
+    return String(from).slice(0, 10) + " → " + String(to).slice(0, 10);
+  }
+
+  /* 区间两端换算回本地日期键，页面上要显示给人看的地方都用它 */
+  function rangeDayKeys(range) {
+    if (!range) return { from: "", to: "" };
+    return { from: localDayKey(range.from), to: localDayKey(range.to) };
+  }
+
+  /* 区间覆盖的天数：不用对端给的 days（形状不一定对），直接按天边界数 */
+  function rangeDayList(range) {
+    const keys = [];
+    if (!range) return keys;
+    const meta = rangeDayKeys(range);
+    if (!isDayKey(meta.from) || !isDayKey(meta.to)) return keys;
+    let time = dayStartTime(meta.from);
+    const last = dayStartTime(meta.to);
+    if (!Number.isFinite(time) || !Number.isFinite(last)) return keys;
+    let guard = 0;
+    while (time <= last && guard < 1000) {
+      keys.push(localDayKey(time));
+      time = dayStartTime(localDayKey(time + DAY_MS));
+      guard += 1;
+    }
+    return keys;
+  }
+
+  /* ── 每天明细（dailyRows） ──────────────────────────────────────── */
+
+  /* 每天明细的归一化：day 认不出的行直接跳过（坏数据不许把整页带崩），
+     byCollection 不是对象就当成空对象，count 取不到就按 0。 */
+  function normalizeDayRows(snapshot) {
+    const raw = snapshot && Array.isArray(snapshot.dailyRows) ? snapshot.dailyRows : [];
+    const map = new Map();
+    raw.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const day = String(item.day == null ? "" : item.day).slice(0, 10);
+      if (!isDayKey(day)) return;
+      const count = Math.max(0, numberOr(item.count, 0));
+      const by = (item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {};
+      const row = map.get(day) || { day: day, count: 0, by: {} };
+      row.count += count;
+      Object.keys(by).forEach((name) => {
+        const value = Math.max(0, numberOr(by[name], 0));
+        if (value > 0) row.by[name] = (row.by[name] || 0) + value;
+      });
+      map.set(day, row);
+    });
+    return [...map.values()].sort((a, b) => (a.day < b.day ? -1 : (a.day > b.day ? 1 : 0)));
+  }
+
+  /* 区间里每一天都出现，缺的那天是一条 0 —— 空档也是信息，不许跳过。 */
+  function rowsInRange(range) {
+    const keys = rangeDayList(range);
+    if (!keys.length) return [];
+    const byDay = new Map();
+    dayRows.forEach((row) => byDay.set(row.day, row));
+    return keys.map((day) => {
+      const row = byDay.get(day);
+      return (row && row.count > 0) ? row : { day: day, count: 0, by: {} };
+    });
+  }
+
+  function countInRange(range) {
+    if (!range) return 0;
+    const from = String(rangeDayKeys(range).from);
+    const to = String(rangeDayKeys(range).to);
+    if (!isDayKey(from) || !isDayKey(to)) return 0;
+    let total = 0;
+    dayRows.forEach((row) => {
+      if (row.day >= from && row.day <= to) total += row.count;
+    });
+    return total;
+  }
+
+  /* 每天的明细：1.6.0 认 dailyRows（带 byCollection）。
+     旧快照（对端还没交 dailyRows）退回旧的 daily：柱状图照样能从它画出来，
+     只是没有收藏夹构成，所以饼图点不出来 —— 那才是真正的「旧形状」。 */
+  function dailySeries(snapshot) {
+    if (dayRows.length) return dayRows.map((row) => ({ day: row.day, count: row.count }));
+    const value = Array.isArray(snapshot && snapshot.daily) ? snapshot.daily : [];
+    const rows = [];
+    value.forEach((item) => {
+      const day = String((item && item.day) || "").slice(0, 10);
+      if (!isDayKey(day)) return;
+      rows.push({ day: day, count: Math.max(0, numberOr(item && item.count, 0)) });
+    });
+    return rows.length ? rows : null;
+  }
+
+  /* 旧的 daily 也能画柱状图，但它没有 byCollection、也没有 180 天的底子。
+     下载菜里那个区间选择器只对 dailyRows 有意义：对端还没交 dailyRows 时收起它，
+     宁可少一块功能，也不摆一个选了没反应的控件。 */
+  function hasDayRows(snapshot) {
+    return normalizeDayRows(snapshot).length > 0;
+  }
+
   /* days.days 是数字时那只是「库里有几天」，拿来当说明文字用，不画柱子 */
   function daysSpan(snapshot) {
-    const value = snapshot.days && snapshot.days.days;
+    const value = snapshot && snapshot.days && snapshot.days.days;
     return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
   }
 
@@ -157,30 +514,51 @@
     return node;
   }
 
+  /* 字符串哈希：同一个收藏夹在任何一天、任何区间都拿到同一个色号（只用来挑 class） */
+  function hashText(text) {
+    const source = String(text == null ? "" : text);
+    let hash = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      hash = (hash * 31 + source.charCodeAt(i)) % 100003;
+    }
+    return hash;
+  }
+
   /* ── 柱状图 ─────────────────────────────────────────────────────── */
 
   /**
-   * 画「最近 N 天每天新增」。返回 { todayMarked }，调用方据此决定还提不提「今天那根」。
-   * rows 里最后一个元素按约定就是今天（stats-core.recentDays），但要是有 localDayKey
-   * 就按真实的今天去认 —— 快照可能是旧的，那天不在这一列里就不瞎标。
+   * 画一排柱子。rows 里每个元素 { day, count, label? }，一天一根。
+   * options.labelMode: "dates" 标到横轴上（天） / "none" 不标（年，图例另有其事）。
+   * 返回 { todayMarked, max }，调用方据此决定还提不提「今天那根」。
    */
-  function drawChart(rows) {
-    const host = ui.chart;
+  function drawChart(host, rows, options) {
     if (!host || !rows || !rows.length) return null;
+    const config = options || {};
+    const height = config.height || CHART_HEIGHT;
+    const labelMode = config.labelMode || "dates";
 
     const measured = Math.round(host.clientWidth || 0);
     const width = measured > 0 ? Math.max(CHART_MIN_WIDTH, measured) : (lastChartWidth || CHART_MIN_WIDTH);
     lastChartWidth = width;
     const plotWidth = Math.max(1, width - CHART_PAD.left - CHART_PAD.right);
-    const plotHeight = Math.max(1, CHART_HEIGHT - CHART_PAD.top - CHART_PAD.bottom);
+    const plotHeight = Math.max(1, height - CHART_PAD.top - CHART_PAD.bottom);
     const baseline = CHART_PAD.top + plotHeight;
     const max = rows.reduce((top, row) => (row.count > top ? row.count : top), 0);
     const slot = plotWidth / rows.length;
-    const barWidth = Math.max(CHART_MIN_BAR, Math.min(CHART_MAX_BAR, slot * 0.62));
+    /* 柱子再多也要留一条缝：180 天时算出来的宽度就是 1、2 像素 */
+    const barWidth = Math.max(1.5, Math.min(CHART_MAX_BAR, slot * 0.66));
     const showValues = rows.length <= CHART_VALUE_LABEL_LIMIT;
-    const labelStride = Math.max(1, Math.ceil(rows.length / 7));
+    /* 横轴标签抽稀：柱子多的时候最多标 CHART_LABEL_LIMIT 个 + 最后那个。
+       宽度窄的时候还得再稀一点：每个标签按 CHART_LABEL_MIN_GAP 像素算，
+       「第一根」和「最后一根」都要标，所以留一个位置给最后一根。 */
+    const roomFor = Math.floor(Math.max(1, width - CHART_PAD.left - CHART_PAD.right) / CHART_LABEL_MIN_GAP);
+    const labelLimit = Math.max(2, Math.min(CHART_LABEL_LIMIT, roomFor));
+    const labelStride = Math.max(1, Math.ceil(rows.length / labelLimit));
+    /* 全 0：没有「近期最高」，这时候只在基线画一条 0 刻度，
+       不摆一排零高度的柱子（零高度的图形不是信息，是噪声）。 */
+    const drawBars = max > 0;
 
-    const todayKey = core && typeof core.localDayKey === "function" ? core.localDayKey(Date.now()) : "";
+    const todayKey = localDayKey(Date.now());
     const todayIndex = todayKey ? rows.findIndex((row) => row.day === todayKey) : -1;
     /* 没有 localDayKey 就按约定认最后一根；有 key 但对不上（快照过期）就不标 */
     const markIndex = todayIndex >= 0 ? todayIndex : (todayKey ? -1 : rows.length - 1);
@@ -189,12 +567,71 @@
     const svg = createSvgRoot();
     if (!svg) return null;
     svg.setAttribute("class", "stats-svg");
-    svg.setAttribute("viewBox", "0 0 " + width + " " + CHART_HEIGHT);
-    svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", BcaI18n.t("最近 {days} 天每天的收藏数量柱状图", { days: formatCount(rows.length) }));
-    host.appendChild(svg);
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+    /* role 不能再用 img：img 会把整棵子树从无障碍树里摘掉，柱子就没法用键盘聚焦了 */
+    svg.setAttribute("role", "group");
+    svg.setAttribute("aria-label", config.ariaLabel || "");
 
-    /* 刻度：顶端一条最大值虚线 + 底端基线，只标最大值和 0 两个数 */
+    /* 只有一根柱子时槽很宽，但柱子不该胖成一块板 */
+    const single = rows.length <= 1;
+
+    rows.forEach((row, index) => {
+      const center = CHART_PAD.left + slot * index + slot / 2;
+      /* max 为 0 时高度一律 0：这里不做除法，也就不会出现 NaN */
+      const height2 = max > 0 ? Math.max(2, (row.count / max) * plotHeight) : 0;
+      const top = baseline - height2;
+      const isToday = index === markIndex;
+      const selected = String(row.day) === focusedDay;
+      const barWidth2 = single ? Math.min(barWidth, 64) : barWidth;
+      /* 全 0 的那一档只留日期和刻度，柱子本身不画：
+         一排零高度的矩形看着像「有数据但是很少」，不如干脆没有。 */
+      if (drawBars) {
+        /* 柱子就是按钮：可聚焦、可读屏、Enter / 空格触发。
+           点空白处收起、再点同一根也收起，都在下面的事件委托里。 */
+        const bar = appendSvg(svg, "rect", {
+          class: "stats-bar" + (isToday ? " stats-bar-today" : "") + (selected ? " stats-bar-active" : ""),
+          x: round2(center - barWidth2 / 2), y: round2(top),
+          width: round2(Math.max(1, barWidth2)), height: round2(height2),
+          rx: round2(Math.min(4, barWidth2 / 2)),
+          tabindex: "0",
+          role: "button",
+          "data-day": row.day,
+          "aria-pressed": selected ? "true" : "false",
+          "aria-label": t("{day} 这一天新增了 {count} 个视频", { day: row.day, count: formatCount(row.count) })
+        });
+        bar.setAttribute("focusable", "true");
+        /* 柱子上的原生提示：鼠标停在哪天都能看到确切数字 */
+        setText(appendSvg(bar, "title", {}),
+          t("{day} 这一天新增了 {count} 个视频", { day: row.day, count: formatCount(row.count) }));
+      }
+
+      /* max 为 0 时整列不画高：不画一根贴底的假柱子，免得看着像有数据 */
+      if (max > 0 && showValues && row.count > 0 && String(row.count).length * 8 <= slot) {
+        setText(appendSvg(svg, "text", {
+          class: "stats-bar-value", x: round2(center),
+          y: Math.max(CHART_PAD.top + 9, round2(top - 5)), "text-anchor": "middle"
+        }), formatCount(row.count));
+      }
+
+      /* 横轴日期：太密就隔几根标一个，第一根和最后一根一定标。
+         最后一根和上一个日期挨太近时，上一个就不画了 —— 两个日期挤在一个
+         格子宽的地方，看着像「10-1310-14」这种连成一串的乱码。 */
+      if (labelMode === "dates") {
+        const isLast = index === rows.length - 1;
+        const strided = index % labelStride === 0;
+        /* 最后一根离我够远才画我这个中间日期（按像素算，不看第几根） */
+        const apart = (rows.length - 1 - index) * slot >= CHART_LABEL_MIN_GAP;
+        if (isLast || (strided && apart)) {
+          setText(appendSvg(svg, "text", {
+            class: isToday ? "stats-axis-label stats-axis-label-today" : "stats-axis-label",
+            x: round2(center), y: height - 6, "text-anchor": "middle"
+          }), row.label || row.day.slice(5));
+        }
+      }
+    });
+
+    /* 刻度：顶端一条最大值虚线 + 底端基线，只标最大值和 0 两个数。
+       柱子画完再补这两样，好让它们压在柱子底下（画在最上面那层）。 */
     if (max > 0) {
       appendSvg(svg, "line", {
         class: "stats-grid-line",
@@ -212,76 +649,241 @@
       class: "stats-scale-label", x: CHART_PAD.left - 6, y: baseline + 4, "text-anchor": "end"
     }), formatCount(0));
 
-    rows.forEach((row, index) => {
-      const center = CHART_PAD.left + slot * index + slot / 2;
-      /* max 为 0 时高度一律 0：这里不做除法，也就不会出现 NaN */
-      const height = max > 0 ? Math.max(2, (row.count / max) * plotHeight) : 0;
-      const top = baseline - height;
-      const isToday = index === markIndex;
-      const bar = appendSvg(svg, "rect", {
-        class: isToday ? "stats-bar stats-bar-today" : "stats-bar",
-        x: round2(center - barWidth / 2), y: round2(top),
-        width: round2(barWidth), height: round2(height),
-        rx: round2(Math.min(4, barWidth / 2))
-      });
-      /* 柱子上的原生提示：鼠标停在哪天都能看到确切数字 */
-      setText(appendSvg(bar, "title", {}),
-        BcaI18n.t("{day} 这一天新增了 {count} 个视频", { day: row.day, count: formatCount(row.count) }));
+    host.appendChild(svg);
+    return { todayMarked: markIndex >= 0, max: max };
+  }
 
-      if (showValues && row.count > 0 && String(row.count).length * 8 <= slot) {
-        setText(appendSvg(svg, "text", {
-          class: "stats-bar-value", x: round2(center),
-          y: Math.max(CHART_PAD.top + 9, round2(top - 5)), "text-anchor": "middle"
-        }), formatCount(row.count));
-      }
+  /* ── 饼图 ───────────────────────────────────────────────────────── */
 
-      /* 横轴日期：太密就隔几根标一个，最后一根一定标 */
-      if (index % labelStride === 0 || index === rows.length - 1) {
-        setText(appendSvg(svg, "text", {
-          class: isToday ? "stats-axis-label stats-axis-label-today" : "stats-axis-label",
-          x: round2(center), y: CHART_HEIGHT - 6, "text-anchor": "middle"
-        }), row.day.slice(5));
-      }
+  function piePoint(cx, cy, radius, angle) {
+    const rad = (angle - 90) * Math.PI / 180;
+    return [round2(cx + radius * Math.cos(rad)), round2(cy + radius * Math.sin(rad))];
+  }
+
+  /* 一个整圆用 arc 画不出来（起止点重合），拆成两段半圆：
+     只有一个收藏夹时也要画得出来，而不是留一块空白。 */
+  function fullCirclePath(cx, cy, radius) {
+    const top = piePoint(cx, cy, radius, 0);
+    const bottom = piePoint(cx, cy, radius, 180);
+    return "M " + top[0] + " " + top[1] +
+      " A " + radius + " " + radius + " 0 0 1 " + bottom[0] + " " + bottom[1] +
+      " A " + radius + " " + radius + " 0 0 1 " + top[0] + " " + top[1] + " Z";
+  }
+
+  function wedgePath(cx, cy, radius, startAngle, endAngle) {
+    if (endAngle - startAngle >= 359.9) return fullCirclePath(cx, cy, radius);
+    const from = piePoint(cx, cy, radius, startAngle);
+    const to = piePoint(cx, cy, radius, endAngle);
+    const large = (endAngle - startAngle) > 180 ? 1 : 0;
+    return "M " + cx + " " + cy +
+      " L " + from[0] + " " + from[1] +
+      " A " + radius + " " + radius + " 0 " + large + " 1 " + to[0] + " " + to[1] + " Z";
+  }
+
+  /* 那天每个收藏夹各有多少条：byCollection 相加，名字全是数据、不进词典 */
+  function slicesOfDay(row) {
+    const list = [];
+    if (!row || !row.by) return list;
+    Object.keys(row.by).forEach((name) => {
+      const count = Math.max(0, numberOr(row.by[name], 0));
+      if (count > 0) list.push({ name: name, count: count });
     });
+    list.sort((a, b) => (b.count - a.count) || (a.name < b.name ? -1 : 1));
+    if (list.length <= PIE_MAX_SLICES) return list;
+    const head = list.slice(0, PIE_MAX_SLICES - 1);
+    const rest = list.slice(PIE_MAX_SLICES - 1);
+    const sum = rest.reduce((total, item) => total + item.count, 0);
+    head.push({ name: "", count: sum, other: true });
+    return head;
+  }
 
-    return { todayMarked: markIndex >= 0 };
+  function drawPie(host, slices, total) {
+    if (!host) return;
+    host.textContent = "";
+    if (!slices.length || total <= 0) return;
+    const size = 190;
+    const cx = size / 2;
+    const cy = size / 2;
+    const svg = createSvgRoot();
+    if (!svg) return;
+    svg.setAttribute("class", "stats-pie-svg");
+    svg.setAttribute("viewBox", "0 0 " + size + " " + size);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", t("收藏夹构成"));
+
+    let angle = 0;
+    slices.forEach((slice, index) => {
+      const span = slice.count / total * 360;
+      const path = appendSvg(svg, "path", {
+        class: "stats-slice" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 8)),
+        d: wedgePath(cx, cy, size / 2 - 6, angle, angle + span)
+      });
+      setText(appendSvg(path, "title", {}),
+        t("{name}：{count} 个视频，占 {percent}%", {
+          name: slice.other ? slice.name : (slice.name || "—"),
+          count: formatCount(slice.count),
+          percent: formatCount(Math.round(slice.count / total * 100))
+        }));
+      angle += span;
+      if (index >= slices.length - 1) return;
+    });
+    host.appendChild(svg);
+  }
+
+  function renderLegend(slices, total) {
+    const list = ui.pieLegend;
+    if (!list) return;
+    list.textContent = "";
+    slices.forEach((slice) => {
+      const item = document.createElement("li");
+      item.className = "stats-legend-item";
+      const mark = document.createElement("span");
+      mark.className = "stats-legend-mark" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 8));
+      const name = document.createElement("span");
+      name.className = "stats-legend-name";
+      name.textContent = slice.other ? slice.name : (slice.name || "—");
+      const value = document.createElement("span");
+      value.className = "stats-legend-value tnum";
+      value.textContent = t("{count} 个视频", { count: formatCount(slice.count) })
+        + " · " + formatCount(total > 0 ? Math.round(slice.count / total * 100) : 0) + "%";
+      item.appendChild(mark);
+      item.appendChild(name);
+      item.appendChild(value);
+      list.appendChild(item);
+    });
   }
 
   /* ── 各块渲染 ───────────────────────────────────────────────────── */
 
-  function renderTiles(snapshot) {
+  function renderTiles(snapshot, range) {
+    const total = countInRange(range);
+    const days = rangeDayList(range).length;
     setText(ui.videos, formatCount(snapshot.videos));
-    setText(ui.savedToday, formatCount(snapshot.savedToday));
-    setText(ui.savedLast7, formatCount(snapshot.savedLast7));
+    /* 后两张跟着所选区间走：区间内新增 / 区间天数，标签里不写死天数 */
+    setText(ui.savedToday, formatCount(total));
+    setText(ui.savedLast7, formatCount(days));
     setText(ui.collections, formatCount(snapshot.collections));
+    return { total: total, days: days };
   }
 
-  function renderChart(snapshot) {
-    const rows = dailySeries(snapshot);
-    if (!rows) {
+  function renderRange(range) {
+    const meta = rangeDayKeys(range);
+    const period = periodOf(preset) || periodOf("last7");
+    const name = period ? period.text : t("自定义区间");
+    const days = rangeDayList(range).length;
+    if (ui.rangeLabel) {
+      setText(ui.rangeLabel, t("{name} · 共 {days} 天", { name: name, days: formatCount(days) }));
+    }
+    if (ui.rangeButton) {
+      ui.rangeButton.setAttribute("aria-label", t("时间范围") + " " + formatSpan(meta.from, meta.to));
+    }
+    /* 日历上是哪两天到哪两天，这里再直白写一遍（数字是数据，不进词典） */
+    if (ui.rangeSummary) setText(ui.rangeSummary, formatSpan(meta.from, meta.to));
+    renderPickerList();
+    return { name: name, days: days };
+  }
+
+  /* legacyRows 只在对端还没交 dailyRows 时用：那时候没有区间可筛，
+     画的就是快照里那串 daily（最后 14 天左右）。 */
+  function renderChart(range, legacyRows) {
+    const rows = Array.isArray(legacyRows) && legacyRows.length ? legacyRows : rowsInRange(range);
+    const total = rows.reduce((sum, row) => sum + row.count, 0);
+    /* 没有每天明细（对端还没交 dailyRows）时没有区间可选，柱子也就点不出饼图：
+       这时候那句「点一下柱子」的提示不能露出来，免得应了一次没反应。
+       有区间选择器就一定有每天明细，提示跟着选择器走。 */
+    if (ui.chartHint) show(ui.chartHint, !!ui.rangeCard && !ui.rangeCard.hidden);
+    /* 提示只能挂在真画出来的柱子上：柱子没了（全 0 / 没有明细）就一起收掉 */
+    if (ui.chartHint && (!rows.length || total <= 0)) show(ui.chartHint, false);
+
+    if (!rows.length) {
       /* 没有每天的明细：不画空图，只留一句说明 */
       if (ui.chart) ui.chart.textContent = "";
-      const span = daysSpan(snapshot);
+      const span = daysSpan(stats);
       setText(ui.chartLead, span > 0
-        ? BcaI18n.t("数据库里目前共有 {days} 天的记录。", { days: formatCount(span) })
-        : BcaI18n.t("暂时拿不到每天的明细数据。"));
-      setText(ui.chartNote, BcaI18n.t("暂时拿不到每天的明细数据。"));
+        ? t("数据库里目前共有 {days} 天的记录。", { days: formatCount(span) })
+        : t("暂时拿不到每天的明细数据。"));
+      setText(ui.chartNote, t("暂时拿不到每天的明细数据。"));
       show(ui.chartNote, true);
       show(ui.chartCaption, false);
       return;
     }
 
-    const max = rows.reduce((top, row) => (row.count > top ? row.count : top), 0);
-    setText(ui.chartLead, BcaI18n.t("最近 {days} 天的每日新增。", { days: formatCount(rows.length) }));
-    const drawn = drawChart(rows);
-    setText(ui.chartNote, BcaI18n.t("最近这些天还没有新增收藏。"));
-    show(ui.chartNote, max <= 0);
-    show(ui.chartCaption, max > 0 && !!(drawn && drawn.todayMarked));
+    setText(ui.chartLead, legacyRows
+      ? t("最近 {days} 天的每日新增。", { days: formatCount(rows.length) })
+      : t("已选 {days} 天，共新增 {count} 个视频。", {
+        days: formatCount(rows.length), count: formatCount(total)
+      }));
+    const drawn = drawChart(ui.chart, rows, {
+      height: CHART_HEIGHT,
+      labelMode: "dates",
+      ariaLabel: t("每天的新增数量柱状图", { days: formatCount(rows.length) })
+    });
+    setText(ui.chartNote, legacyRows ? t("最近这些天还没有新增收藏。") : t("这几天还没有新增收藏。"));
+    show(ui.chartNote, total <= 0);
+    show(ui.chartCaption, !!(drawn && drawn.todayMarked));
+  }
+
+  function renderPie(range) {
+    const keys = rangeDayList(range);
+    const day = focusedDay && keys.indexOf(focusedDay) >= 0 ? focusedDay : "";
+    if (!day) {
+      focusedDay = "";
+      show(ui.pieCard, false);
+      if (ui.pie) ui.pie.textContent = "";
+      if (ui.pieLegend) ui.pieLegend.textContent = "";
+      /* 收起来的卡片里不留上一回的说明文字：再点开时不至于闪一下旧句 */
+      show(ui.pieEmpty, false);
+      show(ui.pie, false);
+      show(ui.pieLegend, false);
+      return;
+    }
+    const row = dayRows.find((item) => item.day === day) || { day: day, count: 0, by: {} };
+    const slices = slicesOfDay(row);
+    const total = slices.reduce((sum, slice) => sum + slice.count, 0);
+    show(ui.pieCard, true);
+    setText(ui.pieLead, t("{day}：新增 {count} 个视频", { day: day, count: formatCount(row.count) }));
+    drawPie(ui.pie, slices, total);
+    renderLegend(slices, total);
+    setText(ui.pieEmpty, t("这一天还没有新增收藏。"));
+    show(ui.pieEmpty, slices.length === 0);
+    show(ui.pie, slices.length > 0);
+    show(ui.pieLegend, slices.length > 0);
+  }
+
+  /* 年份时间轴：没有 yearly 就整块隐藏，不留空壳 */
+  function renderYears() {
+    const raw = stats && Array.isArray(stats.yearly) ? stats.yearly : [];
+    const rows = [];
+    raw.forEach((item) => {
+      const year = String(item && item.year != null ? item.year : "").slice(0, 4);
+      if (!/^\d{4}$/.test(year)) return;
+      rows.push({ day: year, label: year, count: Math.max(0, numberOr(item && item.count, 0)) });
+    });
+    if (!rows.length) {
+      show(ui.yearCard, false);
+      if (ui.yearChart) ui.yearChart.textContent = "";
+      return;
+    }
+    rows.sort((a, b) => (a.day < b.day ? -1 : 1));
+    const total = rows.reduce((sum, row) => sum + row.count, 0);
+    show(ui.yearCard, true);
+    setText(ui.yearLead, t("从 {year} 年至今，共收藏 {count} 个视频。", {
+      year: rows[0].day, count: formatCount(total)
+    }));
+    const drawn = drawChart(ui.yearChart || ui.chart, rows, {
+      height: YEAR_CHART_HEIGHT,
+      labelMode: "years",
+      ariaLabel: t("按年份的收藏数量柱状图")
+    });
+    setText(ui.yearNote, t("暂无年份数据。"));
+    show(ui.yearNote, !drawn);
   }
 
   function renderTop(snapshot) {
-    const windowDays = formatCount(numberOr(core && core.RECENT_WINDOW_DAYS, 0) || 30);
-    setText(ui.topLead, BcaI18n.t("按最近 {days} 天保存的数量排序。", { days: windowDays }));
+    /* 「近期」统一成近 7 天（stats-core.js 的 RECENT_WINDOW_DAYS），
+       与柱状图最右边 7 根柱子是同一个口径 —— 都是按视频条数、按天分桶。 */
+    const windowDays = formatCount(numberOr(core && core.RECENT_WINDOW_DAYS, 0) || 7);
+    setText(ui.topLead, t("按最近 {days} 天保存的数量排序。", { days: windowDays }));
 
     const top = snapshot.topCollection;
     if (!top || typeof top !== "object") {
@@ -295,10 +897,10 @@
     const total = Math.max(0, numberOr(top.count, 0));
     setText(ui.topName, name || "—");
     if (recent > 0) {
-      setText(ui.topCount, BcaI18n.t("近 {days} 天保存 {count} 个视频", { days: windowDays, count: formatCount(recent) }));
+      setText(ui.topCount, t("近 {days} 天保存 {count} 个视频", { days: windowDays, count: formatCount(recent) }));
     } else if (total > 0) {
-      /* 近 30 天一条没存：那就报它一共多少，别让人以为这夹子是空的 */
-      setText(ui.topCount, BcaI18n.t("近 {days} 天没有新增，一共 {count} 个视频", { days: windowDays, count: formatCount(total) }));
+      /* 近 7 天一条没存：那就报它一共多少，别让人以为这夹子是空的 */
+      setText(ui.topCount, t("近 {days} 天没有新增，一共 {count} 个视频", { days: windowDays, count: formatCount(total) }));
     } else {
       setText(ui.topCount, "—");
     }
@@ -311,30 +913,388 @@
   }
 
   function render() {
-    document.title = BcaI18n.t("哔哩藏库 · 数据统计");
+    document.title = t("哔哩藏库 · 数据统计");
     const snapshot = stats;
     const empty = isEmptySnapshot(snapshot);
 
-    show(ui.empty, empty);
-    show(ui.overview, !empty);
-    show(ui.chartCard, !empty);
-    show(ui.topCard, !empty);
-
     if (empty) {
-      /* 数据被清空 / 还没导入：上一次画的柱子和时间要一起收掉，别留着旧图 */
+      /* 数据被清空 / 还没导入：把上面画过的图、展开的下拉、选中的柱子一起收掉 */
+      dayRows = [];
+      focusedDay = "";
+      closePicker();
+      show(ui.empty, true);
+      show(ui.overview, false);
+      show(ui.rangeCard, false);
+      show(ui.chartCard, false);
+      show(ui.pieCard, false);
+      show(ui.yearCard, false);
+      show(ui.topCard, false);
       if (ui.chart) ui.chart.textContent = "";
+      if (ui.pie) ui.pie.textContent = "";
+      if (ui.yearChart) ui.yearChart.textContent = "";
+      if (ui.pieLegend) ui.pieLegend.textContent = "";
       setText(ui.chartLead, "");
+      setText(ui.pieLead, "");
+      setText(ui.yearLead, "");
+      setText(ui.topLead, "");
+      setText(ui.topName, "—");
+      setText(ui.topCount, "—");
       show(ui.chartNote, false);
       show(ui.chartCaption, false);
+      show(ui.pieEmpty, false);
+      show(ui.yearNote, false);
       setText(ui.updatedValue, "");
       show(ui.updated, false);
       return;
     }
 
-    renderTiles(snapshot);
-    renderChart(snapshot);
+    dayRows = normalizeDayRows(snapshot);
+    const rows = dailySeries(snapshot);
+    const range = activeRange(Date.now());
+    /* 「能不能选区间」只看有没有 dailyRows：只有旧的 daily 时快照里没有
+       180 天的底子，区间选了也筛不出东西，那就退回旧的四张卡 + 那 14 根柱子。 */
+    const selectable = hasDayRows(snapshot);
+    if (!selectable) focusedDay = "";
+
+    show(ui.empty, false);
+    show(ui.overview, true);
+    show(ui.rangeCard, selectable);
+    show(ui.chartCard, true);
+    show(ui.topCard, true);
+
+    if (selectable) renderRange(range);
+    if (selectable) renderTiles(snapshot, range);
+    else renderTilesLegacy(snapshot);
+    /* 没有每天明细时 rows 就是快照里那串 daily：柱状图照样画，只是不能点 */
+    renderChart(range, selectable ? null : rows);
+    if (selectable) renderPie(range);
+    renderYears();
     renderTop(snapshot);
     renderUpdated(snapshot);
+    /* 语言切换后柱子上那些 title / aria-label 得跟着换（图标是脚本塞的，也补一次） */
+    if (typeof BcaIcons === "object" && BcaIcons && typeof BcaIcons.hydrate === "function") {
+      try { BcaIcons.hydrate(ui.rangeCard); } catch (_) { /* 图标补不上就补不上 */ }
+    }
+  }
+
+  /* 旧快照（没有 dailyRows）时的四张卡：还是「今日新增 / 近 7 天新增」那两口径 */
+  function renderTilesLegacy(snapshot) {
+    setText(ui.videos, formatCount(snapshot.videos));
+    setText(ui.savedToday, formatCount(snapshot.savedToday));
+    setText(ui.savedLast7, formatCount(snapshot.savedLast7));
+    setText(ui.collections, formatCount(snapshot.collections));
+  }
+
+  /* ── 区间选择器 ─────────────────────────────────────────────────── */
+
+  /* 列表项由脚本生成：文案全是 t() 字面量，节点里不写 data-i18n 属性
+     （那些属性是给静态标记用的，动态节点挂了反而会被 i18n 的扫描漏掉）。 */
+  function renderPickerList() {
+    const list = ui.rangeList;
+    if (!list) return;
+    list.textContent = "";
+    periods.forEach((period) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "stats-picker-option";
+      item.setAttribute("role", "option");
+      item.setAttribute("data-range", period.id);
+      const active = preset === period.id;
+      item.setAttribute("aria-selected", active ? "true" : "false");
+      item.textContent = period.text;
+      list.appendChild(item);
+    });
+  }
+
+  function openPicker() {
+    picker.open = true;
+    picker.mode = preset === "custom" ? "custom" : "preset";
+    picker.view = defaultCalendarView();
+    picker.draftFrom = custom.from;
+    picker.draftTo = custom.to;
+    show(ui.rangeMenu, true);
+    show(ui.calendar, picker.mode === "custom");
+    if (ui.rangeButton) ui.rangeButton.setAttribute("aria-expanded", "true");
+    renderCalendar();
+  }
+
+  function closePicker() {
+    if (!picker.open) {
+      show(ui.rangeMenu, false);
+      if (ui.rangeButton) ui.rangeButton.setAttribute("aria-expanded", "false");
+      return;
+    }
+    picker.open = false;
+    picker.mode = "preset";
+    show(ui.rangeMenu, false);
+    show(ui.calendar, false);
+    if (ui.rangeButton) {
+      ui.rangeButton.setAttribute("aria-expanded", "false");
+      ui.rangeButton.focus();
+    }
+  }
+
+  function monthText(time) {
+    const date = new Date(time);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.getFullYear() + " 年 " + (date.getMonth() + 1) + " 月";
+  }
+
+  /* 两个月并排：左边是 view 那个月，右边是它的下个月。
+     今天之后的日子不给点（未来还没有数据可看）。 */
+  function renderCalendar() {
+    if (!picker.view || !Number.isFinite(picker.view)) {
+      const now = new Date();
+      picker.view = monthStartTime(now.getFullYear(), now.getMonth());
+    }
+    const todayKey = localDayKey(Date.now());
+    const from = picker.draftFrom;
+    const to = picker.draftTo;
+    const low = from && to ? (from <= to ? from : to) : (from || to);
+    const high = from && to ? (from <= to ? to : from) : (from || to);
+
+    /* 平铺几个月：默认两个月（跨月选），起止跨度超过两个月时补到够 —— 上限一年，
+       正好和「最长的自定义区间是 1 年」对上；格子不够时用户还能用「上月/下月」翻页。 */
+    const months = calendarMonthCount();
+    for (let index = 0; index < months; index += 1) {
+      const monthTime = addMonths(picker.view, index);
+      const month = new Date(monthTime);
+      const grid = index === 0 ? ui.calGridA : ui.calGridB;
+      const label = index === 0 ? ui.calMonthA : ui.calMonthB;
+      setText(label, monthText(monthTime));
+      if (!grid) continue;
+      grid.textContent = "";
+      for (let weekday = 0; weekday < 7; weekday += 1) {
+        const head = document.createElement("span");
+        head.className = "stats-calendar-wd";
+        head.textContent = t(WEEKDAY_KEYS[weekday]);
+        grid.appendChild(head);
+      }
+      const lead = (month.getDay() + 6) % 7;   // 周一开头
+      const total = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+      for (let blank = 0; blank < lead; blank += 1) {
+        const pad = document.createElement("span");
+        pad.className = "stats-calendar-blank";
+        grid.appendChild(pad);
+      }
+      for (let day = 1; day <= total; day += 1) {
+        const key = fallbackDayKey(new Date(month.getFullYear(), month.getMonth(), day).getTime());
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "stats-calendar-day";
+        cell.textContent = String(day);
+        cell.setAttribute("data-day", key);
+        if (key === low) cell.classList.add("stats-calendar-edge");
+        if (key === high) cell.classList.add("stats-calendar-edge");
+        if (low && high && key > low && key < high) cell.classList.add("stats-calendar-in");
+        if (key === todayKey) cell.classList.add("stats-calendar-today");
+        if (key > todayKey) {
+          /* 未来：禁用而不是藏起来，日历的格子数才稳定 */
+          cell.disabled = true;
+          cell.setAttribute("aria-disabled", "true");
+        }
+        cell.setAttribute("aria-label", key);
+        cell.setAttribute("aria-pressed", (key === low || key === high) ? "true" : "false");
+        grid.appendChild(cell);
+      }
+    }
+    setText(ui.calWarn, t("最长的自定义区间是 1 年，请把范围缩到一年以内。"));
+    show(ui.calWarn, false);
+  }
+
+  const WEEKDAY_KEYS = ["一", "二", "三", "四", "五", "六", "日"];
+
+  /* 日历默认从哪个月开始铺。
+     右边那格是「后一个月」，所以起始月取「今天所在月」和「区间起点所在月」里更晚的那个：
+     平时翻开就是「上个月 + 这个月」（两个月都点得动，跨月选最快），
+     区间起点在更早的月份时再跟着起点走，不然用户得自己翻回去。
+     今天之后的日子一律禁用，未来那个月翻出来全是灰的，没有意义。 */
+  function defaultCalendarView() {
+    const now = new Date();
+    const here = monthStartTime(now.getFullYear(), now.getMonth());
+    let anchor = custom.from;
+    if (!isDayKey(anchor)) anchor = localDayKey(Date.now());
+    const start = dayStartTime(anchor);
+    if (!Number.isFinite(start)) return here;
+    const date = new Date(start);
+    const month = monthStartTime(date.getFullYear(), date.getMonth());
+    if (!Number.isFinite(month)) return here;
+    return month > here ? month : here;
+  }
+
+  /* 日历要铺几个月：起止跨了几个月就铺几个月，最少两个月、最多十二个月 */
+  function calendarMonthCount() {    const from = picker.draftFrom;
+    const to = picker.draftTo;
+    if (!isDayKey(from) || !isDayKey(to)) return 2;
+    const low = from <= to ? from : to;
+    const high = from <= to ? to : from;
+    const first = new Date(dayStartTime(low));
+    const last = new Date(dayStartTime(high));
+    if (isNaN(first.getTime()) || isNaN(last.getTime())) return 2;
+    const span = (last.getFullYear() - first.getFullYear()) * 12 + (last.getMonth() - first.getMonth()) + 1;
+    if (!Number.isFinite(span)) return 2;
+    return Math.min(12, Math.max(2, span));
+  }
+
+  function pickDay(key) {
+    if (!isDayKey(key)) return;
+    if (!picker.draftFrom || (picker.draftFrom && picker.draftTo)) {
+      /* 第一下定起点，同时把上一次的终点清掉 */
+      picker.draftFrom = key;
+      picker.draftTo = "";
+    } else {
+      /* 第二下定终点：反着点也认，渲染时按大小归一 */
+      picker.draftTo = key;
+    }
+    renderCalendar();
+  }
+
+  function applyCustom() {
+    const from = picker.draftFrom;
+    const to = picker.draftTo || picker.draftFrom;
+    if (!isDayKey(from)) return;
+    const low = from <= to ? from : to;
+    const high = from <= to ? to : from;
+    const days = rangeDays(dayStartTime(low), dayEndTime(high));
+    if (days > MAX_CUSTOM_DAYS) {
+      /* 日历只铺得下一年，超出就明说，不偷偷截断 */
+      setText(ui.calWarn, t("最长的自定义区间是 1 年，请把范围缩到一年以内。"));
+      show(ui.calWarn, true);
+      return;
+    }
+    custom.from = low;
+    custom.to = high;
+    preset = "custom";
+    focusedDay = "";
+    closePicker();
+    render();
+  }
+
+  function choosePreset(name) {
+    if (RANGE_ALL.indexOf(name) < 0) return;
+    if (name === "custom") {
+      picker.mode = "custom";
+      /* 日历翻到默认月份（今天所在月，除非区间起点更早） */
+      picker.view = defaultCalendarView();
+      show(ui.calendar, true);
+      renderCalendar();
+      return;
+    }
+    preset = name;
+    focusedDay = "";
+    closePicker();
+    render();
+  }
+
+  function bindPicker() {
+    if (ui.rangeButton) {
+      ui.rangeButton.addEventListener("click", () => {
+        if (picker.open) closePicker();
+        else openPicker();
+      });
+    }
+    if (ui.rangeList) {
+      ui.rangeList.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target.closest("[data-range]") : null;
+        if (!target) return;
+        choosePreset(target.getAttribute("data-range"));
+      });
+    }
+    if (ui.calendar) {
+      ui.calendar.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target.closest("[data-day]") : null;
+        if (!target || target.disabled) return;
+        pickDay(target.getAttribute("data-day"));
+      });
+    }
+    if (ui.calPrev) {
+      ui.calPrev.addEventListener("click", () => {
+        picker.view = addMonths(picker.view, -1);
+        renderCalendar();
+      });
+    }
+    if (ui.calNext) {
+      ui.calNext.addEventListener("click", () => {
+        const next = addMonths(picker.view, 1);
+        /* 右边那个月已经是本月或更晚就不再往后翻（再翻全是未来） */
+        const now = new Date();
+        const limit = monthStartTime(now.getFullYear(), now.getMonth());
+        if (!Number.isFinite(next) || next > limit) return;
+        picker.view = next;
+        renderCalendar();
+      });
+    }
+    if (ui.calApply) ui.calApply.addEventListener("click", applyCustom);
+    if (ui.calReset) {
+      ui.calReset.addEventListener("click", () => {
+        picker.draftFrom = "";
+        picker.draftTo = "";
+        renderCalendar();
+      });
+    }
+    /* Esc 关掉下拉；点外面也关掉（点在自己身上不算外面） */
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !picker.open) return;
+      closePicker();
+    });
+    document.addEventListener("click", (event) => {
+      if (!picker.open) return;
+      const target = event.target;
+      if (target instanceof Node && ui.rangeCard && ui.rangeCard.contains(target)) return;
+      closePicker();
+    });
+  }
+
+  /* ── 图表交互 ───────────────────────────────────────────────────── */
+
+  function barFromEvent(event) {
+    const target = event.target;
+    if (!(target instanceof Element)) return null;
+    const bar = target.closest("[data-day]");
+    if (!bar || !ui.chart || !ui.chart.contains(bar)) return null;
+    if (bar.tagName.toLowerCase() !== "rect") return null;
+    return bar;
+  }
+
+  /* 选中 / 收起某一天：再点同一根收起，点空白处也收起 */
+  function toggleDay(day) {
+    if (!isDayKey(day)) return;
+    focusedDay = focusedDay === day ? "" : day;
+    render();
+  }
+
+  function bindChart() {
+    if (!ui.chart) return;
+    ui.chart.addEventListener("click", (event) => {
+      const bar = barFromEvent(event);
+      if (!bar) {
+        /* 点在图上但不是柱子上：收起饼图 */
+        if (focusedDay) {
+          focusedDay = "";
+          render();
+        }
+        return;
+      }
+      toggleDay(bar.getAttribute("data-day"));
+    });
+    /* 键盘：柱子是按钮（Enter / 空格触发），左右方向键在柱子之间走 */
+    ui.chart.addEventListener("keydown", (event) => {
+      const bar = barFromEvent(event);
+      if (!bar) return;
+      const key = event.key;
+      if (key === "Enter" || key === " " || key === "Spacebar") {
+        event.preventDefault();
+        toggleDay(bar.getAttribute("data-day"));
+        return;
+      }
+      if (key !== "ArrowLeft" && key !== "ArrowRight") return;
+      const bars = [...ui.chart.querySelectorAll("rect[data-day]")];
+      const index = bars.indexOf(bar);
+      const next = bars[index + (key === "ArrowRight" ? 1 : -1)];
+      if (!next) return;
+      event.preventDefault();
+      next.focus();
+    });
   }
 
   /* ── 事件 ───────────────────────────────────────────────────────── */
@@ -368,12 +1328,19 @@
   }
 
   /* 窗口宽度变了（贴靠、改窗口大小）柱子就重画一遍：宽度是实测的，
-     不重画的话 SVG 会被拉伸，字号也跟着变形。 */
+     不重画的话 SVG 会被拉伸，字号也跟着变形。
+     只重画 SVG 那几张：四张卡的数字、下拉的文案跟宽度没关系，
+     跟着重画一遍只会把已经画好的东西再擦一次。 */
   function bindResize() {
     window.addEventListener("resize", () => {
       window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
-        if (loaded && !isEmptySnapshot(stats)) renderChart(stats);
+        if (!loaded || isEmptySnapshot(stats)) return;
+        /* 只重画跟着宽度走的那几张 SVG：卡片的显示/隐藏和文案都不受窗口宽度影响 */
+        const range = activeRange(Date.now());
+        renderChart(range);
+        renderPie(range);
+        renderYears();
       }, RESIZE_DELAY);
     });
   }
@@ -384,11 +1351,11 @@
     if (!chrome.storage || !chrome.storage.onChanged) return;
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !changes) return;
-      const localeChanged = Boolean(changes[BcaI18n.STORAGE_KEY]);
-      const next = changes[BcaI18n.STORAGE_KEY]?.newValue;
+      const localeChanged = Boolean(changes[i18n ? i18n.STORAGE_KEY : "bcaLocale"]);
+      const next = changes[i18n ? i18n.STORAGE_KEY : "bcaLocale"]?.newValue;
       const statsChanged = Boolean(changes[STATS_KEY]);
       if (!localeChanged && !statsChanged) return;
-      const ready = localeChanged ? BcaI18n.use(next, { silent: true }) : Promise.resolve();
+      const ready = (localeChanged && i18n) ? i18n.use(next, { silent: true }) : Promise.resolve();
       Promise.resolve(ready)
         .then(() => {
           /* 库页刚扫完 / 刚清空数据：同一次事件里把快照也换掉 */
@@ -416,9 +1383,11 @@
   async function init() {
     bindBack();
     bindResize();
+    bindPicker();
+    bindChart();
     watchStorage();
     try {
-      await BcaI18n.init();       // 读不到就按默认语言显示，别把整页拖死
+      if (i18n && typeof i18n.init === "function") await i18n.init();   // 读不到就按默认语言显示，别把整页拖死
     } catch (_) { /* 词典坏了也继续，t() 会原样返回中文原文 */ }
     stats = await readStats();
     loaded = true;

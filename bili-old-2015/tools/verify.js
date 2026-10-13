@@ -29,14 +29,23 @@ const cssUrlCount = [...html.matchAll(/url\((['"]?)([^)'"]+)\1\)/gi)].map((m) =>
 const cssRemote = cssUrlCount.filter((u) => !/^data:/i.test(u.trim()));
 if (cssRemote.length) fails.push(`${cssRemote.length} css url() still fetch a remote file (e.g. ${cssRemote.slice(0, 3).join(', ')})`);
 
-// 3. no <script src>, and the only inline script is the click router
+// 3. no <script src>, and the page carries exactly its two inline scripts:
+//    the click router and the self-contained egg dialog (they must not merge: the dialog script
+//    owns the close paths, the router owns the jump, and each is asserted separately below).
 if (/<script[^>]*\bsrc=/i.test(html)) fails.push('a <script src=...> survived the build');
-if (count(/<script\b/gi) !== 1) fails.push(`expected exactly 1 inline script (the click router), found ${count(/<script\b/gi)}`);
+if (count(/<script\b/gi) !== 2) fails.push(`expected exactly 2 inline scripts (click router + egg dialog), found ${count(/<script\b/gi)}`);
 
 // 4. the click router is present and correct
 if (!/window\.open\('https:\/\/www\.bilibili\.com\/', '_blank'\)/.test(html)) fails.push('click router does not open the live homepage');
 if (!/addEventListener\('click'/.test(html)) fails.push('click router missing');
 if (!/addEventListener\('submit'/.test(html)) fails.push('submit router missing');
+
+// 4b. the egg dialog is present and self-contained (script + markup + its own styles)
+if (!/<div id="eggDialogOverlay"/.test(html)) fails.push('egg dialog markup missing');
+if (!/<button id="eggDialogOk"[^>]*>知道啦<\/button>/.test(html)) fails.push('egg dialog 知道啦 button missing');
+if (!/overlay\.addEventListener\('pointerdown'/.test(html)) fails.push('egg dialog close path (pointerdown) missing');
+if (!/window\.addEventListener\('click'/.test(html)) fails.push('egg dialog click guard missing');
+if (!/#eggDialogOverlay \{[\s\S]{0,200}position: fixed/.test(html)) fails.push('egg dialog styles missing');
 
 // 5. structure: the ten category rows + the fixed pieces are all in the document
 const wanted = [

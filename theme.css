@@ -325,6 +325,11 @@ button { cursor: pointer; }
   /* 边缘高光同样跟着主题走：写死白色的话，夜晚主题下卡片会顶着一圈白边 */
   --bca-glass-glow: color-mix(in srgb, var(--surface), #fff 55%);
   --bca-glass-shade: color-mix(in srgb, var(--surface), #000 10%);
+  /* 卡片的状态阴影槽（悬停投影 / 多选描边）。默认 none = 不追加任何阴影；
+     开了毛玻璃时由 library.css 把状态阴影写进来 —— theme.css:378 的玻璃边缘高光
+     把 .video-card 的 box-shadow 钉死了，不这样留一个槽，状态投影就没有出口。
+     定义在这里是因为 theme.css 是令牌表，且这条测试只认本文件的定义。 */
+  --bca-card-state-shadow: none;
 }
 
 /* 页面背后那一层。由 theme.js 插成 body 的第一个子节点（弹窗不插），
@@ -360,6 +365,11 @@ html.bca-glass :is(.sidebar, .video-card, .detail-panel, .batch-toolbar,
   backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
   -webkit-backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
 }
+/* 上面这条带 (0,2,1) 的特异性，压得住 library.css:662-664 的卡片状态边框
+   （.video-card:hover / .invalid-video / .selected，全是 (0,2,0)）——
+   也就是「开着毛玻璃时三种状态反馈全看不见」。状态视觉属于卡片自己的设计，
+   所以补丁写在 library.css（那边用 :is() 把特异性抬到 (0,2,1) 并按源码顺序取胜），
+   这里只留一句说明，避免下次又有人把玻璃底色当成「卡片的状态色」。 */
 /* 顶栏原本就有一层 92% 的毛玻璃，开了开关再透一点、再糊一点：
    它底下永远有滚过去的卡片，是这套效果里最显眼的一处。 */
 html.bca-glass .topbar {
@@ -375,15 +385,30 @@ html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
     inset 1px 1px 1px -.5px color-mix(in srgb, var(--bca-glass-glow) 45%, transparent),
     inset -1px -1px 1px -.5px color-mix(in srgb, var(--bca-glass-shade) 32%, transparent),
     inset 0 0 12px color-mix(in srgb, var(--bca-glass-glow) 60%, transparent),
-    var(--shadow-sm);
+    /* 末段从写死的 var(--shadow-sm) 换成「卡片自己的状态阴影槽」：
+       原来这条把 .video-card 的 box-shadow 钉成固定的四段 inset，
+       library.css:664 的多选蓝框（0 0 0 2px var(--brand-ring)）与 :662 的悬停阴影
+       都被它盖掉。这个槽在上面 :root 里默认是 none，
+       所以平时算出来与原先逐像素相同；卡片进入 hover / 选中 / 失效时
+       由 library.css 把状态阴影塞进来，与玻璃高光并存。 */
+    var(--bca-card-state-shadow);
 }
 
-/* 尊重系统的“减少动态效果”设置 */
+/* 尊重系统的“减少动态效果”设置。
+   1.4.1 起这里也管毛玻璃：backdrop-filter 每帧都要重新采样背景，
+   是这套外观里最贵的一项，而「减少动态效果」的用户往往就是要省这个。
+   关掉 blur 而不是整块禁用玻璃：底色仍是那层半透明 surface，可读性不变。 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
     scroll-behavior: auto !important;
+  }
+  html.bca-glass :is(.video-card, .detail-panel, .batch-toolbar,
+    .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast),
+  html.bca-glass .topbar {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }

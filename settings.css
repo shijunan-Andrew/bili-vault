@@ -228,9 +228,12 @@
 .toggle-switch.off { border-color: var(--line); background: var(--surface-sunken); }
 .toggle-switch.off span { left: 2px; background: var(--faint); }
 
-/* 隐藏的原生选图控件：按钮代它触发 click，键盘用户走 :focus-visible 的替身高亮 */
+/* 隐藏的原生选图控件：按钮代它触发 click（settings.js），它自己的 tabindex="-1" 让它不进
+   Tab 序列。这条「替身高亮」是兜底：万一有哪条路径真把焦点落到这个 1px 的控件上，
+   焦点环要画在用户看得见的按钮上（原来写成 #wallpaperChoose:focus-visible ~ .hidden-file-input，
+   方向反了 —— 输入框排在按钮**前面**，后继兄弟选择器永远匹配不到，规则从来没生效过）。 */
 .hidden-file-input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); }
-#wallpaperChoose:focus-visible ~ .hidden-file-input { outline: 2px solid var(--brand); outline-offset: 2px; }
+#wallpaperFile:focus-visible ~ #wallpaperChoose { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 /* 次要动作按钮：与 library.css 的 .button-quiet 同观感（page.css 的 .button 只管尺寸） */
 .button-quiet { color: var(--brand-deep); border-color: var(--brand-line); background: var(--brand-soft); }
@@ -243,8 +246,15 @@
 .setting-row.row-flash { border-radius: var(--r-sm); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-ring); }
 
 /* 挂件右键菜单的「宠物设置」带 #pet 跳进来时，整组卡片的高亮（2.6s 后由 settings.js 摘掉）。
-   同一个品牌色，但落在卡片自己的边框上：卡片比一行大得多，铺满底色会把内容压住。 */
-.settings-card.group-flash { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+   同一个品牌色，但落在卡片自己的边框上：卡片比大得多，铺满底色会把内容压住。
+   1.6.0：这行原来只是 `.settings-card.group-flash` —— 特异性 (0,2,0)，被 theme.css 里
+   开毛玻璃时那条 `html.bca-glass :is(...) .settings-card`（(0,2,1)）压死，高亮根本看不见。
+   改成锚在 <html> 上并改走卡片状态影子令牌（和 library.css 的选中/失效态同一套写法），
+   这样无论毛玻璃开不开，都是同一份状态阴影说了算。 */
+html:not([data-wallpaper-scope="popup"]) .settings-card.group-flash {
+  border-color: var(--brand);
+  --bca-card-state-shadow: 0 0 0 3px var(--brand-ring);
+}
 
 /* 页脚说明也做成一张卡：铺了背景图以后，凡是贴在卡片外的文字都会直接压在照片上，
    滚动时更是糊在照片里。要出现在页面上的文字，就得先有自己的一层底色。 */

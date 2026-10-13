@@ -1,11 +1,16 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<!-- data-wallpaper-scope="popup"：这一页不铺背景图、全程纯色（与 popup.html 同一个开关）。
+     两个文档页是长正文，用户选了「自定义 + 背景图」时正文得落在自带底色的面上才读得了，
+     所以 page.css:27 那层「纸」照旧生效；但这页自己不去读 IndexedDB 里的图，
+     就不该凭空多出一次跨页同步，也不该在别的页面换图时被重画。 -->
+<html lang="zh-CN" data-wallpaper-scope="popup">
 <head>
 <meta charset="utf-8">
 <title>哔哩藏库 · 使用说明</title>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="mockup.css">
 <link rel="stylesheet" href="page.css">
+<script src="theme.js"></script>
 </head>
 <body>
 <div class="wrap">

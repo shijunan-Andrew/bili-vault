@@ -183,12 +183,382 @@ function sampleDatabase() {
       video({ date: "2026年10月12日09时30分00秒" }), // 今天
       video({ bvid: "BV1AAAAAAAAA", date: "2026年10月12日08时00分00秒" }), // 今天
       video({ bvid: "BV1BBBBBBBBB", date: "2026年10月10日10时00分00秒" }), // 近 7 天
-      video({ bvid: "BV1CCCCCCCCC", date: "2026年10月01日10时00分00秒", collection: "蜡笔小新" }), // 近 30 天
+      video({ bvid: "BV1CCCCCCCCC", date: "2026年10月01日10时00分00秒", collection: "蜡笔小新" }), // last30 区间内、近 7 天窗口外
       video({ bvid: "BV1DDDDDDDDD", date: "2026年03月01日10时00分00秒", collection: "dds" }) // 很久以前
     ],
     { now: NOW }
   );
 }
+
+// 专门喂给区间 API 的库：跨了 10 月 / 9 月 / 8 月 / 1 月与 2025 年，
+// 这样「今天 / 昨天 / 近 7 天 / 近 30 天 / 本月 / 上个月」六个区间预设的边界都能真的被走到。
+// （这是区间预设 last7 / last30，与排行榜的「近期」窗口是两回事 —— 后者看 RECENT_WINDOW_DAYS，现在是 7。）
+// 10-13 那条是**未来日期**（本地的明天）—— 数据库里本来不该有，用来证明区间右边界是闭的：
+// 今天区间的 to 是 23:59:59.999，明天那条不该被算进来。
+function rangeDatabase() {
+  return core.databaseFromVideos(
+    [
+      video({ date: "2026年10月12日09时30分00秒", collection: "哆啦a梦" }), // 今天
+      video({ bvid: "BV1AAAAAAAAA", date: "2026年10月12日08时00分00秒", collection: "蜡笔小新" }), // 今天
+      video({ bvid: "BV1BBBBBBBBB", date: "2026年10月11日10时00分00秒", collection: "哆啦a梦" }), // 昨天
+      video({ bvid: "BV1CCCCCCCCC", date: "2026年10月01日10时00分00秒", collection: "蜡笔小新" }), // last30 区间内、本月
+      video({ bvid: "BV1DDDDDDDDD", date: "2026年09月30日23时59分59秒", collection: "dds" }), // 上个月最后一天
+      video({ bvid: "BV1EEEEEEEEE", date: "2026年09月15日10时00分00秒", collection: "dds" }), // 上个月
+      video({ bvid: "BV1FFFFFFFFFF", date: "2026年08月05日10时00分00秒", collection: "dds" }), // 更早
+      video({ bvid: "BV1GGGGGGGGG", date: "2026年01月01日10时00分00秒", collection: "dds" }), // 今年
+      video({ bvid: "BV1HHHHHHHHH", date: "2025年12月31日10时00分00秒", collection: "哆啦a梦" }), // 去年
+      video({ bvid: "BV1IIIIIIIII", date: "2026年10月13日08时00分00秒", collection: "哆啦a梦" }) // 明天（不该落进今天）
+    ],
+    { now: NOW }
+  );
+}
+
+test("RANGE_PRESETS 七个预设齐全，label 都是中文", () => {
+  assert.deepEqual(Object.keys(core.RANGE_PRESETS), ["today", "yesterday", "last7", "last30", "thisMonth", "lastMonth", "custom"]);
+  for (const label of Object.values(core.RANGE_PRESETS)) {
+    assert.ok(typeof label === "string" && label.length > 0);
+    assert.ok(/[\u4e00-\u9fa5]/.test(label), `label 该是中文：${label}`);
+  }
+});
+
+test("rangeFor 的 today / yesterday 是一整天的闭区间（明天那条不算进今天）", () => {
+  const today = core.rangeFor("today", NOW);
+  assert.equal(today.preset, "today");
+  assert.equal(today.from, at(2026, 10, 12, 0, 0));
+  assert.equal(today.to, at(2026, 10, 12, 23, 59) + 59999);
+  assert.equal(today.days, 1);
+  assert.equal(today.label, "今天");
+  // 闭区间：23:59:59.999 那一刻的收藏算今天，明天 08:00 不算
+  assert.equal(core.totalInRange(rangeDatabase(), today), 2);
+
+  const yesterday = core.rangeFor("yesterday", NOW);
+  assert.equal(yesterday.from, at(2026, 10, 11, 0, 0));
+  assert.equal(yesterday.to, at(2026, 10, 11, 23, 59) + 59999);
+  assert.equal(yesterday.days, 1);
+  assert.equal(core.totalInRange(rangeDatabase(), yesterday), 1);
+  // 今天 00:00 减 1 毫秒 = 昨天 23:59:59.999，两段严丝合缝、不重叠
+  assert.equal(yesterday.to + 1, today.from);
+});
+
+test("rangeFor 的 last7 / last30 含今天、长度分别 7 与 30 天", () => {
+  const last7 = core.rangeFor("last7", NOW);
+  assert.equal(last7.preset, "last7");
+  assert.equal(last7.days, 7);
+  assert.equal(last7.from, at(2026, 10, 6, 0, 0));
+  assert.equal(last7.to, at(2026, 10, 12, 23, 59) + 59999);
+  assert.equal(last7.label, "近 7 天");
+  assert.equal(core.seriesInRange(rangeDatabase(), last7).length, 7);
+  // 10-06 起：10-12 两条 + 10-11 一条 + 10-01 那条在窗口外
+  assert.equal(core.totalInRange(rangeDatabase(), last7), 3);
+
+  const last30 = core.rangeFor("last30", NOW);
+  assert.equal(last30.preset, "last30");
+  assert.equal(last30.days, 30);
+  assert.equal(last30.from, at(2026, 9, 13, 0, 0));
+  assert.equal(last30.label, "近 30 天");
+  assert.equal(core.seriesInRange(rangeDatabase(), last30).length, 30);
+  // 09-13 起：10-12×2 + 10-11 + 10-01 + 09-30 + 09-15 = 6（08-05 那条出界）
+  assert.equal(core.totalInRange(rangeDatabase(), last30), 6);
+});
+
+test("rangeFor 的 thisMonth 从 1 号算到今天，不把本月的未来算进来", () => {
+  const range = core.rangeFor("thisMonth", NOW);
+  assert.equal(range.preset, "thisMonth");
+  assert.equal(range.from, at(2026, 10, 1, 0, 0));
+  assert.equal(range.to, at(2026, 10, 12, 23, 59) + 59999);
+  assert.equal(range.days, 12);
+  assert.equal(range.label, "本月");
+  assert.equal(core.totalInRange(rangeDatabase(), range), 4); // 10-12×2 + 10-11 + 10-01
+});
+
+test("rangeFor 的 lastMonth 是整月，跨年与 2 月这种短月都对", () => {
+  const range = core.rangeFor("lastMonth", NOW);
+  assert.equal(range.preset, "lastMonth");
+  assert.equal(range.from, at(2026, 9, 1, 0, 0));
+  assert.equal(range.to, at(2026, 9, 30, 23, 59) + 59999);
+  assert.equal(range.days, 30);
+  assert.equal(range.label, "上个月");
+  assert.equal(core.totalInRange(rangeDatabase(), range), 2); // 09-30 + 09-15
+
+  // 1 月的「上个月」要退到去年 12 月
+  const january = core.rangeFor("lastMonth", at(2027, 1, 15, 10, 0));
+  assert.equal(january.from, at(2026, 12, 1, 0, 0));
+  assert.equal(january.to, at(2026, 12, 31, 23, 59) + 59999);
+  assert.equal(january.days, 31);
+
+  // 3 月的「上个月」是 2 月，天数要跟着闰年走
+  const leap = core.rangeFor("lastMonth", at(2024, 3, 10, 10, 0));
+  assert.equal(leap.days, 29); // 2024 是闰年
+  const common = core.rangeFor("lastMonth", at(2025, 3, 10, 10, 0));
+  assert.equal(common.days, 28);
+});
+
+test("rangeFor 的 custom 自动归一成整日，坏输入返回 null 而不是抛", () => {
+  // 给两个「半天」的时间点：from 该落到当天 00:00，to 该升到当天 23:59:59.999
+  const range = core.rangeFor("custom", NOW, { from: at(2026, 10, 1, 15, 30), to: at(2026, 10, 3, 6, 0) });
+  assert.equal(range.preset, "custom");
+  assert.equal(range.from, at(2026, 10, 1, 0, 0));
+  assert.equal(range.to, at(2026, 10, 3, 23, 59) + 59999);
+  assert.equal(range.days, 3);
+  assert.equal(range.label, "自定义");
+
+  // 同一天给两次也至少是 1 天，不会变成 0
+  assert.equal(core.rangeFor("custom", NOW, { from: at(2026, 10, 1, 15, 0), to: at(2026, 10, 1, 16, 0) }).days, 1);
+
+  assert.equal(core.rangeFor("custom", NOW, { from: at(2026, 10, 3, 0, 0), to: at(2026, 10, 1, 0, 0) }), null, "反向区间该是 null");
+  assert.equal(core.rangeFor("custom", NOW, {}), null);
+  assert.equal(core.rangeFor("custom", NOW, { from: "x", to: "y" }), null);
+  assert.equal(core.rangeFor("custom", NOW, null), null);
+  // 天数超过上限时夹住 from，但右端仍然停在结束日
+  const huge = core.rangeFor("custom", NOW, { from: at(2016, 1, 1, 0, 0), to: at(2026, 10, 12, 0, 0) });
+  assert.ok(huge);
+  assert.equal(huge.days, core.MAX_RANGE_DAYS);
+  assert.equal(huge.to, at(2026, 10, 12, 23, 59) + 59999);
+  // 不认识的预设名退回 custom 的语义（拿 custom 参数算），而不是抛
+  assert.equal(core.rangeFor("nope", NOW, { from: at(2026, 10, 1, 0, 0), to: at(2026, 10, 2, 0, 0) }).preset, "custom");
+});
+
+test("rangeFromDays 是 rangeFor 的等价小助手，天数被夹在 1 ~ MAX_RANGE_DAYS", () => {
+  const last7 = core.rangeFromDays(7, NOW);
+  assert.equal(last7.from, core.rangeFor("last7", NOW).from);
+  assert.equal(last7.to, core.rangeFor("last7", NOW).to);
+  assert.equal(core.rangeFromDays(1, NOW).days, 1);
+  assert.equal(core.rangeFromDays(0, NOW).days, 1);
+  assert.equal(core.rangeFromDays(-5, NOW).days, 1);
+  assert.equal(core.rangeFromDays("x", NOW).days, 1);
+  assert.equal(core.rangeFromDays(99999, NOW).days, core.MAX_RANGE_DAYS);
+});
+
+test("seriesInRange 每天都出现、缺的日子补 0、按时间升序", () => {
+  const rows = core.seriesInRange(rangeDatabase(), core.rangeFor("last7", NOW));
+  assert.equal(rows.length, 7);
+  assert.deepEqual(rows.map((row) => row.day), [
+    "2026-10-06",
+    "2026-10-07",
+    "2026-10-08",
+    "2026-10-09",
+    "2026-10-10",
+    "2026-10-11",
+    "2026-10-12"
+  ]);
+  assert.deepEqual(rows.map((row) => row.count), [0, 0, 0, 0, 0, 1, 2]);
+  assert.equal(rows.reduce((sum, row) => sum + row.count, 0), core.totalInRange(rangeDatabase(), core.rangeFor("last7", NOW)));
+});
+
+test("seriesInRange 只认 range.from ~ range.to 之间，两端都含", () => {
+  const database = core.databaseFromVideos(
+    [
+      video({ bvid: "BV1AAAAAAAAA", date: "2026年10月10日00时00分00秒" }),
+      video({ bvid: "BV1BBBBBBBBB", date: "2026年10月11日23时59分59秒" }),
+      video({ bvid: "BV1CCCCCCCCC", date: "2026年10月12日00时00分00秒" })
+    ],
+    { now: NOW }
+  );
+  // 手工造一个 [10-10 00:00, 10-11 23:59:59.999] 的区间：边界上那两条都要算进来
+  const rows = core.seriesInRange(database, {
+    from: at(2026, 10, 10, 0, 0),
+    to: at(2026, 10, 11, 23, 59) + 59999
+  });
+  assert.deepEqual(rows, [
+    { day: "2026-10-10", count: 1 },
+    { day: "2026-10-11", count: 1 }
+  ]);
+  assert.equal(core.totalInRange(database, { from: at(2026, 10, 10, 0, 0), to: at(2026, 10, 11, 23, 59) + 59999 }), 2);
+});
+
+test("collectionBreakdown 按 count 降序、同数按中文名排序、零条的不出现", () => {
+  const breakdown = core.collectionBreakdown(rangeDatabase(), core.rangeFor("thisMonth", NOW));
+  assert.deepEqual(breakdown, [
+    { name: "哆啦a梦", count: 2 },
+    { name: "蜡笔小新", count: 2 },
+    { name: "dds", count: 0 }
+  ].filter((row) => row.count > 0));
+  // 同数（都是 2）时按 zh-CN 排：哆啦a梦 在 蜡笔小新 前面
+  assert.deepEqual(breakdown.map((row) => row.name), ["哆啦a梦", "蜡笔小新"]);
+  assert.ok(!breakdown.some((row) => row.count === 0), "count 为 0 的收藏夹不该出现在饼图里");
+
+  // dds 在这个区间里一条都没有（09-30 / 09-15 都在本月之外）→ 整条不出现
+  assert.ok(!breakdown.some((row) => row.name === "dds"));
+  const wide = core.collectionBreakdown(rangeDatabase(), core.rangeFor("lastMonth", NOW));
+  assert.deepEqual(wide.map((row) => row.name), ["dds"]);
+  assert.equal(wide[0].count, 2);
+
+  // 区间里一条都没有 → 空数组（界面画空饼图，而不是画一堆 0）
+  assert.deepEqual(core.collectionBreakdown(rangeDatabase(), core.rangeFor("custom", NOW, { from: at(2000, 1, 1, 0, 0), to: at(2000, 1, 2, 0, 0) })), []);
+});
+
+test("collectionBreakdown 把缺收藏夹的条目归到「未分类收藏」", () => {
+  const database = core.databaseFromVideos(
+    [video({ bvid: "BV1AAAAAAAAA", collection: "", date: "2026年10月12日10时00分00秒" })],
+    { now: NOW }
+  );
+  const breakdown = core.collectionBreakdown(database, core.rangeFor("today", NOW));
+  assert.deepEqual(breakdown, [{ name: "未分类收藏", count: 1 }]);
+});
+
+test("yearlySeries 按年升序、只列有记录的年份", () => {
+  const rows = core.yearlySeries(rangeDatabase());
+  assert.deepEqual(rows, [
+    { year: 2025, count: 1 },
+    { year: 2026, count: 9 }
+  ]);
+  // 2024 一条都没有 → 那年整年不出现（时间轴上不留空年份）
+  assert.ok(!rows.some((row) => row.year === 2024));
+  for (let i = 1; i < rows.length; i += 1) assert.ok(rows[i].year > rows[i - 1].year);
+});
+
+test("snapshot 带上 dailyRows：覆盖 DAILY_ROWS_DAYS 天、升序、缺天补 0", () => {
+  const snapshot = core.snapshot(rangeDatabase(), NOW);
+  assert.equal(core.DAILY_ROWS_DAYS, 180);
+  assert.equal(snapshot.dailyRows.length, core.DAILY_ROWS_DAYS);
+  assert.equal(snapshot.dailyRows[snapshot.dailyRows.length - 1].day, "2026-10-12"); // 最后一行是今天
+  // 第一行 = 179 天前。用日历构造算这个期望值，不能用 at(2026,10,12) - 179 * DAY：
+  // 在澳大利亚 Lord Howe（UTC+10:30，夏令时只挪半小时）这种地方，
+  // 从午夜减固定毫秒数会掉到前一天，期望值自己就先错了。
+  const firstDay = new Date(at(2026, 10, 12, 0, 0));
+  const expectedFirst = core.localDayKey(
+    new Date(firstDay.getFullYear(), firstDay.getMonth(), firstDay.getDate() - (core.DAILY_ROWS_DAYS - 1)).getTime()
+  );
+  assert.equal(snapshot.dailyRows[0].day, expectedFirst);
+  assert.equal(snapshot.dailyRows[0].day, "2026-04-16"); // 本机是 UTC+8 时的具体值，顺便钉一下
+  for (let i = 1; i < snapshot.dailyRows.length; i += 1) {
+    assert.ok(snapshot.dailyRows[i].day > snapshot.dailyRows[i - 1].day, "dailyRows 必须按天升序");
+  }
+  const todayRow = snapshot.dailyRows[snapshot.dailyRows.length - 1];
+  assert.deepEqual(todayRow, { day: "2026-10-12", count: 2, byCollection: { 哆啦a梦: 1, 蜡笔小新: 1 } });
+  // 明天那条（10-13）在窗口外；窗口外的条目一条都不该混进来
+  assert.ok(!snapshot.dailyRows.some((row) => row.day === "2026-10-13"));
+  // 180 天 × 0 条的那么多天里，抽查两天确认补的是干净的 0
+  const empty = snapshot.dailyRows.find((row) => row.day === "2026-07-01");
+  assert.deepEqual(empty, { day: "2026-07-01", count: 0, byCollection: {} });
+});
+
+test("dailyRows 的 byCollection 只写非零项，且 count 等于各项之和", () => {
+  const snapshot = core.snapshot(rangeDatabase(), NOW);
+  const rows = snapshot.dailyRows.filter((row) => row.count > 0);
+  assert.deepEqual(rows.map((row) => row.day), [
+    "2026-08-05",
+    "2026-09-15",
+    "2026-09-30",
+    "2026-10-01",
+    "2026-10-11",
+    "2026-10-12"
+  ]);
+  for (const row of snapshot.dailyRows) {
+    const parts = Object.values(row.byCollection);
+    assert.equal(parts.reduce((sum, count) => sum + count, 0), row.count, `${row.day} 的分项之和该等于 count`);
+    for (const count of parts) assert.ok(count > 0, `${row.day} 的 byCollection 不该出现 0 值项`);
+  }
+  // 空天的 byCollection 是 {}：界面据此区分「那天 0 条」而不是「那天没算」
+  const emptyRow = snapshot.dailyRows.find((row) => row.day === "2026-07-01");
+  assert.equal(Object.keys(emptyRow.byCollection).length, 0);
+});
+
+test("snapshot 连着 yearly: yearlySeries(database)", () => {
+  const snapshot = core.snapshot(rangeDatabase(), NOW);
+  assert.deepEqual(snapshot.yearly, core.yearlySeries(rangeDatabase()));
+  assert.deepEqual(snapshot.yearly, [
+    { year: 2025, count: 1 },
+    { year: 2026, count: 9 }
+  ]);
+  assert.deepEqual(core.snapshot(core.emptyDatabase(NOW), NOW).yearly, []);
+  assert.equal(core.snapshot(core.emptyDatabase(NOW), NOW).dailyRows.length, core.DAILY_ROWS_DAYS);
+});
+
+test("大库（5000 条 / 20 个收藏夹）的 snapshot 序列化后仍然只有几十 KB", () => {
+  const videos = [];
+  for (let i = 0; i < 5000; i += 1) {
+    // 覆盖 180 天（含窗口外的更早日期），每 5 条换一个收藏夹 → 20 个收藏夹
+    videos.push(
+      video({
+        bvid: `BV1${String(i).padStart(9, "0")}`,
+        collection: `收藏夹${i % 20}`,
+        date: `2026年${String(1 + (i % 9)).padStart(2, "0")}月${String(1 + (i % 28)).padStart(2, "0")}日10时00分00秒`
+      })
+    );
+  }
+  const database = core.databaseFromVideos(videos, { now: NOW });
+  const text = JSON.stringify(core.snapshot(database, NOW));
+  const snapshot = core.snapshot(database, NOW);
+  assert.equal(snapshot.videos, 5000);
+  assert.equal(snapshot.collections, 20);
+  assert.equal(snapshot.dailyRows.length, core.DAILY_ROWS_DAYS);
+  // 这份快照要 JSON 序列化后存进 chrome.storage.local，用户的设备上还有配额。
+  // 80 KB 是「180 天 × 20 个收藏夹只写非零项」应该落在的量级；
+  // 哪天有人图省事把每个收藏夹逐天都写一遍，这里立刻会红。
+  assert.ok(text.length < 80 * 1024, `快照序列化后 ${text.length} 字节，超了 80 KB`);
+  // 大库也要能走通区间 API，不能只是「没抛」
+  assert.equal(core.totalInRange(database, core.rangeFor("last30", NOW)), core.seriesInRange(database, core.rangeFor("last30", NOW)).reduce((sum, row) => sum + row.count, 0));
+});
+
+// 一份「字段缺胳膊少腿」的库：不是 databaseFromVideos 造出来的，专门喂给坏输入用例。
+function weakDatabase() {
+  return { version: 1, videos: {}, pet: {} };
+}
+
+test("区间 API 拿坏输入一律安全，不抛", () => {
+  const useless = [weakDatabase(), null, undefined, "nope", 42, { videos: "不是对象" }, { videos: {} }];
+  for (const database of useless) {
+    // 空库 + 合法区间：柱子仍然要给满（每天 0 条），图表才画得出一条平的基线
+    const series = core.seriesInRange(database, core.rangeFor("today", NOW));
+    assert.equal(series.length, 1);
+    assert.equal(series[0].count, 0);
+    assert.deepEqual(core.collectionBreakdown(database, core.rangeFor("today", NOW)), []);
+    assert.deepEqual(core.yearlySeries(database), []);
+    assert.equal(core.totalInRange(database, core.rangeFor("today", NOW)), 0);
+  }
+  // at 是坏值时不能抛、也不能把条目当「今天」：normalizeEntry 认不出就直接丢掉。
+  const broken = { videos: { "bvid:BV1AAAAAAAAA": { at: "坏时间", collection: "x" } } };
+  assert.equal(core.totalInRange(broken, core.rangeFor("today", NOW)), 0);
+  assert.equal(core.collectionBreakdown(broken, core.rangeFor("today", NOW)).length, 0);
+  assert.deepEqual(core.seriesInRange(broken, core.rangeFor("today", NOW)), [{ day: "2026-10-12", count: 0 }]);
+  // 「at: 2026」是个能认的数字（= 1970-01-01 前后那 2 秒），该落在 1970 那一年附近而不是今年。
+  // 这里不写死年份：UTC+8 是 1970、UTC-5 是 1969，写死就成了只在一个时区成立的断言。
+  const tiny = { videos: { "bvid:BV1AAAAAAAAA": { at: 2026, collection: "x" } } };
+  const tinyYears = core.yearlySeries(tiny);
+  assert.equal(tinyYears.length, 1);
+  assert.equal(tinyYears[0].count, 1);
+  assert.ok(tinyYears[0].year < 1971, `epoch 附近的毫秒不该被算成今年：${tinyYears[0].year}`);
+  assert.equal(core.totalInRange(tiny, core.rangeFor("today", NOW)), 0);
+  // range 本身是坏的：空数组而不是抛
+  const ranges = [
+    null,
+    undefined,
+    {},
+    { from: "x", to: "y" },
+    { from: NaN, to: NaN },
+    { from: at(2026, 10, 3, 0, 0), to: at(2026, 10, 1, 0, 0) }, // 反向
+    { from: Infinity, to: Infinity }
+  ];
+  for (const range of ranges) {
+    assert.deepEqual(core.seriesInRange(rangeDatabase(), range), [], `seriesInRange(${JSON.stringify(range)})`);
+    assert.deepEqual(core.collectionBreakdown(rangeDatabase(), range), [], `collectionBreakdown(${JSON.stringify(range)})`);
+    assert.equal(core.totalInRange(rangeDatabase(), range), 0, `totalInRange(${JSON.stringify(range)})`);
+  }
+  // rangeFor 自己也不能被坏 now 弄崩
+  for (const now of [null, undefined, "x", NaN, {}, new Date("坏日期")]) {
+    const range = core.rangeFor("today", now);
+    assert.ok(range && Number.isFinite(range.from) && Number.isFinite(range.to), "坏 now 也要给得出区间");
+    assert.equal(range.days, 1);
+  }
+  assert.ok(core.rangeFor("lastMonth", new Date("坏日期")).days >= 28, "坏 now 时上个月也该是个整月");
+});
+
+test("缺 day 字段的老库条目照样能进 dailyRows 与区间 API", () => {
+  const database = core.databaseFromVideos([video({ date: "2026年10月12日09时30分00秒" })], { now: NOW });
+  // 模拟老库：只有 at 没有 day
+  for (const entry of Object.values(database.videos)) delete entry.day;
+  const today = core.localDayKey(at(2026, 10, 12, 9, 30));
+  const snapshot = core.snapshot(database, NOW);
+  const row = snapshot.dailyRows.find((item) => item.day === today);
+  assert.equal(row.count, 1);
+  assert.deepEqual(row.byCollection, { 哆啦a梦: 1 });
+  assert.equal(core.totalInRange(database, core.rangeFor("today", NOW)), 1);
+  assert.deepEqual(core.seriesInRange(database, core.rangeFor("today", NOW)), [{ day: today, count: 1 }]);
+});
+
+/* ───────────────────────── 统计口径 ─────────────────────────
+   这几个数字会直接显示给用户看，也算错了最容易发现。 */
 
 test("snapshot 的总数、今日、近 7 天、收藏夹数都对得上", () => {
   const snapshot = core.snapshot(sampleDatabase(), NOW);
@@ -199,7 +569,7 @@ test("snapshot 的总数、今日、近 7 天、收藏夹数都对得上", () =>
   assert.equal(snapshot.updatedAt, NOW);
 });
 
-test("snapshot 的「近期收藏最多的收藏夹」按近 30 天算，并列时取先出现的", () => {
+test("snapshot 的「近期收藏最多的收藏夹」按近 7 天算，并列时取先出现的", () => {
   const snapshot = core.snapshot(sampleDatabase(), NOW);
   assert.ok(snapshot.topCollection);
   assert.equal(snapshot.topCollection.name, "哆啦a梦");
@@ -207,7 +577,7 @@ test("snapshot 的「近期收藏最多的收藏夹」按近 30 天算，并列�
   assert.equal(snapshot.topCollection.count, 3);
 });
 
-test("近 30 天一条都没有时，排行榜退回全时段，不会给 null", () => {
+test("近 7 天一条都没有时，排行榜退回全时段，不会给 null", () => {
   const database = core.databaseFromVideos([video({ date: "2020年01月01日10时00分00秒" })], { now: NOW });
   const snapshot = core.snapshot(database, NOW);
   assert.equal(snapshot.savedLast7, 0);
@@ -266,6 +636,48 @@ test("collectionRows 把缺收藏夹的条目归到「未分类收藏」", () =>
   const rows = core.collectionRows(database, NOW);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].name, "未分类收藏");
+});
+
+test("跨天推进不能靠加固定毫秒数：夏令时那两天也要给出对的日期", () => {
+  // 2026-03-08 与 2026-11-01 是美国夏令时的切换日；这几天在 America/New_York 下
+  // 只有 23 小时 / 有 25 小时。如果实现里写 from + i * 86400000，这里就会缺一天或重一天。
+  // 本机不在那个时区也没关系：这条用例证明的是「日期由日历构造逐日推进」这个实现方式。
+  const database = core.databaseFromVideos(
+    [
+      video({ bvid: "BV1AAAAAAAAA", date: "2026年03月07日10时00分00秒" }),
+      video({ bvid: "BV1BBBBBBBBB", date: "2026年03月08日10时00分00秒" }),
+      video({ bvid: "BV1CCCCCCCCC", date: "2026年03月10日10时00分00秒" })
+    ],
+    { now: NOW }
+  );
+  const range = core.rangeFor("custom", NOW, { from: at(2026, 3, 7, 0, 0), to: at(2026, 3, 10, 0, 0) });
+  assert.equal(range.days, 4);
+  const rows = core.seriesInRange(database, range);
+  assert.deepEqual(rows.map((row) => row.day), ["2026-03-07", "2026-03-08", "2026-03-09", "2026-03-10"]);
+  assert.deepEqual(rows.map((row) => row.count), [1, 1, 0, 1]);
+});
+
+test("跨年与年界那几天：去年最后一天、今年第一天各归各的区间", () => {
+  const database = core.databaseFromVideos(
+    [
+      video({ bvid: "BV1AAAAAAAAA", date: "2026年12月31日23时00分00秒", collection: "跨年" }),
+      video({ bvid: "BV1BBBBBBBBB", date: "2027年01月01日00时30分00秒", collection: "跨年" })
+    ],
+    { now: at(2027, 1, 2, 10, 0) }
+  );
+  assert.deepEqual(core.yearlySeries(database), [
+    { year: 2026, count: 1 },
+    { year: 2027, count: 1 }
+  ]);
+  // 「今天」是 2027-01-02：两条都在昨天或更早，今天该是 0
+  const today = core.rangeFor("today", at(2027, 1, 2, 10, 0));
+  assert.equal(core.totalInRange(database, today), 0);
+  // 昨天（2027-01-01）只算 00:30 那条，23:00 那条属于今天之前
+  assert.equal(core.totalInRange(database, core.rangeFor("yesterday", at(2027, 1, 2, 10, 0))), 1);
+  // 12-31 那条归 2026 年，1-1 那条归 2027 年 —— 区间端点跨年不错位
+  const lastMonth = core.rangeFor("lastMonth", at(2027, 1, 2, 10, 0));
+  assert.equal(core.totalInRange(database, lastMonth), 1);
+  assert.equal(lastMonth.days, 31); // 2026 年 12 月
 });
 
 /* ───────────────────────── 宠物 ───────────────────────── */

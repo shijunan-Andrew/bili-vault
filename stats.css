@@ -198,6 +198,303 @@ body {
   fill: var(--muted);
   font-size: var(--fs-sm);
 }
+/* 被选中的那根：换成品牌深色实心 + 一圈描边。
+   它和「今天」是两件事：空心只表示「这是今天」，选中只看这一次点了谁；
+   两根柱可能同时带上两个类，所以选中这条不写 fill，
+   免得不分先后地跟 .stats-bar-today 抢同一个属性。 */
+.stats-bar-active {
+  stroke: var(--brand-deep);
+  stroke-width: 2;
+}
+
+/* ── 年份时间轴 ──
+   和柱状图同一套画法（都是 .stats-svg），只是矮一点。 */
+.stats-year-chart { min-height: 200px; }
+
+/* ── 时间范围选择器 ──
+   一个按钮 + 一张浮层菜单。菜单绝对定位挂在按钮下面，
+   所以 .stats-range 要有定位上下文，卡片不许 overflow:hidden（会把它裁掉）。 */
+.stats-range {
+  position: relative;
+  margin: 0;
+}
+.stats-picker-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  max-width: 100%;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  background: var(--surface-soft);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.stats-picker-button:hover { border-color: var(--brand-line); background: var(--brand-soft); }
+.stats-picker-button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.stats-picker-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--brand);
+  font-size: var(--fs-md);
+}
+/* 区间标签可能很长（自定义区间带两个日期）：占满剩余宽度、超出省略，别把箭头挤走 */
+.stats-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-picker-caret {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: var(--fs-md);
+}
+.stats-picker-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  left: 0;
+  z-index: 40;
+  min-width: 220px;
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+.stats-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stats-picker-option {
+  display: block;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--ink);
+  background: none;
+  font-family: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.stats-picker-option:hover { background: var(--surface-soft); }
+.stats-picker-option:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.stats-picker-option[aria-selected="true"] {
+  color: var(--brand-deep);
+  background: var(--brand-soft);
+  font-weight: 600;
+}
+
+/* ── 自定义区间日历 ──
+   默认两个月并排（跨月选），所以这里排两列；起止跨得更远时脚本会多铺几个月，
+   多出来的月份自然落到下一行，两列宽度保持不变。
+   日期格子用 grid 排，星期表头与空格子占同样的位。 */
+.stats-calendar {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+/* 月份栏：左右各一个翻页按钮，中间两列是两个月份名 —— 和下面那两列日历对齐。
+   窄窗口下翻页按钮那一列会收窄，但不会消失（按钮是固定 28px 的方块）。 */
+.stats-calendar-head {
+  display: grid;
+  grid-template-columns: auto repeat(2, minmax(0, 1fr)) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+/* 翻页箭头：.stats-calendar-nav 只是个可点的方形按钮，图标跟着文字走。 */
+.stats-calendar-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.stats-calendar-nav:hover { color: var(--brand-deep); border-color: var(--brand-line); }
+.stats-calendar-nav:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* 「上个月」用的是 chevron-right 的图标镜像过来（icons.js 里没有 chevron-left），
+   只翻图标本身，按钮的盒子不动。 */
+.stats-calendar-nav:first-of-type .icon { transform: scaleX(-1); }
+.stats-calendar-month {
+  color: var(--ink);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+.stats-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+  margin-bottom: var(--sp-2);
+}
+.stats-calendar-wd {
+  color: var(--faint);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: center;
+}
+.stats-calendar-blank { display: block; }
+/* 可点的日子：方形按钮，选中/区间内换底换字色。
+   今天加一圈描边（和柱状图里「今天」是同一个意思）。
+   未来的日子 disabled，用 opacity 压下去（.button:disabled 那套不适用于这里）。 */
+.stats-calendar-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  color: var(--ink);
+  background: none;
+  font-family: inherit;
+  font-size: var(--fs-base);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.stats-calendar-day:hover:not(:disabled) { background: var(--surface-soft); }
+.stats-calendar-day:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.stats-calendar-day:disabled { color: var(--ghost); cursor: not-allowed; }
+.stats-calendar-in { background: var(--brand-soft); }
+/* 起止两点：品牌色实心。写在区间底之后，两头的底色才不会被区间盖掉。 */
+.stats-calendar-edge {
+  color: var(--surface);
+  background: var(--brand);
+  font-weight: 600;
+}
+.stats-calendar-edge:hover:not(:disabled) { background: var(--brand-strong); }
+.stats-calendar-today { border-color: var(--brand-line); }
+.stats-calendar-hint {
+  margin: 0 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.stats-calendar-warn {
+  margin: 0 0 var(--sp-2);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+.stats-calendar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.stats-calendar-reset,
+.stats-calendar-apply {
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.stats-calendar-reset { color: var(--muted); background: var(--surface-soft); }
+.stats-calendar-reset:hover { color: var(--ink); border-color: var(--line); }
+.stats-calendar-apply {
+  color: var(--surface);
+  border-color: var(--brand-strong);
+  background: var(--brand-strong);
+}
+.stats-calendar-reset:focus-visible,
+.stats-calendar-apply:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ── 饼图：手写 SVG 扇形 + 图例 ──
+   颜色只从上色类来（.stats-slice-*），脚本只负责几何 —— 和柱状图一个路子。
+   八个色位全取自 theme.css 里现成的成对令牌（每个颜色都有配套的 -strong），
+   深浅两套主题下都会跟着换，不新增任何色值。 */
+.stats-pie {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+.stats-pie-svg {
+  display: block;
+  flex: 0 0 auto;
+  width: 190px;
+  max-width: 100%;
+  height: auto;
+}
+.stats-slice,
+.stats-legend-mark { color: var(--brand); }
+.stats-slice-0, .stats-legend-mark.stats-slice-0 { color: var(--brand); }
+.stats-slice-1, .stats-legend-mark.stats-slice-1 { color: var(--brand-strong); }
+.stats-slice-2, .stats-legend-mark.stats-slice-2 { color: var(--brand-tint); }
+.stats-slice-3, .stats-legend-mark.stats-slice-3 { color: var(--success); }
+.stats-slice-4, .stats-legend-mark.stats-slice-4 { color: var(--warning); }
+.stats-slice-5, .stats-legend-mark.stats-slice-5 { color: var(--danger); }
+.stats-slice-6, .stats-legend-mark.stats-slice-6 { color: var(--accent); }
+.stats-slice-7, .stats-legend-mark.stats-slice-7 { color: var(--feature); }
+/* 超出 6 个收藏夹时合成的那一片：用中性色，一眼看出它不是某个具体收藏夹 */
+.stats-slice-other, .stats-legend-mark.stats-slice-other { color: var(--faint); }
+/* color 给扇形上 fill、给图例小方块上背景，两个属性分开写，互不干扰；
+   扇形之间再留一道底色缝，深浅两套主题下都不会糊成一片。 */
+.stats-slice {
+  fill: currentColor;
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+.stats-legend {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.stats-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--fs-base);
+}
+.stats-legend-mark {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-xs);
+  background: currentColor;
+}
+/* 收藏夹名可能很长：占满剩余宽度、超出省略，右边的条数别被挤走 */
+.stats-legend-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-legend-value {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
 
 /* ── 近期保存最多的收藏夹 ── */
 .stats-top-row {
@@ -277,6 +574,12 @@ body {
   font-size: var(--fs-md);
 }
 .stats-foot .stats-updated-value { color: var(--ink); }
+/* 两行小字各自的盒子（图标由 icons.js 填，尺寸走 theme.css 的 .icon）：
+   图标跟随这一行的浅色，所以只立盒子、不改颜色。 */
+.stats-updated,
+.stats-local { display: flex; }
+.stats-updated-icon,
+.stats-local-icon { display: inline-flex; flex: 0 0 auto; }
 
 /* ── 按钮 ──
    本页不加载 page.css / settings.css（.button 与 .button-quiet 分别在 page.css:106
@@ -338,6 +641,14 @@ html.bca-glass .stats-top-row {
   background: var(--bca-glass-surface);
   border-color: var(--bca-glass-line);
 }
+/* 下拉菜单是浮在卡片上的：卡片透得过去，菜单不行（字会压在照片上）。
+   所以它比卡片更实一点，磨砂也更重一档。 */
+html.bca-glass .stats-picker-menu {
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-color: var(--bca-glass-line);
+  backdrop-filter: blur(calc(var(--bca-glass-blur) + 4px)) saturate(170%);
+  -webkit-backdrop-filter: blur(calc(var(--bca-glass-blur) + 4px)) saturate(170%);
+}
 /* 顶栏比卡片再糊一点：它是粘性的，底下滚过的内容更多（同 theme.css:365 的 .topbar） */
 html.bca-glass .stats-topbar {
   background: color-mix(in srgb, var(--surface) 70%, transparent);
@@ -347,7 +658,8 @@ html.bca-glass .stats-topbar {
 
 /* ── 窄窗口 ──
    1366 的笔记本、半屏贴靠、以及小屏平板都会撞到这里：
-   四列 → 两列 → 一列，副说明在手机上让位给标题和返回按钮。 */
+   四列 → 两列 → 一列，副说明在手机上让位给标题和返回按钮。
+   日历与饼图同理：两个月并排挤不下就改一列，饼图压到图例上面。 */
 @media (max-width: 900px) {
   .stats-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -356,7 +668,31 @@ html.bca-glass .stats-topbar {
   .stats-topbar { padding: var(--sp-2) var(--sp-3); }
   .stats-topbar-lead h1 { font-size: var(--fs-md); }
   .stats-sub { display: none; }
+  /* 日历：两个月并排到手机上每格只剩十几个像素，索性一个月一行 */
+  .stats-calendar-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .stats-calendar-head .stats-calendar-month:last-of-type { display: none; }
+  .stats-pie { justify-content: center; }
+  .stats-legend { flex: 1 1 100%; }
 }
 @media (max-width: 520px) {
   .stats-tiles { grid-template-columns: minmax(0, 1fr); }
+  .stats-picker-menu { min-width: 0; width: 100%; }
+}
+
+/* ── 减少动态效果 ──
+   theme.css 末尾已经用强制覆盖把所有过渡压到 .01ms，这里再按本页自己的需要
+   关一次：本页的过渡只有按钮悬停、柱子换色和日历格子的底色，
+   关掉后悬停照样有结果（换色是瞬时的），只是不再有中间过程。 */
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .stats-picker-button,
+  .stats-picker-option,
+  .stats-calendar-nav,
+  .stats-calendar-day,
+  .stats-calendar-reset,
+  .stats-calendar-apply,
+  .stats-bar {
+    transition: none;
+  }
+  .button:hover:not(:disabled) { transform: none; }
 }

@@ -19,11 +19,15 @@
 
   const STORAGE_KEY = "interfaceTheme";
   // 4.6：内容脚本读的是 chrome.storage.local 里同一个键（见下方 mirrorToStorage）
+  // 只留 id：这四行原来各带一个中文 label，全仓没有任何地方读过它 ——
+  // 设置页那四个按钮的文案是 settings.html 自己写的（带 data-i18n）。
+  // 留在这里的中文既翻不了（locales/ 的词条键是 HTML 里的原文）又是误导，
+  // 让人以为改这里就能改设置页文案。
   const MODES = Object.freeze([
-    { id: "system", label: "跟随系统" },
-    { id: "light", label: "白天" },
-    { id: "dark", label: "夜晚" },
-    { id: "custom", label: "自定义" }
+    { id: "system" },
+    { id: "light" },
+    { id: "dark" },
+    { id: "custom" }
   ]);
   const DEFAULT_MODE = "system";
 
@@ -44,6 +48,8 @@
 
   // 浏览器工具栏取色：<meta name="theme-color"> 只能用字面量，吃不到 CSS 变量，
   // 所以在这里按解析出来的主题同步。
+  // 下面这两个色值是「最后兜底」，真值以 theme.css 的 :root --bg 为准：
+  // 以前这里是同一份字面量的第三个副本，改了 --bg 不会连带。
   const THEME_COLORS = { light: "#f2f5f9", dark: "#0f1216" };
 
   const media = global.matchMedia ? global.matchMedia("(prefers-color-scheme: dark)") : null;
@@ -60,6 +66,20 @@
 
   function systemPrefersDark() {
     return Boolean(media?.matches);
+  }
+
+  // <meta name="theme-color"> 的取值：先读 theme.css 里真正的 --bg（计算值，
+  // 已经按 data-theme 解析过），读不到才用 THEME_COLORS 里的字面量兜底。
+  // 之所以能读：theme.css 的 <link> 在 <script> 之前，此刻样式表已生效；
+  // 之所以要读：改 --bg 时这里不会跟着漂，也不会反过来把字面量写死成第二份真值。
+  // 注意读的是元素上的 --bg 而不是 :root 的 —— 两者在本仓是同一个值，
+  // 但元素上的那份一定是「当前真的在用的」。
+  function themeColor(tone) {
+    try {
+      const value = global.getComputedStyle?.(document.documentElement)?.getPropertyValue("--bg");
+      if (value && value.trim()) return value.trim();
+    } catch (_) {}
+    return THEME_COLORS[tone] || THEME_COLORS.light;
   }
 
   // 「自定义」的底色就是白天：弹窗、提示卡、内容脚本都不铺背景图。
@@ -212,21 +232,29 @@
     if (typeof global.createImageBitmap !== "function") return Promise.resolve(file);
     return global.createImageBitmap(file)
       .then((bitmap) => {
-        const edge = Math.max(bitmap.width, bitmap.height);
-        const scale = edge > MAX_EDGE ? MAX_EDGE / edge : 1;
-        if (scale === 1 && file.size <= BYPASS_BYTES) { bitmap.close?.(); return file; }
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-        const context = canvas.getContext("2d");
-        if (!context) { bitmap.close?.(); return file; }
-        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-        bitmap.close?.();
-        return new Promise((resolve) => {
-          canvas.toBlob((blob) => resolve(blob || file), "image/webp", 0.92);
-        });
-      })
-      .catch(() => file);
+        // 从这里开始到 toBlob 走完，bitmap 由本函数负责释放（每一条出口都要 close）：
+        // 解码出来的是原始像素，一张 5000 万像素的图占着内存不放，多试两次就卡机器。
+        try {
+          const edge = Math.max(bitmap.width, bitmap.height);
+          const scale = edge > MAX_EDGE ? MAX_EDGE / edge : 1;
+          if (scale === 1 && file.size <= BYPASS_BYTES) { bitmap.close?.(); return file; }
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+          const context = canvas.getContext("2d");
+          if (!context) { bitmap.close?.(); return file; }
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close?.();
+          return new Promise((resolve) => {
+            canvas.toBlob((blob) => resolve(blob || file), "image/webp", 0.92);
+          });
+        } catch (error) {
+          // 原来这里是「.catch(() => file)」——canvas 分配失败 / drawImage 抛错时
+          // 上面三次 close 全被跳过，bitmap 就这么漏了。统一在这里收口。
+          bitmap.close?.();
+          return file;
+        }
+      });
   }
 
   // V1.4.1：背景图存在 IndexedDB 的 Blob 里，localStorage 那条同步通道看不见它 ——
@@ -259,7 +287,7 @@
     else root.setAttribute("data-theme", resolved());
     root.dataset.themeResolved = resolved();
     const meta = document.querySelector?.('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", THEME_COLORS[resolved()] || THEME_COLORS.light);
+    if (meta) meta.setAttribute("content", themeColor(resolved()));
     paintAppearance();
   }
 
@@ -330,13 +358,16 @@
         writeLocal(value);
       }).catch(() => {});
     }
-    const localAppearance = readAppearanceLocal();
     const storedAppearance = readFromStorage(APPEARANCE_KEY);
     if (storedAppearance) {
       storedAppearance.then((raw) => {
         if (!raw) return;
-        if (localAppearance) {
-          if (JSON.stringify(localAppearance) !== raw) mirrorToStorage(APPEARANCE_KEY, JSON.stringify(localAppearance));
+        // 等待期间别的扩展页面可能刚写过 localStorage，所以这里重新读一次
+        // （主题那一支一直是这么做的，外观这一支原来在 361 行提前取好值，
+        //  结果 367 行会拿**旧值**去 mirrorToStorage，把用户刚改的覆盖掉）。
+        const local = readAppearanceLocal();
+        if (local) {
+          if (JSON.stringify(local) !== raw) mirrorToStorage(APPEARANCE_KEY, JSON.stringify(local));
           return;
         }
         let parsed = null;
@@ -364,7 +395,15 @@
   }
 
   // 同步生效：head 里调用时立刻把 data-theme 挂好
+  // 句柄存在模块作用域：boot() 只该跑一次，但真被调第二次时得能把上一次挂的
+  // 监听摘掉，否则同一次系统换肤会被 paint 好几遍。
+  let booted = false;
+  let mediaChangeHandler = null;
+  let storageHandler = null;
+
   function boot() {
+    if (booted) return;
+    booted = true;
     appearance = normalizeAppearance(readAppearanceLocal());
     use(readStored(), { silent: true });
     // 首帧已经画完，这里再和 chrome.storage 对一次账（异步，不挡渲染）
@@ -373,24 +412,45 @@
     const startWallpaper = () => { if (mode === "custom") loadWallpaper(); };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startWallpaper);
     else startWallpaper();
-    if (media?.addEventListener) media.addEventListener("change", () => { if (mode === "system") paint(); });
+    if (media?.addEventListener) {
+      media.removeEventListener?.("change", mediaChangeHandler);
+      mediaChangeHandler = () => { if (mode === "system") paint(); };
+      media.addEventListener("change", mediaChangeHandler);
+    }
     // 同源的其它扩展页面改了主题时跟着变（localStorage 的 storage 事件只在
     // 「别的」文档里触发，所以这里不会自我循环）
-    global.addEventListener?.("storage", (event) => {
-      if (event.key === APPEARANCE_KEY) {
-        appearance = normalizeAppearance(readAppearanceLocal());
-        paintAppearance();
-        notifyAppearance();
-        if (mode === "custom") loadWallpaper();
-        return;
-      }
-      if (event.key && event.key !== STORAGE_KEY) return;
-      use(readStored(), { silent: true });
-      if (mode === "custom") loadWallpaper();
-    });
+    storageHandler = (event) => {
+      try {
+        if (event.key === APPEARANCE_KEY) {
+          const next = readAppearanceLocal();
+          // 键被清掉（storage 被清空）时不拿默认值盖掉正在用的外观；
+          // 真读到值才重画。原来这里是无条件 normalizeAppearance(null) → 默认外观。
+          if (!next) return;
+          const wasCustom = mode === "custom";
+          appearance = next;
+          paintAppearance();
+          notifyAppearance();
+          // 这里**不**读 IndexedDB。外观 JSON 里没有图片（图是另一个 Blob），
+          // 设置页的三个滑杆是 input 事件逐帧写 -> 跨文档 storage 事件，
+          // 在这儿 loadWallpaper 就是「拖一下滑杆，别的页面每帧建一次 objectURL」。
+          // 换图另有 WALLPAPER_REVISION_KEY 通道（见下面 onChanged），这里只负责重画。
+          // 唯一的例外：外观顺手把主题切成自定义时，背景图得补上（只有这一帧会走）。
+          if (mode === "custom" && !wasCustom) loadWallpaper();
+          return;
+        }
+        if (event.key && event.key !== STORAGE_KEY) return;
+        const previous = mode;
+        use(readStored(), { silent: true });
+        // 同理：只有「刚变成自定义」这一帧才需要重新读图。
+        if (mode === "custom" && previous !== "custom") loadWallpaper();
+      } catch (_) {}
+    };
+    global.removeEventListener?.("storage", storageHandler);
+    global.addEventListener?.("storage", storageHandler);
     // V1.4.1：背景图的跨页同步。setAppearance 走 localStorage 就能通知到别的页面，
     // 但图片本体在 IndexedDB 里 —— 存图 / 删图时写一个时间戳到 chrome.storage，
     // 别的页面（正在开着的收藏库）收到就重新读一次，不用用户手动刷新。
+    // 滑杆那一侧不走这条路：外观 JSON 变了不等于图变了。
     try {
       global.chrome?.storage?.onChanged?.addListener((changes, areaName) => {
         if (areaName !== "local" || !changes[WALLPAPER_REVISION_KEY]) return;

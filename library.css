@@ -650,18 +650,40 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 .video-grid.list-view .card-meta { flex-direction: column; align-items: flex-end; gap: 2px; margin-top: 0; white-space: nowrap; }
 
 .video-card {
+  /* 1.4.1：卡片投影走变量，其中 --bca-card-state-shadow 只在毛玻璃下被改写
+     （默认值 none 在 theme.css 的令牌块里）。
+     开毛玻璃后卡片是半透明的，悬停/多选的投影如果只换 box-shadow，
+     会被 theme.css:383 那条玻璃边缘高光（四段 inset，(0,2,1)）盖掉 ——
+     所以毛玻璃下让状态阴影叠加在玻璃高光之上，而不是替掉它。 */
+  --bca-card-shadow: var(--shadow-sm);
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--bca-card-shadow);
   cursor: pointer;
   transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .video-card:hover { transform: translateY(-3px); border-color: var(--brand-line); box-shadow: var(--shadow-md); }
 .video-card.invalid-video { border-color: var(--danger-line); }
 .video-card.selected { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-ring); }
+/* 下面三条是**同一个状态视觉的第二份声明**，专门给「开了毛玻璃」用。
+   为什么要重写一遍：theme.css:361 的玻璃底色 `border-color: var(--bca-glass-line)`
+   特异性是 (0,2,1)，而上面那三条状态规则只有 (0,2,0) —— 跨文件比特异性，
+   跟谁先加载无关，玻璃那一级永远赢。所以悬停蓝边、失效红边、多选蓝框
+   在毛玻璃下全部消失。把这三条抬到同样的 (0,2,1)（`html` 出一个元素 + `:is()` 里
+   再出一个类）且写在 theme.css **之后**加载的本文件里，状态就能盖回去。
+   取值逐字照抄上面的原规则，设计不变；没开毛玻璃时这三条不命中。 */
+html:not([data-wallpaper-scope="popup"]) .video-card:hover {
+  border-color: var(--brand-line);
+  --bca-card-state-shadow: var(--shadow-md);
+}
+html:not([data-wallpaper-scope="popup"]) .video-card.invalid-video { border-color: var(--danger-line); }
+html:not([data-wallpaper-scope="popup"]) .video-card.selected {
+  border-color: var(--brand);
+  --bca-card-state-shadow: 0 0 0 2px var(--brand-ring);
+}
 
 .card-cover { position: relative; overflow: hidden; aspect-ratio: 16 / 9; background: linear-gradient(135deg, var(--surface-sunken), var(--surface-sunken)); }
 .card-cover img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform var(--dur-slow) var(--ease); }

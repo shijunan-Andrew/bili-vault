@@ -110,7 +110,9 @@
             <p class="setting-row-desc" data-i18n="选一张本地图片铺在页面背后，图片只存在这台机器上。">选一张本地图片铺在页面背后，图片只存在这台机器上。</p>
           </div>
           <div class="setting-row-control">
-            <input type="file" id="wallpaperFile" class="hidden-file-input" accept="image/*" data-i18n-aria="选择背景图片" aria-label="选择背景图片">
+            <!-- tabindex="-1"：这个原生控件是不可见的替身，点它由下面的按钮转发（settings.js），
+                 留着它会多出一个「看不见也没焦点提示」的 Tab 停靠点。 -->
+            <input type="file" id="wallpaperFile" class="hidden-file-input" accept="image/*" tabindex="-1" data-i18n-aria="选择背景图片" aria-label="选择背景图片">
             <button id="wallpaperChoose" class="button button-quiet" type="button" data-i18n="选择背景图片">选择背景图片</button>
             <button id="wallpaperRemove" class="button button-quiet button-warn" type="button" data-i18n="移除背景图片">移除背景图片</button>
           </div>

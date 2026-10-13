@@ -76,6 +76,36 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.6.0：上线前审查的修复批次与统计口径
+
+用户下的口径是「距离正式上线已经很近了，再仔细审查一下整个项目」+「审查完先发我审阅，我指示后你再改」。四份只读审查（宠物 / 外观 / 核心 / 怀旧页）产出 `bili-vault-1.6.0-审查清单.md`，用户圈了第一批 + 第二批后开工。
+
+### 修掉的（按文件）
+
+- **`library.js`**：删除路径里的裸标识符（漏 `BcaArchiveCore.` 前缀，删收藏夹+勾选清下载时必抛）；空库不再跳过落盘；数据库改写走 `writeFileAtomically`（临时文件 → `removeEntry` → `move`，`move` 不可用退回就地写）。
+- **`background.js`**：两处裸 `fetch` 改为 `biliImportApiGet`（view 15s / tag 10s）；硬编码并发 3 → `IMPORT_DETAIL_CONCURRENCY`；`importPending` 自愈（`settlePending` 只在「这一轮仍是队尾」时清账）；坏库留档 `database.bad.json`。
+- **`theme.js` / `theme.css` / `library.css`**：`guide.html` / `tutorial.html` 补引 `theme.js`（并给两页 `<html>` 加 `data-wallpaper-scope="popup"`，否则纸面规则会突然生效）；毛玻璃用新令牌槽 `--bca-card-state-shadow` 让位，卡片状态改写同特异性选择器；外观变化不再无条件重载背景图；`teardown()` + bitmap 出口回收 + storage 全部套 try。
+- **`pet.js` / `settings.*` / `stats.*`**：设置页开关改成整份合并写（`set({ interfacePet: next })`）；宠物气泡四句数据源换 `firstSeen` / `totals`。
+- **`pack.ps1`**：排除 `bili-old-2015` 与 `_ref`（发行包 672 文件 / 39 MB → **42 文件 / 500 KB**）。
+- **`test/stability.test.cjs`**：`stripComments` 由正则改为逐字符状态机（之前字符串里的 `/*` 与 `*/` 会把 `background.js` 九行整段吃掉，剥离后的断言对该区域全部失明）；页面清单扩到覆盖 `pet.css` / `stats.css` / `theme.js` / `pet.js` / `stats.js`；`[hidden]` 守卫收紧为只认独立成条的全局重定义；裸 `fetch` 白名单收成 `["biliImportApiGet", "loadCoverPng"]`；把「宠物开关要落盘」那条断言从钉死旧写法（等于测试在保护 bug）改成断言整份合并写 + 反向断言旧写法不许回来。
+
+### 统计口径三条铁律
+
+1. **时间轴只有「视频收藏时间」** —— 写入时从 `视频信息.txt` 解析，解析不出不猜；**不许**退回导入时间。
+2. **陪伴天数 = 插件首次启用**（`database.firstSeenAt`），不是最早一条收藏。
+3. **累计 = 单调计数器**（`database.totals.savedTotal`，每次成功写盘 +1，`Math.max` 只增不减）—— 因为数据库是「从收藏库扫描整份重建」，任何从明细派生的「累计」都只是「当前」。
+
+### stats-core.js API 速查（1.6.0）
+
+`rangeFor(preset, now, custom)` → `{preset, from, to, days, label}`（本地日边界、两端含；custom 夹 ≤730 天）；`seriesInRange` / `totalInRange` / `collectionBreakdown` / `yearlySeries`；`snapshot()` 里 `dailyRows`（最近 180 天，`{day, count, byCollection}`，缺天补 0）+ `yearly` + `firstSeen` + `totals`。日历推进必须用日历构造，不能用 `now - N*86400000`（半小时偏移时区会漂）。
+
+### 教训
+
+- **测试也会保护 bug**：断言写的是「源码里有这句」时，它同时锁死了错误的实现。改行为时优先改成正向语义断言 + 反向断言。
+- **发行包排除名单要跟着目录长**：新增一个大目录而不更新 `pack.ps1`，发行包会悄悄胖 78 倍。
+- **样式被压掉往往不是顺序问题而是特异性**：`:is(...)` 会把权重抬到 (0,2,1)，靠源码顺序取胜全线落败。
+- **一句话门槛**：`test/i18n-extract.cjs` 在没有词典文件时 exit 0，而 `release.ps1` 只看输出里有没有「缺 N」—— 两边一起才能构成门禁。
+
 ## 1.5.9：彩蛋页换成作者复刻的那一份
 
 - 入口：`library.js` 里 `#retroEntry` 的点击 → `chrome.tabs.create({ url: chrome.runtime.getURL("bili-old-2015/index.html") })`。开在新标签是为了不盖掉用户当前的收藏库，与设置齿轮同一做法；扩展自有页面**不需要 web_accessible_resources**。
@@ -737,7 +767,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:195 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:196 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
