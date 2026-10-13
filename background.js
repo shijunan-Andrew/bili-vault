@@ -104,6 +104,60 @@ async function updateActionIcon(enabled) {
   await chrome.action.setIcon({ imageData });
 }
 
+/* ---------- 活动角标（4.9.x） ----------
+   导入 / 更新、对比差异、更新视频状态这类要跑几分钟的批量活动结束时，在图标右下角点一个
+   角标，用户切走了页面也能一眼看到"跑完了、成了还是砸了"。口径：
+
+   1. 亮：活动**结束**时亮，成功与失败都亮 —— 成功绿、失败红（失败含被取消、风控中止、
+      以及"跑完了但有条目失败"）；
+   2. 灭：用户打开弹窗（说明结果已经看到）时灭，下一次活动开始时也灭（不留上一轮的结果）；
+   3. 角标与图标是两件事：chrome.action 的 setIcon 与 setBadge* 互不影响，改角标的代码
+      一行都不许碰 updateActionIcon，反之亦然（自动归档开关只走 setIcon 那条路）。
+
+   文字最多 4 个字符：成功用「✓」（与参考图一致，Windows 上由 Segoe UI 回退链渲染），
+   失败用「!」。万一某台机器把「✓」渲染成豆腐块，只需把 BADGE_SUCCESS_TEXT 改成 "1"，
+   别处不用动。文字与底色永远成对写，而且方向相反：亮的时候先写底色再写文字（免得"旧底色 +
+   新文字"——绿底上顶个「!」看着像成功）；灭的时候先清文字再复位底色（免得"新底色 + 旧文字"）。
+   两个方向的中转帧看上去都还是旧的那一副，不会闪出第三种状态。 */
+const BADGE_SUCCESS_TEXT = "✓";
+const BADGE_FAILURE_TEXT = "!";
+const BADGE_SUCCESS_COLOR = "#2e9e5b";
+const BADGE_FAILURE_COLOR = "#c0392b";
+// 全透明：清空时连底色一起复位，不会残留"没文字但有底色"的半截状态
+const BADGE_CLEAR_COLOR = [0, 0, 0, 0];
+
+// 角标绝不能反过来影响活动本身：这里的每一次调用都吞掉异常（setBadge* 在旧内核上
+// 可能直接抛，或返回 rejected promise），调用方在导入的收尾路径上，不能因为它炸掉。
+function paintActivityBadge(success) {
+  try {
+    const action = chrome.action;
+    if (!action) return;
+    Promise.resolve(action.setBadgeBackgroundColor({ color: success ? BADGE_SUCCESS_COLOR : BADGE_FAILURE_COLOR })).catch(() => {});
+    Promise.resolve(action.setBadgeText({ text: success ? BADGE_SUCCESS_TEXT : BADGE_FAILURE_TEXT })).catch(() => {});
+  } catch (_) {}
+}
+
+function clearActivityBadge() {
+  try {
+    const action = chrome.action;
+    if (!action) return;
+    Promise.resolve(action.setBadgeText({ text: "" })).catch(() => {});
+    Promise.resolve(action.setBadgeBackgroundColor({ color: BADGE_CLEAR_COLOR })).catch(() => {});
+  } catch (_) {}
+}
+
+// 活动开始：先灭掉上一轮的结果。必须在任何 await 之前调用，否则上一轮的颜色会挂到新一轮跑起来之后
+function markActivityStarted() {
+  clearActivityBadge();
+}
+
+// 活动结束：result.ok === false（失败 / 取消 / 风控中止）或有个别条目失败 → 红，其余 → 绿。
+// 传 null（catch 分支）也是红。判据只看结果对象，不猜活动类型。
+function markActivityFinished(result) {
+  const success = Boolean(result) && result.ok !== false && !(Number(result.failed) > 0);
+  paintActivityBadge(success);
+}
+
 async function initializeActionIcon() {
   const settings = await chrome.storage.local.get("enabled");
   const enabled = settings.enabled !== false;
@@ -1578,7 +1632,23 @@ async function refreshOneArchiveStatus(root, target, tabId) {
   return "updated";
 }
 
+/* 4.9.x 角标：与导入同样收口在一层薄包装里。inner 的收尾有四条 ——
+     ① 没设本地文件夹 → throw　② 授权失效 → throw　③ 没有要更新的记录 → throw
+     ④ 跑完 → return ok:true（failed 是"其中多少条没更成"）
+   再加上写错误报告那一句自己抛错、连 return 都走不到的情况，全部由包装层兜住。 */
 async function refreshVideoStatus(data, tabId = null) {
+  markActivityStarted();
+  try {
+    const result = await refreshVideoStatusInner(data, tabId);
+    markActivityFinished(result);
+    return result;
+  } catch (error) {
+    markActivityFinished(null);
+    throw error;
+  }
+}
+
+async function refreshVideoStatusInner(data, tabId = null) {
   const root = await getRootHandle();
   if (!root) throw new Error("尚未设置本地备份文件夹，请先在插件中选择本地备份文件夹。");
   await ensureWritePermission(root);
@@ -2647,7 +2717,31 @@ function sendImportProgress(text) {
   chrome.runtime.sendMessage({ type: "bca-import-progress", text }, () => { void chrome.runtime.lastError; });
 }
 
+/* 4.9.x 角标：importBiliFavoritesInner 的收尾路径有六条 ——
+     ① claimImportRun 拿不到占位（重入）→ throw
+     ② 取根目录 / 查授权 / 查勾选失败 → throw
+     ③ 主流程里任意一个 throw（被 3043 那段 catch 原样抛出）
+     ④ 取消（ImportCancelled）→ return ok:false + cancelled
+     ⑤ 风控中止（ImportRateLimited）→ return ok:false + rateLimited
+     ⑥ 正常完成 → return ok:true
+   逐条挂角标的话，将来任何一条新加的 return / throw 都会漏掉 —— 包括"收尾阶段自己炸了"
+   （回滚、写报告、storage.set 抛错）这种连 return 都走不到的路径。所以这里用一层薄包装
+   把"开始 / 结束"各收在一处：不管 inner 走哪条路出去，角标都跟着。inner 的行为一个字没改。
+   注意：只有包装层碰角标，importBiliFavoritesInOrder 里那句出队调用与出队逻辑原样保留
+   （测试会逐字比对那两行，所以那边一个字都不能动）。 */
 async function importBiliFavorites(data, tabId = null) {
+  markActivityStarted();
+  try {
+    const result = await importBiliFavoritesInner(data, tabId);
+    markActivityFinished(result);
+    return result;
+  } catch (error) {
+    markActivityFinished(null);
+    throw error;
+  }
+}
+
+async function importBiliFavoritesInner(data, tabId = null) {
   const selectedIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
   // 报告里必须写明**产生它的插件版本**。
   // 排查一个"改了却没生效"的问题时，最耗时的就是分不清"代码不对"和"跑的还是旧代码" ——
@@ -3573,11 +3667,17 @@ async function resolveDiffUid(uid, tabId) {
 }
 
 async function diffBiliFavorites(data, tabId = null) {
+  // 对比差异的收尾只有两条：inner 正常返回 = 成功（有几处差异不代表失败，那正是这次要的结果），
+  // inner 抛错 = 失败（UID 没记过、没设本地文件夹、读列表失败都从这里出去）
+  markActivityStarted();
   publishDiffState({ running: true, text: BcaI18n.t("正在读取 B 站收藏夹列表…"), summary: null, at: Date.now() });
   try {
-    return await diffBiliFavoritesInner(data, tabId);
+    const result = await diffBiliFavoritesInner(data, tabId);
+    markActivityFinished(result);
+    return result;
   } catch (error) {
     publishDiffState({ running: false, text: "", at: Date.now(), summary: null });
+    markActivityFinished(null);
     throw error;
   }
 }
@@ -3826,6 +3926,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!pendingFavorite) return sendResponse({ ok: false, message: "没有可补存的视频，请回到 B 站重新收藏一次。" });
       return runInSaveQueueWithDeadline(saveFavoriteInOrder(pendingFavorite), "补存视频").then(sendResponse);
     }).catch((error) => sendResponse({ ok: false, message: error.message || "读取待补存视频失败。" }));
+    return true;
+  }
+  if (message?.type === "bca-badge-clear") {
+    // 用户打开了弹窗 = 结果已经摆在他眼前，角标退休（文字与底色一起复位，不留半截状态）。
+    // 由插件页发消息、后台来写：角标状态和图标状态都只有后台一个写入口，语义不会分叉。
+    // 同步应答，不让弹窗为了一个角标去等异步收尾。
+    clearActivityBadge();
+    sendResponse({ ok: true });
     return true;
   }
   if (message?.type === "get-status") {

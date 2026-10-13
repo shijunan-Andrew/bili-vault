@@ -976,6 +976,9 @@ async function applyLocale(locale) {
 }
 
 async function boot() {
+  // 打开弹窗就把角标灭掉（连底色一起复位）—— 结果已经摆在他眼前，这条提醒就完成使命了。
+  // 由后台统一写角标（那里是唯一写入口），这里不等应答；连同步抛错也不许挡住下面的初始化。
+  try { chrome.runtime.sendMessage({ type: "bca-badge-clear" }).catch(() => {}); } catch (_) {}
   // 第一次渲染之前初始化，避免先闪一下中文
   await BcaI18n.init();
   // 主题已经在 head 里由 theme.js 定好（弹窗不再提供主题切换，外观统一在设置页改）；

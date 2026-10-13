@@ -48,6 +48,10 @@ const importRunningNotice = document.getElementById("importRunningNotice");
 const importRunningText = document.getElementById("importRunningText");
 const scanProgress = document.getElementById("scanProgress");
 const videoPager = document.getElementById("videoPager");
+// 彩蛋入口（分页器下方那一行小字）。外面那层 <p> 负责居中与留白，
+// 事件挂在按钮上，切语言时 i18n.apply() 只会改写 textContent，不会重建这个节点。
+const retroEntryWrap = document.getElementById("retroEntryWrap");
+const retroEntryButton = document.getElementById("retroEntry");
 const viewGridButton = document.getElementById("viewGrid");
 const viewListButton = document.getElementById("viewList");
 
@@ -3341,6 +3345,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   refreshScanNotice();
   welcome.hidden = true;
   library.hidden = false;
+  // 彩蛋入口跟着内容一起出现，收在分页器下方（目录还没读进来时不必露出来）
+  if (retroEntryWrap) retroEntryWrap.hidden = false;
   renderCollections();
   // 数据源变了：先按新数据重建 UP 主/标签选项池，再渲染列表（顺序与原来 renderVideos 内部一致）
   refreshVideoFilterOptions();
@@ -3844,6 +3850,14 @@ window.addEventListener("resize", () => {
 settingsFab.addEventListener("click", () => {
   // 扩展页面可以直接被扩展自己打开，不需要 web_accessible_resources
   chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
+});
+
+/* ---------------- 彩蛋：分页器下方那一行小字 → retro.html ---------------- */
+// 开在新标签里，跟旁边的设置齿轮一致：收藏库这边正开着某个收藏夹、可能翻到
+// 第 N 页，彩蛋页盖掉当前页会让人找不回来。扩展页面之间互相打开走
+// chrome.tabs.create 即可，同样不需要 web_accessible_resources。
+retroEntryButton?.addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("retro.html") });
 });
 
 // V1.4.1：齿轮上方那个「回到顶部」。收藏库是整页跟着窗口滚的（顶栏是 sticky，

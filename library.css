@@ -841,6 +841,30 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 }
 .pager-size select:focus-visible { border-color: var(--brand); }
 
+/* ---------- 彩蛋入口（分页器下方那一行小字，4.8） ----------
+   位置跟在 .pager 之后、内容区最底部，居中；做成一行小字而不是按钮，
+   免得抢了分页器的注意力。默认藏起来由 library.js 在目录读进来之后放出来。 */
+.retro-entry-wrap {
+  margin: var(--sp-5) 0 0;
+  text-align: center;
+}
+
+.retro-entry {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  background: none;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  letter-spacing: .3px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.retro-entry:hover { color: var(--brand-deep); background: var(--brand-soft); }
+.retro-entry:focus-visible { color: var(--brand-deep); }
+
 /* ---------- 详情面板 ---------- */
 .detail-backdrop { position: fixed; inset: 0; z-index: 5; background: #10182873; }
 .detail-panel {

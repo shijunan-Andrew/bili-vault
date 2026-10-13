@@ -192,6 +192,14 @@
           <p>试试其他标题、UP 主名称或 BV 号。</p>
           <button id="clearSearch" class="button button-quiet" data-i18n="清除搜索">清除搜索</button>
         </div>
+
+        <!-- 彩蛋入口：分页器下方、内容最底部居中那一行小字，点开怀旧首页（retro.html）。
+             刻意排在 #videoPager 之外、也不放进分页器里 —— 它跟翻页没关系。
+             文案与 data-i18n 必须逐字一致（test/i18n-extract 的 796 条里目前还没有它，
+             两个词典补上之前 i18n-extract --check 会报这一条缺失，这是预期的）。 -->
+        <p id="retroEntryWrap" class="retro-entry-wrap" hidden>
+          <button id="retroEntry" class="retro-entry" type="button" data-i18n="哔哩哔哩-(゜-゜)つロ 乾杯~">哔哩哔哩-(゜-゜)つロ 乾杯~</button>
+        </p>
       </section>
     </main>
   </div>
