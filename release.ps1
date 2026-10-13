@@ -195,7 +195,9 @@ Say "`n【4/6】跑检查" $C_DIM
 $failed = $false
 
 Say "  语法检查…" $C_DIM
-$jsFiles = @(Get-ChildItem -Recurse -File -Include *.js, *.cjs | Where-Object { $_.FullName -notlike '*\.git\*' })
+# _ref 下的 *.pretty.js 是互联网档案馆导出的 pretty-print JSON 转储（整份文件以一个 { 开头），
+# 不是可执行脚本，node --check 必然报错；它们只作对照资料，不参与扩展运行。
+$jsFiles = @(Get-ChildItem -Recurse -File -Include *.js, *.cjs | Where-Object { $_.FullName -notlike '*\.git\*' -and $_.FullName -notlike '*\_ref\*' })
 foreach ($f in $jsFiles) {
   Invoke-Native $Node @('--check', $f.FullName) | Out-Null
   if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] $($f.Name) 语法错误" $C_RED; $failed = $true }
