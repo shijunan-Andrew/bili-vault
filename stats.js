@@ -44,8 +44,10 @@
   /* 每个横轴日期至少占这么宽（「10-14」这种短标签），窄窗口自动再稀一档 */
   const CHART_LABEL_MIN_GAP = 34;
   const RESIZE_DELAY = 160;
-  /* 自定义区间最长一年：日历只铺得下一年，超了就明说，不偷偷截断 */
-  const MAX_CUSTOM_DAYS = 400;
+  /* 自定义区间最长一年（和 stats-core.js 的 MAX_RANGE_DAYS 对齐）。
+     以前这里是 400 天，比核心的 730 天紧 —— 结果「半年以上按月份聚合」
+     那档从界面上根本选不出来。 */
+  const MAX_CUSTOM_DAYS = 730;
   /* 扇形最多单独上色几块，剩下的并成「其他」 —— 图例太长反而看不清 */
   const PIE_MAX_SLICES = 6;
   const DAY_MS = 86400000;
@@ -84,8 +86,10 @@
     calGridA: document.getElementById("statsCalGridA"),
     calGridB: document.getElementById("statsCalGridB"),
     calWarn: document.getElementById("statsCalendarWarn"),
+    calPicked: document.getElementById("statsCalendarPicked"),
     calApply: document.getElementById("statsCalApply"),
     calReset: document.getElementById("statsCalReset"),
+    calToday: document.getElementById("statsCalToday"),
     chart: document.getElementById("statsChart"),
     chartLead: document.getElementById("statsChartLead"),
     chartNote: document.getElementById("statsChartNote"),
@@ -98,6 +102,8 @@
     yearChart: document.getElementById("statsYearChart"),
     yearLead: document.getElementById("statsYearLead"),
     yearNote: document.getElementById("statsYearNote"),
+    yearPie: document.getElementById("statsYearPie"),
+    yearPieLegend: document.getElementById("statsYearPieLegend"),
     topLead: document.getElementById("statsTopLead"),
     topName: document.getElementById("statsTopName"),
     topCount: document.getElementById("statsTopCount"),
@@ -117,8 +123,9 @@
   let periods = [];      // 每个预置区间的计算结果（下拉与文案都读它）
   let currentRange = null;   // 当前生效的区间
 
-  /* 选择器与日历的界面状态 */
-  const picker = { open: false, mode: "preset", view: null, draftFrom: "", draftTo: "" };
+  /* 选择器与日历的界面状态。paged = 用户按过「上月 / 下月」，
+     按过之后就不再让视图自己跟着锚点跑（手动翻页优先）。 */
+  const picker = { open: false, mode: "preset", view: null, draftFrom: "", draftTo: "", paged: false };
   let preset = "last7";                 // 当前预置；选过自定义就留在 custom
   const custom = { from: "", to: "" };  // 生效的自定义起止（YYYY-MM-DD）
 
@@ -126,6 +133,7 @@
 
   function setText(element, text) {
     if (element) element.textContent = text;
+    return element;
   }
 
   function show(element, visible) {
@@ -335,9 +343,15 @@
 
   /* 当前该用哪一段。now 由调用方给，保证同一次渲染里「今天」是同一个瞬间。 */
   function computeRangeFor(presetName, now, customIn) {
+    /* 自定义区间一定要把日键换算成毫秒再交给对端：对端（旧版 stats-core）只认数字边界，
+       直接把 "2026-03-28" 递过去会被判成坏区间 → 退成「近 7 天」，
+       表现出来就是「点了确定，图还是上一次那 7 根柱子」。 */
+    const customArg = (presetName === "custom" && customIn && typeof customIn === "object")
+      ? { from: dayStartTime(customIn.from), to: dayEndTime(customIn.to) }
+      : customIn;
     if (core && typeof core.rangeFor === "function") {
       try {
-        return normalizeRange(core.rangeFor(presetName, now, customIn), presetName, now, customIn);
+        return normalizeRange(core.rangeFor(presetName, now, customArg), presetName, now, customIn);
       } catch (_) { /* 对端实现抛错就整体走兜底 */ }
     }
     return fallbackRange(presetName, now, customIn);
@@ -537,12 +551,17 @@
     const height = config.height || CHART_HEIGHT;
     const labelMode = config.labelMode || "dates";
 
+    /* 按周 / 按月聚合时坐标轴标签又长又少，边距得单独放宽一点 */
+    const pad = config.pad || CHART_PAD;
+    const dateKey = typeof config.dateKey === "function" ? config.dateKey : (row) => String(row.day);
+    const semantic = Boolean(config.semantic);
+
     const measured = Math.round(host.clientWidth || 0);
     const width = measured > 0 ? Math.max(CHART_MIN_WIDTH, measured) : (lastChartWidth || CHART_MIN_WIDTH);
     lastChartWidth = width;
-    const plotWidth = Math.max(1, width - CHART_PAD.left - CHART_PAD.right);
-    const plotHeight = Math.max(1, height - CHART_PAD.top - CHART_PAD.bottom);
-    const baseline = CHART_PAD.top + plotHeight;
+    const plotWidth = Math.max(1, width - pad.left - pad.right);
+    const plotHeight = Math.max(1, height - pad.top - pad.bottom);
+    const baseline = pad.top + plotHeight;
     const max = rows.reduce((top, row) => (row.count > top ? row.count : top), 0);
     const slot = plotWidth / rows.length;
     /* 柱子再多也要留一条缝：180 天时算出来的宽度就是 1、2 像素 */
@@ -551,7 +570,7 @@
     /* 横轴标签抽稀：柱子多的时候最多标 CHART_LABEL_LIMIT 个 + 最后那个。
        宽度窄的时候还得再稀一点：每个标签按 CHART_LABEL_MIN_GAP 像素算，
        「第一根」和「最后一根」都要标，所以留一个位置给最后一根。 */
-    const roomFor = Math.floor(Math.max(1, width - CHART_PAD.left - CHART_PAD.right) / CHART_LABEL_MIN_GAP);
+    const roomFor = Math.floor(Math.max(1, plotWidth) / CHART_LABEL_MIN_GAP);
     const labelLimit = Math.max(2, Math.min(CHART_LABEL_LIMIT, roomFor));
     const labelStride = Math.max(1, Math.ceil(rows.length / labelLimit));
     /* 全 0：没有「近期最高」，这时候只在基线画一条 0 刻度，
@@ -559,63 +578,80 @@
     const drawBars = max > 0;
 
     const todayKey = localDayKey(Date.now());
-    const todayIndex = todayKey ? rows.findIndex((row) => row.day === todayKey) : -1;
-    /* 没有 localDayKey 就按约定认最后一根；有 key 但对不上（快照过期）就不标 */
-    const markIndex = todayIndex >= 0 ? todayIndex : (todayKey ? -1 : rows.length - 1);
+    const todayIndex = todayKey ? rows.findIndex((row) => String(dateKey(row)) === todayKey) : -1;
+    /* 没有 localDayKey 就按约定认最后一根；有 key 但对不上（快照过期）就不标。
+       config.markIndex 传 null = 这张图跟「今天」无关（年度图），干脆不标；
+       传数字 = 调用方自己算好了该标哪一根（周/月汇总图标的是本周/本月）。 */
+    const markIndex = config.markIndex === null
+      ? -1
+      : (Number.isInteger(config.markIndex) ? config.markIndex : (todayIndex >= 0 ? todayIndex : (todayKey ? -1 : rows.length - 1)));
 
     host.textContent = "";
     const svg = createSvgRoot();
     if (!svg) return null;
     svg.setAttribute("class", "stats-svg");
     svg.setAttribute("viewBox", "0 0 " + width + " " + height);
-    /* role 不能再用 img：img 会把整棵子树从无障碍树里摘掉，柱子就没法用键盘聚焦了 */
-    svg.setAttribute("role", "group");
+    /* role 不能再用 img：img 会把整棵子树从无障碍树里摘掉，柱子就没法用键盘聚焦了。
+       按周 / 按月聚合时一根柱子代表一整段，是 list 不是 group。 */
+    svg.setAttribute("role", semantic ? "list" : "group");
     svg.setAttribute("aria-label", config.ariaLabel || "");
 
     /* 只有一根柱子时槽很宽，但柱子不该胖成一块板 */
     const single = rows.length <= 1;
 
     rows.forEach((row, index) => {
-      const center = CHART_PAD.left + slot * index + slot / 2;
-      /* max 为 0 时高度一律 0：这里不做除法，也就不会出现 NaN */
-      const height2 = max > 0 ? Math.max(2, (row.count / max) * plotHeight) : 0;
-      const top = baseline - height2;
+      const center = pad.left + slot * index + slot / 2;
+      const key = String(dateKey(row));
+      const count = numberOr(row.count, 0);
+      /* 柱子的「按列点击」：判定范围是从底到顶的整格矩形，不是那根看得见的细柱子。
+         count 为 0 的日子也照样盖一层（此时槽里没有任何可见图形），
+         看着像没有，点下去仍然能选中那天。 */
+      const selected = key === focusedDay;
       const isToday = index === markIndex;
-      const selected = String(row.day) === focusedDay;
       const barWidth2 = single ? Math.min(barWidth, 64) : barWidth;
-      /* 全 0 的那一档只留日期和刻度，柱子本身不画：
-         一排零高度的矩形看着像「有数据但是很少」，不如干脆没有。 */
-      if (drawBars) {
-        /* 柱子就是按钮：可聚焦、可读屏、Enter / 空格触发。
-           点空白处收起、再点同一根也收起，都在下面的事件委托里。 */
-        const bar = appendSvg(svg, "rect", {
-          class: "stats-bar" + (isToday ? " stats-bar-today" : "") + (selected ? " stats-bar-active" : ""),
-          x: round2(center - barWidth2 / 2), y: round2(top),
-          width: round2(Math.max(1, barWidth2)), height: round2(height2),
-          rx: round2(Math.min(4, barWidth2 / 2)),
-          tabindex: "0",
-          role: "button",
-          "data-day": row.day,
-          "aria-pressed": selected ? "true" : "false",
-          "aria-label": t("{day} 这一天新增了 {count} 个视频", { day: row.day, count: formatCount(row.count) })
+      const hitWidth = Math.max(2, slot - 2);
+      const barHeight = max > 0 ? Math.max(2, (count / max) * plotHeight) : 0;
+      const hitHeight = drawBars ? Math.max(1, baseline - pad.top) : 2;
+      const tip = config.ariaLabelFor ? config.ariaLabelFor(row) : t("{day} 这一天新增了 {count} 个视频", { day: key, count: formatCount(count) });
+
+      /* 看得见的柱子先画 */
+      if (drawBars && count > 0) {
+        appendSvg(svg, "rect", {
+          class: "stats-bar" + (isToday ? " stats-bar-today" : ""),
+          x: round2(center - barWidth2 / 2), y: round2(baseline - barHeight),
+          width: round2(Math.max(1, barWidth2)), height: round2(Math.max(1, barHeight)),
+          rx: round2(Math.min(4, barWidth2 / 2))
         });
-        bar.setAttribute("focusable", "true");
-        /* 柱子上的原生提示：鼠标停在哪天都能看到确切数字 */
-        setText(appendSvg(bar, "title", {}),
-          t("{day} 这一天新增了 {count} 个视频", { day: row.day, count: formatCount(row.count) }));
       }
+      /* 再盖一层整格透明矩形当判定区：从底到顶、整格宽。
+         它必须是**最后一个**画的（SVG 没有 z-index，后画的盖在上面），
+         否则那根看得见的柱子会顶在它上面把点击吃掉 —— 矮柱子、0 记录的日子
+         正是用户说「难点」的那些列，点进来必须都落在这一层上。
+         判定层自己不带 data-day，柱子按「同一列里能拿到 data-day 的那一层」找。 */
+      const bar = appendSvg(svg, "rect", {
+        class: "stats-bar-hit" + (selected ? " stats-bar-active" : ""),
+        x: round2(center - hitWidth / 2), y: round2(baseline - hitHeight),
+        width: round2(hitWidth), height: round2(hitHeight),
+        tabindex: "0",
+        role: "button",
+        "data-day": key,
+        "aria-pressed": selected ? "true" : "false",
+        "aria-label": tip
+      });
+      bar.setAttribute("focusable", "true");
+      /* 整格矩形上的原生提示：鼠标停在哪天都能看到确切数字，矮柱子也一样 */
+      setText(appendSvg(bar, "title", {}), tip);
 
       /* max 为 0 时整列不画高：不画一根贴底的假柱子，免得看着像有数据 */
-      if (max > 0 && showValues && row.count > 0 && String(row.count).length * 8 <= slot) {
+      if (max > 0 && showValues && count > 0 && String(count).length * 8 <= slot) {
         setText(appendSvg(svg, "text", {
           class: "stats-bar-value", x: round2(center),
-          y: Math.max(CHART_PAD.top + 9, round2(top - 5)), "text-anchor": "middle"
-        }), formatCount(row.count));
+          y: Math.max(pad.top + 9, round2(baseline - barHeight - 5)), "text-anchor": "middle"
+        }), formatCount(count));
       }
 
-      /* 横轴日期：太密就隔几根标一个，第一根和最后一根一定标。
-         最后一根和上一个日期挨太近时，上一个就不画了 —— 两个日期挤在一个
-         格子宽的地方，看着像「10-1310-14」这种连成一串的乱码。 */
+      /* 横轴标签：日粒度就是日期，太密隔几根标一个（第一根和最后一根一定标）；
+         按周 / 按月是一段一个标签，画不下就斜着放，不抽稀 —— 少一个标签就少一段。 */
       if (labelMode === "dates") {
         const isLast = index === rows.length - 1;
         const strided = index % labelStride === 0;
@@ -625,7 +661,32 @@
           setText(appendSvg(svg, "text", {
             class: isToday ? "stats-axis-label stats-axis-label-today" : "stats-axis-label",
             x: round2(center), y: height - 6, "text-anchor": "middle"
-          }), row.label || row.day.slice(5));
+          }), row.label || key.slice(5));
+        }
+      } else {
+        const listed = semantic ? appendSvg(svg, "g", { class: "stats-bar-slot" }) : svg;
+        /* 轴上的小刻度：贴边的那几段靠它把标签拉回画布内 */
+        let arrowX = round2(center);
+        const label = setText(appendSvg(listed, "text", {
+          class: isToday ? "stats-axis-label stats-axis-label-today" : "stats-axis-label",
+          x: round2(center), y: Math.min(baseline + 14, height - 30),
+          "text-anchor": "middle"
+        }), row.label || key);
+        if (semantic) label.setAttribute("role", "listitem");
+        /* 每段标签都得露出来（贴边的那两段靠 text-anchor 收回来），
+           还是挤就转到 -34 度斜着排 —— 竖排一个字一行读起来更费劲。 */
+        const textWidth = String(row.label || key).length * 11;
+        if (textWidth > slot - 6) {
+          const overflow = center + textWidth / 2 - (width - pad.right);
+          if (overflow > 0) arrowX = round2(center - overflow);
+          if (center - textWidth / 2 - arrowX < 0) arrowX = round2(center - textWidth / 2);
+          label.setAttribute("transform", "rotate(-34 " + arrowX + " " + (baseline + 4) + ")");
+        }
+        if (semantic) {
+          const arrow = appendSvg(listed, "line", {
+            class: "stats-axis-tick", x1: arrowX, y1: baseline + 1, x2: arrowX, y2: baseline + 5
+          });
+          arrow.setAttribute("aria-hidden", "true");
         }
       }
     });
@@ -635,18 +696,18 @@
     if (max > 0) {
       appendSvg(svg, "line", {
         class: "stats-grid-line",
-        x1: CHART_PAD.left, y1: CHART_PAD.top, x2: width - CHART_PAD.right, y2: CHART_PAD.top
+        x1: pad.left, y1: pad.top, x2: width - pad.right, y2: pad.top
       });
       setText(appendSvg(svg, "text", {
-        class: "stats-scale-label", x: CHART_PAD.left - 6, y: CHART_PAD.top + 4, "text-anchor": "end"
+        class: "stats-scale-label", x: pad.left - 6, y: pad.top + 4, "text-anchor": "end"
       }), formatCount(max));
     }
     appendSvg(svg, "line", {
       class: "stats-axis-line",
-      x1: CHART_PAD.left, y1: baseline, x2: width - CHART_PAD.right, y2: baseline
+      x1: pad.left, y1: baseline, x2: width - pad.right, y2: baseline
     });
     setText(appendSvg(svg, "text", {
-      class: "stats-scale-label", x: CHART_PAD.left - 6, y: baseline + 4, "text-anchor": "end"
+      class: "stats-scale-label", x: pad.left - 6, y: baseline + 4, "text-anchor": "end"
     }), formatCount(0));
 
     host.appendChild(svg);
@@ -697,48 +758,66 @@
     return head;
   }
 
-  function drawPie(host, slices, total) {
+  /* 饼图本体：收藏夹构成和按年份构成共用一份，颜色档位也就跟着一致。
+     自定义区间那一列可能翻出几千条，占比文字挨个算一遍没有意义，
+     所以走「档位 + 图例」：颜色标明是哪一块，鼠标停上去给确切数字。
+     每一块是一个 <g class="stats-slice">，整块（含圆心原点）一起缩放，
+     抬起效果在 CSS 里；这里只负责把 transform-origin 钉在圆心上。 */
+  function drawPieTo(host, slices, total, options) {
     if (!host) return;
+    /* 容器里那个「还没有数据」的占位段落不属于饼图，重画时不能顺手清掉 */
+    const placeholder = host.querySelector(".stats-pie-empty");
     host.textContent = "";
-    if (!slices.length || total <= 0) return;
-    const size = 190;
-    const cx = size / 2;
-    const cy = size / 2;
+    const putBack = () => { if (placeholder) host.appendChild(placeholder); };
+    if (!slices.length || total <= 0) { putBack(); return; }
+    const config = options || {};
+    const size = config.size || 190;
+    const cx = round2(size / 2);
+    const cy = round2(size / 2);
     const svg = createSvgRoot();
     if (!svg) return;
     svg.setAttribute("class", "stats-pie-svg");
     svg.setAttribute("viewBox", "0 0 " + size + " " + size);
     svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", t("收藏夹构成"));
+    svg.setAttribute("aria-label", config.ariaLabel || t("收藏夹构成"));
 
     let angle = 0;
-    slices.forEach((slice, index) => {
+    slices.forEach((slice) => {
       const span = slice.count / total * 360;
-      const path = appendSvg(svg, "path", {
-        class: "stats-slice" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 8)),
+      const group = appendSvg(svg, "g", { class: "stats-slice" });
+      const path = appendSvg(group, "path", {
+        class: "stats-slice-shape" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 7)),
         d: wedgePath(cx, cy, size / 2 - 6, angle, angle + span)
       });
-      setText(appendSvg(path, "title", {}),
-        t("{name}：{count} 个视频，占 {percent}%", {
+      setText(appendSvg(group, "title", {}), config.labelFor
+        ? config.labelFor(slice, total)
+        : t("{name}：{count} 个视频，占 {percent}%", {
           name: slice.other ? slice.name : (slice.name || "—"),
           count: formatCount(slice.count),
           percent: formatCount(Math.round(slice.count / total * 100))
         }));
+      /* 悬停「抬起」要绕**圆心**放大：写具体像素，百分比在 SVG 上各家算法不一。
+         原点写在 <g> 上（CSS 的 :hover 就落在这个 <g> 上），
+         扇形自己只负责几何。 */
+      group.style.transformOrigin = cx + "px " + cy + "px";
       angle += span;
-      if (index >= slices.length - 1) return;
     });
+    putBack();
     host.appendChild(svg);
   }
 
-  function renderLegend(slices, total) {
-    const list = ui.pieLegend;
+  function drawPie(host, slices, total) {
+    drawPieTo(host, slices, total, { ariaLabel: t("收藏夹构成") });
+  }
+
+  function legendInto(list, slices, total) {
     if (!list) return;
     list.textContent = "";
     slices.forEach((slice) => {
       const item = document.createElement("li");
       item.className = "stats-legend-item";
       const mark = document.createElement("span");
-      mark.className = "stats-legend-mark" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 8));
+      mark.className = "stats-legend-mark" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 7));
       const name = document.createElement("span");
       name.className = "stats-legend-name";
       name.textContent = slice.other ? slice.name : (slice.name || "—");
@@ -751,6 +830,10 @@
       item.appendChild(value);
       list.appendChild(item);
     });
+  }
+
+  function renderLegend(slices, total) {
+    legendInto(ui.pieLegend, slices, total);
   }
 
   /* ── 各块渲染 ───────────────────────────────────────────────────── */
@@ -786,8 +869,13 @@
   /* legacyRows 只在对端还没交 dailyRows 时用：那时候没有区间可筛，
      画的就是快照里那串 daily（最后 14 天左右）。 */
   function renderChart(range, legacyRows) {
-    const rows = Array.isArray(legacyRows) && legacyRows.length ? legacyRows : rowsInRange(range);
+    const legacy = Array.isArray(legacyRows) && legacyRows.length ? legacyRows : null;
+    /* 区间一长，一天一根柱子就成了一把牙签，也读不出趋势：
+       超过 31 天按周、超过半年按月（口径写死在 chartModeOf 一处）。 */
+    const mode = legacy ? "day" : chartModeOf(range);
+    const rows = legacy || seriesFor(mode, range);
     const total = rows.reduce((sum, row) => sum + row.count, 0);
+    const totalAll = mode === "day" || !rows.length ? total : countInRange(range);
     /* 没有每天明细（对端还没交 dailyRows）时没有区间可选，柱子也就点不出饼图：
        这时候那句「点一下柱子」的提示不能露出来，免得应了一次没反应。
        有区间选择器就一定有每天明细，提示跟着选择器走。 */
@@ -808,19 +896,145 @@
       return;
     }
 
-    setText(ui.chartLead, legacyRows
-      ? t("最近 {days} 天的每日新增。", { days: formatCount(rows.length) })
-      : t("已选 {days} 天，共新增 {count} 个视频。", {
-        days: formatCount(rows.length), count: formatCount(total)
+    const days = rangeDayList(range).length;
+    if (mode === "week") {
+      setText(ui.chartLead, t("已选 {days} 天，按周汇总，共新增 {count} 个视频。", {
+        days: formatCount(days), count: formatCount(totalAll)
       }));
+      setText(ui.chartNote, t("这几天还没有新增收藏。"));
+    } else if (mode === "month") {
+      setText(ui.chartLead, t("已选 {days} 天，按月汇总，共新增 {count} 个视频。", {
+        days: formatCount(days), count: formatCount(totalAll)
+      }));
+      setText(ui.chartNote, t("这段时间还没有新增收藏。"));
+    } else {
+      setText(ui.chartLead, t("已选 {days} 天，共新增 {count} 个视频。", {
+        days: formatCount(legacy ? rows.length : days), count: formatCount(totalAll)
+      }));
+      setText(ui.chartNote, t("这几天还没有新增收藏。"));
+    }
     const drawn = drawChart(ui.chart, rows, {
-      height: CHART_HEIGHT,
-      labelMode: "dates",
-      ariaLabel: t("每天的新增数量柱状图", { days: formatCount(rows.length) })
+      height: mode === "day" ? CHART_HEIGHT : CHART_ROLLUP_HEIGHT,
+      pad: mode === "day" ? CHART_PAD : ROLLUP_PAD,
+      labelMode: mode === "day" ? "dates" : "periods",
+      semantic: mode !== "day",
+      dateKey: (row) => row.day,
+      /* 空心的那根只在逐日模式下画（并在下方用一句话解释）。
+         周/月汇总图的最后一格常常正好含今天，套上「空心」会看起来像「这根是空的」；
+         汇总图里焦点本来就是那个虚线方格，所以这里直接关掉今天标记。 */
+      markIndex: mode === "day" ? undefined : -1,
+      ariaLabel: t("每天的新增数量柱状图", { days: formatCount(rows.length) }),
+      ariaLabelFor: (row) => (mode === "day"
+        ? t("{day} 这一天新增了 {count} 个视频", { day: row.day, count: formatCount(row.count) })
+        : t("{day} 新增了 {count} 个视频", { day: row.label || row.day, count: formatCount(row.count) }))
     });
-    setText(ui.chartNote, legacyRows ? t("最近这些天还没有新增收藏。") : t("这几天还没有新增收藏。"));
     show(ui.chartNote, total <= 0);
-    show(ui.chartCaption, !!(drawn && drawn.todayMarked));
+    show(ui.chartCaption, mode === "day" && !!(drawn && drawn.todayMarked));
+  }
+
+  /* 按周 / 按月的汇总都只能读快照：stats-core.js 交上来的 dailyRows 只有最近 180 天，
+     数据库本身又不在这一页手里，所以拿到多少画多少 —— 不拿 0 去凑满整段区间，
+     那会凭空造出一段「这段时间没收藏」的假象。
+     周是以周一为键的全量汇总，周日这天由这里 +6 天推出来；
+     最后一跨周可能还没过完，标签就只写到今天，不预告还没到的日子。 */
+  function weeklyRows(range) {
+    const raw = stats && Array.isArray(stats.weekly) ? stats.weekly : [];
+    const bounds = aggregateBounds(range);
+    const today = localDayKey(Date.now());
+    const rows = [];
+    raw.forEach((item) => {
+      const week = String(item && item.week != null ? item.week : "");
+      if (!isDayKey(week)) return;
+      const end = weekEndKey(week);
+      if (week > bounds.to || end < bounds.from) return;
+      rows.push({
+        day: week,
+        label: weekText(week) + " - " + weekText(end < today ? end : today),
+        count: Math.max(0, numberOr(item && item.count, 0))
+      });
+    });
+    rows.sort((a, b) => (a.day < b.day ? -1 : 1));
+    return rows;
+  }
+
+  function monthlyRows(range) {
+    const raw = stats && Array.isArray(stats.monthly) ? stats.monthly : [];
+    const bounds = aggregateBounds(range);
+    const rows = [];
+    raw.forEach((item) => {
+      const month = String(item && item.month != null ? item.month : "");
+      if (!/^\d{4}-\d{2}$/.test(month)) return;
+      const key = month + "-01";
+      const end = monthEndKey(month);
+      if (key > bounds.to || end < bounds.from) return;
+      rows.push({ day: key, label: monthText(key), count: Math.max(0, numberOr(item && item.count, 0)) });
+    });
+    rows.sort((a, b) => (a.day < b.day ? -1 : 1));
+    return rows;
+  }
+
+  function seriesFor(mode, range) {
+    if (mode === "week") return weeklyRows(range);
+    if (mode === "month") return monthlyRows(range);
+    return rowsInRange(range);
+  }
+
+  /* 区间越长柱子越少，但画布高度不变：这两种粒度都留一样的画布给下面那排标签 */
+  const CHART_ROLLUP_HEIGHT = 236;
+  const ROLLUP_PAD = { top: 20, right: 10, bottom: 44, left: 36 };
+
+  /* 0 = 按天，1 = 按周，2 = 按月。边界按用户口径：> 31 天按周，> 183 天按月
+     （半年按 183 天算，正好 6 个月的自然区间也走按月）。 */
+  function chartModeOf(range) {
+    const days = rangeDayList(range).length;
+    if (days > 183) return "month";
+    if (days > 31) return "week";
+    return "day";
+  }
+
+  /* 「8月4日星期一」：年只在跨年那一周才写出来，免得每个标签都一样长 */
+  function weekText(key) {
+    const parts = String(key).split("-");
+    const month = numberOr(parts[1], 0);
+    const day = numberOr(parts[2], 0);
+    if (!month || !day) return String(key);
+    const date = new Date(Number(parts[0]), month - 1, day);
+    return t("{month}月{day}日", { month: formatCount(month), day: formatCount(day) }) + weekdayText(date.getDay() === 0 ? 6 : date.getDay() - 1);
+  }
+
+  /* 「2026年8月」 */
+  function monthText(key) {
+    const parts = String(key).split("-");
+    const month = numberOr(parts[1], 0);
+    if (!month) return String(key);
+    return t("{year}年{month}月", { year: parts[0], month: formatCount(month) });
+  }
+
+  /* 周一是键，周日 = 周一 + 6 天：按自然日加成，不用固定毫秒数 */
+  function weekEndKey(week) {
+    const start = dayStartTime(week);
+    if (!Number.isFinite(start)) return week;
+    const date = new Date(start);
+    return fallbackDayKey(new Date(date.getFullYear(), date.getMonth(), date.getDate() + 6).getTime());
+  }
+
+  /* 「2026-08」的月末那天：下月一号往前退一天，同样按自然日算 */
+  function monthEndKey(month) {
+    const parts = String(month).split("-");
+    const year = numberOr(parts[0], 0);
+    const index = numberOr(parts[1], 0);
+    if (!year || !index) return month + "-01";
+    return fallbackDayKey(new Date(year, index, 0).getTime());
+  }
+
+  /* 汇总序列（周 / 月）要比对「这段区间」和「这一桶」的先后，
+     range.from / range.to 是毫秒（对端 rangeFor 交上来的就是数字），
+     拿它当 "YYYY-MM-DD" 字符串切前 7 位会得到 "1774627" 这种鬼东西，
+     于是所有桶都被判成「不在区间里」→ 图空白。这里统一换成日键。 */
+  function aggregateBounds(range) {
+    const fromKey = isDayKey(range && range.from) ? String(range.from) : fallbackDayKey(range && range.from);
+    const toKey = isDayKey(range && range.to) ? String(range.to) : fallbackDayKey(range && range.to);
+    return { from: fromKey || "0000-00-00", to: toKey || "9999-99-99" };
   }
 
   function renderPie(range) {
@@ -862,6 +1076,7 @@
     if (!rows.length) {
       show(ui.yearCard, false);
       if (ui.yearChart) ui.yearChart.textContent = "";
+      renderYearPie([]);
       return;
     }
     rows.sort((a, b) => (a.day < b.day ? -1 : 1));
@@ -873,10 +1088,46 @@
     const drawn = drawChart(ui.yearChart || ui.chart, rows, {
       height: YEAR_CHART_HEIGHT,
       labelMode: "years",
+      /* 年度图和「今天」无关：不画空心柱，也不显示下面那句解释 */
+      markIndex: null,
       ariaLabel: t("按年份的收藏数量柱状图")
     });
     setText(ui.yearNote, t("暂无年份数据。"));
     show(ui.yearNote, !drawn);
+    /* 「按年份累计」下面再给一张按年份的构成饼图：柱子看趋势，饼图看各年占比 */
+    renderYearPie(rows);
+  }
+
+  /* 年份构成（各年占比）：跟收藏夹构成共用 drawPieTo，配色档位也就一样，
+     名字直接是年份，所以连图例的色块都对得上。 */
+  function yearSlices(rows) {
+    const list = [];
+    rows.forEach((row) => {
+      const count = Math.max(0, numberOr(row.count, 0));
+      if (count > 0) list.push({ name: row.label || row.day, count: count });
+    });
+    list.sort((a, b) => (a.name < b.name ? -1 : 1));
+    if (list.length <= PIE_MAX_SLICES) return list;
+    const head = list.slice(0, PIE_MAX_SLICES - 1);
+    const rest = list.slice(PIE_MAX_SLICES - 1);
+    head.push({ name: t("其它年份"), count: rest.reduce((sum, item) => sum + item.count, 0), other: true });
+    return head;
+  }
+
+  function renderYearPie(rows) {
+    if (!ui.yearPie) return;
+    const slices = yearSlices(rows);
+    const total = slices.reduce((sum, slice) => sum + slice.count, 0);
+    drawPieTo(ui.yearPie, slices, total, {
+      ariaLabel: t("按年份的收藏占比饼图"),
+      labelFor: (slice) => t("{name}：{count} 个视频，占 {percent}%", {
+        name: slice.name, count: formatCount(slice.count),
+        percent: formatCount(Math.round(slice.count / total * 100))
+      })
+    });
+    legendInto(ui.yearPieLegend, slices, total);
+    show(ui.yearPie, slices.length > 0);
+    show(ui.yearPieLegend, slices.length > 0);
   }
 
   function renderTop(snapshot) {
@@ -932,7 +1183,11 @@
       if (ui.chart) ui.chart.textContent = "";
       if (ui.pie) ui.pie.textContent = "";
       if (ui.yearChart) ui.yearChart.textContent = "";
+      if (ui.yearPie) ui.yearPie.textContent = "";
       if (ui.pieLegend) ui.pieLegend.textContent = "";
+      if (ui.yearPieLegend) ui.yearPieLegend.textContent = "";
+      show(ui.yearPie, false);
+      show(ui.yearPieLegend, false);
       setText(ui.chartLead, "");
       setText(ui.pieLead, "");
       setText(ui.yearLead, "");
@@ -1009,9 +1264,12 @@
   function openPicker() {
     picker.open = true;
     picker.mode = preset === "custom" ? "custom" : "preset";
-    picker.view = defaultCalendarView();
-    picker.draftFrom = custom.from;
-    picker.draftTo = custom.to;
+    /* 先前选过的自定义区间也要重新夹一遍：收藏夹最早那条之前的日子不该再选得中 */
+    picker.draftFrom = clampDay(custom.from);
+    picker.draftTo = clampDay(custom.to);
+    /* 每次打开都从「贴着锚点的那一屏」开始，上次的手动翻页不带过来 */
+    picker.paged = false;
+    picker.view = calendarView();
     show(ui.rangeMenu, true);
     show(ui.calendar, picker.mode === "custom");
     if (ui.rangeButton) ui.rangeButton.setAttribute("aria-expanded", "true");
@@ -1043,20 +1301,26 @@
   /* 两个月并排：左边是 view 那个月，右边是它的下个月。
      今天之后的日子不给点（未来还没有数据可看）。 */
   function renderCalendar() {
+    /* 用户没按「上月 / 下月」翻过页，视图就跟着锚点走：
+       点一天之后，那一屏会挪到「点的那天」所在的两个月，而不是原地不动。 */
+    if (!picker.paged) picker.view = calendarView();
     if (!picker.view || !Number.isFinite(picker.view)) {
       const now = new Date();
       picker.view = monthStartTime(now.getFullYear(), now.getMonth());
     }
     const todayKey = localDayKey(Date.now());
+    const bounds = calendarBounds();
     const from = picker.draftFrom;
     const to = picker.draftTo;
     const low = from && to ? (from <= to ? from : to) : (from || to);
     const high = from && to ? (from <= to ? to : from) : (from || to);
 
-    /* 平铺几个月：默认两个月（跨月选），起止跨度超过两个月时补到够 —— 上限一年，
-       正好和「最长的自定义区间是 1 年」对上；格子不够时用户还能用「上月/下月」翻页。 */
-    const months = calendarMonthCount();
-    for (let index = 0; index < months; index += 1) {
+    /* 屏幕上永远是两个月（HTML 里就两张表，#statsCalGridA / B）。
+       起止跨度很大时**不**去补第三个月：那两张表是固定的，
+       多出来的月份只会互相覆盖，看着像「点了没反应」—— 跨月靠「上月 / 下月」翻。
+       这一条是「点一下就退出」那个 bug 的真正根因：以前这里按跨度铺 2–12 个月，
+       点完起点视图一跳，右格就被别的月份顶掉了，第二下点在屏幕上根本不存在的日子上。 */
+    for (let index = 0; index < 2; index += 1) {
       const monthTime = addMonths(picker.view, index);
       const month = new Date(monthTime);
       const grid = index === 0 ? ui.calGridA : ui.calGridB;
@@ -1067,7 +1331,7 @@
       for (let weekday = 0; weekday < 7; weekday += 1) {
         const head = document.createElement("span");
         head.className = "stats-calendar-wd";
-        head.textContent = t(WEEKDAY_KEYS[weekday]);
+        head.textContent = weekdayText(weekday);
         grid.appendChild(head);
       }
       const lead = (month.getDay() + 6) % 7;   // 周一开头
@@ -1080,6 +1344,7 @@
       for (let day = 1; day <= total; day += 1) {
         const key = fallbackDayKey(new Date(month.getFullYear(), month.getMonth(), day).getTime());
         const cell = document.createElement("button");
+        const outside = (bounds.earliest && key < bounds.earliest) || key > bounds.latest;
         cell.type = "button";
         cell.className = "stats-calendar-day";
         cell.textContent = String(day);
@@ -1088,8 +1353,8 @@
         if (key === high) cell.classList.add("stats-calendar-edge");
         if (low && high && key > low && key < high) cell.classList.add("stats-calendar-in");
         if (key === todayKey) cell.classList.add("stats-calendar-today");
-        if (key > todayKey) {
-          /* 未来：禁用而不是藏起来，日历的格子数才稳定 */
+        if (outside) {
+          /* 收藏夹里最早那条之前 / 今天之后：禁用而不是藏起来，日历的格子数才稳定 */
           cell.disabled = true;
           cell.setAttribute("aria-disabled", "true");
         }
@@ -1098,11 +1363,57 @@
         grid.appendChild(cell);
       }
     }
-    setText(ui.calWarn, t("最长的自定义区间是 1 年，请把范围缩到一年以内。"));
+    setText(ui.calPicked, (low && high)
+      ? t("已选 {from} 至 {to}，共 {days} 天。", {
+        from: low, to: high,
+        days: formatCount(rangeDays(dayStartTime(low), dayEndTime(high)))
+      })
+      : t("点一天定起点，再点一天定终点。"));
     show(ui.calWarn, false);
   }
 
-  const WEEKDAY_KEYS = ["一", "二", "三", "四", "五", "六", "日"];
+  /* 星期几的写法交给词典。1.6.1 改：原来是一条带占位符的「星期{name}」，而传进去的
+     {name} 是中文的「一…日」—— 英文界面里会漏出汉字。改成七条独立词条，并且每一句
+     都写成 t("…") 字面量（塞进数组或拼字符串，抽取器就看不见了）。 */
+  function weekdayText(index) {
+    switch (((index % 7) + 7) % 7) {
+      case 0: return t("星期一");
+      case 1: return t("星期二");
+      case 2: return t("星期三");
+      case 3: return t("星期四");
+      case 4: return t("星期五");
+      case 5: return t("星期六");
+      default: return t("星期日");
+    }
+  }
+
+  /* 时间范围选择器里「当前贴着哪一天」。1.6.1 加的：跨月选起止的时候，
+     屏幕上的两个月是动的 —— 只盯 picker.view 的话，
+     点一个不在这两个月里的日子会「点完什么都没变」，看着就像点一下就把菜单关掉了。
+     吸附规则：
+       已经点过起止 → 贴住**起点**那边（这样正在选的那两天一直在屏幕上，
+                      再改起点也不用翻页；终点在右边那格里，一样点得着）；
+       只点了起点   → 贴住新的那一天（第二下点哪，那一屏就挪到那个月）；
+       还没点       → 贴今天。 */
+  function pickerAnchor() {
+    const today = localDayKey(Date.now());
+    if (isDayKey(picker.draftFrom)) return { key: picker.draftFrom, how: "from" };
+    if (isDayKey(picker.draftTo)) return { key: picker.draftTo, how: "to" };
+    return { key: isDayKey(today) ? today : "", how: "today" };
+  }
+
+  /* 两个月这一屏该从哪个月开始铺：默认正好落在锚点那一天上，
+     点哪一天的瞬间就能看见自己点的那天（不是「两个月之后」）。 */
+  function calendarView() {
+    const anchor = pickerAnchor();
+    const time = dayStartTime(anchor.key);
+    if (Number.isFinite(time)) {
+      const date = new Date(time);
+      const month = monthStartTime(date.getFullYear(), date.getMonth());
+      if (Number.isFinite(month)) return clampCalendarView(month);
+    }
+    return clampCalendarView(defaultCalendarView());
+  }
 
   /* 日历默认从哪个月开始铺。
      右边那格是「后一个月」，所以起始月取「今天所在月」和「区间起点所在月」里更晚的那个：
@@ -1122,22 +1433,51 @@
     return month > here ? month : here;
   }
 
-  /* 日历要铺几个月：起止跨了几个月就铺几个月，最少两个月、最多十二个月 */
-  function calendarMonthCount() {    const from = picker.draftFrom;
-    const to = picker.draftTo;
-    if (!isDayKey(from) || !isDayKey(to)) return 2;
-    const low = from <= to ? from : to;
-    const high = from <= to ? to : from;
-    const first = new Date(dayStartTime(low));
-    const last = new Date(dayStartTime(high));
-    if (isNaN(first.getTime()) || isNaN(last.getTime())) return 2;
-    const span = (last.getFullYear() - first.getFullYear()) * 12 + (last.getMonth() - first.getMonth()) + 1;
-    if (!Number.isFinite(span)) return 2;
-    return Math.min(12, Math.max(2, span));
+  /* 翻页的两头都封住：左边不早于收藏夹最早那条所在的月，
+     右边不晚于今天所在的月（再往后翻全是灰格子）。 */
+  function clampCalendarView(time) {
+    if (!Number.isFinite(time)) return time;
+    const now = new Date();
+    const here = monthStartTime(now.getFullYear(), now.getMonth());
+    if (time > here) return here;
+    const bounds = calendarBounds();
+    if (!bounds.earliest) return time;
+    const start = dayStartTime(bounds.earliest);
+    if (!Number.isFinite(start)) return time;
+    const date = new Date(start);
+    const floor = monthStartTime(date.getFullYear(), date.getMonth());
+    if (!Number.isFinite(floor)) return time;
+    return time < floor ? floor : time;
+  }
+
+  /* ── 可选范围 ───────────────────────────────────────────────────── */
+
+  /* 自定义区间能选到哪：下界是收藏夹里最早的那条收藏，上界永远是今天。
+     这两个值由 stats-core.js 的 snapshot() 交上来（earliest 可能没有），
+     拿不到就按「不限」处理 —— 少一个下界总比整块日历点不动好。 */
+  function calendarBounds() {
+    const latest = localDayKey(Date.now());
+    let earliest = "";
+    if (stats && isDayKey(stats.earliest)) earliest = String(stats.earliest);
+    else if (stats && isDayKey(stats.days && stats.days.since)) earliest = String(stats.days.since);
+    if (earliest && earliest > latest) earliest = latest;
+    return { earliest: earliest, latest: latest };
+  }
+
+  function clampDay(key) {
+    if (!isDayKey(key)) return "";
+    const bounds = calendarBounds();
+    if (bounds.earliest && key < bounds.earliest) return bounds.earliest;
+    if (key > bounds.latest) return bounds.latest;
+    return key;
   }
 
   function pickDay(key) {
     if (!isDayKey(key)) return;
+    const bounds = calendarBounds();
+    /* 置灰的格子本来就点不动；键盘 / 脚本绕过 disabled 也得拦住 */
+    if (bounds.earliest && key < bounds.earliest) return;
+    if (key > bounds.latest) return;
     if (!picker.draftFrom || (picker.draftFrom && picker.draftTo)) {
       /* 第一下定起点，同时把上一次的终点清掉 */
       picker.draftFrom = key;
@@ -1150,9 +1490,9 @@
   }
 
   function applyCustom() {
-    const from = picker.draftFrom;
-    const to = picker.draftTo || picker.draftFrom;
-    if (!isDayKey(from)) return;
+    const from = clampDay(picker.draftFrom);
+    const to = clampDay(picker.draftTo || picker.draftFrom);
+    if (!isDayKey(from) || !isDayKey(to)) return;
     const low = from <= to ? from : to;
     const high = from <= to ? to : from;
     const days = rangeDays(dayStartTime(low), dayEndTime(high));
@@ -1173,9 +1513,14 @@
   function choosePreset(name) {
     if (RANGE_ALL.indexOf(name) < 0) return;
     if (name === "custom") {
+      /* 日历、清空、确定都长在下拉面板里面，所以点「自定义区间」
+         必须自己把面板打开 —— 只切 picker.mode 不 openPicker 的话，
+         面板还带着 hidden，整块日历（连同确定按钮）都显示不出来。 */
+      if (!picker.open) openPicker();
       picker.mode = "custom";
-      /* 日历翻到默认月份（今天所在月，除非区间起点更早） */
-      picker.view = defaultCalendarView();
+      /* 日历翻到贴着锚点的那一屏（今天所在月，或已选起点那天的月份） */
+      picker.paged = false;
+      picker.view = calendarView();
       show(ui.calendar, true);
       renderCalendar();
       return;
@@ -1209,7 +1554,9 @@
     }
     if (ui.calPrev) {
       ui.calPrev.addEventListener("click", () => {
-        picker.view = addMonths(picker.view, -1);
+        /* 手动翻页后视图就不再自动跟着锚点跑 */
+        picker.paged = true;
+        picker.view = clampCalendarView(addMonths(picker.view, -1));
         renderCalendar();
       });
     }
@@ -1220,7 +1567,16 @@
         const now = new Date();
         const limit = monthStartTime(now.getFullYear(), now.getMonth());
         if (!Number.isFinite(next) || next > limit) return;
+        picker.paged = true;
         picker.view = next;
+        renderCalendar();
+      });
+    }
+    /* 起点选在很久以前时，可以一键跳回今天那两个月的窗口 */
+    if (ui.calToday) {
+      ui.calToday.addEventListener("click", () => {
+        picker.paged = false;
+        picker.view = calendarView();
         renderCalendar();
       });
     }
@@ -1237,22 +1593,29 @@
       if (event.key !== "Escape" || !picker.open) return;
       closePicker();
     });
+    /* 点外面关掉。判「里外」用事件路径而不是当前 DOM 树：
+       日历每点一下就重画一遍格子，刚被点中的那个按钮在事件冒泡到这里时
+       已经从文档里摘下来了（contains 变 false），照原样判就会被当成「点了外面」
+       —— 这正是用户报的「点一个日期就退出、选不了完整起止」的根因。 */
     document.addEventListener("click", (event) => {
       if (!picker.open) return;
-      const target = event.target;
-      if (target instanceof Node && ui.rangeCard && ui.rangeCard.contains(target)) return;
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      if (ui.rangeCard && (path.indexOf(ui.rangeCard) >= 0 || (event.target instanceof Node && ui.rangeCard.contains(event.target)))) return;
       closePicker();
     });
   }
 
   /* ── 图表交互 ───────────────────────────────────────────────────── */
 
+  /* 点在图上：找到「这一列」的判定层（带 data-day 的那一层）。
+     柱子与判定层都在最外层，判定层是后画的那一层，所以正常情况下点到的就是它；
+     兜底再往上找一层，免得将来有人把柱子包进 <g> 里之后这里悄悄失灵。 */
   function barFromEvent(event) {
     const target = event.target;
     if (!(target instanceof Element)) return null;
-    const bar = target.closest("[data-day]");
+    let bar = target.closest("[data-day]");
+    if (!bar && target.parentElement) bar = target.parentElement.closest("[data-day]");
     if (!bar || !ui.chart || !ui.chart.contains(bar)) return null;
-    if (bar.tagName.toLowerCase() !== "rect") return null;
     return bar;
   }
 

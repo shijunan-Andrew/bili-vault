@@ -3293,9 +3293,16 @@ async function writeFileAtomically(directory, file, text) {
     await writable.write(text);
     await writable.close();
     if (typeof temp.move === "function") {
-      await directory.removeEntry(file.name);
-      await temp.move(file);
-      return;
+      // 1.6.1 修：绝不先删原文件再换名。
+      // 原写法是 removeEntry(file.name) → temp.move(file)，而 move() 要的是
+      // 「目标目录 + 新文件名」，传一个文件句柄会抛；一旦抛出，原文件已经删掉了、
+      // 临时文件又被 catch 清掉，数据库就凭空消失 —— 下一次扫描读不到 previous，
+      // 陪伴天数与累计保存数一起归零（用户报的「删掉几个视频后统计回到初始状态」
+      // 就是这条）。现在先按规范换名覆盖，失败才退回就地写；任何一步失败原文件都还在。
+      try {
+        await temp.move(directory, file.name);
+        return;
+      } catch (_) { /* 换名不被支持，退回就地写 */ }
     }
     await writeFileInPlace(file, text);
   } catch (error) {
@@ -3342,6 +3349,13 @@ async function syncStatsDatabase(handle) {
       const text = await (await file.getFile()).text();
       if (text.trim()) previous = JSON.parse(text);
     } catch (_) { /* 旧库坏了就当没有，下面整份重建 */ }
+    // 1.6.1：扫描到 0 条时不许用空结果覆盖已经有内容的库。
+    // 删掉几个视频之后的那次重扫曾经拿空列表整份重建，把陪伴天数与累计保存数一起抹平。
+    // 空扫描不是「库里没有东西」的证据，只是这一次没扫到；库里本来就是空的就照常写。
+    if (!videos.length && previous && Object.keys(previous.videos || {}).length) {
+      console.warn("扫描到 0 条记录，保留已有数据库，不用空结果覆盖。");
+      return;
+    }
     const database = core.databaseFromVideos(videos, { previous });
     await writeFileAtomically(directory, file, JSON.stringify(database));
     // 1.5.0：和 background.js 的 publishStatsSnapshot 保持同一形状 —— snapshot() 的

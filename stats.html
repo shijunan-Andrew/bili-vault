@@ -63,9 +63,11 @@
       </div>
     </section>
 
-    <!-- 时间维度：一个下拉（今天 / 昨天 / 近 7 天 / 近 30 天 / 本月 / 上月 / 自定义区间）。
-         列表项由脚本按预置清单生成（文案走 t()），所以这里只有一个空槽；
-         选「自定义区间」时才展开这本两个月并排的日历（表格是静态的，日期由脚本填）。 -->
+    <!-- 时间维度：一个按钮 + 一块整面板（今天 / 昨天 / 近 7 天 / 近 30 天 / 本月 / 上月 /
+         自定义区间）。1.6.1 起面板是一块**从上到下**的整体：
+           一排横向的预设 chip → 下面两个月并排的日历 → 提示 / 警告 / 清空·确定。
+         原来的「左边一列预设文字 + 右边上下两月日历」两栏并排被用户点了名：
+         文字是左右排的、日历是上下排的，两块凑在一起不成一个界面。 -->
     <section class="stats-card" id="statsRangeCard" hidden>
       <h2 data-i18n="时间范围">时间范围</h2>
       <p class="stats-lead" id="statsRangeSummary">—</p>
@@ -76,8 +78,12 @@
           <span class="stats-picker-label" id="statsRangeLabel">—</span>
           <span class="stats-picker-caret" data-icon="chevron-down"></span>
         </button>
-        <div class="stats-picker-menu" id="statsRangeMenu" role="listbox" aria-label="选择时间范围" data-i18n-aria="选择时间范围" hidden>
-          <div class="stats-picker-list" id="statsRangeList"></div>
+        <div class="stats-picker-menu" id="statsRangeMenu" aria-label="选择时间范围" data-i18n-aria="选择时间范围" hidden>
+          <!-- 预设：一排横向 chip。角色与 aria-selected 由脚本按当前预置填。 -->
+          <div class="stats-picker-list" id="statsRangeList" role="group" aria-label="预置区间"
+            data-i18n-aria="预置区间"></div>
+          <!-- 自定义区间：默认收着，点了「自定义区间」才展开。
+               日历是上下两块并排，所以脚本会往这两个容器里各填一个月的格子。 -->
           <div class="stats-calendar" id="statsCalendar" hidden>
             <div class="stats-calendar-head">
               <button class="stats-calendar-nav" type="button" id="statsCalPrev"
@@ -91,13 +97,21 @@
                 <span data-icon="chevron-right"></span>
               </button>
             </div>
-            <div class="stats-calendar-grid" id="statsCalGridA" role="grid"
-              aria-label="第一个月" data-i18n-aria="第一个月"></div>
-            <div class="stats-calendar-grid" id="statsCalGridB" role="grid"
-              aria-label="第二个月" data-i18n-aria="第二个月"></div>
+            <div class="stats-calendar-months">
+              <div class="stats-calendar-month-block">
+                <div class="stats-calendar-grid" id="statsCalGridA" role="grid"
+                  aria-label="第一个月" data-i18n-aria="第一个月"></div>
+              </div>
+              <div class="stats-calendar-month-block">
+                <div class="stats-calendar-grid" id="statsCalGridB" role="grid"
+                  aria-label="第二个月" data-i18n-aria="第二个月"></div>
+              </div>
+            </div>
             <p class="stats-calendar-hint" data-i18n="点第一下定起点，第二下定终点；起止点反了会自动归一。">点第一下定起点，第二下定终点；起止点反了会自动归一。</p>
             <p class="stats-calendar-warn" id="statsCalendarWarn" hidden></p>
             <div class="stats-calendar-actions">
+              <p class="stats-calendar-picked" id="statsCalendarPicked">—</p>
+              <button class="button stats-calendar-today" type="button" id="statsCalToday" data-i18n="回到今天">回到今天</button>
               <button class="button stats-calendar-reset" type="button" id="statsCalReset" data-i18n="清空">清空</button>
               <button class="stats-calendar-apply" type="button" id="statsCalApply" data-i18n="确定">确定</button>
             </div>
@@ -128,12 +142,19 @@
       <p class="stats-note" id="statsPieEmpty" hidden></p>
     </section>
 
-    <!-- 年份时间轴：快照里没有 yearly 就整块藏起来（不留空壳）。 -->
+    <!-- 年份时间轴：快照里没有 yearly 就整块藏起来（不留空壳）。
+         1.6.1 起柱状图下面再挂一张年度饼图（各年在总数里占多少），
+         和「某一天的收藏夹构成」共用同一套扇形画法与配色：
+         画不出来时里面只留一句「各年份的收藏构成」，不留一个空壳圆。 -->
     <section class="stats-card" id="statsYearCard" hidden>
       <h2 data-i18n="按年份累计">按年份累计</h2>
       <p class="stats-lead" id="statsYearLead"></p>
       <div class="stats-chart stats-year-chart" id="statsYearChart"></div>
       <p class="stats-note" id="statsYearNote" hidden></p>
+      <div class="stats-pie stats-year-pie" id="statsYearPie">
+        <p class="stats-pie-empty" data-i18n="各年份的收藏构成">各年份的收藏构成</p>
+      </div>
+      <ul class="stats-legend" id="statsYearPieLegend"></ul>
     </section>
 
     <!-- 近期保存最多的收藏夹：快照里只有 topCollection 一个，没有整张排行，

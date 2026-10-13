@@ -29,23 +29,52 @@ const cssUrlCount = [...html.matchAll(/url\((['"]?)([^)'"]+)\1\)/gi)].map((m) =>
 const cssRemote = cssUrlCount.filter((u) => !/^data:/i.test(u.trim()));
 if (cssRemote.length) fails.push(`${cssRemote.length} css url() still fetch a remote file (e.g. ${cssRemote.slice(0, 3).join(', ')})`);
 
-// 3. no <script src>, and the page carries exactly its two inline scripts:
-//    the click router and the self-contained egg dialog (they must not merge: the dialog script
-//    owns the close paths, the router owns the jump, and each is asserted separately below).
-if (/<script[^>]*\bsrc=/i.test(html)) fails.push('a <script src=...> survived the build');
-if (count(/<script\b/gi) !== 2) fails.push(`expected exactly 2 inline scripts (click router + egg dialog), found ${count(/<script\b/gi)}`);
+// 3. scripts: exactly two tags — the inline copy (for file://) and the external egg-2015.js
+//    (for chrome-extension://, whose CSP is script-src 'self' and kills inline scripts outright:
+//    that is the real-machine root cause behind 「知道啦」 not closing the dialog).
+//    Both copies must stay byte-identical, so this checks the file on disk too.
+const eggJsPath = path.join(ROOT, 'egg-2015.js');
+const eggJs = fs.existsSync(eggJsPath) ? fs.readFileSync(eggJsPath, 'utf8') : null;
+const scriptTags = [...html.matchAll(/^<script\b[^>]*>/gim)].map((m) => m[0]);
+if (scriptTags.length !== 2) fails.push(`expected exactly 2 <script> tags (inline copy + egg-2015.js), found ${scriptTags.length}: ${scriptTags.join(' | ')}`);
+if (/<script\b[^>]*\bsrc="(?:https?:)?\/\//i.test(html)) fails.push('a remote <script src=...> survived the build');
+const inlineTags = scriptTags.filter((t) => !/\bsrc=/i.test(t));
+const extTags = scriptTags.filter((t) => /\bsrc=/i.test(t));
+if (inlineTags.length !== 1) fails.push(`expected exactly 1 inline <script>, found ${inlineTags.length}`);
+if (extTags.length !== 1 || !/\bsrc="egg-2015\.js"/i.test(extTags[0] || '')) fails.push(`expected exactly one <script src="egg-2015.js">, found ${JSON.stringify(extTags)}`);
+if (!eggJs) fails.push('egg-2015.js is missing next to index.html (the extension environment has nothing to run)');
+else {
+  if (!html.includes('<script>\n' + eggJs + '</script>')) fails.push('the inline <script> and egg-2015.js are NOT byte-identical (they must carry the same code)');
+  else notes.push(`inline <script> === egg-2015.js (${eggJs.length} chars, byte-identical)`);
+  if (!html.trimEnd().endsWith('<script src="egg-2015.js"></script>\n</html>')) fails.push('egg-2015.js is not loaded as the last tag before </html>');
+}
 
 // 4. the click router is present and correct
-if (!/window\.open\('https:\/\/www\.bilibili\.com\/', '_blank'\)/.test(html)) fails.push('click router does not open the live homepage');
+if (!/var TARGET = 'https:\/\/www\.bilibili\.com\/';/.test(html)) fails.push('click router lost its https://www.bilibili.com/ target');
+if (!/window\.open\(TARGET, '_blank'\)/.test(html)) fails.push('click router does not open the live homepage');
 if (!/addEventListener\('click'/.test(html)) fails.push('click router missing');
 if (!/addEventListener\('submit'/.test(html)) fails.push('submit router missing');
+// 关掉之后 catch-all 不许再导航（关闭那一次手势的点击不能顺带跳走）
+if (!/hasAttribute\('data-egg-dismissed'\)\) return;/.test(html)) fails.push('click router does not honour the data-egg-dismissed marker');
 
-// 4b. the egg dialog is present and self-contained (script + markup + its own styles)
+// 4b. the egg dialog is present and closes through paths that do not depend on script order:
+//     a pure-CSS path (label -> hidden checkbox -> :checked hides the overlay), pointerdown,
+//     a window-capture click guard, and Esc.
+if (!/<input type="checkbox" id="eggDialogOkToggle"/.test(html)) fails.push('egg dialog css kill-switch checkbox missing');
 if (!/<div id="eggDialogOverlay"/.test(html)) fails.push('egg dialog markup missing');
-if (!/<button id="eggDialogOk"[^>]*>知道啦<\/button>/.test(html)) fails.push('egg dialog 知道啦 button missing');
-if (!/overlay\.addEventListener\('pointerdown'/.test(html)) fails.push('egg dialog close path (pointerdown) missing');
+if (!/<label id="eggDialogOk"[^>]*for="eggDialogOkToggle"[^>]*>知道啦<\/label>/.test(html)) fails.push('egg dialog 知道啦 control missing (must be a <label for="eggDialogOkToggle">)');
+if (!/#eggDialogOkToggle:checked ~ #eggDialogOverlay \{[\s\S]{0,60}display: none/.test(html)) fails.push('egg dialog css kill-switch rule missing');
+if (!/html:has\(#eggDialogOkToggle:checked\) #eggDialogOverlay/.test(html)) fails.push('egg dialog css kill-switch fallback (html:has) missing');
+if (!/window\.addEventListener\('pointerdown'/.test(html)) fails.push('egg dialog close path (pointerdown) missing');
 if (!/window\.addEventListener\('click'/.test(html)) fails.push('egg dialog click guard missing');
+if (!/=== 'Escape'/.test(html)) fails.push('egg dialog Esc close path missing');
 if (!/#eggDialogOverlay \{[\s\S]{0,200}position: fixed/.test(html)) fails.push('egg dialog styles missing');
+// 关掉之后本次浏览不再自己回来：带版本号的 storage 记号 + 页面加载时先查一次
+if (!/biliVaultEggDismissed\.v1/.test(html)) fails.push('egg dialog versioned storage key missing');
+if (!/if \(remembered\(\)\) closeDialog\(\);/.test(html)) fails.push('egg dialog does not consult the stored state on load');
+if (!/sessionStorage\.setItem\(KEY/.test(html) || !/localStorage\.setItem\(KEY/.test(html)) fails.push('egg dialog does not record the dismissed state in both storages');
+if (!/catch \(e\) \{\}/.test(html)) fails.push('egg dialog storage writes are not wrapped in try/catch (file:// / private mode throws)');
+if (!/__bili2015Wired/.test(html)) fails.push('egg dialog lacks the __bili2015Wired guard (double wiring)');
 
 // 5. structure: the ten category rows + the fixed pieces are all in the document
 const wanted = [
@@ -80,14 +109,15 @@ notes.push(`images inlined as data uri: ${dataImgs}`);
 notes.push(`thumbnail boxes left empty (no 2015 file anywhere): ${emptyImgs}`);
 notes.push(`css url(data:) inline: ${count(/url\(['"]?data:/gi)}`);
 notes.push(`addnew badges filled: ${count(/class="addnew_\d+" title=/g)}`);
-notes.push(`scripts: ${count(/<script\b/gi)}`);
+notes.push(`scripts: ${scriptTags.length} (inline copy + egg-2015.js)`);
 
-// 9. the file must work when opened directly from disk (file://): every sub-resource is a data: uri,
-//    so no relative path can 404 and no CORS rule applies.
+// 9. the file must still work when opened directly from disk (file://): every sub-resource is a
+//    data: uri except the one sanctioned sibling script (a same-directory file:// <script src> is
+//    allowed and is exactly what the extension environment needs).
 const relSrc = [...html.matchAll(/\b(?:src|href)="(?!data:|https:\/\/www\.bilibili\.com\/|#)([^"]*)"/gi)]
-  .map((m) => m[1]).filter((u) => u && !/^javascript:/i.test(u));
+  .map((m) => m[1]).filter((u) => u && !/^javascript:/i.test(u) && u !== 'egg-2015.js');
 if (relSrc.length) fails.push(`${relSrc.length} relative sub-resource references would break file:// (e.g. ${relSrc.slice(0, 3).join(', ')})`);
-notes.push(`relative sub-resource refs (file:// safety): ${relSrc.length}`);
+notes.push(`relative sub-resource refs besides egg-2015.js (file:// safety): ${relSrc.length}`);
 
 console.log('--- notes ---');
 notes.forEach((n) => console.log('  ', n));

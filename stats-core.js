@@ -44,10 +44,15 @@
   // 区间的毫秒边界专用：空值 / 空串一律当「没给」。
   // 不能直接用 numberOr，因为 Number(null) === 0 —— 那样 `null` 会变成一个合法的
   // 1970-01-01 区间，而不是「这个区间是坏的」。0 本身仍然是合法时间戳（1970 年）。
+  // 另外要认 "2026-03-28" 这种日键：界面上的日历格子就是日键，rangeFor("custom") 拿到
+  // 的 from/to 直接是日键。不认的话 Number("2026-03-28") 是 NaN，自定义区间会整个变成
+  // null，界面上就成了「点了确定但图还是上一次的」——这条是自定义区间一直不生效的根因。
+  // 只认形状严格的日键（错一个字符都不猜），认不出照旧返回 NaN。
   function timeOr(value) {
     if (value === null || value === undefined || value === "") return NaN;
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : NaN;
+    if (Number.isFinite(parsed)) return parsed;
+    return dayKeyToTime(value);
   }
 
   // 一律用**本地时间**分天：用户看到的「今日」就是挂钟上的今日，不是 UTC 的。
@@ -464,6 +469,86 @@
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"));
   }
 
+  // 某一天所属那一周的周一。用「当天是星期几」回退，不做毫秒减法：
+  // 夏令时那天少/多一小时的话，`time - 3 * DAY_MS` 会落到周日 23:00。
+  // 做法与 localDayList 一致 —— 先按日运算，再取那天的 00:00。
+  function weekStartOf(time) {
+    const date = new Date(numberOr(time, NaN));
+    if (Number.isNaN(date.getTime())) return NaN;
+    return dayStartTime(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7));
+  }
+
+  // 周一那天的日期键。"2026-08-03"
+  function weekKeyOf(time) {
+    const monday = weekStartOf(time);
+    return Number.isFinite(monday) ? localDayKey(monday) : "";
+  }
+
+  // 一个自然月一个 key："2026-08"。月份从 1 起算（和界面上「8 月」一致）。
+  function monthKeyOf(time) {
+    const date = new Date(numberOr(time, NaN));
+    if (Number.isNaN(date.getTime())) return "";
+    return date.getFullYear() + "-" + pad2(date.getMonth() + 1);
+  }
+
+  // 按月分桶（全量，不受 dailyRows 那 180 天窗口限制）。
+  // byCollection 用 Map：和 bucketByDay 同一形状，后续序列化时再过滤。
+  function bucketByMonth(database) {
+    const buckets = new Map();
+    for (const entry of entriesOf(database)) {
+      const month = monthKeyOf(entry.at);
+      if (!month) continue;
+      let bucket = buckets.get(month);
+      if (!bucket) {
+        bucket = { count: 0, byCollection: new Map() };
+        buckets.set(month, bucket);
+      }
+      const name = entry.collection || "未分类收藏";
+      bucket.count += 1;
+      bucket.byCollection.set(name, numberOr(bucket.byCollection.get(name), 0) + 1);
+    }
+    return buckets;
+  }
+
+  // 按自然周（周一~周日）汇总，只列**有记录**的周，升序。
+  // 长区间的柱子用它：730 天 ≈ 105 根柱子，逐日渲染会挤成一片。
+  function weeklySeries(database) {
+    const buckets = new Map();
+    for (const entry of entriesOf(database)) {
+      const week = weekKeyOf(entry.at);
+      if (!week) continue;
+      let bucket = buckets.get(week);
+      if (!bucket) {
+        bucket = { count: 0, byCollection: new Map() };
+        buckets.set(week, bucket);
+      }
+      const name = entry.collection || "未分类收藏";
+      bucket.count += 1;
+      bucket.byCollection.set(name, numberOr(bucket.byCollection.get(name), 0) + 1);
+    }
+    return Array.from(buckets.entries())
+      .map(([week, bucket]) => ({ week, count: bucket.count, byCollection: byCollectionObject(bucket.byCollection) }))
+      .sort((a, b) => (a.week < b.week ? -1 : (a.week > b.week ? 1 : 0)));
+  }
+
+  // 按自然月汇总，只列**有记录**的月，升序。
+  // 与 yearlySeries 同一口味（空月份不出现）—— 统计页要用它补满区间里的空月，
+  // 补 0 是界面的事，这里不替它编。
+  function monthlySeries(database) {
+    return Array.from(bucketByMonth(database).entries())
+      .map(([month, bucket]) => ({ month, count: bucket.count, byCollection: byCollectionObject(bucket.byCollection) }))
+      .sort((a, b) => (a.month < b.month ? -1 : (a.month > b.month ? 1 : 0)));
+  }
+
+  // Map<string, number> → 只留非零项的普通对象（快照要 JSON 序列化后进 chrome.storage）。
+  function byCollectionObject(source) {
+    const out = {};
+    for (const [name, count] of source) {
+      if (count > 0) out[name] = count;
+    }
+    return out;
+  }
+
   // 按年份汇总，升序、只列有记录的年份（年份时间轴上不该出现空年份）。
   function yearlySeries(database) {
     const counts = new Map();
@@ -542,8 +627,19 @@
       days: { since, days },
       pet: normalizePet(database && database.pet, time),
       dailyRows,
+      // 按自然周（周一~周日）的全量汇总：31 天 ~ 半年之间的区间按它画。
+      // 和 monthly / yearly 一个道理 —— 统计页手里只有快照，拿不到数据库本体，
+      // 想按周聚合就只能由这里带出去。只列有记录的周。
+      weekly: weeklySeries(database),
+      // 按自然月的全量汇总：长区间（> 半年）的柱子按它画。
+      // dailyRows 只有最近 180 天，730 天的区间在它上面根本取不到逐日数据，
+      // 所以这份月度表必须由这里带出去（和 dailyRows 一个道理：统计页读不到数据库本体）。
+      monthly: monthlySeries(database),
       // 年份时间轴。跟着快照走，统计页就不必为了「按年看」再去碰数据库。
-      yearly: yearlySeries(database)
+      yearly: yearlySeries(database),
+      // 收藏夹里最早一条收藏的日期（YYYY-MM-DD），空库是 null。
+      // 自定义区间的下界：比这更早的日子在日历上置灰，选也选不动。
+      earliest: Number.isFinite(firstAt) ? localDayKey(firstAt) : null
     };
   }
 
@@ -656,6 +752,14 @@
     totalInRange,
     collectionBreakdown,
     yearlySeries,
+    // 长区间的聚合：按自然周（周一~周日）与按自然月。
+    // monthlySeries 是全量的 —— dailyRows 只有 180 天，长区间拿不到逐日数据，
+    // 统计页的「按月聚合」柱子只能靠它（快照里的 monthly 也是它）。
+    weeklySeries,
+    monthlySeries,
+    weekStartOf,
+    weekKeyOf,
+    monthKeyOf,
     localDayKey,
     dayKeyToTime,
     parseFavoriteTime,

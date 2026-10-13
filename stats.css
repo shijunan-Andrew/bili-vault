@@ -112,6 +112,14 @@ body {
   color: var(--faint);
   font-size: var(--fs-sm);
 }
+/* 饼图画不出来时的一句话（空库、或者点的那一天没有新增）：
+   1.6.1 起年度饼图也用同一句占位，所以它有自己的类，不再是 .stats-note。 */
+.stats-pie-empty {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
 
 /* ── 四个数字卡 ──
    窗口越窄列数越少（见文件末尾的媒体查询），minmax(0, 1fr) 保证长数字不会把格子撑破。 */
@@ -206,6 +214,24 @@ body {
   stroke: var(--brand-deep);
   stroke-width: 2;
 }
+/* 整格判定层：从底到顶、整格宽的透明矩形。
+   1.6.1 起点柱子点的是它，不是那根看得见的细柱子 —— 矮柱子和 0 记录的日子
+   在图上几乎（或完全）没有可见面积，原来的命中区跟着一起缩水，很难点。
+   fill 透明 + pointer-events:all：底色不挡任何东西，但整格都能收指针事件。
+   它是每列里后画的那一层，所以压在看得见的柱子上面（SVG 没有 z-index）。 */
+.stats-bar-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+.stats-bar-hit:focus-visible {
+  outline: none;
+}
+/* 键盘落在这层上时，把焦点环画给同列那根看得见的柱子（它在判定层**前面**，
+   所以用 :has(+ …) 往后看，不能用兄弟选择器往前找）。 */
+.stats-bar:has(+ .stats-bar-hit:focus-visible) {
+  stroke: var(--brand-deep);
+  stroke-width: 2;
+}
 
 /* ── 年份时间轴 ──
    和柱状图同一套画法（都是 .stats-svg），只是矮一点。 */
@@ -262,57 +288,82 @@ body {
   top: calc(100% + var(--sp-2));
   left: 0;
   z-index: 40;
+  /* 1.6.1：面板里要并排两个月，所以它比按钮宽得多。
+     宽度取「卡片宽度」与「60ch」里更小的那个 —— 小窗口下面板不会顶到卡片外面，
+     大窗口下也不会拉成一条横贯整屏的长条。 */
+  width: min(100%, 60ch);
   min-width: 220px;
-  padding: var(--sp-2);
+  max-width: calc(100vw - var(--sp-5));
+  box-sizing: border-box;
+  padding: var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--shadow-md);
 }
+/* 预设：一排横向 chip（原来是一列文字，和右边上下排的日历拼不成一个整体）。
+   窄了就自动换行，不横向滚动 —— 滚动条在浮层里很难用。 */
 .stats-picker-list {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
 }
 .stats-picker-option {
-  display: block;
-  width: 100%;
-  padding: var(--sp-2) var(--sp-3);
-  border: 0;
-  border-radius: var(--r-xs);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 30px;
+  max-width: 100%;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
   color: var(--ink);
-  background: none;
+  background: var(--surface-soft);
   font-family: inherit;
   font-size: var(--fs-base);
-  text-align: left;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
-.stats-picker-option:hover { background: var(--surface-soft); }
+.stats-picker-option:hover { border-color: var(--brand-line); background: var(--brand-soft); }
 .stats-picker-option:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .stats-picker-option[aria-selected="true"] {
-  color: var(--brand-deep);
-  background: var(--brand-soft);
+  color: var(--surface);
+  border-color: var(--brand-strong);
+  background: var(--brand-strong);
   font-weight: 600;
 }
 
 /* ── 自定义区间日历 ──
-   默认两个月并排（跨月选），所以这里排两列；起止跨得更远时脚本会多铺几个月，
+   1.6.1 起是**上下排的一块面板**：预设 chip 在上一行，日历整块铺在下面，
+   两个月的标题都在各自那一列的顶上（`8 月 / 9 月` 正对着它们下面那张表），
+   不再是「左边一列文字 + 右边一堆月份名」那种对不上的排法。
+   两个月并排、各占一列，跨月翻页照旧；起止跨得更远时脚本会多铺几个月，
    多出来的月份自然落到下一行，两列宽度保持不变。
    日期格子用 grid 排，星期表头与空格子占同样的位。 */
 .stats-calendar {
-  margin-top: var(--sp-2);
+  margin-top: var(--sp-3);
   padding-top: var(--sp-3);
   border-top: 1px solid var(--line);
 }
-/* 月份栏：左右各一个翻页按钮，中间两列是两个月份名 —— 和下面那两列日历对齐。
-   窄窗口下翻页按钮那一列会收窄，但不会消失（按钮是固定 28px 的方块）。 */
+/* 翻页按钮一行：两个按钮顶到两端，中间写着「点第一下定起点…」那种全局提示的位置
+   留给下面，这里只放按钮（月份名挪到每张表的头上去了）。 */
 .stats-calendar-head {
-  display: grid;
-  grid-template-columns: auto repeat(2, minmax(0, 1fr)) auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--sp-2);
-  margin-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+/* 两个月并排的容器：窄窗口下由媒体查询改成一列（见文件末尾）。 */
+.stats-calendar-months {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.stats-calendar-month-block {
+  min-width: 0;
 }
 /* 翻页箭头：.stats-calendar-nav 只是个可点的方形按钮，图标跟着文字走。 */
 .stats-calendar-nav {
@@ -335,6 +386,7 @@ body {
 /* 「上个月」用的是 chevron-right 的图标镜像过来（icons.js 里没有 chevron-left），
    只翻图标本身，按钮的盒子不动。 */
 .stats-calendar-nav:first-of-type .icon { transform: scaleX(-1); }
+/* 月份名：每一列的标题。两个格子宽窄一样，标题也居中对齐到各自的表上。 */
 .stats-calendar-month {
   color: var(--ink);
   font-size: var(--fs-base);
@@ -342,10 +394,18 @@ body {
   text-align: center;
   white-space: nowrap;
 }
+/* 每一列的标题：排在它自己那张表的上方（原来两个月份名挤在头部一行里）。 */
+.stats-calendar-month-block .stats-calendar-month { display: block; }
+/* 铺了两个月以上时补在表头里的月份名：占满整行，不与 7 列对齐。 */
+.stats-calendar-month-in {
+  grid-column: 1 / -1;
+  margin-bottom: var(--sp-1);
+}
 .stats-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 2px;
+  margin-top: var(--sp-2);
   margin-bottom: var(--sp-2);
 }
 .stats-calendar-wd {
@@ -395,12 +455,28 @@ body {
   color: var(--danger);
   font-size: var(--fs-sm);
 }
+/* 提示行、警告行、动作行：面板是上下排的，所以这三行也都整宽铺开。
+   动作行左边是「已选 x 月 x 日 - y 月 y 日」这类回执（用户点了第一下之后
+   得看得见自己选中了什么），右边才是清空 / 确定。 */
 .stats-calendar-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--sp-2);
 }
+/* 回执占满剩余宽度，把两个按钮顶到右边；太长就省略，不把按钮挤走 */
+.stats-calendar-picked {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .stats-calendar-reset,
+.stats-calendar-today,
 .stats-calendar-apply {
   min-height: 32px;
   padding: 0 var(--sp-3);
@@ -412,14 +488,17 @@ body {
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
-.stats-calendar-reset { color: var(--muted); background: var(--surface-soft); }
-.stats-calendar-reset:hover { color: var(--ink); border-color: var(--line); }
+.stats-calendar-reset,
+.stats-calendar-today { color: var(--muted); background: var(--surface-soft); }
+.stats-calendar-reset:hover,
+.stats-calendar-today:hover { color: var(--ink); border-color: var(--line); }
 .stats-calendar-apply {
   color: var(--surface);
   border-color: var(--brand-strong);
   background: var(--brand-strong);
 }
 .stats-calendar-reset:focus-visible,
+.stats-calendar-today:focus-visible,
 .stats-calendar-apply:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* ── 饼图：手写 SVG 扇形 + 图例 ──
@@ -427,6 +506,21 @@ body {
    八个色位全取自 theme.css 里现成的成对令牌（每个颜色都有配套的 -strong），
    深浅两套主题下都会跟着换，不新增任何色值。 */
 .stats-pie {
+  /* 饼图配色：只留品牌蓝一个色相，逐档往 --ink 里混。
+     浅色主题的 --ink 是近黑 → 越来越深的蓝；深色主题的 --ink 是近白 → 越来越亮的蓝。
+     两套主题各配一条自己的档位表（见下面的 html[data-theme="dark"] 覆盖）：
+     浅色从 92% 起手，最深那档在浅底上 3.35:1（旧表 100% 起手只有 2.97:1，卡在门槛下）；
+     深色从 92% 起手、按等亮度步长压到 22%，相邻两片在深底上仍能分开。
+     写死任何一档颜色都会在另一套主题里翻车，所以这里全部由 color-mix 现算。 */
+  --pie-slice: var(--brand);
+  --pie-slice-0: color-mix(in srgb, var(--brand) 92%, var(--ink));
+  --pie-slice-1: color-mix(in srgb, var(--brand) 82%, var(--ink));
+  --pie-slice-2: color-mix(in srgb, var(--brand) 72%, var(--ink));
+  --pie-slice-3: color-mix(in srgb, var(--brand) 62%, var(--ink));
+  --pie-slice-4: color-mix(in srgb, var(--brand) 52%, var(--ink));
+  --pie-slice-5: color-mix(in srgb, var(--brand) 42%, var(--ink));
+  --pie-slice-6: color-mix(in srgb, var(--brand) 32%, var(--ink));
+  --pie-slice-7: color-mix(in srgb, var(--brand) 22%, var(--ink));
   display: flex;
   align-items: center;
   gap: var(--sp-5);
@@ -439,24 +533,72 @@ body {
   max-width: 100%;
   height: auto;
 }
+/* 深色主题的 --ink 是近白，同样的档位表会挤成一串浅蓝；
+   这里换一条按等亮度步长解出来的表，档距拉大，深底上相邻两片也分得开。
+   两种深色都要覆盖：手动选深色是 <html data-theme="dark">，
+   跟随系统时没有这个属性、由 theme.css 的媒体查询接手。 */
+html[data-theme="dark"] .stats-pie {
+  --pie-slice-0: color-mix(in srgb, var(--brand) 92%, var(--ink));
+  --pie-slice-1: color-mix(in srgb, var(--brand) 78%, var(--ink));
+  --pie-slice-2: color-mix(in srgb, var(--brand) 66%, var(--ink));
+  --pie-slice-3: color-mix(in srgb, var(--brand) 56%, var(--ink));
+  --pie-slice-4: color-mix(in srgb, var(--brand) 47%, var(--ink));
+  --pie-slice-5: color-mix(in srgb, var(--brand) 39%, var(--ink));
+  --pie-slice-6: color-mix(in srgb, var(--brand) 30%, var(--ink));
+  --pie-slice-7: color-mix(in srgb, var(--brand) 22%, var(--ink));
+}
+@media (prefers-color-scheme: dark) {
+  /* 跟随系统且没手动选浅色时，令牌本身就是深色那一套，档位表跟着换 */
+  html:not([data-theme="light"]) .stats-pie {
+    --pie-slice-0: color-mix(in srgb, var(--brand) 92%, var(--ink));
+    --pie-slice-1: color-mix(in srgb, var(--brand) 78%, var(--ink));
+    --pie-slice-2: color-mix(in srgb, var(--brand) 66%, var(--ink));
+    --pie-slice-3: color-mix(in srgb, var(--brand) 56%, var(--ink));
+    --pie-slice-4: color-mix(in srgb, var(--brand) 47%, var(--ink));
+    --pie-slice-5: color-mix(in srgb, var(--brand) 39%, var(--ink));
+    --pie-slice-6: color-mix(in srgb, var(--brand) 30%, var(--ink));
+    --pie-slice-7: color-mix(in srgb, var(--brand) 22%, var(--ink));
+  }
+}
 .stats-slice,
-.stats-legend-mark { color: var(--brand); }
-.stats-slice-0, .stats-legend-mark.stats-slice-0 { color: var(--brand); }
-.stats-slice-1, .stats-legend-mark.stats-slice-1 { color: var(--brand-strong); }
-.stats-slice-2, .stats-legend-mark.stats-slice-2 { color: var(--brand-tint); }
-.stats-slice-3, .stats-legend-mark.stats-slice-3 { color: var(--success); }
-.stats-slice-4, .stats-legend-mark.stats-slice-4 { color: var(--warning); }
-.stats-slice-5, .stats-legend-mark.stats-slice-5 { color: var(--danger); }
-.stats-slice-6, .stats-legend-mark.stats-slice-6 { color: var(--accent); }
-.stats-slice-7, .stats-legend-mark.stats-slice-7 { color: var(--feature); }
-/* 超出 6 个收藏夹时合成的那一片：用中性色，一眼看出它不是某个具体收藏夹 */
-.stats-slice-other, .stats-legend-mark.stats-slice-other { color: var(--faint); }
+.stats-legend-mark { color: var(--pie-slice); }
+.stats-slice-0, .stats-legend-mark.stats-slice-0 { color: var(--pie-slice-0); }
+.stats-slice-1, .stats-legend-mark.stats-slice-1 { color: var(--pie-slice-1); }
+.stats-slice-2, .stats-legend-mark.stats-slice-2 { color: var(--pie-slice-2); }
+.stats-slice-3, .stats-legend-mark.stats-slice-3 { color: var(--pie-slice-3); }
+.stats-slice-4, .stats-legend-mark.stats-slice-4 { color: var(--pie-slice-4); }
+.stats-slice-5, .stats-legend-mark.stats-slice-5 { color: var(--pie-slice-5); }
+.stats-slice-6, .stats-legend-mark.stats-slice-6 { color: var(--pie-slice-6); }
+.stats-slice-7, .stats-legend-mark.stats-slice-7 { color: var(--pie-slice-7); }
+/* 超出八档时合成的那一片：往中性灰里混，一眼看出它不是某个具体收藏夹，
+   也比上面任何一档都灰，不会跟某一档撞色。 */
+.stats-slice-other,
+.stats-legend-mark.stats-slice-other {
+  color: color-mix(in srgb, var(--brand) 22%, var(--muted));
+}
 /* color 给扇形上 fill、给图例小方块上背景，两个属性分开写，互不干扰；
-   扇形之间再留一道底色缝，深浅两套主题下都不会糊成一片。 */
+   扇形之间再留一道缝（stroke 走卡片底色，深色主题下自然变深色）。
+
+   悬停「抬起」：整块扇形以圆心为原点放大一点并加一层投影。
+   transform-origin 由脚本按 viewBox 算好、写成具体像素（190 的视框就是 95px 95px）——
+   SVG 上写百分比在 Safari 里与视框的换算是另一套算法，写像素两边都稳。
+   放大只作用在这一个 <g> 上，别人的位置不动，也不会有布局回流。 */
 .stats-slice {
   fill: currentColor;
   stroke: var(--surface);
-  stroke-width: 1.5;
+  stroke-width: 2;
+  transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+  filter: drop-shadow(0 0 0 transparent);
+}
+.stats-slice:hover,
+.stats-slice:focus-within {
+  transform: scale(1.06);
+  stroke-width: 3;
+  filter: drop-shadow(0 3px 4px color-mix(in srgb, var(--ink) 42%, transparent));
+}
+/* 图例项悬停时把对应的小方块也顶一下：鼠标在图例上也能顺着找到图上哪一块 */
+.stats-legend-item:hover .stats-legend-mark {
+  transform: scale(1.25);
 }
 .stats-legend {
   flex: 1 1 240px;
@@ -481,6 +623,8 @@ body {
   height: 10px;
   border-radius: var(--r-xs);
   background: currentColor;
+  transform-origin: 50% 50%;
+  transition: transform var(--dur-fast) var(--ease);
 }
 /* 收藏夹名可能很长：占满剩余宽度、超出省略，右边的条数别被挤走 */
 .stats-legend-name {
@@ -668,21 +812,41 @@ html.bca-glass .stats-topbar {
   .stats-topbar { padding: var(--sp-2) var(--sp-3); }
   .stats-topbar-lead h1 { font-size: var(--fs-md); }
   .stats-sub { display: none; }
-  /* 日历：两个月并排到手机上每格只剩十几个像素，索性一个月一行 */
-  .stats-calendar-head { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .stats-calendar-head .stats-calendar-month:last-of-type { display: none; }
   .stats-pie { justify-content: center; }
   .stats-legend { flex: 1 1 100%; }
+}
+/* ── 620px：自定义区间面板的降级点 ──
+   用户点名要求窄屏要有合理降级。这一档起：
+     · 日历从「两个月并排」改成一列（每格还能保持 36px 左右的点击面，
+       并排的话每格只剩十几个像素，根本点不准）；
+     · 预设 chip 收小一档（字号仍是 11px 以上，不碰字号下限）；
+     · 面板贴着按钮整宽铺开，不再是浮在旁边的一小块。 */
+@media (max-width: 620px) {
+  .stats-picker-menu {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: var(--sp-2);
+  }
+  .stats-calendar-months { grid-template-columns: minmax(0, 1fr); }
+  .stats-picker-option {
+    min-height: 28px;
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-sm);
+  }
 }
 @media (max-width: 520px) {
   .stats-tiles { grid-template-columns: minmax(0, 1fr); }
   .stats-picker-menu { min-width: 0; width: 100%; }
+  .stats-calendar-actions { flex-wrap: wrap; }
+  .stats-calendar-picked { flex: 1 1 100%; text-align: left; }
 }
 
 /* ── 减少动态效果 ──
    theme.css 末尾已经用强制覆盖把所有过渡压到 .01ms，这里再按本页自己的需要
-   关一次：本页的过渡只有按钮悬停、柱子换色和日历格子的底色，
-   关掉后悬停照样有结果（换色是瞬时的），只是不再有中间过程。 */
+   关一次：本页的过渡只有按钮悬停、柱子换色、日历格子的底色和饼图那下「抬起」。
+   关掉后悬停照样有结果（换色是瞬时的），只是不再有中间过程 ——
+   饼图那块保持原样不放大、不投影，也不做过渡。 */
 @media (prefers-reduced-motion: reduce) {
   .button,
   .stats-picker-button,
@@ -691,8 +855,16 @@ html.bca-glass .stats-topbar {
   .stats-calendar-day,
   .stats-calendar-reset,
   .stats-calendar-apply,
-  .stats-bar {
+  .stats-bar,
+  .stats-slice,
+  .stats-legend-mark {
     transition: none;
   }
   .button:hover:not(:disabled) { transform: none; }
+  .stats-slice:hover,
+  .stats-slice:focus-within {
+    transform: none;
+    filter: none;
+  }
+  .stats-legend-item:hover .stats-legend-mark { transform: none; }
 }

@@ -76,6 +76,23 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.6.1：统计页的粒度规则与「数据库凭空消失」的根因
+
+**粒度**：`stats.js` 的 `chartModeOf()` 按区间长度选柱状图粒度 —— ≤31 天逐日、>31 天按自然周、>183 天按自然月。周一律从周一开始（`stats-core.js` 的 `weekStartOf / weekKeyOf / weeklySeries`，用日历算术而不是 `time - n * DAY_MS`，避免夏令时落到前一天 23:00）；月聚合走 `stats-core.js` 的 `monthlySeries()`（**全量**，不受 `dailyRows` 只有 180 天的限制）。
+
+**快照新增字段**：`weekly` / `monthly` / `earliest`（最早收藏日，空库为 null）。5000 条 / 20 收藏夹的库：快照 16.5 KB → 28.3 KB；`test/stats-core.test.cjs` 里 `< 80KB` 的断言仍成立，另加了两道更紧的上限（月汇总单独 2.3 KB）。
+
+**自定义区间**：下界 = `snapshot().earliest`，上界 = 今天；日历对界外日期 `disabled + aria-disabled`，`pickDay` 直接拒绝、`applyCustom` 再夹一次，翻页也被 `clampCalendarView` 限制在「最早那个月 ~ 本月」。`rangeFor` 的 730 天上限没动。
+
+**三条可复用的教训**（都是这次真机上踩出来的）：
+
+1. **替换文件绝不允许「先删后换名」**：`FileSystemFileHandle.move()` 的参数是「目标目录 + 新文件名」，传文件句柄必抛；而老的 `writeFileAtomically()` 恰恰是先 `removeEntry(file.name)` 再 `temp.move(file)` —— 一抛，原文件没了、临时文件又被 catch 清掉，数据库就凭空消失，用户看到的是「统计回到初始状态」加「已陪伴你 1 天」。正确写法是先按规范换名、失败再退回就地写，任一步失败原文件都还在。
+2. **空扫描不是「库里没有东西」的证据**：重建型同步（拿扫描结果整份重写数据库）必须能区分「这一次扫到 0 条」与「库里确实为空」。`syncStatsDatabase()` 现在在「扫描 0 条 + 旧库里还有记录」时直接跳过写入。
+3. **别把中文塞进占位符**：`t("星期{name}", { name: "一" })` 这种写法翻译不出来（英文里会漏汉字）。要么一条条写成 `t("星期一")` 字面量（抽取器才看得见），要么用能本地化的枚举。
+
+4. **扩展页不许用内联 `<script>`**：MV3 默认 CSP 就是 `script-src 'self'`，`manifest.json` 里没有 `content_security_policy` 键也一样。彩蛋页 `bili-old-2015/index.html` 的两段内联脚本（全站跳转路由器、对话框）在真机 `chrome-extension://` 下**从未执行过** —— 症状是「按钮点得到、事件也到了按钮上，但没有任何处理器响应」，而同一个文件用 `file://` 打开一切正常（这是最容易骗过自动化验证的地方：上一轮 8 个场景全绿，跑的全是 `file://`）。所有页面脚本必须走 `<script src="…">`；`bili-old-2015/tools/build.js` 现在同时产出内联副本（给 `file://`）与外链 `egg-2015.js`（给扩展环境），`tools/verify.js` 断言两者逐字一致。
+5. **两条真机事实**（这次实测出来的）：**只有扩展自己的 service worker 能打开 `chrome-extension://` 页面** —— 从别的扩展调 `chrome.tabs.create` 会被 `ERR_BLOCKED_BY_CLIENT` 拒，CDP 的 `Page.navigate` / `Target.createTarget` 一律落成 chrome-error，想验扩展页必须让该扩展自己的 SW 去开；以及**改过的扩展文件会重新读盘**，不用点「重新加载」，刷新页面就生效。
+
 ## 1.6.0：上线前审查的修复批次与统计口径
 
 用户下的口径是「距离正式上线已经很近了，再仔细审查一下整个项目」+「审查完先发我审阅，我指示后你再改」。四份只读审查（宠物 / 外观 / 核心 / 怀旧页）产出 `bili-vault-1.6.0-审查清单.md`，用户圈了第一批 + 第二批后开工。

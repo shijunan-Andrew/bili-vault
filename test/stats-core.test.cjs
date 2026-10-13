@@ -318,6 +318,29 @@ test("rangeFor 的 custom 自动归一成整日，坏输入返回 null 而不是
   assert.equal(core.rangeFor("nope", NOW, { from: at(2026, 10, 1, 0, 0), to: at(2026, 10, 2, 0, 0) }).preset, "custom");
 });
 
+test("rangeFor 的 custom 也认「2026-03-28」这种日键（日历交上来的就是日键）", () => {
+  /* 统计页的日历格子挂的是 YYYY-MM-DD，确定时把这两个日键原样交给 rangeFor。
+     早先 timeOr 只认 Number()，Number("2026-03-28") 是 NaN → 整个区间变成 null →
+     统计页退回「近 7 天」，用户看到的就是「自定义区间点了确定没反应」。
+     这一条钉住「日键也能算」。 */
+  const range = core.rangeFor("custom", NOW, { from: "2026-03-28", to: "2026-10-14" });
+  assert.ok(range, "日键形状的 custom 不能是 null");
+  assert.equal(range.from, at(2026, 3, 28, 0, 0));
+  assert.equal(range.to, at(2026, 10, 14, 23, 59) + 59999);
+  assert.equal(range.days, 201);
+  assert.equal(range.preset, "custom");
+  // 同一天的日键至少 1 天
+  assert.equal(core.rangeFor("custom", NOW, { from: "2026-10-14", to: "2026-10-14" }).days, 1);
+  // 日键与毫秒混着给也行
+  assert.equal(core.rangeFor("custom", NOW, { from: "2026-10-01", to: at(2026, 10, 3, 6, 0) }).days, 3);
+  // 形状不对的字符串照旧是坏输入，不许瞎猜（2026/03/28 不是日键）
+  assert.equal(core.rangeFor("custom", NOW, { from: "2026/03/28", to: "2026/10/14" }), null);
+  assert.equal(core.rangeFor("custom", NOW, { from: "2026-3-8", to: "2026-10-14" }), null);
+  assert.equal(core.rangeFor("custom", NOW, { from: "", to: "" }), null);
+  // 日键区间也能直接喂给区间 API（内部同样走 timeOr）
+  assert.equal(core.totalInRange(rangeDatabase(), range), 8);
+});
+
 test("rangeFromDays 是 rangeFor 的等价小助手，天数被夹在 1 ~ MAX_RANGE_DAYS", () => {
   const last7 = core.rangeFromDays(7, NOW);
   assert.equal(last7.from, core.rangeFor("last7", NOW).from);
@@ -465,6 +488,100 @@ test("snapshot 连着 yearly: yearlySeries(database)", () => {
   assert.equal(core.snapshot(core.emptyDatabase(NOW), NOW).dailyRows.length, core.DAILY_ROWS_DAYS);
 });
 
+/* ───────────────────────── 长区间的聚合（1.6.1） ─────────────────────────
+   自定义区间超过 31 天按自然周（周一~周日）画柱子、超过半年按自然月画。
+   dailyRows 只有 180 天，所以月度那份必须是全量的 —— 这四条钉住这两件事。 */
+
+test("weekStartOf / weekKeyOf 对齐到周一（周日属于上一周，跨月也认）", () => {
+  // 2026-08-05 是星期三 → 那一周的周一是 08-03
+  assert.equal(core.weekStartOf(at(2026, 8, 5, 10, 0)), core.dayKeyToTime("2026-08-03"));
+  assert.equal(core.weekKeyOf(at(2026, 8, 5, 10, 0)), "2026-08-03");
+  // 周一自己就是周一
+  assert.equal(core.weekKeyOf(at(2026, 8, 3, 0, 0)), "2026-08-03");
+  // 星期日算在它前面那个周一那一周里，不能跳到下一周
+  assert.equal(core.weekKeyOf(at(2026, 8, 9, 23, 30)), "2026-08-03");
+  // 跨月：2026-10-01 是星期四 → 周一是 09-28
+  assert.equal(core.weekKeyOf(at(2026, 10, 1, 10, 0)), "2026-09-28");
+  // 跨年：2026-01-01 是星期四 → 周一是 2025-12-29
+  assert.equal(core.weekKeyOf(at(2026, 1, 1, 10, 0)), "2025-12-29");
+  // 坏输入不抛
+  assert.ok(Number.isNaN(core.weekStartOf(NaN)));
+  assert.equal(core.weekKeyOf("坏时间"), "");
+});
+
+test("weekStartOf 用日历回退而不是减毫秒（夏令时那天不能落到前一天）", () => {
+  // 每天都该落在当天 00:00：本机是 UTC+8 时 08-05 的周日那一格会是 08-03 00:00。
+  // 用 at(...) - 2 * DAY 去减的话，在夏令时切换那天会得到前一天的 23:00。
+  const monday = core.weekStartOf(at(2026, 8, 5, 10, 0));
+  const date = new Date(monday);
+  assert.equal(date.getHours(), 0);
+  assert.equal(date.getMinutes(), 0);
+  assert.equal(core.localDayKey(monday), "2026-08-03");
+});
+
+test("weeklySeries 按自然周聚合、只列有记录的周、升序", () => {
+  const rows = core.weeklySeries(rangeDatabase());
+  assert.deepEqual(rows.map((row) => row.week), [
+    "2025-12-29",   // 2025-12-31（周三）
+    "2026-08-03",   // 2026-08-05（周三）
+    "2026-09-14",   // 2026-09-15（周二）
+    "2026-09-28",   // 2026-09-30（周三）
+    "2026-10-05",   // 2026-10-01（周四）
+    "2026-10-12"    // 10-11（周日）/ 10-12（周一）/ 10-13（周二）都落在这一周
+  ]);
+  for (let i = 1; i < rows.length; i += 1) {
+    assert.ok(rows[i].week > rows[i - 1].week, "weeklySeries 必须按周升序");
+  }
+  // 「周一~周日」是同一桶：10-11（周日）与 10-12（周一）分属两周，
+  // 但 10-12 和 10-13 要落在一起
+  const week = rows.find((row) => row.week === "2026-10-12");
+  assert.equal(week.count, 3);
+  // 每一桶的 count 必须等于它 byCollection 各项之和，且不出现 0 值项
+  for (const row of rows) {
+    const parts = Object.values(row.byCollection);
+    assert.equal(parts.reduce((sum, count) => sum + count, 0), row.count, `${row.week} 的分项之和该等于 count`);
+    for (const count of parts) assert.ok(count > 0, `${row.week} 的 byCollection 不该出现 0 值项`);
+  }
+  // 空库：一根柱子都没有（不编空周）
+  assert.deepEqual(core.weeklySeries(core.emptyDatabase(NOW)), []);
+  // 坏输入不抛
+  assert.deepEqual(core.weeklySeries(null), []);
+});
+
+test("monthlySeries 是全量的：180 天窗口外的月份也要算进来", () => {
+  // rangeDatabase 里有 2025-12-31 与 2026-01-01 两条 —— 都在 dailyRows 那 180 天之外。
+  // 月度汇总要是跟着 dailyRows 走，这两条就会凭空消失（去年的柱子整根不见）。
+  const rows = core.monthlySeries(rangeDatabase());
+  assert.deepEqual(rows.map((row) => row.month), ["2025-12", "2026-01", "2026-08", "2026-09", "2026-10"]);
+  assert.deepEqual(rows.map((row) => row.count), [1, 1, 1, 2, 5]);
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  assert.equal(total, core.yearlySeries(rangeDatabase()).reduce((sum, row) => sum + row.count, 0));
+  for (const row of rows) {
+    const parts = Object.values(row.byCollection);
+    assert.equal(parts.reduce((sum, count) => sum + count, 0), row.count, `${row.month} 的分项之和该等于 count`);
+  }
+  assert.deepEqual(core.monthlySeries(core.emptyDatabase(NOW)), []);
+  assert.deepEqual(core.monthlySeries(null), []);
+});
+
+test("monthKeyOf 补零、认月份从 1 起算", () => {
+  assert.equal(core.monthKeyOf(at(2026, 8, 5, 10, 0)), "2026-08");
+  assert.equal(core.monthKeyOf(at(2026, 10, 1, 0, 0)), "2026-10");
+  assert.equal(core.monthKeyOf(at(2025, 12, 31, 10, 0)), "2025-12");
+  assert.equal(core.monthKeyOf("坏时间"), "");
+});
+
+test("snapshot 带上 monthly（全量月度）与 earliest（最早一条收藏的日期）", () => {
+  const snapshot = core.snapshot(rangeDatabase(), NOW);
+  assert.deepEqual(snapshot.monthly, core.monthlySeries(rangeDatabase()));
+  // 最早一是 2025-12-31（不是 firstSeen —— 那个看 firstSeenAt）
+  assert.equal(snapshot.earliest, "2025-12-31");
+  assert.ok(snapshot.earliest <= snapshot.dailyRows[0].day, "earliest 必须不晚于 dailyRows 的第一天");
+  // 空库：没有最早日期这种东西，给 null（界面据此把下界放开到 730 天）
+  assert.equal(core.snapshot(core.emptyDatabase(NOW), NOW).earliest, null);
+  assert.deepEqual(core.snapshot(core.emptyDatabase(NOW), NOW).monthly, []);
+});
+
 test("大库（5000 条 / 20 个收藏夹）的 snapshot 序列化后仍然只有几十 KB", () => {
   const videos = [];
   for (let i = 0; i < 5000; i += 1) {
@@ -489,6 +606,15 @@ test("大库（5000 条 / 20 个收藏夹）的 snapshot 序列化后仍然只�
   assert.ok(text.length < 80 * 1024, `快照序列化后 ${text.length} 字节，超了 80 KB`);
   // 大库也要能走通区间 API，不能只是「没抛」
   assert.equal(core.totalInRange(database, core.rangeFor("last30", NOW)), core.seriesInRange(database, core.rangeFor("last30", NOW)).reduce((sum, row) => sum + row.count, 0));
+  // 新增的按月全量表（长区间柱子用）同样要守配额：9 个月 × 20 个收藏夹
+  // 只写非零项，实测约 2 KB —— 逐月把每个月都写一遍才是会炸的那种写法。
+  const monthlyText = JSON.stringify(snapshot.monthly);
+  assert.equal(snapshot.monthly.length, 9);
+  assert.equal(snapshot.monthly[0].month, "2026-01");
+  assert.equal(snapshot.monthly[snapshot.monthly.length - 1].month, "2026-09");
+  assert.ok(monthlyText.length < 12 * 1024, `月度汇总序列化后 ${monthlyText.length} 字节，超了 12 KB`);
+  // 一份快照的总量：月度和 dailyRows 都在里面，还是十几 KB（原来 ~16.5 KB）
+  assert.ok(text.length < 40 * 1024, `快照序列化后 ${text.length} 字节，超了 40 KB`);
 });
 
 // 一份「字段缺胳膊少腿」的库：不是 databaseFromVideos 造出来的，专门喂给坏输入用例。

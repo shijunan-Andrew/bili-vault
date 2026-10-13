@@ -7880,35 +7880,6 @@ img[data-empty]{ background:linear-gradient(135deg,#e7ebef 0%,#dbe0e6 60%,#d3d9e
 
 </div>
 	</body>
-<script>
-// 2015 replica: every click leads to the live bilibili homepage.
-// Anchors already carry href="https://www.bilibili.com/" + target="_blank", so they need no help;
-// this handler covers every element that is NOT a link (banner dots, tabs, buttons, list rows, the
-// search box, blank areas) — the original page routed all of those through page.core.js handlers.
-//
-// 彩蛋对话框那一段（本文件末尾的 EGG_DIALOG）在 window 捕获阶段注册了一层 click 守卫。
-// 捕获阶段的传播路径是 window -> document -> ...，所以那层守卫一定比这里的 document 捕获先跑：
-// 它遇到对话框范围内的点击就 preventDefault + stopImmediatePropagation，这里根本不会被调用。
-// 下面两条判断是留给「守卫没装上」这种情况的兜底，不影响正常路径。
-document.addEventListener('click', function (e) {
-  var et = e.target;
-  if (et && et.nodeType === 1 && et.closest && et.closest('[data-egg-dialog]')) return;
-  // 对话框是在 pointerdown 里就摘掉的，所以「知道啦 / 点遮罩」那一次 click 的落点已经变成
-  // 底下的页面元素了；对话框在 pointerdown 时留下的记号能把这最后一次 click 认出来。
-  if (document.documentElement.hasAttribute('data-egg-dismissed')) return;
-  var t = e.target;
-  while (t && t !== document.body) {
-    if (t.tagName === 'A' && t.getAttribute('href')) return;   // let the anchor do its own job
-    t = t.parentNode;
-  }
-  e.preventDefault();
-  window.open('https://www.bilibili.com/', '_blank');
-}, true);
-document.addEventListener('submit', function (e) {
-  e.preventDefault();
-  window.open('https://www.bilibili.com/', '_blank');
-}, true);
-</script>
 <style>a{cursor:pointer}.index-nav .n-i,.b-slt-tab li,.b-slt .list li,.b-slt,.page,.i-link,.more-link,.b-head-t,.top-list li,.v,.rlist li,.rm-list li,.slider-bar li,.search-keyword{cursor:pointer}</style>
 </body>
 <style>
@@ -7961,7 +7932,22 @@ document.addEventListener('submit', function (e) {
   line-height: 1.9;
   text-align: center;
 }
+/* 关闭的纯 CSS 通道：按钮其实是 <label for="eggDialogOkToggle">，点它勾上隐藏的复选框，
+   下面两条规则把遮罩藏掉 —— 页面上一个 JS 都跑不起来时（扩展环境里内联脚本被 CSP 拦掉就是
+   这种情况），「知道啦」依然点得动。两条都留着：~ 管同一层，:has 管万一被挪进别的容器。 */
+#eggDialogOkToggle {
+  display: none;
+}
+#eggDialogOkToggle:checked ~ #eggDialogOverlay {
+  display: none !important;
+}
+html:has(#eggDialogOkToggle:checked) #eggDialogOverlay {
+  display: none !important;
+}
+/* 按钮从 <button> 换成了 <label>，index.html 里那条全局 button{} 规则不再作用于它，
+   所以 2015 年的外观（浅灰底、圆角、灰字、27px 高）要在这里自己写全。 */
 #eggDialogOk {
+  display: inline-block;
   float: none;
   width: auto;
   min-width: 0;
@@ -7969,96 +7955,159 @@ document.addEventListener('submit', function (e) {
   padding: 0 18px;
   height: 27px;
   line-height: 27px;
+  background: #efefef;
+  border-radius: 4px;
+  color: #666;
   font-size: 14px;
   text-align: center;
   cursor: pointer;
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
 }
-#eggDialogText {
-  margin: 0 0 20px 0;
-  font-size: 14px;
-  line-height: 1.9;
-  text-align: center;
-}
-#eggDialogOk {
-  float: none;
-  width: auto;
-  min-width: 0;
-  margin: 0 auto;
-  padding: 0 18px;
-  height: 27px;
-  line-height: 27px;
-  font-size: 14px;
-  text-align: center;
-  cursor: pointer;
+#eggDialogOk:focus {
+  outline: 1px solid #00a1d6;
 }
 </style>
-<div id="eggDialogOverlay" data-egg-dialog role="dialog" aria-modal="true" aria-label="彩蛋">
+<input type="checkbox" id="eggDialogOkToggle" data-egg-dialog hidden>
+<div id="eggDialogOverlay" data-egg-dialog data-egg-version="2" role="dialog" aria-modal="true" aria-label="彩蛋">
   <div id="eggDialogBox" data-egg-dialog>
     <div id="eggDialogCard" data-egg-dialog>
       <p id="eggDialogText">恭喜你发现彩蛋！这个界面有没有勾起你的回忆呢？这是2015年的b站怀旧复刻页面，也是插件作者第一次入站的时间，屏幕前的你们又是在哪一年第一次进入b站的呢？</p>
         <p id="eggDialogNote" style="margin:12px 0 0;font-size:12px;line-height:1.7;color:#888;text-align:center;word-break:break-all;">本怀旧网站为粉丝向b站怀旧页面复刻，所有网页数据均来自互联网档案馆的：http://web.archive.org/web/20150701082208/http://www.bilibili.com/，仅作为怀旧和欣赏使用，请勿将其用于商业或其他作用。</p>
-      <button id="eggDialogOk" type="button">知道啦</button>
+      <label id="eggDialogOk" for="eggDialogOkToggle" data-egg-dialog role="button" tabindex="0">知道啦</label>
     </div>
   </div>
 </div>
 <script>
+// 2015 replica: every click leads to the live bilibili homepage, plus the easter-egg dialog.
+//
+// 这一段在两个地方出现，内容必须逐字一致：
+//   1) index.html 末尾的内联 <script>  —— 双击 index.html 直接打开（file://）时靠它；
+//   2) 同目录的 egg-2015.js，由 <script src="egg-2015.js"> 引入 —— chrome-extension:// 页面
+//      的 CSP 是 script-src 'self'，内联脚本会被整段拦掉（真机上「知道啦」点不动的根因就是这个）。
+// 两份都加载时靠 window.__bili2015Wired 保证只有第一份生效。
 (function () {
-  var overlay = document.getElementById('eggDialogOverlay');
-  if (!overlay) return;
-  function closeEggDialog() {
-    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-  }
-  var ok = document.getElementById('eggDialogOk');
-  var box = document.getElementById('eggDialogBox');
+  if (window.__bili2015Wired) return;
+  window.__bili2015Wired = 1;
 
-  // 摘掉之后，这一次手势的 click 会落在它底下的页面元素上（遮罩已经没了），页面 catch-all
-  // 光看“点击目标在不在对话框里”认不出来。所以在 pointerdown 时留一个记号，catch-all 看到
-  // 记号就放过这一次 click，并在同一个任务里把记号清掉 —— 只有这一次 click 被放过，之后
-  // 点页面任何地方照常跳转。
+  var TARGET = 'https://www.bilibili.com/';
   var docEl = document.documentElement;
-  var markDismissed = function () {
+
+  // 彩蛋对话框：遮罩 #eggDialogOverlay / 卡片 #eggDialogCard / 文案 #eggDialogText / 按钮 #eggDialogOk。
+  // 关闭有四条互不依赖的通道，任意一条活着就能关掉：
+  //   A. 纯 CSS：按钮其实是 <label for="eggDialogOkToggle">，点一下勾上隐藏的复选框，
+  //      #eggDialogOkToggle:checked ~ #eggDialogOverlay 就把遮罩 display:none —— 一行 JS 都不用；
+  //   B. 指针：window 捕获阶段的 pointerdown（最早注册），按下就关，不等 click；
+  //   C. 点击：window 捕获阶段的 click 硬守卫，preventDefault + stopImmediatePropagation 按死这一次；
+  //   D. 键盘：Esc（按钮聚焦时还包括 Enter / 空格），同样在 window 捕获阶段。
+  // 「关掉的那一次手势不能顺带导航」用 <html data-egg-dismissed> 记号 + dismissedAt 时间窗解决：
+  // 记号只在这一次手势里有效，下一次新手势一到就撤掉，之后点页面别处照旧跳 B 站。
+  var overlay = document.getElementById('eggDialogOverlay');
+  var box = document.getElementById('eggDialogBox');
+  var ok = document.getElementById('eggDialogOk');
+  var toggle = document.getElementById('eggDialogOkToggle');
+
+  var KEY = 'biliVaultEggDismissed.v1';   // 带版本号，换实现就换版本
+  var GESTURE_MS = 400;                   // 同一次手势的保护窗口（含双击的第二下）
+  var PERSIST_MS = 60000;                 // localStorage 兜底有效期：刚关过又立刻打开同一页就别再弹
+  var dismissedAt = 0;
+
+  function readStore(name) {
+    try { var s = window[name]; return s ? s.getItem(KEY) : null; } catch (e) { return null; }
+  }
+  function writeStores() {
+    var now = String(Date.now());
+    try { if (window.sessionStorage) window.sessionStorage.setItem(KEY, now); } catch (e) {}
+    try { if (window.localStorage) window.localStorage.setItem(KEY, now); } catch (e) {}
+  }
+  // 关掉之后，本次浏览里不要再自己回来。sessionStorage 管这个标签页；localStorage 是兜底，
+  // 管「刚关掉、页面又被重新打开一次」这种短时间内的重复弹出。
+  function remembered() {
+    if (readStore('sessionStorage')) return true;
+    var t = parseInt(readStore('localStorage') || '', 10);
+    return !!t && (Date.now() - t) < PERSIST_MS;
+  }
+  function openDialog() { return !!(overlay && overlay.parentNode); }
+  function closeDialog() {
+    if (toggle) { try { toggle.checked = true; } catch (e) {} }   // 先走 A 那条 CSS 通道
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+  function dismiss() {
+    dismissedAt = Date.now();
     docEl.setAttribute('data-egg-dismissed', '1');
-    setTimeout(function () { docEl.removeAttribute('data-egg-dismissed'); }, 0);
-  };
-  // 只有这两种点击才是「关掉对话框」：按钮，或遮罩空白（卡片外面的半透明区域）。
-  var isCloseTarget = function (el) {
-    return el === ok || el === overlay || el === box;
-  };
+    writeStores();
+    closeDialog();
+  }
+  // 只有「新手势」才撤记号：关闭动作之后 GESTURE_MS 内的按住仍然算同一次手势（双击的第二下）。
+  function gestureStart() {
+    if (!docEl.hasAttribute('data-egg-dismissed')) return;
+    if (Date.now() - dismissedAt < GESTURE_MS) return;
+    docEl.removeAttribute('data-egg-dismissed');
+  }
+  function swallow(e) {
+    if (!e) return;
+    if (e.cancelable !== false && e.preventDefault) e.preventDefault();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+  }
+  // 只有这两处点击算「关掉对话框」：按钮本身，或卡片外面的遮罩空白。卡片正文点了不关。
+  function isCloseTarget(el) {
+    return el === ok || el === overlay || el === box || el === toggle;
+  }
 
-  // 关闭动作挂在「按下」这一步：pointerdown 一触发，对话框就已经从文档里摘掉了，
-  // 后面 click 走到谁那里都改不了「已经关掉」这个结果，也就与捕获/冒泡顺序无关了。
-  overlay.addEventListener('pointerdown', function (e) {
-    if (!isCloseTarget(e.target)) return;
-    markDismissed();
-    closeEggDialog();
+  // ---- B 按下就关
+  window.addEventListener('pointerdown', function (e) {
+    if (openDialog() && isCloseTarget(e.target)) { dismiss(); return; }
+    gestureStart();
   }, true);
+  // 没有 pointer 事件的输入路径（老的合成 mousedown）也要能撤记号
+  window.addEventListener('mousedown', function () { gestureStart(); }, true);
+  window.addEventListener('touchstart', function () { gestureStart(); }, true);
 
-  // 这一层在 window 捕获阶段，页面 catch-all 在 document 捕获阶段：window 先于 document，所以
-  // 它总能把 click 按死。它同时是 pointerdown 那条主路径的退路：不管是「刚才按下的是关闭点，
-  // 但 click 的落点已经换了（记号还在）」，还是「click 直接落在对话框范围内」，都在这里把这一次
-  // click 按死；落在卡片里的 click 则原样放过。
+  // ---- C click 硬守卫：对话框范围内的点击不许变成跳转，是关闭点的就顺手关掉
   window.addEventListener('click', function (e) {
     var el = e.target;
-    var marked = docEl.hasAttribute('data-egg-dismissed');
+    var marked = docEl.hasAttribute('data-egg-dismissed') || (Date.now() - dismissedAt) < GESTURE_MS;
     var inDialog = !!(el && el.nodeType === 1 && el.closest && el.closest('[data-egg-dialog]'));
-    if (!marked && !inDialog) return;            // 页面自己的点击：一律不管
-    if (isCloseTarget(el) || marked) {           // 关闭点 / 上一次 pointerdown 留下的记号
-      markDismissed();
-      closeEggDialog();
-    }
-    e.preventDefault();                          // 卡片内部的点击：对话框留着，但也不能变成跳转
-    e.stopImmediatePropagation();
+    if (!marked && !inDialog) return;                 // 页面自己的点击：一律不管
+    if (isCloseTarget(el) || marked) dismiss();
+    swallow(e);
   }, true);
 
-  // Esc：挂 window 捕获，杜绝被中途的 stopPropagation 截掉；只在对话框还在时处理。
+  // ---- D 键盘
   window.addEventListener('keydown', function (e) {
-    if (!overlay.parentNode) return;
-    if (e.key === 'Escape' || e.keyCode === 27) {
-      e.preventDefault();
-      e.stopPropagation();
-      closeEggDialog();
-    }
+    var k = e.key || '';
+    var esc = (k === 'Escape' || k === 'Esc' || e.keyCode === 27);
+    var activate = (k === 'Enter' || k === ' ' || k === 'Spacebar' || e.keyCode === 13 || e.keyCode === 32) && document.activeElement === ok;
+    if (openDialog() && (esc || activate)) { swallow(e); dismiss(); return; }
+    gestureStart();
   }, true);
+
+  // ---- 页面 catch-all：其余地方点哪儿都跳 B 站（彩蛋的一部分，不许破坏）
+  // 链接自己带 href + target="_blank"，不用管；这里管的是 banner 圆点、tab、按钮、列表行、
+  // 搜索框、空白区域这些 2015 年靠 page.core.js 跳转的元素。
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t && t.nodeType === 1 && t.closest && t.closest('[data-egg-dialog]')) return;
+    if (docEl.hasAttribute('data-egg-dismissed')) return;
+    if ((Date.now() - dismissedAt) < GESTURE_MS) return;
+    if (overlay && overlay.parentNode && overlay.contains && overlay.contains(t)) return;
+    var n = t;
+    while (n && n !== document.body) {
+      if (n.tagName === 'A' && n.getAttribute('href')) return;   // let the anchor do its own job
+      n = n.parentNode;
+    }
+    if (e.cancelable !== false && e.preventDefault) e.preventDefault();
+    window.open(TARGET, '_blank');
+  }, true);
+  document.addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.open(TARGET, '_blank');
+  }, true);
+
+  // ---- 这次浏览里已经关过（哪怕打开的是缓存下来的旧 HTML）：直接不显示对话框
+  if (remembered()) closeDialog();
 })();
 </script>
+<script src="egg-2015.js"></script>
 </html>
