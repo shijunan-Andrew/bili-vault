@@ -1,19 +1,26 @@
 <!doctype html>
 <!-- ==========================================================================
-     retro.html —— 彩蛋页：2015 年前后 B 站首页的怀旧版式
+     retro.html —— 彩蛋页：2015 年 B 站首页的怀旧版式（严格还原版）
+     --------------------------------------------------------------------------
+     版面数值来自 2015 年那个首页自己的 CSS（归档快照里的 new_z2.css），
+     逐条量过、写在 _work 的报告里，这里只挑结论：
+     版心 980px、主导航条 42px、轮播 440×280、右侧小图 2×4 栅格、
+     视频卡 160×100 封面、右侧排行栏 250px 宽。缩略图一律是自绘的
+     「正在加载中」，没有一张图片、没有一处外链。
      --------------------------------------------------------------------------
      三条硬规矩，改这个页面之前先读一遍：
-     1. **完全自包含**：只引本目录的 retro.css / retro.js。没有外链、没有 CDN、
-        没有网络字体、没有一张位图 —— 顶栏那个小电视是手写的 SVG，
-        横幅和封面上的图示全是 CSS 画出来的。整个文件里除了跳转目标那一个
-        地址（在 retro.js 里），不应该出现任何 http(s) 地址。
-     2. **不用 B 站的任何图片/Logo 素材**：那些不是我们的。文字标 + 自绘小电视
-        轮廓只是"版式与配色参考"，不是复刻。
+     1. **完全自包含**：只引 theme.css（拿几个共用变量）和 retro.css。
+        没有外链、没有 CDN、没有网络字体、没有一张位图 —— 小电视、图标、
+        封面占位全是内联 SVG。整个页面里除了跳转目标那一个地址（在 retro.js
+        里），不应该出现任何 http(s) 地址。
+     2. **不用 B 站的任何图片/图标/字体素材**：那些不是我们的。所有图形都是
+        按当年的版式自己画的，不是复刻原素材。
      3. **点哪儿都走**：整页任意位置（含链接、封面、空白处）点击，或键盘
         Enter/Space 落在可聚焦元素上，都会跳到现在的 B 站首页。逻辑全在
         retro.js 的 document 级捕获监听里，这个文件不挂任何行内事件。
-     另外故意不引 theme.css / i18n.js：彩蛋页要的是 2015 年那个样子，
-     跟着当前主题一起变、或者文字被切成别的语言，就不像"十年前的页面"了。
+     另外故意不引 i18n.js：彩蛋页要的是 2015 年那个样子，文字被切成别的
+     语言就不像「十年前的页面」了。配色也不跟主题走 —— 见 retro.css 里的
+     说明，2015 年的链接蓝 #00a1d6 是那个年代的固定色。
      ========================================================================== -->
 <html lang="zh-CN">
 <head>
@@ -21,242 +28,479 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>哔哩哔哩 (゜-゜)つロ 乾杯~ - bilibili</title>
+  <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="retro.css">
 </head>
-<body>
-  <div class="retro-page">
+<body class="retro-body">
+  <div class="retro-page" id="retroPage">
 
-    <!-- ---------------- 顶栏：logo / 分区导航 / 搜索 / 登录 ---------------- -->
-    <header class="retro-head">
-      <div class="head-inner">
-        <a class="retro-logo" href="#">
-          <span class="logo-tv" aria-hidden="true">
-            <svg viewBox="0 0 48 40" focusable="false">
-              <path d="M16.2 3.4 23.9 11.2h4.1l7.7-7.8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
-              <rect x="3" y="11.6" width="46" height="30" rx="6.5" fill="none" stroke="currentColor" stroke-width="2.8"/>
-              <path d="M10.5 20h13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-              <circle cx="18.4" cy="29.6" r="2.7" fill="currentColor"/>
-              <circle cx="33.2" cy="29.6" r="2.7" fill="currentColor"/>
-              <path d="M24 24.2l3.6 10.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+    <!-- ================= 顶部小工具条（2015 年的深色细条） ================= -->
+    <div class="z-topbar">
+      <div class="z-inner">
+        <ul class="z-topnav">
+          <li class="home"><a class="i-link" href="#"><svg class="i-ico" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.4 1.6 5.2v5.4h3.2V7.8h2.4v2.8h3.2V5.2z" fill="currentColor"/></svg><em>主站</em></a></li>
+          <li><a class="i-link" href="#"><em>画友</em><svg class="i-dot i-dot-new" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.2" fill="currentColor"/></svg></a></li>
+          <li><a class="i-link" href="#"><em>游戏中心</em><svg class="i-dot i-dot-beta" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.2" fill="currentColor"/></svg></a></li>
+          <li><a class="i-link" href="#"><em>直播</em><svg class="i-dot i-dot-live" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.2" fill="currentColor"/></svg></a></li>
+          <li><a class="i-link" href="#"><em>手机端</em></a></li>
+          <li><a class="i-link" href="#"><em>日本游</em></a></li>
+          <li class="more"><a class="i-link" href="#"><em>更多</em><svg class="i-caret" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1.2 5 4.8 9 1.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></a></li>
+        </ul>
+        <p class="z-toolside">
+          <a class="i-link" href="#">登录</a>
+          <a class="i-link" href="#">注册</a>
+          <a class="i-link" href="#">投稿</a>
+        </p>
+      </div>
+    </div>
+
+    <!-- ================= 站庆横幅（当年那个活动位的自绘版） ================= -->
+    <div class="z-banner">
+      <div class="z-inner">
+        <div class="z-banner-in">
+          <span class="z-banner-tv" aria-hidden="true">
+            <svg viewBox="0 0 32 32">
+              <path d="M11 4.6 16 9.6h0L21 4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <rect x="3.2" y="9.6" width="25.6" height="19.2" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M9.4 16.4h4.6M18 16.4h4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <circle cx="13.4" cy="23" r="1.9" fill="currentColor"/>
+              <circle cx="18.6" cy="23" r="1.9" fill="currentColor"/>
             </svg>
           </span>
-          <b class="logo-word">哔哩哔哩</b>
-        </a>
-
-        <nav class="retro-nav" aria-label="分区导航">
-          <a class="nav-item is-on" href="#">首页</a>
-          <a class="nav-item" href="#">动画</a>
-          <a class="nav-item" href="#">番剧</a>
-          <a class="nav-item" href="#">音乐</a>
-          <a class="nav-item" href="#">舞蹈</a>
-          <a class="nav-item" href="#">游戏</a>
-          <a class="nav-item" href="#">科技</a>
-          <a class="nav-item" href="#">生活</a>
-          <a class="nav-item" href="#">鬼畜</a>
-          <a class="nav-item" href="#">时尚</a>
-          <a class="nav-item" href="#">娱乐</a>
-          <a class="nav-item" href="#">影视</a>
-        </nav>
-
-        <form class="retro-search" action="#" method="get">
-          <input type="text" name="keyword" placeholder="搜索视频、番剧、UP主" aria-label="搜索">
-          <button type="submit" aria-label="搜索">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <circle cx="10.6" cy="10.6" r="6.4" fill="none" stroke="currentColor" stroke-width="2.2"/>
-              <path d="M15.4 15.4 21 21" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-            </svg>
-          </button>
-        </form>
-      </div>
-    </header>
-
-    <!-- ---------------- 顶栏下沿那一条快捷入口 ---------------- -->
-    <div class="retro-toolbar">
-      <div class="toolbar-inner">
-        <nav class="tool-links" aria-label="快捷入口">
-          <a href="#">投稿</a>
-          <a href="#">动态</a>
-          <a href="#">历史</a>
-          <a href="#">稍后再看</a>
-          <a href="#">我的收藏</a>
-          <a href="#">游戏中心</a>
-          <a href="#">直播</a>
-          <a href="#">下载客户端</a>
-        </nav>
-        <p class="tool-side">
-          <a class="login-link" href="#">登录</a>
-          <a class="register-link" href="#">注册</a>
-        </p>
+          <b class="z-banner-t">哔哩哔哩六周年</b>
+          <span class="z-banner-s">(゜-゜)つロ 乾杯~ —— 谢谢你们陪我们走过第六年</span>
+          <em class="z-banner-go">进入活动页 &gt;</em>
+        </div>
       </div>
     </div>
 
-    <div class="retro-container">
+    <!-- ================= 主导航条（42px，13 个 tab + 搜索框） ================= -->
+    <div class="z-header">
+      <div class="z-inner">
+        <div class="header-in">
+          <ul class="num" id="mainNav">
+            <li class="m-i home on"><a class="i-link" href="#"><em>首页</em></a><span>3</span></li>
+            <li class="m-i"><a class="i-link" href="#"><em>动画</em><i class="m-i-line"></i></a><span>1</span></li>
+            <li class="m-i"><a class="i-link" href="#"><em>番剧</em><i class="m-i-line"></i></a><span>4</span></li>
+            <li class="m-i"><a class="i-link" href="#"><em>音乐</em><i class="m-i-line"></i></a><span>2</span></li>
+            <li class="m-i"><a class="i-link" href="#"><em>舞蹈</em><i class="m-i-line"></i></a></li>
+            <li class="m-i"><a class="i-link" href="#"><em>游戏</em><i class="m-i-line"></i></a><span>1</span></li>
+            <li class="m-i"><a class="i-link" href="#"><em>科技</em><i class="m-i-line"></i></a><span>3</span></li>
+            <li class="m-i"><a class="i-link" href="#"><em>娱乐</em><i class="m-i-line"></i></a></li>
+            <li class="m-i"><a class="i-link" href="#"><em>鬼畜</em><i class="m-i-line"></i></a><span>2</span></li>
+            <li class="m-i"><a class="i-link" href="#"><em>电影</em><i class="m-i-line"></i></a></li>
+            <li class="m-i"><a class="i-link" href="#"><em>电视剧</em><i class="m-i-line"></i></a><span>1</span></li>
+            <li class="m-i rank"><a class="i-link" href="#"><svg class="i-ico" viewBox="0 0 14 14" aria-hidden="true"><rect x="1.4" y="7.6" width="3" height="5" rx="1" fill="currentColor"/><rect x="5.5" y="4.4" width="3" height="8.2" rx="1" fill="currentColor"/><rect x="9.6" y="1.6" width="3" height="11" rx="1" fill="currentColor"/></svg>排行</a></li>
+          </ul>
+          <div class="search">
+            <form class="search-form" action="#">
+              <input class="search-keyword" name="keyword" type="text" placeholder="使徒来袭(゜≡゜)" aria-label="搜索视频、番剧、UP主" autocomplete="off">
+              <button class="search-submit" name="formsubmit" type="submit" aria-label="搜索">
+                <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="7.6" cy="7.6" r="5.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11.5 11.5 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
 
-      <!-- ---------------- 首屏横幅：左边大图 + 右边三张小的 ---------------- -->
-      <section class="retro-banner" aria-label="首页横幅">
-        <article class="banner-card banner-lead">
-          <div class="banner-art art-lead" aria-hidden="true">
-            <span class="art-ring"></span>
-            <span class="art-ring art-ring-2"></span>
-            <span class="art-disc"></span>
-          </div>
-          <div class="banner-text">
-            <p class="banner-kicker">2015 夏季新番</p>
-            <h2 class="banner-title">新番放送中</h2>
-            <p class="banner-sub">每周更新，追番不落下一集</p>
-            <p class="banner-dots"><span class="dot is-on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></p>
-          </div>
-        </article>
+    <!-- ================= 主体 ================= -->
+    <div class="z">
+      <div class="index-container">
 
-        <article class="banner-card banner-side">
-          <div class="banner-art art-a" aria-hidden="true">
-            <span class="art-bar art-bar-1"></span>
-            <span class="art-bar art-bar-2"></span>
-            <span class="art-bar art-bar-3"></span>
-          </div>
-          <div class="banner-text">
-            <h3 class="banner-title-sm">原创音乐区</h3>
-            <p class="banner-sub">投稿就有机会上首页</p>
-          </div>
-        </article>
-
-        <article class="banner-card banner-side">
-          <div class="banner-art art-b" aria-hidden="true">
-            <span class="art-sun"></span>
-            <span class="art-hill"></span>
-          </div>
-          <div class="banner-text">
-            <h3 class="banner-title-sm">舞蹈区</h3>
-            <p class="banner-sub">宅舞、翻跳、宅舞教学</p>
-          </div>
-        </article>
-
-        <article class="banner-card banner-side">
-          <div class="banner-art art-c" aria-hidden="true">
-            <span class="art-pixel art-pixel-1"></span>
-            <span class="art-pixel art-pixel-2"></span>
-            <span class="art-pixel art-pixel-3"></span>
-            <span class="art-pixel art-pixel-4"></span>
-          </div>
-          <div class="banner-text">
-            <h3 class="banner-title-sm">游戏区</h3>
-            <p class="banner-sub">实况、攻略、解说</p>
-          </div>
-        </article>
-      </section>
-
-      <!-- ---------------- 主区：左边内容 + 右边侧栏 ---------------- -->
-      <div class="retro-main">
-
-        <div class="retro-content">
-          <section class="block" aria-labelledby="recommendTitle">
-            <div class="block-head">
-              <h2 class="block-title" id="recommendTitle">推荐视频</h2>
-              <p class="block-tabs">
-                <span class="block-tab is-on">综合</span>
-                <span class="block-tab">动画</span>
-                <span class="block-tab">音乐</span>
-                <span class="block-tab">游戏</span>
-              </p>
+        <!-- ---------- 头版：轮播 + 右侧小图 + 竖排分区链接 ---------- -->
+        <div class="container-top">
+          <div class="b-l">
+            <div class="slider" id="slider">
+              <div class="slider-box">
+                <div class="slider-slide is-on" data-slide="0">
+                  <div class="slider-art">
+                    <svg class="loader loader-lg" viewBox="0 0 640 280" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                      <rect x="0" y="0" width="640" height="280" fill="#e9ebee"/>
+                      <rect x="3" y="3" width="634" height="274" rx="8" fill="#fff"/>
+                      <path d="M292 88 320 116h16l28-28" fill="none" stroke="#00a1d6" stroke-width="7" stroke-linecap="round"/>
+                      <rect x="236" y="116" width="168" height="104" rx="14" fill="none" stroke="#00a1d6" stroke-width="7"/>
+                      <path d="M272 156h24M344 156h24" fill="none" stroke="#00a1d6" stroke-width="7" stroke-linecap="round"/>
+                      <circle cx="292" cy="192" r="10" fill="#00a1d6"/>
+                      <circle cx="348" cy="192" r="10" fill="#00a1d6"/>
+                      <g class="loader-bar">
+                        <rect x="288" y="244" width="10" height="1" fill="none"/>
+                        <rect x="288" y="238" width="64" height="14" rx="7" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                        <rect class="loader-fill" x="291" y="241" width="34" height="8" rx="4" fill="#f25d8e"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <p class="slider-cap"><b>【轮播位】正在加载中……</b><em>这一屏的封面一律用加载中的占位，不是加载失败</em></p>
+                  <span class="slider-dur">06:12</span>
+                </div>
+                <div class="slider-slide" data-slide="1">
+                  <div class="slider-art">
+                    <svg class="loader loader-lg" viewBox="0 0 640 280" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                      <rect x="0" y="0" width="640" height="280" fill="#e9ebee"/>
+                      <rect x="3" y="3" width="634" height="274" rx="8" fill="#fff"/>
+                      <rect x="272" y="92" width="96" height="78" rx="12" fill="none" stroke="#00a1d6" stroke-width="7"/>
+                      <path d="M300 124h40" fill="none" stroke="#00a1d6" stroke-width="7" stroke-linecap="round"/>
+                      <circle cx="306" cy="150" r="9" fill="#00a1d6"/>
+                      <circle cx="334" cy="150" r="9" fill="#00a1d6"/>
+                      <g class="loader-bar">
+                        <rect x="288" y="238" width="64" height="14" rx="7" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                        <rect class="loader-fill" x="291" y="241" width="28" height="8" rx="4" fill="#00a1d6"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <p class="slider-cap"><b>【轮播位】正在加载中……</b><em>第二个轮播位，同样只有占位图</em></p>
+                </div>
+                <div class="slider-slide" data-slide="2">
+                  <div class="slider-art">
+                    <svg class="loader loader-lg" viewBox="0 0 640 280" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                      <rect x="0" y="0" width="640" height="280" fill="#e9ebee"/>
+                      <rect x="3" y="3" width="634" height="274" rx="8" fill="#fff"/>
+                      <rect x="272" y="92" width="96" height="78" rx="12" fill="none" stroke="#f25d8e" stroke-width="7"/>
+                      <path d="M300 124h40" fill="none" stroke="#f25d8e" stroke-width="7" stroke-linecap="round"/>
+                      <circle cx="306" cy="150" r="9" fill="#f25d8e"/>
+                      <circle cx="334" cy="150" r="9" fill="#f25d8e"/>
+                      <g class="loader-bar">
+                        <rect x="288" y="238" width="64" height="14" rx="7" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                        <rect class="loader-fill" x="291" y="241" width="22" height="8" rx="4" fill="#f25d8e"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <p class="slider-cap"><b>【轮播位】正在加载中……</b><em>第三个轮播位，同样只有占位图</em></p>
+                </div>
+                <div class="slider-slide" data-slide="3">
+                  <div class="slider-art">
+                    <svg class="loader loader-lg" viewBox="0 0 640 280" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                      <rect x="0" y="0" width="640" height="280" fill="#e9ebee"/>
+                      <rect x="3" y="3" width="634" height="274" rx="8" fill="#fff"/>
+                      <rect x="272" y="92" width="96" height="78" rx="12" fill="none" stroke="#00a1d6" stroke-width="7"/>
+                      <path d="M300 124h40" fill="none" stroke="#00a1d6" stroke-width="7" stroke-linecap="round"/>
+                      <circle cx="306" cy="150" r="9" fill="#00a1d6"/>
+                      <circle cx="334" cy="150" r="9" fill="#00a1d6"/>
+                      <g class="loader-bar">
+                        <rect x="288" y="238" width="64" height="14" rx="7" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                        <rect class="loader-fill" x="291" y="241" width="40" height="8" rx="4" fill="#00a1d6"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <p class="slider-cap"><b>【轮播位】正在加载中……</b><em>第四个轮播位，同样只有占位图</em></p>
+                </div>
+                <div class="slider-slide" data-slide="4">
+                  <div class="slider-art">
+                    <svg class="loader loader-lg" viewBox="0 0 640 280" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                      <rect x="0" y="0" width="640" height="280" fill="#e9ebee"/>
+                      <rect x="3" y="3" width="634" height="274" rx="8" fill="#fff"/>
+                      <rect x="272" y="92" width="96" height="78" rx="12" fill="none" stroke="#00a1d6" stroke-width="7"/>
+                      <path d="M300 124h40" fill="none" stroke="#00a1d6" stroke-width="7" stroke-linecap="round"/>
+                      <circle cx="306" cy="150" r="9" fill="#00a1d6"/>
+                      <circle cx="334" cy="150" r="9" fill="#00a1d6"/>
+                      <g class="loader-bar">
+                        <rect x="288" y="238" width="64" height="14" rx="7" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                        <rect class="loader-fill" x="291" y="241" width="16" height="8" rx="4" fill="#00a1d6"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <p class="slider-cap"><b>【轮播位】正在加载中……</b><em>第五个轮播位，同样只有占位图</em></p>
+                </div>
+              </div>
+              <ul class="slider-dots" id="sliderDots">
+                <li class="dot is-on"></li>
+                <li class="dot"></li>
+                <li class="dot"></li>
+                <li class="dot"></li>
+                <li class="dot"></li>
+              </ul>
             </div>
+          </div>
 
-            <ul class="video-grid" id="recommendGrid">
-              <li class="video-card">
-                <div class="card-cover">
-                  <span class="cover-art cover-1"></span>
-                  <span class="cover-mask"><span class="cover-play"></span></span>
-                  <span class="cover-duration">04:12</span>
+          <div class="b-r">
+            <ul class="top-grid">
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="18" height="4" rx="2" fill="#f25d8e"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">03:24</span>
                 </div>
-                <h3 class="card-title">【自制】用 CSS 画一只会动的小电视</h3>
-                <p class="card-meta"><span class="meta-up">前端研究所</span><span class="meta-play">12.4万</span></p>
+                <p class="tgi-t">【新番】第七集 · 正在加载中……</p>
+                <p class="tgi-i"><em>番剧</em><b>18.2万</b></p>
               </li>
-              <li class="video-card">
-                <div class="card-cover">
-                  <span class="cover-art cover-2"></span>
-                  <span class="cover-mask"><span class="cover-play"></span></span>
-                  <span class="cover-duration">02:37</span>
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="12" height="4" rx="2" fill="#00a1d6"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">12:05</span>
                 </div>
-                <h3 class="card-title">【搬运】这大概是今年最带感的一首电音了</h3>
-                <p class="card-meta"><span class="meta-up">夜航船</span><span class="meta-play">8.7万</span></p>
+                <p class="tgi-t">【实况】生存第 100 天 · 正在加载中……</p>
+                <p class="tgi-i"><em>游戏</em><b>9.6万</b></p>
               </li>
-              <li class="video-card">
-                <div class="card-cover">
-                  <span class="cover-art cover-3"></span>
-                  <span class="cover-mask"><span class="cover-play"></span></span>
-                  <span class="cover-duration">10:05</span>
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="24" height="4" rx="2" fill="#00a1d6"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">04:41</span>
                 </div>
-                <h3 class="card-title">【MMD】夏日祭的和风舞步</h3>
-                <p class="card-meta"><span class="meta-up">海边的猫</span><span class="meta-play">5.1万</span></p>
+                <p class="tgi-t">【翻唱】夏天的风 · 正在加载中……</p>
+                <p class="tgi-i"><em>音乐</em><b>24.7万</b></p>
               </li>
-              <li class="video-card">
-                <div class="card-cover">
-                  <span class="cover-art cover-4"></span>
-                  <span class="cover-mask"><span class="cover-play"></span></span>
-                  <span class="cover-duration">01:48</span>
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="30" height="4" rx="2" fill="#f25d8e"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">02:58</span>
                 </div>
-                <h3 class="card-title">【鬼畜】把这段采访调成了循环播放</h3>
-                <p class="card-meta"><span class="meta-up">音MAD小组</span><span class="meta-play">23.9万</span></p>
+                <p class="tgi-t">【MMD】夏日祭的舞步 · 正在加载中……</p>
+                <p class="tgi-i"><em>舞蹈</em><b>6.3万</b></p>
+              </li>
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="20" height="4" rx="2" fill="#00a1d6"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">08:20</span>
+                </div>
+                <p class="tgi-t">【教程】十分钟讲清楚排序 · 正在加载中……</p>
+                <p class="tgi-i"><em>科技</em><b>3.1万</b></p>
+              </li>
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="14" height="4" rx="2" fill="#f25d8e"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">05:37</span>
+                </div>
+                <p class="tgi-t">【手书】画了一整个夏天 · 正在加载中……</p>
+                <p class="tgi-i"><em>动画</em><b>7.8万</b></p>
+              </li>
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="26" height="4" rx="2" fill="#00a1d6"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">15:40</span>
+                </div>
+                <p class="tgi-t">【料理】一个人也要好好吃饭 · 正在加载中……</p>
+                <p class="tgi-i"><em>生活</em><b>2.4万</b></p>
+              </li>
+              <li class="top-grid-item">
+                <div class="tgi-cover">
+                  <svg class="loader" viewBox="0 0 280 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                    <rect width="280" height="140" fill="#e9ebee"/>
+                    <rect x="1" y="1" width="278" height="138" rx="6" fill="#fff"/>
+                    <rect x="118" y="42" width="44" height="36" rx="6" fill="none" stroke="#00a1d6" stroke-width="4"/>
+                    <path d="M131 56h18" fill="none" stroke="#00a1d6" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="133" cy="68" r="4.4" fill="#00a1d6"/>
+                    <circle cx="147" cy="68" r="4.4" fill="#00a1d6"/>
+                    <g class="loader-bar">
+                      <rect x="122" y="98" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                      <rect class="loader-fill" x="124" y="100" width="16" height="4" rx="2" fill="#f25d8e"/>
+                    </g>
+                  </svg>
+                  <span class="cover-dur">01:52</span>
+                </div>
+                <p class="tgi-t">【鬼畜】这段采访我能循环一天 · 正在加载中……</p>
+                <p class="tgi-i"><em>鬼畜</em><b>31.5万</b></p>
               </li>
             </ul>
-            <p class="block-more"><a class="more-link" href="#">查看更多推荐视频 &gt;&gt;</a></p>
-          </section>
-
-          <section class="block" aria-labelledby="newestTitle">
-            <div class="block-head">
-              <h2 class="block-title" id="newestTitle">最近投递</h2>
-              <p class="block-tabs">
-                <span class="block-tab is-on">最新</span>
-                <span class="block-tab">最多播放</span>
-                <span class="block-tab">最多弹幕</span>
-              </p>
-            </div>
-            <ul class="video-grid" id="newestGrid"></ul>
-            <p class="block-more"><a class="more-link" href="#">查看最近投递的全部稿件 &gt;&gt;</a></p>
-          </section>
+            <ul class="top-aside">
+              <li><a href="#">动画</a></li>
+              <li><a href="#">番剧</a></li>
+              <li><a href="#">音乐</a></li>
+              <li><a href="#">舞蹈</a></li>
+              <li><a href="#">游戏</a></li>
+              <li><a href="#">科技</a></li>
+              <li><a href="#">娱乐</a></li>
+              <li><a href="#">鬼畜</a></li>
+              <li><a href="#">电影</a></li>
+              <li><a href="#">电视剧</a></li>
+            </ul>
+          </div>
         </div>
 
-        <aside class="retro-aside" aria-label="侧栏">
-          <section class="side-block">
-            <h2 class="side-title">公告</h2>
-            <ul class="notice-list">
-              <li><a href="#">弹幕礼仪小贴士：不要刷屏，不要剧透</a></li>
-              <li><a href="#">新投稿的稿件会在审核通过之后出现在首页</a></li>
-              <li><a href="#">遇到失效视频可以在视频页反馈给我们</a></li>
-            </ul>
-          </section>
+        <!-- ---------- 推广 ---------- -->
+        <div class="container-row" id="b_promote">
+          <div class="b-l">
+            <div class="b-head">
+              <span class="b-head-i"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 14.6 9.4 21.4 12 14.6 14.6 12 21.4 9.4 14.6 2.6 12 9.4 9.4z" fill="currentColor"/></svg></span>
+              <span class="b-head-t"><a href="#">新作推广</a></span>
+              <span class="b-head-s">(゜-゜)つロ 今天也要开心</span>
+              <a class="b-head-link" href="#">更多 &gt;</a>
+            </div>
+            <div class="b-body">
+              <ul class="v-list v-list-tj" id="promoteList"></ul>
+            </div>
+          </div>
+          <div class="b-r">
+            <div class="b-head">
+              <div class="index_online">
+                <span class="web-online">在线:271992</span>
+                <a class="online" href="#">正在观看:309274</a>
+              </div>
+            </div>
+            <div class="b-body">
+              <p class="pmt-line"><a href="#">壁纸站：把 2015 的首页做成了壁纸 &gt;</a></p>
+              <div class="pmt-ad">
+                <svg class="loader" viewBox="0 0 230 96" aria-hidden="true">
+                  <rect width="230" height="96" fill="#e9ebee"/>
+                  <rect x="1" y="1" width="228" height="94" rx="5" fill="#fff"/>
+                  <rect x="92" y="26" width="46" height="30" rx="5" fill="none" stroke="#00a1d6" stroke-width="3.4"/>
+                  <path d="M104 39h22" fill="none" stroke="#00a1d6" stroke-width="3.4" stroke-linecap="round"/>
+                  <circle cx="107" cy="48" r="3.6" fill="#00a1d6"/>
+                  <circle cx="123" cy="48" r="3.6" fill="#00a1d6"/>
+                  <g class="loader-bar">
+                    <rect x="97" y="66" width="36" height="8" rx="4" fill="none" stroke="#c6ccd4" stroke-width="2"/>
+                    <rect class="loader-fill" x="99" y="68" width="14" height="4" rx="2" fill="#f25d8e"/>
+                  </g>
+                </svg>
+                <p class="pmt-ad-t">广告位招租 · 正在加载中……</p>
+              </div>
+              <p class="pmt-note">本页所有封面都是自绘的占位图，没有一张来自网络。</p>
+            </div>
+          </div>
+        </div>
 
-          <section class="side-block">
-            <h2 class="side-title">排行榜</h2>
-            <ol class="rank-list" id="rankList"></ol>
-          </section>
+        <!-- ---------- 十个分区板块（由 retro.js 生成） ---------- -->
+        <div id="sectionArea"></div>
 
-          <section class="side-block">
-            <h2 class="side-title">友情链接</h2>
-            <p class="friend-links">
-              <a href="#">关于我们</a>
-              <a href="#">加入我们</a>
-              <a href="#">联系我们</a>
-              <a href="#">帮助中心</a>
-            </p>
-          </section>
-        </aside>
+        <!-- ---------- 特别推荐 ---------- -->
+        <div class="container-row" id="b_recommend">
+          <div class="b-l">
+            <div class="b-head">
+              <span class="b-head-i"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.5 5.4 5.9.7-4.3 4.1 1.1 5.8-5.2-2.9-5.2 2.9 1.1-5.8L3.6 9.3l5.9-.7z" fill="currentColor"/></svg></span>
+              <span class="b-head-t"><a href="#">特别推荐</a></span>
+              <span class="b-head-s">小编从今天的投稿里挑出来的</span>
+              <a class="b-head-link" href="#">更多 &gt;</a>
+            </div>
+            <div class="b-body">
+              <ul class="v-list" id="recommendList"></ul>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 
-    <!-- ---------------- 页脚 ---------------- -->
-    <footer class="retro-foot">
-      <div class="foot-inner">
-        <p class="foot-links">
-          <a href="#">关于我们</a><span class="foot-sep">|</span>
-          <a href="#">用户协议</a><span class="foot-sep">|</span>
-          <a href="#">隐私政策</a><span class="foot-sep">|</span>
-          <a href="#">帮助中心</a><span class="foot-sep">|</span>
-          <a href="#">举报投诉</a>
-        </p>
-        <p class="foot-cheer">哔哩哔哩-(゜-゜)つロ 乾杯~</p>
-        <p class="foot-copy">本站为个人怀旧页面，与哔哩哔哩官方无关</p>
+    <!-- ================= 页脚 ================= -->
+    <div class="footer">
+      <div class="footer-cnt">
+        <ul class="boston-postcards">
+          <li>
+            <a href="#">关于我们</a><br>
+            <a href="#">联系我们</a><br>
+            <a href="#">加入我们</a><br>
+            <a href="#">友情链接</a><br>
+            <a href="#">新浪微博</a>
+          </li>
+          <li>
+            <a href="#">画友</a><br>
+            <a href="#">游戏中心</a><br>
+            <a href="#">活动专题页</a><br>
+            <a href="#">壁纸站</a><br>
+            <a href="#">分院帽计划</a>
+          </li>
+          <li>
+            <a href="#">帮助中心</a><br>
+            <a href="#">补档认领处</a><br>
+            <a href="#">高级弹幕</a><br>
+            <a href="#">侵权申诉</a><br>
+            <a href="#">资源免责声明</a>
+          </li>
+          <li>
+            <a href="#">用户协议</a><br>
+            <a href="#">隐私政策</a><br>
+            <a href="#">举报投诉</a><br>
+            <a href="#">名人堂</a><br>
+            <a href="#">建议和 BUG 汇报</a>
+          </li>
+        </ul>
+        <div class="partner">
+          <div class="block left">
+            <div class="partner-banner">
+              <svg class="loader" viewBox="0 0 400 70" aria-hidden="true">
+                <rect width="400" height="70" fill="#e9ebee"/>
+                <rect x="1" y="1" width="398" height="68" rx="4" fill="#fff"/>
+                <rect x="168" y="18" width="64" height="34" rx="5" fill="none" stroke="#00a1d6" stroke-width="3.6"/>
+                <path d="M184 32h32" fill="none" stroke="#00a1d6" stroke-width="3.6" stroke-linecap="round"/>
+                <circle cx="188" cy="42" r="4" fill="#00a1d6"/>
+                <circle cx="212" cy="42" r="4" fill="#00a1d6"/>
+              </svg>
+            </div>
+          </div>
+          <div class="block right">
+            <p>广播电视节目制作经营许可证：<span>（此页为怀旧复刻，无此证号）</span></p>
+            <p>网络文化经营许可证：<span>（同上）</span></p>
+            <p>互联网 ICP 备案：<span>（同上）</span></p>
+            <p class="foot-cheer">哔哩哔哩-(゜-゜)つロ 乾杯~</p>
+          </div>
+          <p class="foot-copy">本站为个人怀旧页面，与哔哩哔哩官方无关 · 所有标题、UP 主、播放数均为虚构</p>
+        </div>
       </div>
-    </footer>
+    </div>
 
   </div>
 
