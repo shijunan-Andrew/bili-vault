@@ -1,0 +1,172 @@
+[
+  {
+    "local": "slideshow.json",
+    "bytes": 1178,
+    "sha1": "a9ce18ef3ae9060f028fd8b85424e1b57409506a",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20150711105618",
+        "bytes": 1175,
+        "sha1": "c384a65bcd81afe0f17bda57e6f0135fc568cd63",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20150711105618",
+    "matchesLocal": false
+  },
+  {
+    "local": "ranking.json",
+    "bytes": 91048,
+    "sha1": "365e12a2744224a375475f6c79e764d5e4224cbb",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20160121102217",
+        "bytes": 91045,
+        "sha1": "f81cdc3dac16eeef83ac75c2ad5b1937602dacd7",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20160121102217",
+    "matchesLocal": false
+  },
+  {
+    "local": "ranking-3day.json",
+    "bytes": 7364,
+    "sha1": "2849c0efd89bc747d2711971262a5a88dd260858",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20150711105618",
+        "bytes": 7361,
+        "sha1": "4de79e99d8d07ffe838d2290af2c6894f9dd8211",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20150711105618",
+    "matchesLocal": false
+  },
+  {
+    "local": "ranking-week.json",
+    "bytes": 83276,
+    "sha1": "5e3bf41ddb2b9f35d2fdc0b335878b3df410e110",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20140715055152",
+        "bytes": 83273,
+        "sha1": "80355cc6e886dfd2cd7fc5561f5477964e50df85",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20140715055152",
+    "matchesLocal": false
+  },
+  {
+    "local": "promote.json",
+    "bytes": 6288,
+    "sha1": "7afc54d2fc1d53a950cb351b95d00c5801d39a9a",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20150702162039",
+        "bytes": 6285,
+        "sha1": "42f0444a21eeb0edc270844031ef18ffe1efb53c",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20150702162039",
+    "matchesLocal": false
+  },
+  {
+    "local": "promote-12.json",
+    "bytes": 265,
+    "sha1": "5f3de4995dcbfb42da6769dab12a9a54746690e5",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20150822192609",
+        "bytes": 265,
+        "sha1": "5f3de4995dcbfb42da6769dab12a9a54746690e5",
+        "sameAsLocal": true
+      }
+    ],
+    "served": "20150822192609",
+    "matchesLocal": true
+  },
+  {
+    "local": "recommend.json",
+    "bytes": 7461,
+    "sha1": "bf34cfd2627da8b38152c976c6a8d2919733ce43",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20160104042256",
+        "bytes": 7458,
+        "sha1": "c7212765541de1e2c70320ec991f88c0b8e4d684",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20160104042256",
+    "matchesLocal": false
+  },
+  {
+    "local": "bangumi.json",
+    "bytes": 29240,
+    "sha1": "49044d3e7451521f7e8aa2775318e158fb9a04c5",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20150203125458",
+        "bytes": 29237,
+        "sha1": "8c088d47557e613bebf9c95838ff2481b8b3d41a",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20150203125458",
+    "matchesLocal": false
+  },
+  {
+    "local": "ding.json",
+    "bytes": 66632,
+    "sha1": "c19175e7ea2d4713e85892ff6ca49d74e474ca57",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20150711105617",
+        "bytes": 66629,
+        "sha1": "ff39115cbc26bef842bbe347346ead228f53e784",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20150711105617",
+    "matchesLocal": false
+  },
+  {
+    "local": "ding-count.json",
+    "bytes": 1462,
+    "sha1": "f2b81ffc75d00628ce3baa3b92b79c086d85824c",
+    "probes": [
+      {
+        "asked": "20150701082208",
+        "http": 200,
+        "served": "20150623005644",
+        "bytes": 1459,
+        "sha1": "39350b3a723f0db42ee7a4a1930653ebd4c50cbf",
+        "sameAsLocal": false
+      }
+    ],
+    "served": "20150623005644",
+    "matchesLocal": false
+  }
+]

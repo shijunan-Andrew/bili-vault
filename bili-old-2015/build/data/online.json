@@ -1,0 +1,8 @@
+{
+  "_source": "http://www.bilibili.com/online.js as archived by the Wayback Machine for 2015-07-01 (payload fetched 2015 era; values are the site's own 2015 counters)",
+  "_note": "countInfo -> the .addnew_<tid> badge next to each category in the header; c<tid> keys. Included so the replica shows the real numbers a 2015 visitor saw instead of the server-side '--' placeholder.",
+  "countInfo": { "c11": 28, "c4": 187, "c129": 11, "c5": 79, "c119": 18, "c1": 84, "c3": 57, "c13": 19, "c36": 19, "c23": 15 },
+  "web_online": 89580,
+  "play_online": 102968,
+  "archivedPageShows": { "web_online": 271992, "play_online": 309274 }
+}

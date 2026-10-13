@@ -76,6 +76,14 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.5.9：彩蛋页换成作者复刻的那一份
+
+- 入口：`library.js` 里 `#retroEntry` 的点击 → `chrome.tabs.create({ url: chrome.runtime.getURL("bili-old-2015/index.html") })`。开在新标签是为了不盖掉用户当前的收藏库，与设置齿轮同一做法；扩展自有页面**不需要 web_accessible_resources**。
+- 我上一版自制的 `retro.html` / `retro.css` / `retro.js` 已删除。README 里 V1.5.6 / V1.5.7 两节是历史记录，按规矩没动。
+- 对话框在 `bili-old-2015/index.html` 里，自包含（内联 style + script，零外部资源、零网络请求、零新权限、无动画、无 `!important`）：两段文案 = 恭喜问候 + 免责声明。
+- **踩过的坑（务必记住）**：那份页面有一个 **window 捕获阶段的 catch-all 链接处理器** —— 点页面上任何元素都会被当成跳转，真的打开 B 站新标签。所以弹层必须在**捕获阶段** `stopPropagation`，并用 `event.target.closest("#eggDialogOverlay")` 判定只拦弹层自身的点击；否则点「知道啦」、点遮罩、按 Esc 都会顺手多开一个标签。我们的验收里有 4 条「关闭动作没有多开标签」断言钉着这件事。
+- **有边界的例外**（用户查证后拍板，写在这里以免被当成通用许可）：只复刻 2015 年那一版首页、素材来自互联网档案馆的公开快照、唯一交互是跳回现在的 B 站主页、不作为项目宣传也不商用、仅作怀旧与欣赏 —— 因此不构成严重侵权。**这条只适用于这一个彩蛋页**；不要据此把官方素材用到别处（下载功能那套红线依旧：`bilivideo|akamaized` 永不加回）。
+
 ## 1.5.8：怀旧页停机（retro.* 仍然留在仓库里）
 
 - 现状：`library.js` 里 `#retroEntry` 的点击处理是 `chrome.tabs.create({ url: "https://www.bilibili.com" })`。`retro.html` / `retro.css` / `retro.js` 三个文件**保留但没有任何入口**（全仓提到 `retro.html` 的地方只剩注释）。

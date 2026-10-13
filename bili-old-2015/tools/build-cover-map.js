@@ -1,0 +1,95 @@
+// tools/build-cover-map.js — map every thumbnail slot in the generated fragments to a rescued cover.
+//
+// The 2015 volume thumbnails lived on i0|i1|i2.hdslb.com/<size>/... and every one of those files is
+// gone. tools/fetch-covers.js rescued the *current* cover of 189 of the 319 archived videos by aid.
+// This script connects the two: it walks the generated markup in document order, reads each entry's
+// aid from its /video/avNNN/ link (or its title), and records slot -> assets/cover/<aid>.<ext>.
+//
+// Slot key = the ORIGINAL 2015 image URL (the builder inlines by image URL), plus an aid key for the
+// entries whose 2015 url is known and a title key for the ones whose 2015 url was never archived.
+const fs = require('fs');
+const path = require('path');
+const ROOT = path.resolve(__dirname, '..');
+const P = (...a) => path.join(ROOT, ...a);
+const read = (f) => fs.readFileSync(f, 'utf8');
+
+// ---- 1. title -> aid, from every archived payload ----------------------------------------------
+const titleToAid = new Map();
+const walk = (node, inheritedAid) => {
+  if (Array.isArray(node)) return node.forEach((n) => walk(n, inheritedAid));
+  if (!node || typeof node !== 'object') return;
+  const aid = node.aid != null ? String(node.aid) : inheritedAid;
+  if (node.title && aid) titleToAid.set(String(node.title).trim(), aid);
+  for (const v of Object.values(node)) walk(v, aid);
+};
+for (const f of fs.readdirSync(P('_ref', 'json')).filter((x) => x.endsWith('.json'))) {
+  try { walk(JSON.parse(read(P('_ref', 'json', f))), null); } catch { /* skip unparseable */ }
+}
+
+// ---- 2. covers on disk --------------------------------------------------------------------------
+const covers = new Map();
+for (const f of fs.readdirSync(P('assets', 'cover'))) {
+  const m = f.match(/^(\d+)\.(jpe?g|png|gif|webp)$/i);
+  if (m) covers.set(m[1], 'assets/cover/' + f);
+}
+
+// ---- 3. walk the generated fragments ------------------------------------------------------------
+// Shape-agnostic: every thumbnail is an `<img ... data-img="URL" alt="TITLE" />` whose enclosing
+// entry is the nearest preceding /video/avNNN/ link. This covers both the video cards
+// (`<div class="v">`) and the right-rail ranking rows (`<i class="number">`), which have no common
+// wrapper class.
+const frag = JSON.parse(read(P('build', 'fragments.json')));
+const order = ['b_index_top', 'b_promote', 'sections', 'b_recommend', 'b_recommend_row'];
+const slots = [];       // { img, aid, title, where }
+for (const key of order) {
+  const html = frag[key];
+  if (!html) continue;
+  let at = 0;
+  while ((at = html.indexOf('<img', at)) !== -1) {
+    const tag = html.slice(at, html.indexOf('>', at) + 1);
+    at += 4;
+    const img = (tag.match(/data-(?:img|missing)="([^"]+)"/) || [])[1];
+    if (!img) continue;                        // already-resolved or decorative <img>
+    const alt = (tag.match(/alt="([^"]*)"/) || [])[1] || '';
+    const back = html.slice(Math.max(0, at - 3000), at);
+    const avs = [...back.matchAll(/\/video\/av(\d+)\//g)];
+    const aid = avs.length ? avs[avs.length - 1][1] : null;
+    // short display title: the nearest <div class="t">…</div> or <p class="t">…</p> in that window
+    const ts = [...back.matchAll(/<(?:div|p) class="t"[^>]*>([\s\S]*?)<\/(?:div|p)>/g)];
+    const short = ts.length ? ts[ts.length - 1][1].replace(/<[^>]+>/g, '') : '';
+    slots.push({ img, aid, title: (short || alt).replace(/&amp;/g, '&').trim(), where: key });
+  }
+}
+console.log('thumbnail slots found in fragments:', slots.length);
+
+// ---- 4. resolve ---------------------------------------------------------------------------------
+const byImg = {}, byAid = {}, byTitle = {};
+let resolved = 0, noCover = 0, unknown = 0;
+const missing = [];
+for (const s of slots) {
+  let aid = s.aid;
+  if (!aid && s.title) aid = titleToAid.get(s.title);
+  const file = aid ? covers.get(String(aid)) : null;
+  if (!aid) { unknown++; if (missing.length < 10) missing.push('no aid: ' + (s.title || s.img).slice(0, 44)); continue; }
+  if (!file) { noCover++; if (missing.length < 20) missing.push(`aid ${aid} has no cover today: ${s.title.slice(0, 34)}`); continue; }
+  resolved++;
+  if (s.img) byImg[s.img] = { aid, file, title: s.title };
+}
+console.log(`slots=${slots.length} resolved=${resolved} (aid known, cover on disk) noCover=${noCover} unknownAid=${unknown}`);
+if (missing.length) missing.forEach((x) => console.log('   ', x));
+
+// ---- 5. write the maps the builder consumes -----------------------------------------------------
+fs.writeFileSync(P('assets', 'COVER-MAP.json'), JSON.stringify({ byImg, byTitle }, null, 1));
+const lines = ['# cover backfill wiring', '',
+  'Every volume thumbnail on the 2015 homepage lived on `i0|i1|i2.hdslb.com/<size>/…`; those files are',
+  'permanently gone (the host serves a grey placeholder today). `tools/fetch-covers.js` rescued the',
+  '*current* cover of 189 of the 319 archived videos by aid, and this file wires them back into the',
+  'page. Generated by `tools/build-cover-map.js` — do not hand-edit.', '',
+  `- thumbnail slots found in the generated markup: ${slots.length}`,
+  `- slots whose 2015 image URL is known (builder can inline by URL): ${Object.keys(byImg).length}`,
+  `- slots resolved to a rescued cover: ${resolved}`,
+  `- slots whose video no longer has any cover (deleted/private): ${noCover}`,
+  `- slots whose aid could not be identified: ${unknown}`, '',
+  '| 2015 image url | aid | cover file | title |', '|---|---|---|---|'];
+for (const [k, v] of Object.entries(byImg)) lines.push(`| ${k} | ${v.aid} | ${v.file} | ${v.title.slice(0, 40)} |`);
+fs.writeFileSync(P('assets', 'COVER-WIRING.md'), lines.join('\n') + '\n', 'utf8');

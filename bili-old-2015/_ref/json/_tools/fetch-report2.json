@@ -1,0 +1,47 @@
+[
+  {
+    "local": "slideshow.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "ranking.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "ranking-3day.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "ranking-week.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "promote.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "promote-12.json",
+    "status": "OK",
+    "bytes": 265,
+    "requested": "20150701082208",
+    "served": "20150822192609",
+    "remote": "http://www.bilibili.com/index/promote/12.json",
+    "shape": "object{code,zone,item}"
+  },
+  {
+    "local": "recommend.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "bangumi.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "ding.json",
+    "status": "SKIP"
+  },
+  {
+    "local": "ding-count.json",
+    "status": "SKIP"
+  }
+]

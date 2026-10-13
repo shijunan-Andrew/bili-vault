@@ -1,0 +1,528 @@
+{
+  return (globalThis._wb_wombat && globalThis._wb_wombat.local_init && globalThis._wb_wombat.local_init(name))||globalThis[
+    name
+  ];
+  
+};
+if(!globalThis.__WB_pmw){
+  globalThis.__WB_pmw=function(obj){
+    this.__WB_source=obj;
+    return this;
+    
+  }
+}{
+  
+let window = _____WB$wombat$assign$function_____("window");
+  
+let self = _____WB$wombat$assign$function_____("self");
+  
+let document = _____WB$wombat$assign$function_____("document");
+  
+let location = _____WB$wombat$assign$function_____("location");
+  
+let top = _____WB$wombat$assign$function_____("top");
+  
+let parent = _____WB$wombat$assign$function_____("parent");
+  
+let frames = _____WB$wombat$assign$function_____("frames");
+  
+let opener = _____WB$wombat$assign$function_____("opener");
+  
+document.onerror=function(){
+    return !0
+  };
+  var jsloader=new LazyJSONLoader,
+  base_ads=3,
+  indexBlock={
+    top:{
+      id:"b_index_top",
+      area:'<div class="container-top-wrapper"><div class="container-top"><div class="b-l"></div><div class="b-r"><div class="top-list-wrapper"></div></div></div></div>',
+      container:"#index_container",
+      panes:{
+        list:{
+          wrapper:".b-r .top-list-wrapper",
+          dataContainer:'<ul class="top-list clearfix"></ul>',
+          dataSource:"/index/ranking-3day.json",
+          pagesize:8,
+          render:"renderTopList",
+          onInitComplete:function(i){
+            function n(){
+              switch(m){
+                case 0:k.html("\u4e00\u5468");
+                h.html("\u4e09\u65e5");
+                break;
+                case 1:k.html("\u6628\u65e5");
+                h.html("\u4e00\u5468");
+                break;
+                case 2:k.html("\u4e09\u65e5"),
+                h.html("\u6628\u65e5")
+              }
+            }var l=i._super;
+            (new SliderController(i.sliderParams)).init();
+            var k=$('<div class="page prev no-select"></div>').appendTo(i.wrapper),
+            h=$('<div class="page next no-select"></div>').appendTo(i.wrapper),
+            j=[
+              "/index/ranking.json",
+              "/index/ranking-3day.json",
+              "/index/ranking-week.json"
+            ],
+            m=1;
+            n();
+            i.wrapper.hover(function(){
+              $(this).find(".page").fadeIn(200)
+            },
+            function(){
+              $(this).find(".page").fadeOut(200)
+            });
+            k.click(function(){
+              h.show();
+              m--;
+              0>m&&(m=2);
+              n();
+              i.dataSource=j[
+                m
+              ];
+              l.parseData(i)
+            });
+            h.click(function(){
+              k.show();
+              m++;
+              2<m&&(m=0);
+              n();
+              i.dataSource=j[
+                m
+              ];
+              l.parseData(i)
+            })
+          },
+          sliderParams:{
+            parent:".container-top .b-l",
+            wrapper:$('<div class="topic-preview-wrapper"><a class="more-topic" href="/topic/integrated-1.html" target="_blank">\u66f4\u591a></a><div class="s-bottom"><div class="title"></div></div></div>'),
+            container:$('<ul class="topic-preview clearfix"></ul>'),
+            item:'<li><a target="_blank"><img /></a></li>',
+            bar:$('<ul id="topic_slider" class="slider-bar"></ul>'),
+            barContainer:".s-bottom",
+            barItem:"<li></li>",
+            renderCallback:function(b,
+            f,
+            d){
+              b=$('<span><a href="'+f.link+'">'+f.title+"</a></span>").appendTo($(".title",
+              b));
+              0==d&&b.show()
+            },
+            slideCallback:function(b,
+            d){
+              $(".title span",
+              b).hide();
+              $(".title",
+              b).find("span:eq("+d+")").fadeIn(300)
+            },
+            dataSrc:"/index/slideshow.json"
+          }
+        }
+      }
+    },
+    promote:{
+      id:"b_promote",
+      panes:{
+        recommedList:{
+          wrapper:".b-l",
+          title:'<div class="left"><span class="b-head-i"></span><span class="b-head-t"><h2>\u63a8\u5e7f</h2></span></div><a href="http://web.archive.org/web/20150613210912/http://h.bilibili.com/wallpaper?action=list" target="_blank"><div class="bg-link">\u58c1\u7eb8</div></a>',
+          dataContainer:'<ul class="rm-list"></ul>',
+          dataSource:"/index/promote.json",
+          render:"renderPromote",
+          pagesize:5
+        },
+        ad:{
+          wrapper:".b-r",
+          dataContainer:'<div class="index-promote"></div>',
+          dataSource:"/index/promote/12.json",
+          render:"renderAds"
+        }
+      }
+    },
+    douga:{
+      tid:1,
+      id:"b_douga",
+      panes:{
+        dougaList:{
+          wrapper:".b-l",
+          title:'<div class="left"><span class="b-head-i"></span><span class="b-head-t"><a href="/video/douga.html" title="\u52a8\u753b"><h2>\u52a8\u753b</h2></a></span></div>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"douga",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          push:!0,
+          onInitComplete:function(b){
+            
+          }
+        },
+        dougaRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u52a8\u753b\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(1),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    bangumi:{
+      tid:13,
+      id:"b_bangumi",
+      panes:{
+        bangumiList:{
+          wrapper:".b-l",
+          title:'<div class="left"><span class="b-head-i"></span><span class="b-head-t"><a href="/video/bangumi.html" title="\u756a\u5267"><h2>\u756a\u5267</h2></a></span></div>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"bangumi",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          push:!0
+        },
+        bangumiRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u756a\u5267\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<ul class="rlist bangumi-ranking"></ul>',
+          render:"renderIndexRanking",
+          pagesize:8,
+          type:"hot",
+          selector:CreateArea.createRankingSelect(13),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        },
+        bangumiCalendar:{
+          template:'<div class="b-l bgm-calendar"><div class="b-head"></div><div class="b-body"></div></div>',
+          dataContainer:'<ul class="c-list clearfix"></ul>',
+          dataSource:"/index/bangumi.json",
+          render:"renderBangumiCalendar",
+          tab:'<div class="b-tab"><ul class="clearfix"><li day=0><span>\u661f\u671f\u65e5</span></li><li day=1><span>\u661f\u671f\u4e00</span></li><li day=2><span>\u661f\u671f\u4e8c</span></li><li day=3><span>\u661f\u671f\u4e09</span></li><li day=4><span>\u661f\u671f\u56db</span></li><li day=5><span>\u661f\u671f\u4e94</span></li><li day=6><span>\u661f\u671f\u516d</span></li></ul></div>',
+          tabTarget:".b-head",
+          onInitComplete:function(b){
+            var d=(new Date).getDay();
+            b.tab.find("li:eq("+d+")").addClass("on")
+          }
+        },
+        bangumiPromote:{
+          template:'<div class="b-r bangumi"><div class="b-head"></div><div class="b-body"></div></div>'
+        }
+      }
+    },
+    music:{
+      tid:3,
+      id:"b_music",
+      panes:{
+        musicList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/music.html" title="\u97f3\u4e50"><h2>\u97f3\u4e50</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"music",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        musicRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u97f3\u4e50\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(3),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    dance:{
+      tid:129,
+      id:"b_dance",
+      panes:{
+        danceList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/dance.html" title="\u821e\u8e48"><h2>\u821e\u8e48</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"dance",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        danceRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u821e\u8e48\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(129),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    game:{
+      tid:4,
+      id:"b_game",
+      panes:{
+        gameList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/game.html" title="\u6e38\u620f"><h2>\u6e38\u620f</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"game",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        gameRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u6e38\u620f\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(4),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    technology:{
+      tid:36,
+      id:"b_technology",
+      panes:{
+        techList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/technology.html" title="\u79d1\u5b66\u00b7\u6280\u672f"><h2>\u79d1\u5b66\u00b7\u6280\u672f</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"technology",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        techRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u79d1\u6280\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(36),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    ent:{
+      tid:5,
+      id:"b_ent",
+      panes:{
+        entList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/ent.html" title="\u5a31\u4e50"><h2>\u5a31\u4e50</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"ent",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        entRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u5a31\u4e50\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(5),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    kichiku:{
+      tid:119,
+      id:"b_kichiku",
+      panes:{
+        kichikuList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/kichiku.html" title="\u9b3c\u755c"><h2>\u9b3c\u755c</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"kichiku",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        kichikuRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u9b3c\u755c\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(119),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    movie:{
+      tid:23,
+      id:"b_movie",
+      panes:{
+        movieList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/movie.html" title="\u7535\u5f71"><h2>\u7535\u5f71</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"movie",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        movieRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u7535\u5f71\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(23),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    teleplay:{
+      tid:11,
+      id:"b_teleplay",
+      panes:{
+        movieList:{
+          wrapper:".b-l",
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/video/teleplay.html" title="\u7535\u89c6\u5267"><h2>\u7535\u89c6\u5267</h2></a></span>',
+          dataContainer:'<ul class="vidbox v-list"></ul>',
+          render:"renderList",
+          pagesize:10,
+          type:"teleplay",
+          tab:CreateArea.createListTab(),
+          tabTarget:".b-head",
+          tabChange:"tabChange",
+          push:!0
+        },
+        movieRanking:{
+          wrapper:".b-r",
+          title:'<div class="left"><span class="b-head-t"><h3>\u7535\u89c6\u5267\u6392\u884c</h3></span></div><div class="right"></div>',
+          dataContainer:'<div class="r-list-body vertical"><div class="r-list-wrapper"></div></div>',
+          render:"renderIndexRanking",
+          pagesize:6,
+          tab:CreateArea.createRankingTab(),
+          tabTarget:".b-head .left",
+          tabChange:"tabChange",
+          selector:CreateArea.createRankingSelect(11),
+          selectorTarget:".b-head .right",
+          selectChange:"selectChange"
+        }
+      }
+    },
+    recommend:{
+      id:"b_recommend",
+      empty:!0,
+      panes:{
+        recommedList:{
+          template:'<div class="b-l"><div class="b-head"></div><div class="b-body"></div></div><div class="b-r"></div>',
+          title:'<span class="b-head-i"></span><span class="b-head-t"><a href="/list/recommend/1.html" title="\u7279\u522b\u63a8\u8350"><h2>\u7279\u522b\u63a8\u8350</h2></a></span>',
+          dataContainer:'<ul class="rm-list recommend"></ul>',
+          dataSource:"/index/recommend.json",
+          render:"renderRecommend",
+          pagesize:5
+        }
+      }
+    }
+  };
+  function buildop(g,
+  j,
+  i,
+  h){
+    var d=$(g);
+    $(j);
+    d.click(function(){
+      var b=d.index($(this));
+      "undefined"!==typeof i&&ChatSaveSettings(i,
+      b);
+      d.removeClass("on");
+      $(this).addClass("on")
+    });
+    (g=h||ChatGetSettings(i))?$(d.get(g)).trigger("click"):3==d.length?$(d.get(1)).trigger("click"):$(d.get(0)).trigger("click")
+  }$(function(){
+    addReturnToMobile()
+  });
+  
+
+}
+
+/*
+     FILE ARCHIVED ON 21:09:12 Jun 13,
+ 2015 AND RETRIEVED FROM THE
+     INTERNET ARCHIVE ON 13:26:33 Oct 13,
+ 2026.
+     JAVASCRIPT APPENDED BY WAYBACK MACHINE,
+ COPYRIGHT INTERNET ARCHIVE.
+
+     ALL OTHER CONTENT MAY ALSO BE PROTECTED BY COPYRIGHT (17 U.S.C.
+     SECTION 108(a)(3)).
+*/
+/*
+playback timings (ms):
+  captures_list: 0.653
+  exclusion.robots: 0.068
+  exclusion.robots.policy: 0.055
+  esindex: 0.008
+  cdx.remote: 39.511
+  LoadShardBlock: 100.903 (3)
+  PetaboxLoader3.datanode: 117.836 (4)
+  load_resource: 220.449
+  PetaboxLoader3.resolve: 68.855
+*/

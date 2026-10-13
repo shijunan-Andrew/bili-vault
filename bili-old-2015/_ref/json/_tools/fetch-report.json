@@ -1,0 +1,112 @@
+[
+  {
+    "remote": "slideshow.json",
+    "local": "slideshow.json",
+    "status": "BAD",
+    "ts": "",
+    "bytes": 0,
+    "note": "http=429 json=false bytes=620",
+    "captures": 14,
+    "cdxTs": "20150711105618",
+    "cdxWindow": false,
+    "servedTs": "20150711105618",
+    "httpStatus": 429
+  },
+  {
+    "remote": "ranking.json",
+    "local": "ranking.json",
+    "status": "MISSING",
+    "ts": "",
+    "bytes": 0,
+    "note": "no CDX capture with status 200",
+    "captures": 0
+  },
+  {
+    "remote": "ranking-3day.json",
+    "local": "ranking-3day.json",
+    "status": "BAD",
+    "ts": "",
+    "bytes": 0,
+    "note": "http=429 json=false bytes=620",
+    "captures": 15,
+    "cdxTs": "20150711105618",
+    "cdxWindow": false,
+    "servedTs": "20150711105618",
+    "httpStatus": 429
+  },
+  {
+    "remote": "ranking-week.json",
+    "local": "ranking-week.json",
+    "status": "MISSING",
+    "ts": "",
+    "bytes": 0,
+    "note": "no CDX capture with status 200",
+    "captures": 0
+  },
+  {
+    "remote": "promote.json",
+    "local": "promote.json",
+    "status": "BAD",
+    "ts": "",
+    "bytes": 0,
+    "note": "http=429 json=false bytes=620",
+    "captures": 16,
+    "cdxTs": "20150702162039",
+    "cdxWindow": true,
+    "servedTs": "20150702162039",
+    "httpStatus": 429
+  },
+  {
+    "remote": "promote/12.json",
+    "local": "promote-12.json",
+    "status": "BAD",
+    "ts": "",
+    "bytes": 0,
+    "note": "http=429 json=false bytes=620",
+    "captures": 8,
+    "cdxTs": "20150822192609",
+    "cdxWindow": false,
+    "servedTs": "20150822192609",
+    "httpStatus": 429
+  },
+  {
+    "remote": "recommend.json",
+    "local": "recommend.json",
+    "status": "MISSING",
+    "ts": "",
+    "bytes": 0,
+    "note": "no CDX capture with status 200",
+    "captures": 0
+  },
+  {
+    "remote": "bangumi.json",
+    "local": "bangumi.json",
+    "status": "MISSING",
+    "ts": "",
+    "bytes": 0,
+    "note": "no CDX capture with status 200",
+    "captures": 0
+  },
+  {
+    "remote": "ding.json",
+    "local": "ding.json",
+    "status": "BAD",
+    "ts": "",
+    "bytes": 0,
+    "note": "http=429 json=false bytes=620",
+    "captures": 11,
+    "cdxTs": "20150711105617",
+    "cdxWindow": false,
+    "servedTs": "20150711105617",
+    "httpStatus": 429
+  },
+  {
+    "remote": "ding-count.json",
+    "local": "ding-count.json",
+    "status": "MISSING",
+    "ts": "",
+    "bytes": 0,
+    "note": "no CDX capture with status 200",
+    "captures": 0
+  }
+]

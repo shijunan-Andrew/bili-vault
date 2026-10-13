@@ -1,0 +1,117 @@
+{
+  "checkedAt": "2026-10-13T13:53:11.863Z",
+  "rows": [
+    {
+      "file": "slideshow.json",
+      "bomStripped": true,
+      "bytes": 1175,
+      "remoteBytes": 1175,
+      "sha1": "c384a65bcd81afe0f17bda57e6f0135fc568cd63",
+      "remoteSha1": "c384a65bcd81afe0f17bda57e6f0135fc568cd63",
+      "byteIdentical": true,
+      "served": "20150711105618",
+      "json": "ok"
+    },
+    {
+      "file": "ranking.json",
+      "bomStripped": true,
+      "bytes": 91045,
+      "remoteBytes": 91045,
+      "sha1": "f81cdc3dac16eeef83ac75c2ad5b1937602dacd7",
+      "remoteSha1": "f81cdc3dac16eeef83ac75c2ad5b1937602dacd7",
+      "byteIdentical": true,
+      "served": "20160121102217",
+      "json": "ok"
+    },
+    {
+      "file": "ranking-3day.json",
+      "bomStripped": true,
+      "bytes": 7361,
+      "remoteBytes": 7361,
+      "sha1": "4de79e99d8d07ffe838d2290af2c6894f9dd8211",
+      "remoteSha1": "4de79e99d8d07ffe838d2290af2c6894f9dd8211",
+      "byteIdentical": true,
+      "served": "20150711105618",
+      "json": "ok"
+    },
+    {
+      "file": "ranking-week.json",
+      "bomStripped": true,
+      "bytes": 83273,
+      "remoteBytes": 83273,
+      "sha1": "80355cc6e886dfd2cd7fc5561f5477964e50df85",
+      "remoteSha1": "80355cc6e886dfd2cd7fc5561f5477964e50df85",
+      "byteIdentical": true,
+      "served": "20140715055152",
+      "json": "ok"
+    },
+    {
+      "file": "promote.json",
+      "bomStripped": true,
+      "bytes": 6285,
+      "remoteBytes": 6285,
+      "sha1": "42f0444a21eeb0edc270844031ef18ffe1efb53c",
+      "remoteSha1": "42f0444a21eeb0edc270844031ef18ffe1efb53c",
+      "byteIdentical": true,
+      "served": "20150702162039",
+      "json": "ok"
+    },
+    {
+      "file": "promote-12.json",
+      "bomStripped": false,
+      "bytes": 265,
+      "remoteBytes": 265,
+      "sha1": "5f3de4995dcbfb42da6769dab12a9a54746690e5",
+      "remoteSha1": "5f3de4995dcbfb42da6769dab12a9a54746690e5",
+      "byteIdentical": true,
+      "served": "20150822192609",
+      "json": "ok"
+    },
+    {
+      "file": "recommend.json",
+      "bomStripped": true,
+      "bytes": 7458,
+      "remoteBytes": 7458,
+      "sha1": "c7212765541de1e2c70320ec991f88c0b8e4d684",
+      "remoteSha1": "c7212765541de1e2c70320ec991f88c0b8e4d684",
+      "byteIdentical": true,
+      "served": "20160104042256",
+      "json": "ok"
+    },
+    {
+      "file": "bangumi.json",
+      "bomStripped": true,
+      "bytes": 29237,
+      "remoteBytes": 29237,
+      "sha1": "8c088d47557e613bebf9c95838ff2481b8b3d41a",
+      "remoteSha1": "8c088d47557e613bebf9c95838ff2481b8b3d41a",
+      "byteIdentical": true,
+      "served": "20150203125458",
+      "json": "ok"
+    },
+    {
+      "file": "ding.json",
+      "bomStripped": true,
+      "bytes": 66629,
+      "remoteBytes": 66629,
+      "sha1": "ff39115cbc26bef842bbe347346ead228f53e784",
+      "remoteSha1": "ff39115cbc26bef842bbe347346ead228f53e784",
+      "byteIdentical": true,
+      "served": "20150711105617",
+      "json": "ok"
+    },
+    {
+      "file": "ding-count.json",
+      "bomStripped": true,
+      "bytes": 1459,
+      "remoteBytes": 1459,
+      "sha1": "39350b3a723f0db42ee7a4a1930653ebd4c50cbf",
+      "remoteSha1": "39350b3a723f0db42ee7a4a1930653ebd4c50cbf",
+      "byteIdentical": true,
+      "served": "20150623005644",
+      "json": "ok"
+    }
+  ],
+  "identical": 10,
+  "total": 10
+}

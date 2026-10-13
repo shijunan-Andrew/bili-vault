@@ -1,0 +1,4 @@
+/battery/img/icons02.png
+/battery/img/icons03.png
+/battery/img/bubbles.gif
+/battery/img/rank_icons.png

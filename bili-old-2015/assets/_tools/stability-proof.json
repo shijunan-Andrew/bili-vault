@@ -1,0 +1,90 @@
+{
+  "checkedAt": "2026-10-13T15:05:38.141Z",
+  "claimWithdrawn": "md5(filename) == md5(bytes) does NOT prove byte-exactness: the path encodes a resized rendition keyed by the md5 of the original upload. Only /promote/<md5>.jpg is stored verbatim.",
+  "propertyProved": "For a given URL the served bytes are stable across capture years, so a capture from any year returns the same picture the 2015 page showed.",
+  "sample": 6,
+  "identical": 0,
+  "differs": 0,
+  "unavailable": 6,
+  "nameMatches": 0,
+  "rows": [
+    {
+      "url": "http://i0.hdslb.com/240_180/u_user/5cc104e78974e9bf77781b16521075a9.jpg",
+      "path": "pic/5cc104e78974e9bf77781b16521075a9.jpg",
+      "localServed": "20140723023042",
+      "localBytes": 5987,
+      "localMd5": "7574f1dc8372a37bd3aca113a3e34a17",
+      "nameMd5": "5cc104e78974e9bf77781b16521075a9",
+      "nameMatches": false,
+      "laterCapture": "20190327085721",
+      "verdict": "unavailable",
+      "laterBytes": null,
+      "laterMd5": null
+    },
+    {
+      "url": "http://i0.hdslb.com/240_180/u_user/1ebf01797ac8b02dc8604fc45f997ba3.jpg",
+      "path": "pic/1ebf01797ac8b02dc8604fc45f997ba3.jpg",
+      "localServed": "20140723004957",
+      "localBytes": 4449,
+      "localMd5": "9e160d6846025d23bd8a38cb05ca39c0",
+      "nameMd5": "1ebf01797ac8b02dc8604fc45f997ba3",
+      "nameMatches": false,
+      "laterCapture": "20190327085721",
+      "verdict": "unavailable",
+      "laterBytes": null,
+      "laterMd5": null
+    },
+    {
+      "url": "http://i0.hdslb.com/240_180/u_user/54b63fd125965b5d7e0d9a5d52afccf1.jpg",
+      "path": "pic/54b63fd125965b5d7e0d9a5d52afccf1.jpg",
+      "localServed": "20140723163802",
+      "localBytes": 3849,
+      "localMd5": "7706c406f2b6d3c1fd5d23efe912ce30",
+      "nameMd5": "54b63fd125965b5d7e0d9a5d52afccf1",
+      "nameMatches": false,
+      "laterCapture": "20190327085721",
+      "verdict": "unavailable",
+      "laterBytes": null,
+      "laterMd5": null
+    },
+    {
+      "url": "http://i0.hdslb.com/240_180/u_user/49d6550d78a2c4175d66049226295ab7.jpg",
+      "path": "pic/49d6550d78a2c4175d66049226295ab7.jpg",
+      "localServed": "20140723081510",
+      "localBytes": 6123,
+      "localMd5": "2bfcbb5264639bc2912b004bec0ef80f",
+      "nameMd5": "49d6550d78a2c4175d66049226295ab7",
+      "nameMatches": false,
+      "laterCapture": "20190327085721",
+      "verdict": "unavailable",
+      "laterBytes": null,
+      "laterMd5": null
+    },
+    {
+      "url": "http://i0.hdslb.com/240_180/u_user/6e115ff47da60cea0ee87dda71b1ce73.jpg",
+      "path": "pic/6e115ff47da60cea0ee87dda71b1ce73.jpg",
+      "localServed": "20140713211641",
+      "localBytes": 4839,
+      "localMd5": "6ea4391d4de31a85b78effd602e2f910",
+      "nameMd5": "6e115ff47da60cea0ee87dda71b1ce73",
+      "nameMatches": false,
+      "laterCapture": "20190327085721",
+      "verdict": "unavailable",
+      "laterBytes": null,
+      "laterMd5": null
+    },
+    {
+      "url": "http://i0.hdslb.com/240_180/u_user/1a0250e006960181727873cd16210b5a.jpg",
+      "path": "pic/1a0250e006960181727873cd16210b5a.jpg",
+      "localServed": "20140713221210",
+      "localBytes": 4785,
+      "localMd5": "53e7f9edcb3af2c8178fbfdc8ffbbefe",
+      "nameMd5": "1a0250e006960181727873cd16210b5a",
+      "nameMatches": false,
+      "laterCapture": "20190327085721",
+      "verdict": "unavailable",
+      "laterBytes": null,
+      "laterMd5": null
+    }
+  ]
+}
