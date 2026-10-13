@@ -3852,12 +3852,14 @@ settingsFab.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
 });
 
-/* ---------------- 彩蛋：分页器下方那一行小字 → retro.html ---------------- */
-// 开在新标签里，跟旁边的设置齿轮一致：收藏库这边正开着某个收藏夹、可能翻到
-// 第 N 页，彩蛋页盖掉当前页会让人找不回来。扩展页面之间互相打开走
-// chrome.tabs.create 即可，同样不需要 web_accessible_resources。
+/* ---------------- 彩蛋：分页器下方那一行小字 → 现在的 B 站主页 ---------------- */
+// V1.5.8：这一行原本开的是项目里自制的怀旧页（retro.html）。验收后决定不做那个页面，
+// 改成直接去现在的 b 站主页；retro.html / retro.css / retro.js 三个文件按用户要求
+// 暂时留在仓库里不清理，但已经没有任何入口指向它们（将来要恢复就把下面这行换回去）。
+// 开在新标签里，跟旁边的设置齿轮一致：收藏库这边正开着某个收藏夹、可能翻到第 N 页，
+// 用新页盖掉当前页会让人找不回来。开外站同样不需要 web_accessible_resources。
 retroEntryButton?.addEventListener("click", () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL("retro.html") });
+  chrome.tabs.create({ url: "https://www.bilibili.com" });
 });
 
 // V1.4.1：齿轮上方那个「回到顶部」。收藏库是整页跟着窗口滚的（顶栏是 sticky，
