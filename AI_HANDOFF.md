@@ -76,6 +76,20 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.6.2：五个根因（闭包抓空表、文字旋转、180 天窗口、草稿被重置、气泡两份指针）
+
+**1. 绑定一次 + 持有可变状态 → 必须传取值函数，不能传值。** `stats.js` 里 `chartRows` / `yearRows` 在 `renderChart` / `renderYears` 每次渲染都是**整体重赋值**（`chartRows = new Map(rows.map(...))`），而 `bindChart()` 只在 `init()` 里跑一次，把**当时那个空 Map 对象**传进了 `bindBarChart(element, lookup)`。闭包抓的是对象，不是变量：`chartRows.size` 从模块变量读是 7，`lookup.get(key)` 却恒为 `undefined`。症状极隐蔽 —— 柱子点得到、也会高亮（高亮读的是模块变量 `focusedDay`），饼图的 `renderPie()` 却永远拿不到行数据而早退（顺手把 `focusedDay` 清掉，于是连高亮也会残留）。修法：`bindBarChart(el, () => chartRows)`，内部 `lookupOf().get(key)`；也可以原地 `clear() + set()`，但传函数更稳。凡是「只绑一次 + 稍后换对象」的地方都该这样写。
+
+**2. 长文字旋转不能用「字数 × 每字宽」估。** 周标签是 `1月6日星期一 - 1月12日星期日`（20+ 字、真实宽度 200px 上下，格子只有 ~90px），旧代码用 `String(label).length * 11` 估宽、再绕 `baseline+4` 旋转 -34°，估算与真实差一倍以上：标签照旧重叠，右端还被 SVG 视口裁掉。现在轴标签分两层：`row.short`（`1/6–12`、`1/26–2/1`、`2026年1月`）给眼睛，`row.label` 全称留在 `aria-label` 与 `<title>` 里给读屏和悬停；倾角用 `getComputedTextLength()` 量真实宽度，取「不重叠所需的 `acos((slot-6)/width)`」与「不超过竖直空间上限的 `asin(room/width)`」里的小者，夹在 14°~58°，锚点改 `text-anchor:end` 并绕**文字自身的锚点**旋转（旧代码转轴在文字上方 10px，长文字会被甩出视口）。`ROLLUP_PAD.bottom` 44 → 72、`CHART_ROLLUP_HEIGHT` 236 → 266 是给倾角留的空间。
+
+**3. `countInRange()` 只看得到最近 180 天。** `dailyRows` 只带最近 180 天（`stats-core.js` 的 `DAILY_ROWS_DAYS`），而 `weekly` / `monthly` 是全量的。长区间的「共新增 N 个视频」如果拿 `countInRange()` 求和，区间落在 180 天以外时恒为 0 —— 柱子（来自全量聚合）有数、总数是 0，看起来像聚合没累加。修法：聚合模式下总数 = **画出来的桶的合计**（`renderChart()` 里的 `total`），另抽 `rangeTotal(range)` 给总览卡「区间内新增」共用，保证卡片与状态行永远一致。
+
+**4. `picker.paged = false` 会让日历窗口每次重画都回到锚点。** `renderCalendar()` 开头 `if (!picker.paged) picker.view = calendarView()`，而 `pickerAnchor()` 优先取 `draftFrom`。「回到今天」以前写成 `draftFrom = draftTo = 今天`，其实是在借「锚点=今天」把窗口挪回今天 —— 代价是把用户选的起止清掉了。现在保留草稿，只 `picker.paged = true` 并把视图设成今天所在月（经 `clampCalendarView`）。**想让视图动、又不想动用户的选择，就得显式打断「视图跟随选择」这层耦合。**
+
+**5. 宠物气泡有两份「第几句」的指针。** 后台回包的 `index`（`stats-core.js` 的 `touchPet()` 按 `affinity + totalTouch` 轮换）是权威轮播位，而气泡自己的 `lineIndex` 只在 `hideBubble()` 里归零；与此同时摸头会写库 → `chrome.storage.onChanged` → `refresh()` 把「已陪伴你 N 天」重新画一次。三件事叠起来：连点时后一句被刷新盖掉（看着像「点第二下没反应」），`refresh()` 还会把指针拉回轮播第一位。现在 `showBubbleLine(index, { egg })` 是唯一入口，另有 `shownIndex` / `shownEgg` 记住「当前显示的是哪一条」，`refresh()` 与切换语言时按记录重画；彩蛋回包用 `force` 覆盖而不推进轮播，且加了一条「与上一句相同就换下一句」的兜底。**`SMOKE_TEST.md:56` 的契约必须保留：连点第 5 下收起** —— 所以「显示过几句」另外用 `runClicks` 计数，5 秒自动收起后归零，不再拿 `lineIndex` 当这个计数器。`stats-core.js` 里 `index` 之所以只落 0/2，是因为 `min(9999, affinity+1)` 与 `totalTouch += 1` 一次加 2，改成按 `totalTouch % PET_LINE_COUNT` 取，一次一跳。
+
+**这版同一个教训**：前三条都是「文本级断言看不见」的类型（闭包捕获、真实文字宽度、180 天窗口），自动化全绿但真机就是不对 —— 统计页一定要按「点柱子 / 拉长区间 / 看标签有没有被裁」这条真机路径走一遍（`SMOKE_TEST.md` 的 V1.6.2 小节）。
+
 ## 1.6.1：统计页的粒度规则与「数据库凭空消失」的根因
 
 **粒度**：`stats.js` 的 `chartModeOf()` 按区间长度选柱状图粒度 —— ≤31 天逐日、>31 天按自然周、>183 天按自然月。周一律从周一开始（`stats-core.js` 的 `weekStartOf / weekKeyOf / weeklySeries`，用日历算术而不是 `time - n * DAY_MS`，避免夏令时落到前一天 23:00）；月聚合走 `stats-core.js` 的 `monthlySeries()`（**全量**，不受 `dailyRows` 只有 180 天的限制）。

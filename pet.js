@@ -166,7 +166,11 @@
   let statsLoaded = false;
   let stats = null;
   let visible = false;
-  let lineIndex = 0;      // 下一次点开要显示第几条
+  let lineIndex = 0;      // 下一条要显示的轮播台词（只往前走，收起也不回头）
+  let shownIndex = 0;     // 气泡里正显示的是第几条轮播台词（refresh / 切语言要重画它）
+  let shownEgg = -1;      // 气泡里正显示的是第几条彩蛋台词（>=0 时压过轮播）
+  let runClicks = 0;      // 这一轮气泡里已经出过几句（收起清零，用来数「第 5 下」）
+  let awaitingReply = false; // 这一下还在等后台的彩蛋（收起的那一下不再等，回复到了也不放）
   let ready = false;      // 是否已经装配过一次（build 只做一次）
 
   // 宠物自己的账本（持久化在 interfacePet 里）
@@ -354,11 +358,12 @@
 
   function hideBubble() {
     clearBubbleTimer();
-    // 收起 = 这一轮看完了，轮播指针必须一起归零。
-    // V1.5.4 起气泡会自己收（5s 闹钟 / 点别处），如果只收不清指针，
-    // 指针会停在 4（= 已经超出四句），下一次点击 showBubble 之后紧接着的一下
-    // 就会被 advanceBubble 当成「第 5 下」立刻收掉 —— 用户看到的是一闪就没。
-    lineIndex = 0;
+    // 收起 = 这一轮看完了，但**轮播指针不回头**：V1.5.4 起气泡会自己收（5s 闹钟 / 点别处），
+    // 那时把 lineIndex 归零，用户隔一会儿再点就永远回到第 1 句（他报的「只显示一个气泡、
+    // 再点也不换」）。「点满 4 句第 5 下收起」改由 onPetClick 里的 runClicks 数，
+    // 所以这里不再需要靠清零指针来兜底。
+    runClicks = 0;
+    awaitingReply = false;
     if (!bubble) return;
     bubble.hidden = true;
     if (button) button.setAttribute("aria-expanded", "false");
@@ -416,14 +421,13 @@
     if (visible && button && doc.activeElement === doc.body) button.focus();
   }
 
-  // 第 5 次点击（4 条都看过以后）收起；收起后再点从头开始。
+  // 轮播下一条。「第 5 下收起」不在这里判 —— 后台的彩蛋回复走的是另一条路
+  // （onTouchReply），收起必须在**两条路之前**判，所以挪去了 onPetClick 的 runClicks。
   function advanceBubble(lines) {
-    if (bubble && !bubble.hidden && lineIndex >= lines.length) {
-      dismissBubble();
-      return false;
-    }
-    showBubble(lines[lineIndex % lines.length]);
-    lineIndex += 1;
+    shownIndex = lineIndex % lines.length;
+    shownEgg = -1;
+    showBubble(lines[shownIndex]);
+    lineIndex = (lineIndex + 1) % lines.length;
     return true;
   }
 
@@ -1047,10 +1051,16 @@
       if (!response || !response.ok) return;
       const index = Number(response.lineIndex);
       if (!Number.isInteger(index) || index < 0) return;
+      // 「第 5 下收起」那一下也在报后台，但它的回复不该再把气泡叫回来
+      if (!awaitingReply) return;
+      awaitingReply = false;
       // 这一下还在等：取消轮播那条，改放彩蛋（点一下只出一次气泡）
       clearTimeout(pendingBubbleTimer);
       pendingLines = null;
-      applyTempLine(touchLine(index), true);
+      // 记下「正显示的是哪条彩蛋」：后台每写一次库都会引来 refresh()，
+      // 它必须重画这一句，而不是把轮播的某一句盖上来（用户报的「再点也不换」）。
+      shownEgg = index % TOUCH_LINE_COUNT;
+      applyTempLine(touchLine(shownEgg), true);
     } catch (_) {}
   }
 
@@ -1068,11 +1078,24 @@
 
     // 气泡先动：有后台攒的临时台词就先放它，否则接着轮播 4 条
     const lines = bubbleLines(stats);
-    if (tempLine) {
+    // 连点第 5 下：这一轮的四句都出过了，收起来（SMOKE_TEST.md 的验收就是
+    // 「每点一下吐一个、第 5 下气泡收起来」）。收起这一下不再排新台词，
+    // 但「摸了一下」照样报给后台（下面那段）。判据放在这里而不是 advanceBubble：
+    // 后台的彩蛋回复走的是另一条路，收起必须在两条路之前判。
+    if (bubble && !bubble.hidden && runClicks >= TOUCH_LINE_COUNT) {
+      clearTimeout(pendingBubbleTimer);
+      pendingLines = null;
+      awaitingReply = false;
+      dismissBubble();
+    } else if (tempLine) {
+      runClicks += 1;
+      awaitingReply = true;
       const line = tempLine;
       tempLine = "";
       showBubble(line);
     } else {
+      runClicks += 1;
+      awaitingReply = true;
       // 挂起来等后台的彩蛋回复，120ms 内没等到再自己显示（见 queueBubble）
       queueBubble(lines);
     }
@@ -1120,7 +1143,7 @@
       renderMenu();
       if (bubble && !bubble.hidden) {
         const lines = bubbleLines(stats);
-        showBubble(lines[clamp(lineIndex - 1, 0, lines.length - 1)]);
+        showBubble(currentBubbleText(lines));
       }
     }
   }
@@ -1527,18 +1550,25 @@
   }
 
   // 统计变了、语言切了都走这里：只重画气泡内容（气泡开着的时候），不动显隐与动画状态。
-  // 1.5.9：重画的必须是**当前正显示的那一句** —— lineIndex 在画完之后已经 +1 了，所以取
-  // lineIndex - 1（和下面切语言那条路径同一套算法）。原来用 lineIndex % length，于是后台
-  // 每写一次库（点一下摸头就会写）气泡就悄悄翻到下一句，用户看到的是「点一下连出两个气泡」。
+  // 1.5.9：重画的必须是**当前正显示的那一句**。原来只认轮播指针（lineIndex - 1），
+  // 而后台的彩蛋台词是另一条路、不动那个指针，于是每次点完摸头（后台会写一次库 →
+  // 触发 refresh）气泡都被盖回第 1 句 —— 用户看到的是「永远只显示一个气泡、再点也不换」。
   // 文案没变就不碰 DOM：免得重排自动收起计时器、也免得白闪一下。
   async function refresh() {
     if (!statsLoaded) return;
     stats = await readStats();
     if (!visible || !bubble || bubble.hidden) return;
     const lines = bubbleLines(stats);
-    const text = lines[clamp(lineIndex - 1, 0, lines.length - 1)];
+    const text = currentBubbleText(lines);
     if (bubbleText && bubbleText.textContent === text) return;
     showBubble(text);
+  }
+
+  // 气泡里「当前这句」：彩蛋占先（它抢的就是轮播那一位），否则是轮播到的那一条。
+  // refresh() 与切语言两条重画路径共用它。
+  function currentBubbleText(lines) {
+    if (shownEgg >= 0) return touchLine(shownEgg);
+    return lines[clamp(shownIndex, 0, lines.length - 1)];
   }
 
   // 只读快照：给「真浏览器里怎么验」用的。挂件的问题（拖动被当成点击、走到边界没停、

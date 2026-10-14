@@ -486,6 +486,17 @@
     return total;
   }
 
+  /* 「这一段里新增了多少」：短区间逐日累加，长区间就拿快照的周 / 月汇总累加。
+     逐日明细只有最近 180 天，区间一老就一天都查不到 —— 以前两处都直接用它，
+     于是长区间里「区间内新增」和图表那句「共新增 N 个视频」一起恒为 0，
+     而柱子上明明有数。口径统一成「图上画出来的那几桶加起来的数」：
+     跨到区间外的头尾两桶本来也画在图上了（见 weeklyRows 的取桶规则）。 */
+  function rangeTotal(range) {
+    const mode = chartModeOf(range);
+    if (mode === "day") return countInRange(range);
+    return seriesFor(mode, range).reduce((sum, row) => sum + row.count, 0);
+  }
+
   /* 每天的明细：1.6.0 认 dailyRows（带 byCollection）。
      旧快照（对端还没交 dailyRows）退回旧的 daily：柱状图照样能从它画出来，
      只是没有收藏夹构成，所以饼图点不出来 —— 那才是真正的「旧形状」。 */
@@ -543,6 +554,71 @@
 
   /* ── 柱状图 ─────────────────────────────────────────────────────── */
 
+  /* ── 轴标签：量宽、短写法、倾角 ─────────────────────────────────── */
+
+  const LABEL_TILT_MIN = 14;
+  const LABEL_TILT_MAX = 58;
+  const LABEL_GLYPH_FALLBACK = 11;
+
+  function shortDayParts(key) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ""));
+    if (!match) return null;
+    return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+  }
+
+  /* 横轴上的短写法：「1/6–12」（同一个月）或「1/26–2/1」（跨月）。
+     完整说法（「1月6日星期一 - 1月12日星期日」）留给提示框和读屏 ——
+     横轴一共就那么宽，一格塞 17 个字的后果就是叠字加裁切。 */
+  function shortDayPair(fromKey, toKey) {
+    const from = shortDayParts(fromKey);
+    const to = shortDayParts(toKey);
+    if (!from || !to) return "";
+    if (from.year === to.year && from.month === to.month) return from.month + "/" + from.day + "–" + to.day;
+    return from.month + "/" + from.day + "–" + to.month + "/" + to.day;
+  }
+
+  /* 月份标签：「8月」就够了；跨年或第一格才带上年份「2026年8月」。
+     整排都写年份会把窄格子撑爆，只有「这一年从哪开始」需要在轴上交代。 */
+  function shortMonthLabel(key, previousKey) {
+    const current = shortDayParts(key);
+    if (!current) return "";
+    const previous = shortDayParts(previousKey);
+    if (!previous || previous.year !== current.year) return current.year + "年" + current.month + "月";
+    return current.month + "月";
+  }
+
+  /* 量一串轴标签的真实像素宽度。中日韩字和数字的宽度差一倍，
+     按「字数 × 11」估会误判（放得下的被当成放不下，白白斜一排）。
+     量不出来就退回估算，保证图一定画得出来。 */
+  function measureLabelWidth(svg, text) {
+    let width = 0;
+    try {
+      const probe = appendSvg(svg, "text", { class: "stats-axis-label", x: -9999, y: -9999 });
+      probe.textContent = text;
+      width = probe.getComputedTextLength();
+      if (probe.parentNode) probe.parentNode.removeChild(probe);
+    } catch (_) {
+      width = 0;
+    }
+    if (!Number.isFinite(width) || width <= 0) width = String(text).length * LABEL_GLYPH_FALLBACK;
+    return width;
+  }
+
+  /* 段标签该斜多少度。
+     ① 横着不越格：width·cos θ + 6 ≤ slot —— 不然相邻两段的标签叠在一起；
+     ② 竖着不出画布：width·sin θ ≤ room —— 斜着排会往下探，底下没地方就被裁。
+     以「刚好放得下」（need）为准：能少斜就不多斜；need 太小就抬到下限，
+     免得一排标签里有的斜有的不斜；竖直方向放不下时以 room 为准（宁可挤，不能被裁）。 */
+  function labelTiltDegrees(width, slot, room) {
+    if (!(width > 0) || !(slot > 0) || width + 6 <= slot) return 0;
+    const fit = (ratio) => Math.max(0, Math.min(1, ratio));
+    const need = Math.acos(fit((slot - 6) / width)) * 180 / Math.PI;
+    const fits = Math.asin(fit(room / width)) * 180 / Math.PI;
+    const ceiling = Math.min(LABEL_TILT_MAX, fits);
+    const floor = Math.min(LABEL_TILT_MIN, ceiling);
+    return Math.round(Math.min(ceiling, Math.max(floor, need)) * 10) / 10;
+  }
+
   /**
    * 画一排柱子。rows 里每个元素 { day, count, label? }，一天一根。
    * options.labelMode: "dates" 标到横轴上（天） / "none" 不标（年，图例另有其事）。
@@ -598,6 +674,20 @@
        按周 / 按月聚合时一根柱子代表一整段，是 list 不是 group。 */
     svg.setAttribute("role", semantic ? "list" : "group");
     svg.setAttribute("aria-label", config.ariaLabel || "");
+
+    /* 一段一个标签的图（周 / 月 / 年）：整排先统一算一个倾角。
+       按最宽的那条算，看着才齐；横轴上的文字用 row.short（短写法），
+       完整的「1月6日星期一 - 1月12日星期日」只进提示框和读屏。 */
+    let labelTilt = 0;
+    if (labelMode !== "dates") {
+      const anchorY = Math.min(baseline + 14, height - 30);
+      const room = Math.max(6, height - 8 - anchorY);
+      const widest = rows.reduce((top, row) => {
+        const text = String(row.short || row.label || dateKey(row) || "");
+        return Math.max(top, measureLabelWidth(svg, text));
+      }, 0);
+      labelTilt = labelTiltDegrees(widest, slot, room);
+    }
 
     /* 只有一根柱子时槽很宽，但柱子不该胖成一块板 */
     const single = rows.length <= 1;
@@ -668,26 +758,24 @@
         }
       } else {
         const listed = semantic ? appendSvg(svg, "g", { class: "stats-bar-slot" }) : svg;
-        /* 轴上的小刻度：贴边的那几段靠它把标签拉回画布内 */
-        let arrowX = round2(center);
+        const text = String(row.short || row.label || key);
+        /* 斜着排时锚点钉在自己那格的刻度上、text-anchor 改成 end：
+           文字只往左上铺，右端永远不越过刻度 —— 最后几根的标签再长也不会甩到画布外，
+           这正是以前「右边留白、最后几根没标签」的原因（旋转支点算错了）。
+           角度是整排统一的 labelTilt，不这么斜就还是老老实实居中。 */
+        const anchorX = round2(center);
+        const labelY = round2(Math.min(baseline + 14, height - 30));
         const label = setText(appendSvg(listed, "text", {
           class: isToday ? "stats-axis-label stats-axis-label-today" : "stats-axis-label",
-          x: round2(center), y: Math.min(baseline + 14, height - 30),
-          "text-anchor": "middle"
-        }), row.label || key);
+          x: anchorX, y: labelY, "text-anchor": labelTilt > 0 ? "end" : "middle"
+        }), text);
         if (semantic) label.setAttribute("role", "listitem");
-        /* 每段标签都得露出来（贴边的那两段靠 text-anchor 收回来），
-           还是挤就转到 -34 度斜着排 —— 竖排一个字一行读起来更费劲。 */
-        const textWidth = String(row.label || key).length * 11;
-        if (textWidth > slot - 6) {
-          const overflow = center + textWidth / 2 - (width - pad.right);
-          if (overflow > 0) arrowX = round2(center - overflow);
-          if (center - textWidth / 2 - arrowX < 0) arrowX = round2(center - textWidth / 2);
-          label.setAttribute("transform", "rotate(-34 " + arrowX + " " + (baseline + 4) + ")");
+        if (labelTilt > 0) {
+          label.setAttribute("transform", "rotate(" + (-labelTilt) + " " + anchorX + " " + labelY + ")");
         }
         if (semantic) {
           const arrow = appendSvg(listed, "line", {
-            class: "stats-axis-tick", x1: arrowX, y1: baseline + 1, x2: arrowX, y2: baseline + 5
+            class: "stats-axis-tick", x1: anchorX, y1: baseline + 1, x2: anchorX, y2: baseline + 5
           });
           arrow.setAttribute("aria-hidden", "true");
         }
@@ -845,7 +933,7 @@
   /* ── 各块渲染 ───────────────────────────────────────────────────── */
 
   function renderTiles(snapshot, range) {
-    const total = countInRange(range);
+    const total = rangeTotal(range);
     const days = rangeDayList(range).length;
     setText(ui.videos, formatCount(snapshot.videos));
     /* 后两张跟着所选区间走：区间内新增 / 区间天数，标签里不写死天数 */
@@ -881,7 +969,6 @@
     const mode = legacy ? "day" : chartModeOf(range);
     const rows = legacy || seriesFor(mode, range);
     const total = rows.reduce((sum, row) => sum + row.count, 0);
-    const totalAll = mode === "day" || !rows.length ? total : countInRange(range);
     /* 没有每天明细（对端还没交 dailyRows）时没有区间可选，柱子也就点不出饼图：
        这时候那句「点一下柱子」的提示不能露出来，免得应了一次没反应。
        有区间选择器就一定有每天明细，提示跟着选择器走。 */
@@ -905,17 +992,17 @@
     const days = rangeDayList(range).length;
     if (mode === "week") {
       setText(ui.chartLead, t("已选 {days} 天，按周汇总，共新增 {count} 个视频。", {
-        days: formatCount(days), count: formatCount(totalAll)
+        days: formatCount(days), count: formatCount(total)
       }));
       setText(ui.chartNote, t("这几天还没有新增收藏。"));
     } else if (mode === "month") {
       setText(ui.chartLead, t("已选 {days} 天，按月汇总，共新增 {count} 个视频。", {
-        days: formatCount(days), count: formatCount(totalAll)
+        days: formatCount(days), count: formatCount(total)
       }));
       setText(ui.chartNote, t("这段时间还没有新增收藏。"));
     } else {
       setText(ui.chartLead, t("已选 {days} 天，共新增 {count} 个视频。", {
-        days: formatCount(legacy ? rows.length : days), count: formatCount(totalAll)
+        days: formatCount(legacy ? rows.length : days), count: formatCount(total)
       }));
       setText(ui.chartNote, t("这几天还没有新增收藏。"));
     }
@@ -956,9 +1043,12 @@
       if (!isDayKey(week)) return;
       const end = weekEndKey(week);
       if (week > bounds.to || end < bounds.from) return;
+      const last = end < today ? end : today;
       rows.push({
         day: week,
-        label: weekText(week) + " - " + weekText(end < today ? end : today),
+        /* label 给提示框和读屏（完整说法），short 给横轴（放得下才不至于叠字） */
+        label: weekText(week) + " - " + weekText(last),
+        short: shortDayPair(week, last),
         count: Math.max(0, numberOr(item && item.count, 0)),
         /* 这一桶里每个收藏夹各多少条：点柱子时要拿它拼饼图，所以在源头带下来 */
         by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
@@ -979,9 +1069,11 @@
       const key = month + "-01";
       const end = monthEndKey(month);
       if (key > bounds.to || end < bounds.from) return;
+      const previous = rows.length ? String(rows[rows.length - 1].day) : "";
       rows.push({
         day: key,
         label: monthText(key),
+        short: shortMonthLabel(key, previous),
         count: Math.max(0, numberOr(item && item.count, 0)),
         by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
         kind: "bucket"
@@ -998,8 +1090,10 @@
   }
 
   /* 区间越长柱子越少，但画布高度不变：这两种粒度都留一样的画布给下面那排标签 */
-  const CHART_ROLLUP_HEIGHT = 236;
-  const ROLLUP_PAD = { top: 20, right: 10, bottom: 44, left: 36 };
+  /* 聚合图底下得给斜着排的段标签留地方：44 像素只够平躺的短标签，
+     一旦斜过来（最长那条要 60 多像素、斜到 50 度上下）就会探出画布被裁掉。 */
+  const CHART_ROLLUP_HEIGHT = 266;
+  const ROLLUP_PAD = { top: 20, right: 10, bottom: 72, left: 36 };
 
   /* 0 = 按天，1 = 按周，2 = 按月。边界按用户口径：> 31 天按周，> 183 天按月
      （半年按 183 天算，正好 6 个月的自然区间也走按月）。 */
@@ -1055,15 +1149,19 @@
     return { from: fromKey || "0000-00-00", to: toKey || "9999-99-99" };
   }
 
-  function renderPie(range) {
+  function renderPie() {
     /* 由「点柱子时记下的那一行」驱动：逐日就是那一天，周 / 月聚合就是整桶
        （每个收藏夹各多少条已经在源头合并进 row.by），年份图就是那一年的收藏夹构成。
        不再按天回查逐日表 —— 聚合桶的键（周一 / 某月 1 号）在 dailyRows 里未必存在，
        这正是用户报的「聚合后只算桶里第一天」的根因。 */
     const row = focusedRow;
-    const keys = rangeDayList(range);
-    const inRange = !!row && (row.kind === "year" || keys.indexOf(String(row.day)) >= 0);
-    if (!row || !inRange) {
+    /* 「这一行还在不在当前这张图上」只能问刚才画完留下的索引：
+       拿「桶的键在不在区间的那串日子里」判会误杀 —— 长区间的第一桶是残缺周，
+       它的周一在区间开始之前，照原样判就会被当成过期焦点，第一根柱子照样点不出饼图。 */
+    const live = !!row && (row.kind === "year"
+      ? yearRows.has(String(row.day))
+      : chartRows.has(String(row.day)));
+    if (!row || !live) {
       focusedDay = "";
       focusedRow = null;
       show(ui.pieCard, false);
@@ -1124,7 +1222,12 @@
       labelMode: "years",
       /* 年度图和「今天」无关：不画空心柱，也不显示下面那句解释 */
       markIndex: null,
-      ariaLabel: t("按年份的收藏数量柱状图")
+      ariaLabel: t("按年份的收藏数量柱状图"),
+      /* 年份柱子的读屏措辞不能带「这一天」：用现成的「{day} 新增了 {count} 个视频」
+         这条词条，把年份当主语，读出来是「2024 新增了 62 个视频」。 */
+      ariaLabelFor: (row) => t("{day} 新增了 {count} 个视频", {
+        day: row.label || String(row.day), count: formatCount(row.count)
+      })
     });
     setText(ui.yearNote, t("暂无年份数据。"));
     show(ui.yearNote, !drawn);
@@ -1257,7 +1360,7 @@
     else renderTilesLegacy(snapshot);
     /* 没有每天明细时 rows 就是快照里那串 daily：柱状图照样画，只是不能点 */
     renderChart(range, selectable ? null : rows);
-    if (selectable) renderPie(range);
+    if (selectable) renderPie();
     renderYears();
     renderTop(snapshot);
     renderUpdated(snapshot);
@@ -1609,17 +1712,17 @@
         renderCalendar();
       });
     }
-    /* 起点选在很久以前时，可以一键跳回今天那两个月的窗口 */
-    /* 「回到今天」：把草稿选中直接落回今天，再把日历翻回今天那两个月的窗口。
-       以前只翻窗口、不动选中，而窗口锚点取自「已选的起点」→ 起点在去年时
-       按下去反而跳到去年那个月，正是用户报的「回到的是我选的第一天」。 */
+    /* 「回到今天」：只把日历窗口翻回今天那两个月的窗口，草稿选中一个字都不动。
+       用户按它是想「跳回去看看今天」，不是想把刚选的起止清掉 —— 1.6.2 里
+       顺手把 draftFrom/draftTo 落成今天，等于把用户上一步的动作抹了，被复测抓了出来。
+       窗口锚点平时是跟着 draftFrom 跑的（renderCalendar 里 !paged 时会重算 view），
+       所以这里得按「手动翻页」把 paged 立起来，否则重画完又跳回选中的那一天，
+       就又变回用户报过的「按回到今天却跳到我选的第一天」。 */
     if (ui.calToday) {
       ui.calToday.addEventListener("click", () => {
-        const today = localDayKey(Date.now());
-        picker.draftFrom = today;
-        picker.draftTo = today;
-        picker.paged = false;
-        picker.view = calendarView();
+        const now = new Date();
+        picker.paged = true;
+        picker.view = clampCalendarView(monthStartTime(now.getFullYear(), now.getMonth()));
         show(ui.calWarn, false);
         renderCalendar();
       });
@@ -1672,9 +1775,17 @@
     render();
   }
 
-  /* 两张图共用一套绑定：柱子是按钮（Enter / 空格触发），左右方向键在柱子之间走 */
-  function bindBarChart(element, lookup) {
+  /* 两张图共用一套绑定：柱子是按钮（Enter / 空格触发），左右方向键在柱子之间走。
+     行索引必须现查现取：renderChart / renderYears 每次都是**另换一个新 Map**，
+     启动时把 Map 本身传进来，闭包里那份就永远停在初始的空 Map 上 ——
+     点柱子查不到行 → focusedRow 恒为 null → 饼图卡片永远不出现。
+     这正是真机复测里「点任意柱子和年份柱子都不出饼图」的根因。 */
+  function bindBarChart(element, lookupOf) {
     if (!element) return;
+    const rowOf = (key) => {
+      const map = typeof lookupOf === "function" ? lookupOf() : lookupOf;
+      return map && typeof map.get === "function" ? map.get(String(key)) : undefined;
+    };
     element.addEventListener("click", (event) => {
       const bar = barFromEvent(event, element);
       if (!bar) {
@@ -1687,7 +1798,7 @@
         return;
       }
       const key = bar.getAttribute("data-day");
-      toggleBar(key, lookup.get(String(key)));
+      toggleBar(key, rowOf(key));
     });
     element.addEventListener("keydown", (event) => {
       const bar = barFromEvent(event, element);
@@ -1696,7 +1807,7 @@
       if (key === "Enter" || key === " " || key === "Spacebar") {
         event.preventDefault();
         const day = bar.getAttribute("data-day");
-        toggleBar(day, lookup.get(String(day)));
+        toggleBar(day, rowOf(day));
         return;
       }
       if (key !== "ArrowLeft" && key !== "ArrowRight") return;
@@ -1710,11 +1821,11 @@
   }
 
   function bindChart() {
-    bindBarChart(ui.chart, chartRows);
+    bindBarChart(ui.chart, () => chartRows);
     /* 「按年份累计」那张图以前完全没绑：柱子是按钮、能聚焦，点了却什么都不发生
        —— 用户报的「按年份累计点柱子不出饼图」就是这里。
        对端没给独立容器时 renderYears 会退回 ui.chart，那种情况下不能再绑一次。 */
-    if (ui.yearChart && ui.yearChart !== ui.chart) bindBarChart(ui.yearChart, yearRows);
+    if (ui.yearChart && ui.yearChart !== ui.chart) bindBarChart(ui.yearChart, () => yearRows);
   }
 
   /* ── 事件 ───────────────────────────────────────────────────────── */
@@ -1759,7 +1870,7 @@
         /* 只重画跟着宽度走的那几张 SVG：卡片的显示/隐藏和文案都不受窗口宽度影响 */
         const range = activeRange(Date.now());
         renderChart(range);
-        renderPie(range);
+        renderPie();
         renderYears();
       }, RESIZE_DELAY);
     });

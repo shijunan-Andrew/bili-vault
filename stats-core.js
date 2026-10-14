@@ -725,7 +725,9 @@
       database.updatedAt = new Date(time).toISOString();
     }
     return {
-      index: (pet.affinity + pet.totalTouch) % PET_LINE_COUNT,
+      // 台词下标按「摸过多少次」走，一句一句往下轮。原来用 affinity + totalTouch：
+      // 两个计数器一起涨，下标每次 +2，四句里只用得上两句（而且 affinity 当天封顶后步长又变回 1）。
+      index: (pet.totalTouch - 1) % PET_LINE_COUNT,
       affinity: pet.affinity,
       todayTouch: pet.todayTouch,
       totalTouch: pet.totalTouch,
