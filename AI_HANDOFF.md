@@ -76,6 +76,20 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.6.3：粒度档位、年份柱的饼图、日历按年翻、气泡「先报数字再打招呼」
+
+**1. 粒度档位由 `chartModeOf()` 一处决定，改档位只动它。** 判据从「>31 天按周 / >183 天按月」改成「**>30 天按周 / >90 天按月 / >365 天按年**」，多出「按年」一档（`yearlyRows(range)` 与 `weeklyRows` / `monthlyRows` 同构，`row.kind = "year"`，状态行写「按年份汇总」）。能这么改的前提是 `weekly` / `monthly` / `yearly` 三张表都由 `stats-core.js` **全量**带出（只有 `dailyRows` 受 `DAILY_ROWS_DAYS = 180` 限制）—— 换档位时先确认目标粒度的表在快照里是全量的，否则长区间会画出空图。
+
+**2. 同一根柱子可以在两张图上，`focusedRow` 是共享的。** 「按年份累计」的柱子以前只影响年度卡里那张「所有年份合在一起」的饼图；用户要的是「点哪年看哪年」。做法：`renderYears()` 每行的 `by` 只带该年构成，点年度柱就照常把 `focusedRow` 落到 `yearRows` 那一行，`renderYearPie(rows)` 先看 `focusedRow.kind === "year"` 取那一行、再退回合表。**注意 `renderPie()` 的 `live` 判据必须同时认 `chartRows` 与 `yearRows`**，只认一张表会把另一张图上的焦点当成过期。
+
+**3. 日历翻年 = 打断「视图跟随锚点」，不用动草稿。** `picker.paged` 为 `true` 时 `renderCalendar()` 不再按锚点重设视图，所以「`>>` / `<<`」只要 `picker.paged = true` + `clampCalendarView(addMonths(picker.view, ±12))`；`>>` 已经在本月时直接 `return`（不越界）。这与 1.6.2「回到今天」是同一套机制：**想动视图又不想动用户的选择，就显式关掉「视图=锚点」这层耦合。**
+
+**4. 宠物的「两段式一轮」——修症状时别把不需要等的东西也推给后台。** 用户报「统计信息看不到了」，根因是 1.6.2 的修法把**所有**台词都塞进「等后台彩蛋回包」这一条路：回包总在几十毫秒后到，`force` 覆盖会把先挂上的 `queueBubble(统计句)` 顶掉，统计段于是永远没机会显示。现在 `onPetClick()` 按 `turn = runClicks + 1` 分三段：`turn <= 统计句数` → `showStatsLine()` **当场显示**（`awaitingReply = false`，后台这一下的回复只喂欢迎段）；有攒下的 `tempLine` 就放它；其余 `queueEgg()` 等后台（120ms 兜底用本地 `eggCursor`）。一轮总数 = 统计句数 + `TOUCH_LINE_COUNT`，整轮出完再点一下才收起（`runClicks >= runTotal`）。`refresh()` 与切语言按 `currentBubbleText()` 重画**当前这一条**（`shownEgg` 优先，否则 `shownIndex`）。
+
+**5. 饼图文案分粒度**：天「这一天」、周/月「这几天」、年「2025年：新增 N 个视频」+ 空态「这段时间」（复用已有键，没新增）。这版词典新增 3 条（按年汇总那句等）。
+
+**教训**：「先显示 A、再被 B 覆盖」的时序问题，先问一句 **B 真的需要先到吗**。统计句是本地快照当场就能算，彩蛋句才是必须等后台的跨端轮播号 —— 1.6.2 把两类数据混在一条等待路径上，于是修好了「哪一句」，弄坏了「哪几句先」。
+
 ## 1.6.2：五个根因（闭包抓空表、文字旋转、180 天窗口、草稿被重置、气泡两份指针）
 
 **1. 绑定一次 + 持有可变状态 → 必须传取值函数，不能传值。** `stats.js` 里 `chartRows` / `yearRows` 在 `renderChart` / `renderYears` 每次渲染都是**整体重赋值**（`chartRows = new Map(rows.map(...))`），而 `bindChart()` 只在 `init()` 里跑一次，把**当时那个空 Map 对象**传进了 `bindBarChart(element, lookup)`。闭包抓的是对象，不是变量：`chartRows.size` 从模块变量读是 7，`lookup.get(key)` 却恒为 `undefined`。症状极隐蔽 —— 柱子点得到、也会高亮（高亮读的是模块变量 `focusedDay`），饼图的 `renderPie()` 却永远拿不到行数据而早退（顺手把 `focusedDay` 清掉，于是连高亮也会残留）。修法：`bindBarChart(el, () => chartRows)`，内部 `lookupOf().get(key)`；也可以原地 `clear() + set()`，但传函数更稳。凡是「只绑一次 + 稍后换对象」的地方都该这样写。

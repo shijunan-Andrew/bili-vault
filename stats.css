@@ -383,9 +383,23 @@ body {
 }
 .stats-calendar-nav:hover { color: var(--brand-deep); border-color: var(--brand-line); }
 .stats-calendar-nav:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-/* 「上个月」用的是 chevron-right 的图标镜像过来（icons.js 里没有 chevron-left），
-   只翻图标本身，按钮的盒子不动。 */
-.stats-calendar-nav:first-of-type .icon { transform: scaleX(-1); }
+/* 左右两组翻页按钮：组内挨着放（一年那个按钮里是两个箭头）。 */
+.stats-calendar-nav-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+/* 「上个月 / 上一年」用的是 chevron-right 的图标镜像过来（icons.js 里没有 chevron-left），
+   只翻图标本身，按钮的盒子不动。**别再写 :first-of-type** —— 1.6.3 起
+   左边多了「上一年」，第一个按钮已经不是「上个月」了。 */
+#statsCalPrev .icon,
+#statsCalPrevYear .icon { transform: scaleX(-1); }
+/* 「>>」比「>」宽一点：两个箭头并排、缝留小些，看着才像一个符号。 */
+.stats-calendar-nav-year {
+  width: 38px;
+  gap: 0;
+}
+.stats-calendar-nav-year .icon + .icon { margin-left: -3px; }
 /* 月份名：每一列的标题。两个格子宽窄一样，标题也居中对齐到各自的表上。 */
 .stats-calendar-month {
   color: var(--ink);

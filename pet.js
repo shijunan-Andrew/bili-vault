@@ -364,6 +364,10 @@
     // 所以这里不再需要靠清零指针来兜底。
     runClicks = 0;
     awaitingReply = false;
+    // 排队中的那一下也一起丢：收起之后它再冒出来就是「点别处又弹一句」
+    pendingEgg = false;
+    pendingLines = null;
+    clearTimeout(pendingBubbleTimer);
     if (!bubble) return;
     bubble.hidden = true;
     if (button) button.setAttribute("aria-expanded", "false");
@@ -1001,17 +1005,54 @@
   let pendingLines = null;
   let pendingBubbleTimer = 0;
 
+  /* 1.6.3：一轮气泡分两段 —— 先四句「统计信息」（已陪伴 / 帮你保存 / 今日新增 /
+     近期最多的收藏夹），再四句「欢迎彩蛋」（摸摸头那些）。
+     统计段是本地就能算的：点一下就该说话，等后台反而会被彩蛋顶掉
+     （用户报的「宠物现在不显示统计信息」就是这么来的）；
+     欢迎段才等后台回来的下标（那是跨端一致的轮播号），120ms 等不到就用本地游标。 */
+  let pendingEgg = false;
+  let eggCursor = 0;
+
   function queueBubble(lines) {
     pendingLines = lines;
     clearTimeout(pendingBubbleTimer);
     pendingBubbleTimer = setTimeout(flushPendingBubble, 120);
   }
 
+  function queueEgg() {
+    pendingEgg = true;
+    clearTimeout(pendingBubbleTimer);
+    pendingBubbleTimer = setTimeout(flushPendingBubble, 120);
+  }
+
   function flushPendingBubble() {
+    if (pendingEgg) {
+      pendingEgg = false;
+      const index = eggCursor;
+      eggCursor = index + 1;
+      showEggLine(index);
+      return;
+    }
     if (!pendingLines) return;
     const lines = pendingLines;
     pendingLines = null;
     advanceBubble(lines);
+  }
+
+  /* 统计信息那几句：本地的，立刻显示（不排队、不等后台） */
+  function showStatsLine(lines, index) {
+    if (!visible || !lines || !lines.length) return;
+    shownEgg = -1;
+    shownIndex = Math.min(Math.max(0, index), lines.length - 1);
+    showBubble(lines[shownIndex]);
+  }
+
+  /* 欢迎彩蛋那几句：下标由后台给，也可能来自本地游标兜底 */
+  function showEggLine(index) {
+    if (!visible) return;
+    const count = TOUCH_LINE_COUNT;
+    shownEgg = ((Math.floor(index) % count) + count) % count;
+    showBubble(touchLine(shownEgg));
   }
 
   function applyTempLine(line, force = false) {
@@ -1054,13 +1095,13 @@
       // 「第 5 下收起」那一下也在报后台，但它的回复不该再把气泡叫回来
       if (!awaitingReply) return;
       awaitingReply = false;
-      // 这一下还在等：取消轮播那条，改放彩蛋（点一下只出一次气泡）
+      // 这一下还在等：取消排队的哨兵，改放彩蛋（点一下只出一次气泡）
       clearTimeout(pendingBubbleTimer);
       pendingLines = null;
+      pendingEgg = false;
       // 记下「正显示的是哪条彩蛋」：后台每写一次库都会引来 refresh()，
-      // 它必须重画这一句，而不是把轮播的某一句盖上来（用户报的「再点也不换」）。
-      shownEgg = index % TOUCH_LINE_COUNT;
-      applyTempLine(touchLine(shownEgg), true);
+      // 它必须重画这一句，而不是把别的某一句盖上来（用户报的「再点也不换」）。
+      showEggLine(index);
     } catch (_) {}
   }
 
@@ -1076,28 +1117,43 @@
       standUp(true);
     }
 
-    // 气泡先动：有后台攒的临时台词就先放它，否则接着轮播 4 条
+    // 气泡先动：一轮 = 前几句「统计信息」（本地算）+ 后四句「欢迎彩蛋」（等后台的下标）
     const lines = bubbleLines(stats);
-    // 连点第 5 下：这一轮的四句都出过了，收起来（SMOKE_TEST.md 的验收就是
-    // 「每点一下吐一个、第 5 下气泡收起来」）。收起这一下不再排新台词，
+    const statsCount = lines.length;
+    const runTotal = statsCount + TOUCH_LINE_COUNT;
+    const turn = runClicks + 1; // 这一下是这一轮的第几句（从 1 数起）
+    // 整轮都出过了：这一下把气泡收起来（SMOKE_TEST.md 的验收就是
+    // 「每点一下吐一个、出完一轮再点一下收起来」）。收起这一下不再排新台词，
     // 但「摸了一下」照样报给后台（下面那段）。判据放在这里而不是 advanceBubble：
     // 后台的彩蛋回复走的是另一条路，收起必须在两条路之前判。
-    if (bubble && !bubble.hidden && runClicks >= TOUCH_LINE_COUNT) {
+    if (bubble && !bubble.hidden && runClicks >= runTotal) {
       clearTimeout(pendingBubbleTimer);
       pendingLines = null;
+      pendingEgg = false;
       awaitingReply = false;
       dismissBubble();
+    } else if (turn <= statsCount) {
+      /* 统计段：当场显示。用户第 1 条报的就是这一段一直看不到 ——
+         原先它和彩蛋抢同一个「等 120ms」的坑，后台回复一到就被顶掉。
+         现在这段不等后台（awaitingReply 留 false，后台这一下的回复只喂欢迎段）。 */
+      runClicks = turn;
+      awaitingReply = false;
+      clearTimeout(pendingBubbleTimer);
+      pendingLines = null;
+      pendingEgg = false;
+      showStatsLine(lines, turn - 1);
     } else if (tempLine) {
-      runClicks += 1;
-      awaitingReply = true;
+      // 后台攒下来的临时台词（气泡收着的时候收到的）也是一句
+      runClicks = turn;
+      awaitingReply = false;
       const line = tempLine;
       tempLine = "";
       showBubble(line);
     } else {
-      runClicks += 1;
+      // 欢迎段：挂起来等后台的彩蛋回复，120ms 内没等到再自己显示（见 queueEgg）
+      runClicks = turn;
       awaitingReply = true;
-      // 挂起来等后台的彩蛋回复，120ms 内没等到再自己显示（见 queueBubble）
-      queueBubble(lines);
+      queueEgg();
     }
 
     // 每一下都报给后台（它负责记录摸摸头、算亲密度、可能回一条临时台词）。

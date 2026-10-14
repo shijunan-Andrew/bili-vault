@@ -86,16 +86,31 @@
                日历是上下两块并排，所以脚本会往这两个容器里各填一个月的格子。 -->
           <div class="stats-calendar" id="statsCalendar" hidden>
             <div class="stats-calendar-head">
-              <button class="stats-calendar-nav" type="button" id="statsCalPrev"
-                aria-label="上个月" data-i18n-aria="上个月">
-                <span data-icon="chevron-right" aria-hidden="true"></span>
-              </button>
+              <!-- 翻页：一年一格是「>>」、一月一格是「>」（左半边是同一个图标镜像过来的）。 -->
+              <span class="stats-calendar-nav-pair">
+                <button class="stats-calendar-nav stats-calendar-nav-year" type="button" id="statsCalPrevYear"
+                  aria-label="上一年" data-i18n-aria="上一年">
+                  <span data-icon="chevron-right" aria-hidden="true"></span>
+                  <span data-icon="chevron-right" aria-hidden="true"></span>
+                </button>
+                <button class="stats-calendar-nav" type="button" id="statsCalPrev"
+                  aria-label="上个月" data-i18n-aria="上个月">
+                  <span data-icon="chevron-right" aria-hidden="true"></span>
+                </button>
+              </span>
               <span class="stats-calendar-month" id="statsCalMonthA">—</span>
               <span class="stats-calendar-month" id="statsCalMonthB">—</span>
-              <button class="stats-calendar-nav" type="button" id="statsCalNext"
-                aria-label="下个月" data-i18n-aria="下个月">
-                <span data-icon="chevron-right"></span>
-              </button>
+              <span class="stats-calendar-nav-pair">
+                <button class="stats-calendar-nav" type="button" id="statsCalNext"
+                  aria-label="下个月" data-i18n-aria="下个月">
+                  <span data-icon="chevron-right"></span>
+                </button>
+                <button class="stats-calendar-nav stats-calendar-nav-year" type="button" id="statsCalNextYear"
+                  aria-label="下一年" data-i18n-aria="下一年">
+                  <span data-icon="chevron-right" aria-hidden="true"></span>
+                  <span data-icon="chevron-right" aria-hidden="true"></span>
+                </button>
+              </span>
             </div>
             <div class="stats-calendar-months">
               <div class="stats-calendar-month-block">

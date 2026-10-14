@@ -81,6 +81,8 @@
     calendar: document.getElementById("statsCalendar"),
     calPrev: document.getElementById("statsCalPrev"),
     calNext: document.getElementById("statsCalNext"),
+    calPrevYear: document.getElementById("statsCalPrevYear"),
+    calNextYear: document.getElementById("statsCalNextYear"),
     calMonthA: document.getElementById("statsCalMonthA"),
     calMonthB: document.getElementById("statsCalMonthB"),
     calGridA: document.getElementById("statsCalGridA"),
@@ -965,7 +967,7 @@
   function renderChart(range, legacyRows) {
     const legacy = Array.isArray(legacyRows) && legacyRows.length ? legacyRows : null;
     /* 区间一长，一天一根柱子就成了一把牙签，也读不出趋势：
-       超过 31 天按周、超过半年按月（口径写死在 chartModeOf 一处）。 */
+       超过 30 天按周、超过 90 天按月、超过一年按年（口径写死在 chartModeOf 一处）。 */
     const mode = legacy ? "day" : chartModeOf(range);
     const rows = legacy || seriesFor(mode, range);
     const total = rows.reduce((sum, row) => sum + row.count, 0);
@@ -990,16 +992,21 @@
     }
 
     const days = rangeDayList(range).length;
-    if (mode === "week") {
-      setText(ui.chartLead, t("已选 {days} 天，按周汇总，共新增 {count} 个视频。", {
+    if (mode === "year") {
+      setText(ui.chartLead, t("已选 {days} 天，按年份汇总，共新增 {count} 个视频。", {
         days: formatCount(days), count: formatCount(total)
       }));
-      setText(ui.chartNote, t("这几天还没有新增收藏。"));
+      setText(ui.chartNote, t("这段时间还没有新增收藏。"));
     } else if (mode === "month") {
       setText(ui.chartLead, t("已选 {days} 天，按月汇总，共新增 {count} 个视频。", {
         days: formatCount(days), count: formatCount(total)
       }));
       setText(ui.chartNote, t("这段时间还没有新增收藏。"));
+    } else if (mode === "week") {
+      setText(ui.chartLead, t("已选 {days} 天，按周汇总，共新增 {count} 个视频。", {
+        days: formatCount(days), count: formatCount(total)
+      }));
+      setText(ui.chartNote, t("这几天还没有新增收藏。"));
     } else {
       setText(ui.chartLead, t("已选 {days} 天，共新增 {count} 个视频。", {
         days: formatCount(legacy ? rows.length : days), count: formatCount(total)
@@ -1012,7 +1019,7 @@
     const drawn = drawChart(ui.chart, rows, {
       height: mode === "day" ? CHART_HEIGHT : CHART_ROLLUP_HEIGHT,
       pad: mode === "day" ? CHART_PAD : ROLLUP_PAD,
-      labelMode: mode === "day" ? "dates" : "periods",
+      labelMode: mode === "day" ? "dates" : (mode === "year" ? "years" : "periods"),
       semantic: mode !== "day",
       dateKey: (row) => row.day,
       /* 空心的那根只在逐日模式下画（并在下方用一句话解释）。
@@ -1083,9 +1090,35 @@
     return rows;
   }
 
+  /* 按年的汇总同样只读快照（stats-core.js 的 yearlySeries 是全量，不受 180 天窗口限制）。
+     区间跨了哪几年就画哪几年：年份桶和区间的先后按「年初 / 年末」两个日键比。
+     轴上的字只写年份（和下面「按年份累计」那张图一致），完整说法进提示框和读屏。 */
+  function yearlyRows(range) {
+    const raw = stats && Array.isArray(stats.yearly) ? stats.yearly : [];
+    const bounds = aggregateBounds(range);
+    const rows = [];
+    raw.forEach((item) => {
+      const year = String(item && item.year != null ? item.year : "").slice(0, 4);
+      if (!/^\d{4}$/.test(year)) return;
+      if (year + "-01-01" > bounds.to || year + "-12-31" < bounds.from) return;
+      rows.push({
+        day: year,
+        label: year,
+        short: year,
+        count: Math.max(0, numberOr(item && item.count, 0)),
+        /* 这一年里每个收藏夹各多少条：点柱子时要拿它拼饼图，所以在源头带下来 */
+        by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        kind: "year"
+      });
+    });
+    rows.sort((a, b) => (a.day < b.day ? -1 : 1));
+    return rows;
+  }
+
   function seriesFor(mode, range) {
-    if (mode === "week") return weeklyRows(range);
+    if (mode === "year") return yearlyRows(range);
     if (mode === "month") return monthlyRows(range);
+    if (mode === "week") return weeklyRows(range);
     return rowsInRange(range);
   }
 
@@ -1095,12 +1128,14 @@
   const CHART_ROLLUP_HEIGHT = 266;
   const ROLLUP_PAD = { top: 20, right: 10, bottom: 72, left: 36 };
 
-  /* 0 = 按天，1 = 按周，2 = 按月。边界按用户口径：> 31 天按周，> 183 天按月
-     （半年按 183 天算，正好 6 个月的自然区间也走按月）。 */
+  /* 0 = 按天，1 = 按周，2 = 按月，3 = 按年。边界按用户口径：
+     30 天以内按天（超过一个月一天一根柱子就成牙签了）、90 天以内按周、
+     一年以内按月、超过一年按年。 */
   function chartModeOf(range) {
     const days = rangeDayList(range).length;
-    if (days > 183) return "month";
-    if (days > 31) return "week";
+    if (days > 365) return "year";
+    if (days > 90) return "month";
+    if (days > 30) return "week";
     return "day";
   }
 
@@ -1177,11 +1212,16 @@
     const total = slices.reduce((sum, slice) => sum + slice.count, 0);
     show(ui.pieCard, true);
     setText(ui.pieLead, t("{day}：新增 {count} 个视频", {
-      day: row.label || String(row.day), count: formatCount(row.count)
+      /* 年份桶读出来是「2025年：…」；周 / 月桶的 label 自带完整说法，直接用 */
+      day: row.kind === "year" ? String(row.day) + "年" : (row.label || String(row.day)),
+      count: formatCount(row.count)
     }));
     drawPie(ui.pie, slices, total);
     renderLegend(slices, total);
-    setText(ui.pieEmpty, row.kind === "bucket" ? t("这几天还没有新增收藏。") : t("这一天还没有新增收藏。"));
+    /* 空饼图的说明也得分粒度：年份桶说「这一年」，周 / 月桶说「这几天」 */
+    setText(ui.pieEmpty, row.kind === "bucket"
+      ? t("这几天还没有新增收藏。")
+      : (row.kind === "year" ? t("这段时间还没有新增收藏。") : t("这一天还没有新增收藏。")));
     show(ui.pieEmpty, slices.length === 0);
     show(ui.pie, slices.length > 0);
     show(ui.pieLegend, slices.length > 0);
@@ -1251,18 +1291,30 @@
     return head;
   }
 
+  /* 年份构成：跟年份柱子共用聚焦键 focusedDay —— 点了某一年就出那一年的收藏夹构成
+     （和「每日新增收藏数」点柱子的读法完全一样：柱子看趋势，饼图看构成），
+     没点、或点的键不是年份时，还是「各年在总数里占多少」。 */
   function renderYearPie(rows) {
     if (!ui.yearPie) return;
-    const slices = yearSlices(rows);
+    const focused = yearRows.get(String(focusedDay || ""));
+    const yearRow = focused && focused.kind === "year" ? focused : null;
+    const slices = yearRow ? slicesOfDay(yearRow) : yearSlices(rows);
     const total = slices.reduce((sum, slice) => sum + slice.count, 0);
     drawPieTo(ui.yearPie, slices, total, {
-      ariaLabel: t("按年份的收藏占比饼图"),
+      ariaLabel: yearRow ? t("收藏夹构成") : t("按年份的收藏占比饼图"),
       labelFor: (slice) => t("{name}：{count} 个视频，占 {percent}%", {
         name: slice.name, count: formatCount(slice.count),
-        percent: formatCount(Math.round(slice.count / total * 100))
+        percent: formatCount(total > 0 ? Math.round(slice.count / total * 100) : 0)
       })
     });
     legendInto(ui.yearPieLegend, slices, total);
+    /* 饼图上头那句小标题：选了年份就说清是哪一年，没选还是「各年份的收藏构成」 */
+    const caption = ui.yearPie.querySelector(".stats-pie-empty");
+    if (caption) {
+      setText(caption, yearRow
+        ? t("{day}：新增 {count} 个视频", { day: yearRow.day + "年", count: formatCount(yearRow.count) })
+        : t("各年份的收藏构成"));
+    }
     show(ui.yearPie, slices.length > 0);
     show(ui.yearPieLegend, slices.length > 0);
   }
@@ -1724,6 +1776,27 @@
         picker.paged = true;
         picker.view = clampCalendarView(monthStartTime(now.getFullYear(), now.getMonth()));
         show(ui.calWarn, false);
+        renderCalendar();
+      });
+    }
+    /* 「上一年的同一个月」：一年 12 个月，直接减 12 个月 —— 3 月 31 日这类日子
+       由 addMonths 自己夹到当月最后一天，不会溢出到下个月。 */
+    if (ui.calPrevYear) {
+      ui.calPrevYear.addEventListener("click", () => {
+        picker.paged = true;
+        picker.view = clampCalendarView(addMonths(picker.view, -12));
+        renderCalendar();
+      });
+    }
+    if (ui.calNextYear) {
+      ui.calNextYear.addEventListener("click", () => {
+        const next = addMonths(picker.view, 12);
+        const now = new Date();
+        const limit = monthStartTime(now.getFullYear(), now.getMonth());
+        /* 右边那个月已经是本月或更晚就不再往后翻（再翻全是未来） */
+        if (!Number.isFinite(next) || next > limit) return;
+        picker.paged = true;
+        picker.view = next;
         renderCalendar();
       });
     }
