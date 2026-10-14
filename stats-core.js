@@ -550,15 +550,24 @@
   }
 
   // 按年份汇总，升序、只列有记录的年份（年份时间轴上不该出现空年份）。
+  // 1.6.4：这里也必须带 byCollection —— 统计页点年份柱子要看「那一年的收藏夹构成」，
+  // 只给 count 的话饼图永远是空的（真机上就是这么发现的：柱子有数、饼图说没有收藏）。
   function yearlySeries(database) {
-    const counts = new Map();
+    const buckets = new Map();
     for (const entry of entriesOf(database)) {
       const year = new Date(entry.at).getFullYear();
       if (!Number.isFinite(year)) continue;
-      counts.set(year, numberOr(counts.get(year), 0) + 1);
+      let bucket = buckets.get(year);
+      if (!bucket) {
+        bucket = { count: 0, byCollection: new Map() };
+        buckets.set(year, bucket);
+      }
+      const name = entry.collection || "未分类收藏";
+      bucket.count += 1;
+      bucket.byCollection.set(name, numberOr(bucket.byCollection.get(name), 0) + 1);
     }
-    return Array.from(counts.entries())
-      .map(([year, count]) => ({ year, count }))
+    return Array.from(buckets.entries())
+      .map(([year, bucket]) => ({ year, count: bucket.count, byCollection: byCollectionObject(bucket.byCollection) }))
       .sort((a, b) => a.year - b.year);
   }
 

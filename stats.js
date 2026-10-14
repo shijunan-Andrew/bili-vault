@@ -120,8 +120,13 @@
   let stats = null;      // 当前快照（读不到就是 null）
   let loaded = false;    // 第一次 storage 读完没有
   let resizeTimer = 0;
-  let focusedDay = "";   // 当前选中的那根柱子（空串就是没选）：逐日是那一天，周/月聚合是那一桶，年份图是那一年
-  let focusedRow = null; // 那根柱子对应的数据行 —— 饼图直接用它，不再回头查逐日表（聚合桶查不到）
+  /* 选中态分成两套：上面「每日新增收藏数」一套、下面「按年份累计」一套。
+     1.6.4 之前两张图共用 focusedDay，于是点上面 2025 年那根柱子，下面年份图里 2025
+     那根也跟着高亮、下面那张饼图还会被上面的解读顶掉（用户报的「上下两个柱子会关联」）。 */
+  let focusedDay = "";   // 「每日新增收藏数」选中的那根柱子（空串就是没选）：逐日是那一天，周/月聚合是那一桶
+  let focusedRow = null; // 它对应的数据行 —— 饼图直接用它，不再回头查逐日表（聚合桶查不到）
+  let yearFocusDay = "";   // 「按年份累计」自己选中的那一年（和上面那张图互不影响）
+  let yearFocusRow = null; // 它对应的年度行 —— 下面那张饼图用它
   let chartRows = new Map();  // 「每日新增收藏数」那张图上：柱子键 → 行
   let yearRows = new Map();   // 「按年份累计」那张图上：柱子键 → 行
   let dayRows = [];      // 归一化后的每天明细（升序）
@@ -701,7 +706,8 @@
       /* 柱子的「按列点击」：判定范围是从底到顶的整格矩形，不是那根看得见的细柱子。
          count 为 0 的日子也照样盖一层（此时槽里没有任何可见图形），
          看着像没有，点下去仍然能选中那天。 */
-      const selected = key === focusedDay;
+      /* 两张图各有各的选中键：默认看主图的 focusedDay，年份图用 options.isFocused 传自己的进来 */
+      const selected = typeof options.isFocused === "function" ? options.isFocused(key) : key === focusedDay;
       const isToday = index === markIndex;
       const barWidth2 = single ? Math.min(barWidth, 64) : barWidth;
       const hitWidth = Math.max(2, slot - 2);
@@ -1227,10 +1233,35 @@
     show(ui.pieLegend, slices.length > 0);
   }
 
+  /* 老快照兜底：1.6.3 及以前的 yearly 只有 {year, count}，没有 byCollection ——
+     真机上表现为「点年份柱子，下面那张饼图说这一段时间没有收藏」。快照要等下一次
+     导入 / 扫描才会刷新，所以这里用全量的月度表按年合并出一份收藏夹构成，和新快照
+     自己算出来的结果一致（月度表是 stats-core.js 为长区间聚合带出去的全量数据）。 */
+  function monthlyYearFallback() {
+    const years = new Map();
+    const months = stats && Array.isArray(stats.monthly) ? stats.monthly : [];
+    months.forEach((item) => {
+      const month = String(item && item.month != null ? item.month : "");
+      const year = month.slice(0, 4);
+      const by = item && item.byCollection;
+      if (!/^\d{4}$/.test(year) || !by || typeof by !== "object") return;
+      let bucket = years.get(year);
+      if (!bucket) {
+        bucket = {};
+        years.set(year, bucket);
+      }
+      Object.keys(by).forEach((name) => {
+        bucket[name] = numberOr(bucket[name], 0) + numberOr(by[name], 0);
+      });
+    });
+    return years;
+  }
+
   /* 年份时间轴：没有 yearly 就整块隐藏，不留空壳 */
   function renderYears() {
     const raw = stats && Array.isArray(stats.yearly) ? stats.yearly : [];
     const rows = [];
+    const monthFallback = monthlyYearFallback();
     raw.forEach((item) => {
       const year = String(item && item.year != null ? item.year : "").slice(0, 4);
       if (!/^\d{4}$/.test(year)) return;
@@ -1238,8 +1269,11 @@
         day: year,
         label: year,
         count: Math.max(0, numberOr(item && item.count, 0)),
-        /* 这一年的收藏夹构成：点年份柱子时要拿它出饼图（快照里的 yearly 已经带了） */
-        by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        /* 这一年的收藏夹构成：点年份柱子时要拿它出饼图。
+           新快照的 yearly 自带 byCollection；老快照用月度表现算一份（见上面的兜底）。 */
+        by: (item && item.byCollection && typeof item.byCollection === "object" && Object.keys(item.byCollection).length)
+          ? item.byCollection
+          : (monthFallback.get(year) || {}),
         kind: "year"
       });
     });
@@ -1247,11 +1281,18 @@
       show(ui.yearCard, false);
       if (ui.yearChart) ui.yearChart.textContent = "";
       yearRows = new Map();
+      yearFocusDay = "";
+      yearFocusRow = null;
       renderYearPie([]);
       return;
     }
     rows.sort((a, b) => (a.day < b.day ? -1 : 1));
     yearRows = new Map(rows.map((row) => [String(row.day), row]));
+    /* 选中的那一年在新快照里没了（换了备份文件夹）就放手，别留一个指向空气的焦点 */
+    if (yearFocusDay && !yearRows.has(String(yearFocusDay))) {
+      yearFocusDay = "";
+      yearFocusRow = null;
+    }
     const total = rows.reduce((sum, row) => sum + row.count, 0);
     show(ui.yearCard, true);
     setText(ui.yearLead, t("从 {year} 年至今，共收藏 {count} 个视频。", {
@@ -1262,6 +1303,9 @@
       labelMode: "years",
       /* 年度图和「今天」无关：不画空心柱，也不显示下面那句解释 */
       markIndex: null,
+      /* 高亮只看年份图自己的选中键：以前共用 focusedDay，上面那张图里选了年份，
+         下面这张会跟着亮（用户报的「上下两个柱子会关联」）。 */
+      isFocused: (key) => key === yearFocusDay,
       ariaLabel: t("按年份的收藏数量柱状图"),
       /* 年份柱子的读屏措辞不能带「这一天」：用现成的「{day} 新增了 {count} 个视频」
          这条词条，把年份当主语，读出来是「2024 新增了 62 个视频」。 */
@@ -1291,12 +1335,13 @@
     return head;
   }
 
-  /* 年份构成：跟年份柱子共用聚焦键 focusedDay —— 点了某一年就出那一年的收藏夹构成
+  /* 年份构成：用年份图自己的选中键 yearFocusDay —— 点了某一年就出那一年的收藏夹构成
      （和「每日新增收藏数」点柱子的读法完全一样：柱子看趋势，饼图看构成），
      没点、或点的键不是年份时，还是「各年在总数里占多少」。 */
   function renderYearPie(rows) {
     if (!ui.yearPie) return;
-    const focused = yearRows.get(String(focusedDay || ""));
+    /* 1.6.4：只认年份图自己的选中，而且那一年还得在这次的年度行里（快照换了就自动放手） */
+    const focused = yearFocusRow && yearRows.has(String(yearFocusRow.day)) ? yearFocusRow : null;
     const yearRow = focused && focused.kind === "year" ? focused : null;
     const slices = yearRow ? slicesOfDay(yearRow) : yearSlices(rows);
     const total = slices.reduce((sum, slice) => sum + slice.count, 0);
@@ -1840,11 +1885,17 @@
   }
 
   /* 选中 / 收起某一根柱子：再点同一根收起，点空白处也收起。
-     行由调用方按「图表 → 索引」查好传进来（逐日 / 周 / 月一张图，年份一张图）。 */
-  function toggleBar(key, row) {
+     行由调用方按「图表 → 索引」查好传进来（逐日 / 周 / 月一张图，年份一张图）。
+     target 区分是哪张图：两张图的选中态各记各的，点上面不影响下面。 */
+  function toggleBar(key, row, target) {
     if (!key) return;
-    focusedDay = focusedDay === key ? "" : key;
-    focusedRow = focusedDay ? (row || null) : null;
+    if (target === "year") {
+      yearFocusDay = yearFocusDay === key ? "" : key;
+      yearFocusRow = yearFocusDay ? (row || null) : null;
+    } else {
+      focusedDay = focusedDay === key ? "" : key;
+      focusedRow = focusedDay ? (row || null) : null;
+    }
     render();
   }
 
@@ -1853,25 +1904,34 @@
      启动时把 Map 本身传进来，闭包里那份就永远停在初始的空 Map 上 ——
      点柱子查不到行 → focusedRow 恒为 null → 饼图卡片永远不出现。
      这正是真机复测里「点任意柱子和年份柱子都不出饼图」的根因。 */
-  function bindBarChart(element, lookupOf) {
+  function bindBarChart(element, lookupOf, target) {
     if (!element) return;
     const rowOf = (key) => {
       const map = typeof lookupOf === "function" ? lookupOf() : lookupOf;
       return map && typeof map.get === "function" ? map.get(String(key)) : undefined;
     };
+    /* 收起时只动「这张图」的选中键，另一张图不受影响 */
+    const collapse = () => {
+      if (target === "year") {
+        if (!yearFocusDay) return;
+        yearFocusDay = "";
+        yearFocusRow = null;
+      } else {
+        if (!focusedDay) return;
+        focusedDay = "";
+        focusedRow = null;
+      }
+      render();
+    };
     element.addEventListener("click", (event) => {
       const bar = barFromEvent(event, element);
       if (!bar) {
         /* 点在图上但不是柱子上：收起饼图 */
-        if (focusedDay) {
-          focusedDay = "";
-          focusedRow = null;
-          render();
-        }
+        collapse();
         return;
       }
       const key = bar.getAttribute("data-day");
-      toggleBar(key, rowOf(key));
+      toggleBar(key, rowOf(key), target);
     });
     element.addEventListener("keydown", (event) => {
       const bar = barFromEvent(event, element);
@@ -1880,7 +1940,7 @@
       if (key === "Enter" || key === " " || key === "Spacebar") {
         event.preventDefault();
         const day = bar.getAttribute("data-day");
-        toggleBar(day, rowOf(day));
+        toggleBar(day, rowOf(day), target);
         return;
       }
       if (key !== "ArrowLeft" && key !== "ArrowRight") return;
@@ -1894,11 +1954,11 @@
   }
 
   function bindChart() {
-    bindBarChart(ui.chart, () => chartRows);
+    bindBarChart(ui.chart, () => chartRows, "main");
     /* 「按年份累计」那张图以前完全没绑：柱子是按钮、能聚焦，点了却什么都不发生
        —— 用户报的「按年份累计点柱子不出饼图」就是这里。
        对端没给独立容器时 renderYears 会退回 ui.chart，那种情况下不能再绑一次。 */
-    if (ui.yearChart && ui.yearChart !== ui.chart) bindBarChart(ui.yearChart, () => yearRows);
+    if (ui.yearChart && ui.yearChart !== ui.chart) bindBarChart(ui.yearChart, () => yearRows, "year");
   }
 
   /* ── 事件 ───────────────────────────────────────────────────────── */
@@ -1906,28 +1966,27 @@
   /* 「返回设置」：本页是新开的一个标签，先试着关掉它（回到原来那个设置页标签）。
      浏览器不允许脚本关掉非脚本打开的标签，window.close() 会静默失败，
      所以兜底查一次当前标签再导航过去 —— 绝不把按钮做成 <a href>。 */
+  /* 「返回设置」：把这个标签页本身导航回设置页 —— 1.6.4 起不再先试 window.close()。
+     本页是设置页用 chrome.tabs.create 打开的，window.close() 真的关得掉，
+     关掉之后用户落到「底下原来那个标签」，看着就像「这个按钮只是把页面关了」
+     （设置页的「返回收藏库」也是同一个坑，V1.4.1 已经踩过一次）。
+     拿不到当前标签时就地导航，绝不把人卡住。 */
   function bindBack() {
     const button = document.getElementById("statsBack");
     if (!button) return;
     button.addEventListener("click", () => {
       const url = chrome.runtime.getURL("settings.html");
       try {
-        window.close();
-      } catch (_) { /* 关不掉就走下面的兜底 */ }
-      window.setTimeout(() => {
-        if (window.closed) return;
-        try {
-          chrome.tabs.getCurrent((tab) => {
-            if (tab && typeof tab.id === "number") {
-              chrome.tabs.update(tab.id, { url: url });
-            } else {
-              window.location.href = url;
-            }
-          });
-        } catch (_) {
-          window.location.href = url;
-        }
-      }, 60);
+        chrome.tabs.getCurrent((tab) => {
+          if (tab && typeof tab.id === "number") {
+            chrome.tabs.update(tab.id, { url: url });
+          } else {
+            window.location.href = url;
+          }
+        });
+      } catch (_) {
+        window.location.href = url;
+      }
     });
   }
 

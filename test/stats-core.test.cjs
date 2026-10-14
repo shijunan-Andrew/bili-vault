@@ -421,10 +421,16 @@ test("collectionBreakdown 把缺收藏夹的条目归到「未分类收藏」", 
 
 test("yearlySeries 按年升序、只列有记录的年份", () => {
   const rows = core.yearlySeries(rangeDatabase());
-  assert.deepEqual(rows, [
+  assert.deepEqual(rows.map((row) => ({ year: row.year, count: row.count })), [
     { year: 2025, count: 1 },
     { year: 2026, count: 9 }
   ]);
+  // 1.6.4：每年都要带 byCollection —— 统计页点年份柱子要画「那一年的收藏夹构成」，
+  // 只给 count 的话饼图是空的（真机上就是这么发现的：柱子有数、饼图说没有收藏）。
+  for (const row of rows) {
+    const sum = Object.values(row.byCollection || {}).reduce((total, value) => total + value, 0);
+    assert.equal(sum, row.count, `${row.year} 年的收藏夹构成之和应等于该年总数`);
+  }
   // 2024 一条都没有 → 那年整年不出现（时间轴上不留空年份）
   assert.ok(!rows.some((row) => row.year === 2024));
   for (let i = 1; i < rows.length; i += 1) assert.ok(rows[i].year > rows[i - 1].year);
@@ -480,7 +486,7 @@ test("dailyRows 的 byCollection 只写非零项，且 count 等于各项之和"
 test("snapshot 连着 yearly: yearlySeries(database)", () => {
   const snapshot = core.snapshot(rangeDatabase(), NOW);
   assert.deepEqual(snapshot.yearly, core.yearlySeries(rangeDatabase()));
-  assert.deepEqual(snapshot.yearly, [
+  assert.deepEqual(snapshot.yearly.map((row) => ({ year: row.year, count: row.count })), [
     { year: 2025, count: 1 },
     { year: 2026, count: 9 }
   ]);
@@ -791,7 +797,7 @@ test("跨年与年界那几天：去年最后一天、今年第一天各归各�
     ],
     { now: at(2027, 1, 2, 10, 0) }
   );
-  assert.deepEqual(core.yearlySeries(database), [
+  assert.deepEqual(core.yearlySeries(database).map((row) => ({ year: row.year, count: row.count })), [
     { year: 2026, count: 1 },
     { year: 2027, count: 1 }
   ]);

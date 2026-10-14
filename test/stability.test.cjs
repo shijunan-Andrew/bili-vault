@@ -2034,11 +2034,11 @@ function noticeItems(html) {
     .trim());
 }
 
-test("both surfaces show the same seven safety items, abuse warning first", () => {
+test("both surfaces show the same six safety items, abuse warning first", () => {
   const surfaces = ["library.html", "popup.html"];
   const lists = Object.fromEntries(surfaces.map((file) => [file, noticeItems(readProjectFile(file))]));
   for (const file of surfaces) {
-    assert.equal(lists[file].length, 7, `${file} 的使用须知应正好七条`);
+    assert.equal(lists[file].length, 6, `${file} 的使用须知应正好六条`);
     // 4.5：请勿滥用提到最前面
     assert.ok(lists[file][0].startsWith("请勿滥用："), `${file} 的第一条必须是「请勿滥用」`);
     assert.equal(lists[file].filter((item) => item.startsWith("请勿滥用：")).length, 1, `${file} 的「请勿滥用」只应出现一次`);

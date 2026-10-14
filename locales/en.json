@@ -73,7 +73,6 @@
   "报告暂存在插件中，可下载到本地。": "The report is stored in the extension and can be downloaded.",
   "备份文件夹已改为“{name}”，点右上角“刷新”重新读取。": "Backup folder is now “{name}”. Click “Refresh” at the top right to reload.",
   "被风控了会怎样": "What happens if risk control kicks in",
-  "本插件不是 B 站官方工具，使用它可能违反《哔哩哔哩用户使用协议》（第 4.3.15 条等），账号风险请自行评估。": "This extension is not an official Bilibili tool. Using it may violate the Bilibili Terms of Service (section 4.3.15 and others). Assess the risk to your account yourself.",
   "本次处理 {processed} 条：更新 {updated} 条，新标记失效 {markedInvalid} 条，无变化 {unchanged} 条，失败 {failed} 条。": "Processed {processed}: updated {updated}, newly marked unavailable {markedInvalid}, unchanged {unchanged}, failed {failed}.",
   "本次读取可能不完整，结果仅供参考": "This read may be incomplete — treat the result as a rough guide",
   "本次读取可能不完整，结果仅供参考。": "This read may be incomplete — treat the result as a rough guide.",

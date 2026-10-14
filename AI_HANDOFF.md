@@ -76,6 +76,14 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.6.4：上下两张图各管各的、年度饼图缺字段、返回设置别再关标签
+
+1. **上下两张图联动**（用户报「点上面的年份柱，下面那年也跟着亮、下面饼图还被顶掉」）：1.6.3 里「每日新增收藏数」和「按年份累计」**共用** `focusedDay` / `focusedRow`。现在拆成两套 —— `focusedDay`/`focusedRow` 归上面那张图，`yearFocusDay`/`yearFocusRow` 归年份图；`drawChart` 新增 `isFocused` 选项（默认仍看 `focusedDay`，年份图传自己的进去），`toggleBar(key, row, target)` 与 `bindBarChart(element, lookupOf, target)` 都带 target，点空白只收**自己这张图**的选中；`renderYearPie` 改读 `yearFocusRow`。
+2. **点年份柱子说「这一段时间还没有收藏」**：快照的 `yearly` 只有 `{year, count}`，没带 `byCollection`，饼图拿不到数据。`stats-core.js` 的 `yearlySeries` 现在带上 `byCollection`（与 `weeklySeries`/`monthlySeries` 一致，每个 entry 都会进桶，`未分类收藏` 兜底，所以「构成之和 = count」恒成立）。统计页另有兜底 `monthlyYearFallback()`：**老快照**（1.6.3 及以前写下的）用全量的 `monthly` 按年合出一份，用户不用重新导入就能看到那一年的构成。`test/stats-core.test.cjs` 三处 `deepEqual(yearly, [{year, count}])` 改成只比 `{year, count}` + 断言「byCollection 之和 = count」（避免把收藏夹名字写死在测试里）。
+3. **「返回设置」把人送到别的标签**：`bindBack()` 原来先 `window.close()` —— 统计页是设置页用 `chrome.tabs.create` 打开的，**真的关得掉**，于是用户落到下面那个标签上，看着就像「按钮只是把页面关了」。现在去掉 `window.close()`，直接 `chrome.tabs.getCurrent` → `chrome.tabs.update(tab.id, {url: settings.html})`，拿不到当前标签时退回就地导航。和设置页「返回收藏库」（V1.4.1）是同一个坑。
+4. **提示条配色**：`library.css` 的 `.import-running-notice` 换成危险色（`background: var(--danger-soft)`、`color: var(--danger)`、`border-color: var(--danger-line)`，连 `.import-hint-icon` 一起），`.is-paused` 保持琥珀色以示区分。这几个令牌的对比度本来就在 stability 的 PAIRS 表里（`--danger on --danger-soft` ≥ 4.5）。
+5. **使用须知 7 → 6 条**：删掉「本插件不是 B 站官方工具……账号风险请自行评估」（用户要求）。连带改了：`library.html` 与 `popup.html` 各一条 `<li>`、两份词典的对应词条、README「4.4 使用须知」那条、`test/stability.test.cjs` 的「seven → six」测试（标题与断言 7 → 6）、本文件里三处「七条」。
+
 ## 1.6.3：粒度档位、年份柱的饼图、日历按年翻、气泡「先报数字再打招呼」
 
 **1. 粒度档位由 `chartModeOf()` 一处决定，改档位只动它。** 判据从「>31 天按周 / >183 天按月」改成「**>30 天按周 / >90 天按月 / >365 天按年**」，多出「按年」一档（`yearlyRows(range)` 与 `weeklyRows` / `monthlyRows` 同构，`row.kind = "year"`，状态行写「按年份汇总」）。能这么改的前提是 `weekly` / `monthly` / `yearly` 三张表都由 `stats-core.js` **全量**带出（只有 `dailyRows` 受 `DAILY_ROWS_DAYS = 180` 限制）—— 换档位时先确认目标粒度的表在快照里是全量的，否则长区间会画出空图。
@@ -618,7 +626,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **顶部横幅的跑马灯**由 `buildBannerMarquee()` 在显示横幅后构建、窗口 resize 时重建。它按容器宽度补足份数并保证前后两半等宽（位移 50% 才能无缝）。`library.css` 里有一条 `@media (prefers-reduced-motion: reduce)` 显式豁免——**不要删**：`theme.css` 的全局规则会把动画压成「跑一次就弹回原位」，而 `animation-fill-mode` 默认是 `none`，元素会退回无位移状态，跑马灯就完全不动了。
 - **工具栏的下拉框有固定宽度**（`.video-filter select` 132px、`.sort-select select` 124px）。工具栏是 `justify-content: flex-end` 右对齐的，**如果让 select 宽度跟着选中项文字变，整行都会左右窜**。
 - **颜色令牌新增 `--feature` / `--feature-soft` / `--feature-line`**（橘黄，用于突出「导入或更新」这类主入口）。浅色 `#a5560a`、深色 `#efa45a`，对比度 4.76 / 7.39。深色那两处仍然必须完全一致。
-- **使用须知现在是七条**（新增「不要移动插件文件夹位置」）。三个界面必须逐字一致，测试断言条数为 7。
+- **使用须知现在是六条**（新增「不要移动插件文件夹位置」）。三个界面必须逐字一致，测试断言条数为 6。**1.6.4 起删掉了「本插件不是 B 站官方工具……账号风险请自行评估」那一条**（用户要求），两份词典里的对应词条同时删除。
 
 ### 收藏库的性能与可访问性（4.6）
 
@@ -639,11 +647,11 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 使用须知（4.4 新增）
 
-同一份**七条**安全声明必须同时出现在 `library.html`、`popup.html`，**逐字一致**（测试会逐条比对）。（1.3.0 前下载页也有第三份，随那张页面一起删除。）
+同一份**六条**安全声明必须同时出现在 `library.html`、`popup.html`，**逐字一致**（测试会逐条比对）。（1.3.0 前下载页也有第三份，随那张页面一起删除。）
 
 4.4.1 起：三处统一用 --warning-soft / --warning-line 黄色底、正文 --fs-md(15px)；收藏库默认展开、可折叠，但**不允许永久关闭**（dismissSafety 按钮与 safetyNoticeDismissed 写入都已删除，只保留一次性的旧标记清理）；弹窗里**置顶**（排在 brand-row 之前）且默认折叠，避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要；也不要把「不再提示」加回来。**
 
-4.5 起：**「请勿滥用……」一条必须排在最前面**（测试会断言第一条以「请勿滥用：」开头，且两个界面的**七条**文字完全一致）。条目上带 data-i18n；**1.3.0 起七条全是纯文本** —— 原来第 2 条带 DownKyi 链接、第 3 条讲下载文件不要外传，两条都换成了「1.3.0 起不再提供下载 / 放进收藏夹的文件仅限个人离线观看」，不再需要 data-i18n-html。
+4.5 起：**「请勿滥用……」一条必须排在最前面**（测试会断言第一条以「请勿滥用：」开头，且两个界面的**六条**文字完全一致）。条目上带 data-i18n；**1.3.0 起六条全是纯文本** —— 原来第 2 条带 DownKyi 链接、第 3 条讲下载文件不要外传，两条都换成了「1.3.0 起不再提供下载 / 放进收藏夹的文件仅限个人离线观看」，不再需要 data-i18n-html。
 
 V1.2.3 起：**折叠的须知必须留个「口子」** —— 摘要行里固定带一句 `class="safety-hint"` 的「请勿滥用，请分批、低速使用」，风控提醒不能因为折叠就从界面上消失。V1.3.0 起只有两处：`library.html` 默认展开、`popup.html` 置顶且默认折叠。折叠一律用原生 `<details>`，**不要再引入「不再提示 / 记住已关闭」**。
 
