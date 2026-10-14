@@ -990,8 +990,33 @@
   // 后台回的临时台词：优先于 4 条序列，只显示一次。
   let tempLine = "";
 
-  function applyTempLine(line) {
+  /* 点一下之后不立刻显示轮播那条 —— 后台的彩蛋台词总在几十毫秒后才回来，
+     先显示再被顶掉就是用户报的「点一下连出两个气泡、彩蛋被『已陪伴你 x 天』顶掉」。
+     这里先把「这一下该播哪一串」挂起来，等回复：回复里有彩蛋就直接换成彩蛋，
+     120ms 内没等到（后台没起来、没有接听方）再自己显示轮播那条。 */
+  let pendingLines = null;
+  let pendingBubbleTimer = 0;
+
+  function queueBubble(lines) {
+    pendingLines = lines;
+    clearTimeout(pendingBubbleTimer);
+    pendingBubbleTimer = setTimeout(flushPendingBubble, 120);
+  }
+
+  function flushPendingBubble() {
+    if (!pendingLines) return;
+    const lines = pendingLines;
+    pendingLines = null;
+    advanceBubble(lines);
+  }
+
+  function applyTempLine(line, force = false) {
     if (!line || !visible) return;
+    // 同一次点击里等到的那条：认领这一下，直接显示（轮播那条已经被取消）
+    if (force) {
+      showBubble(line);
+      return;
+    }
     // 1.5.9：气泡正开着时**一个字都不动**。后台的回复总在点击之后几十毫秒才到
     // （它要先写库、再发快照），当场换字就是用户报的「点一下连出两个气泡」。
     // 只有气泡收着的时候才攒下来，下次点开时放一次 —— 与原注释同一个语义。
@@ -1022,7 +1047,10 @@
       if (!response || !response.ok) return;
       const index = Number(response.lineIndex);
       if (!Number.isInteger(index) || index < 0) return;
-      applyTempLine(touchLine(index));
+      // 这一下还在等：取消轮播那条，改放彩蛋（点一下只出一次气泡）
+      clearTimeout(pendingBubbleTimer);
+      pendingLines = null;
+      applyTempLine(touchLine(index), true);
     } catch (_) {}
   }
 
@@ -1045,7 +1073,8 @@
       tempLine = "";
       showBubble(line);
     } else {
-      advanceBubble(lines);
+      // 挂起来等后台的彩蛋回复，120ms 内没等到再自己显示（见 queueBubble）
+      queueBubble(lines);
     }
 
     // 每一下都报给后台（它负责记录摸摸头、算亲密度、可能回一条临时台词）。

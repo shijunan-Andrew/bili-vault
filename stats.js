@@ -118,7 +118,10 @@
   let stats = null;      // 当前快照（读不到就是 null）
   let loaded = false;    // 第一次 storage 读完没有
   let resizeTimer = 0;
-  let focusedDay = "";   // 当前选中的那天（空串就是没选）
+  let focusedDay = "";   // 当前选中的那根柱子（空串就是没选）：逐日是那一天，周/月聚合是那一桶，年份图是那一年
+  let focusedRow = null; // 那根柱子对应的数据行 —— 饼图直接用它，不再回头查逐日表（聚合桶查不到）
+  let chartRows = new Map();  // 「每日新增收藏数」那张图上：柱子键 → 行
+  let yearRows = new Map();   // 「按年份累计」那张图上：柱子键 → 行
   let dayRows = [];      // 归一化后的每天明细（升序）
   let periods = [];      // 每个预置区间的计算结果（下拉与文案都读它）
   let currentRange = null;   // 当前生效的区间
@@ -782,11 +785,13 @@
     svg.setAttribute("aria-label", config.ariaLabel || t("收藏夹构成"));
 
     let angle = 0;
-    slices.forEach((slice) => {
+    slices.forEach((slice, index) => {
       const span = slice.count / total * 360;
       const group = appendSvg(svg, "g", { class: "stats-slice" });
+      /* 色位按「第几块」分配，不按名字哈希：哈希会撞车（用户的年份图四块撞成一个颜色、
+         收藏夹图三块只分出两档），相邻两块必须永远不同色 —— 这是饼图能不能读的前提。 */
       const path = appendSvg(group, "path", {
-        class: "stats-slice-shape" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 7)),
+        class: "stats-slice-shape" + (slice.other ? " stats-slice-other" : " stats-slice-" + (index % 8)),
         d: wedgePath(cx, cy, size / 2 - 6, angle, angle + span)
       });
       setText(appendSvg(group, "title", {}), config.labelFor
@@ -813,11 +818,12 @@
   function legendInto(list, slices, total) {
     if (!list) return;
     list.textContent = "";
-    slices.forEach((slice) => {
+    slices.forEach((slice, index) => {
       const item = document.createElement("li");
       item.className = "stats-legend-item";
       const mark = document.createElement("span");
-      mark.className = "stats-legend-mark" + (slice.other ? " stats-slice-other" : " stats-slice-" + (hashText(slice.name) % 7));
+      /* 和扇形同一套分配（按第几块），图例色块才对得上 */
+      mark.className = "stats-legend-mark" + (slice.other ? " stats-slice-other" : " stats-slice-" + (index % 8));
       const name = document.createElement("span");
       name.className = "stats-legend-name";
       name.textContent = slice.other ? slice.name : (slice.name || "—");
@@ -913,6 +919,9 @@
       }));
       setText(ui.chartNote, t("这几天还没有新增收藏。"));
     }
+    /* 点柱子时要拿到「这一桶」的完整数据（含每个收藏夹各多少条）。
+       桶键是周一或某月 1 号，回头查逐日表查不到，所以在这里留一份索引。 */
+    chartRows = new Map(rows.map((row) => [String(row.day), row]));
     const drawn = drawChart(ui.chart, rows, {
       height: mode === "day" ? CHART_HEIGHT : CHART_ROLLUP_HEIGHT,
       pad: mode === "day" ? CHART_PAD : ROLLUP_PAD,
@@ -950,7 +959,10 @@
       rows.push({
         day: week,
         label: weekText(week) + " - " + weekText(end < today ? end : today),
-        count: Math.max(0, numberOr(item && item.count, 0))
+        count: Math.max(0, numberOr(item && item.count, 0)),
+        /* 这一桶里每个收藏夹各多少条：点柱子时要拿它拼饼图，所以在源头带下来 */
+        by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        kind: "bucket"
       });
     });
     rows.sort((a, b) => (a.day < b.day ? -1 : 1));
@@ -967,7 +979,13 @@
       const key = month + "-01";
       const end = monthEndKey(month);
       if (key > bounds.to || end < bounds.from) return;
-      rows.push({ day: key, label: monthText(key), count: Math.max(0, numberOr(item && item.count, 0)) });
+      rows.push({
+        day: key,
+        label: monthText(key),
+        count: Math.max(0, numberOr(item && item.count, 0)),
+        by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        kind: "bucket"
+      });
     });
     rows.sort((a, b) => (a.day < b.day ? -1 : 1));
     return rows;
@@ -1038,10 +1056,16 @@
   }
 
   function renderPie(range) {
+    /* 由「点柱子时记下的那一行」驱动：逐日就是那一天，周 / 月聚合就是整桶
+       （每个收藏夹各多少条已经在源头合并进 row.by），年份图就是那一年的收藏夹构成。
+       不再按天回查逐日表 —— 聚合桶的键（周一 / 某月 1 号）在 dailyRows 里未必存在，
+       这正是用户报的「聚合后只算桶里第一天」的根因。 */
+    const row = focusedRow;
     const keys = rangeDayList(range);
-    const day = focusedDay && keys.indexOf(focusedDay) >= 0 ? focusedDay : "";
-    if (!day) {
+    const inRange = !!row && (row.kind === "year" || keys.indexOf(String(row.day)) >= 0);
+    if (!row || !inRange) {
       focusedDay = "";
+      focusedRow = null;
       show(ui.pieCard, false);
       if (ui.pie) ui.pie.textContent = "";
       if (ui.pieLegend) ui.pieLegend.textContent = "";
@@ -1051,14 +1075,15 @@
       show(ui.pieLegend, false);
       return;
     }
-    const row = dayRows.find((item) => item.day === day) || { day: day, count: 0, by: {} };
     const slices = slicesOfDay(row);
     const total = slices.reduce((sum, slice) => sum + slice.count, 0);
     show(ui.pieCard, true);
-    setText(ui.pieLead, t("{day}：新增 {count} 个视频", { day: day, count: formatCount(row.count) }));
+    setText(ui.pieLead, t("{day}：新增 {count} 个视频", {
+      day: row.label || String(row.day), count: formatCount(row.count)
+    }));
     drawPie(ui.pie, slices, total);
     renderLegend(slices, total);
-    setText(ui.pieEmpty, t("这一天还没有新增收藏。"));
+    setText(ui.pieEmpty, row.kind === "bucket" ? t("这几天还没有新增收藏。") : t("这一天还没有新增收藏。"));
     show(ui.pieEmpty, slices.length === 0);
     show(ui.pie, slices.length > 0);
     show(ui.pieLegend, slices.length > 0);
@@ -1071,15 +1096,24 @@
     raw.forEach((item) => {
       const year = String(item && item.year != null ? item.year : "").slice(0, 4);
       if (!/^\d{4}$/.test(year)) return;
-      rows.push({ day: year, label: year, count: Math.max(0, numberOr(item && item.count, 0)) });
+      rows.push({
+        day: year,
+        label: year,
+        count: Math.max(0, numberOr(item && item.count, 0)),
+        /* 这一年的收藏夹构成：点年份柱子时要拿它出饼图（快照里的 yearly 已经带了） */
+        by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        kind: "year"
+      });
     });
     if (!rows.length) {
       show(ui.yearCard, false);
       if (ui.yearChart) ui.yearChart.textContent = "";
+      yearRows = new Map();
       renderYearPie([]);
       return;
     }
     rows.sort((a, b) => (a.day < b.day ? -1 : 1));
+    yearRows = new Map(rows.map((row) => [String(row.day), row]));
     const total = rows.reduce((sum, row) => sum + row.count, 0);
     show(ui.yearCard, true);
     setText(ui.yearLead, t("从 {year} 年至今，共收藏 {count} 个视频。", {
@@ -1172,6 +1206,7 @@
       /* 数据被清空 / 还没导入：把上面画过的图、展开的下拉、选中的柱子一起收掉 */
       dayRows = [];
       focusedDay = "";
+      focusedRow = null;
       closePicker();
       show(ui.empty, true);
       show(ui.overview, false);
@@ -1209,7 +1244,7 @@
     /* 「能不能选区间」只看有没有 dailyRows：只有旧的 daily 时快照里没有
        180 天的底子，区间选了也筛不出东西，那就退回旧的四张卡 + 那 14 根柱子。 */
     const selectable = hasDayRows(snapshot);
-    if (!selectable) focusedDay = "";
+    if (!selectable) { focusedDay = ""; focusedRow = null; }
 
     show(ui.empty, false);
     show(ui.overview, true);
@@ -1506,6 +1541,7 @@
     custom.to = high;
     preset = "custom";
     focusedDay = "";
+    focusedRow = null;
     closePicker();
     render();
   }
@@ -1527,6 +1563,7 @@
     }
     preset = name;
     focusedDay = "";
+    focusedRow = null;
     closePicker();
     render();
   }
@@ -1573,10 +1610,17 @@
       });
     }
     /* 起点选在很久以前时，可以一键跳回今天那两个月的窗口 */
+    /* 「回到今天」：把草稿选中直接落回今天，再把日历翻回今天那两个月的窗口。
+       以前只翻窗口、不动选中，而窗口锚点取自「已选的起点」→ 起点在去年时
+       按下去反而跳到去年那个月，正是用户报的「回到的是我选的第一天」。 */
     if (ui.calToday) {
       ui.calToday.addEventListener("click", () => {
+        const today = localDayKey(Date.now());
+        picker.draftFrom = today;
+        picker.draftTo = today;
         picker.paged = false;
         picker.view = calendarView();
+        show(ui.calWarn, false);
         renderCalendar();
       });
     }
@@ -1610,54 +1654,67 @@
   /* 点在图上：找到「这一列」的判定层（带 data-day 的那一层）。
      柱子与判定层都在最外层，判定层是后画的那一层，所以正常情况下点到的就是它；
      兜底再往上找一层，免得将来有人把柱子包进 <g> 里之后这里悄悄失灵。 */
-  function barFromEvent(event) {
+  function barFromEvent(event, element) {
     const target = event.target;
     if (!(target instanceof Element)) return null;
     let bar = target.closest("[data-day]");
     if (!bar && target.parentElement) bar = target.parentElement.closest("[data-day]");
-    if (!bar || !ui.chart || !ui.chart.contains(bar)) return null;
+    if (!bar || !element || !element.contains(bar)) return null;
     return bar;
   }
 
-  /* 选中 / 收起某一天：再点同一根收起，点空白处也收起 */
-  function toggleDay(day) {
-    if (!isDayKey(day)) return;
-    focusedDay = focusedDay === day ? "" : day;
+  /* 选中 / 收起某一根柱子：再点同一根收起，点空白处也收起。
+     行由调用方按「图表 → 索引」查好传进来（逐日 / 周 / 月一张图，年份一张图）。 */
+  function toggleBar(key, row) {
+    if (!key) return;
+    focusedDay = focusedDay === key ? "" : key;
+    focusedRow = focusedDay ? (row || null) : null;
     render();
   }
 
-  function bindChart() {
-    if (!ui.chart) return;
-    ui.chart.addEventListener("click", (event) => {
-      const bar = barFromEvent(event);
+  /* 两张图共用一套绑定：柱子是按钮（Enter / 空格触发），左右方向键在柱子之间走 */
+  function bindBarChart(element, lookup) {
+    if (!element) return;
+    element.addEventListener("click", (event) => {
+      const bar = barFromEvent(event, element);
       if (!bar) {
         /* 点在图上但不是柱子上：收起饼图 */
         if (focusedDay) {
           focusedDay = "";
+          focusedRow = null;
           render();
         }
         return;
       }
-      toggleDay(bar.getAttribute("data-day"));
+      const key = bar.getAttribute("data-day");
+      toggleBar(key, lookup.get(String(key)));
     });
-    /* 键盘：柱子是按钮（Enter / 空格触发），左右方向键在柱子之间走 */
-    ui.chart.addEventListener("keydown", (event) => {
-      const bar = barFromEvent(event);
+    element.addEventListener("keydown", (event) => {
+      const bar = barFromEvent(event, element);
       if (!bar) return;
       const key = event.key;
       if (key === "Enter" || key === " " || key === "Spacebar") {
         event.preventDefault();
-        toggleDay(bar.getAttribute("data-day"));
+        const day = bar.getAttribute("data-day");
+        toggleBar(day, lookup.get(String(day)));
         return;
       }
       if (key !== "ArrowLeft" && key !== "ArrowRight") return;
-      const bars = [...ui.chart.querySelectorAll("rect[data-day]")];
+      const bars = [...element.querySelectorAll("rect[data-day]")];
       const index = bars.indexOf(bar);
       const next = bars[index + (key === "ArrowRight" ? 1 : -1)];
       if (!next) return;
       event.preventDefault();
       next.focus();
     });
+  }
+
+  function bindChart() {
+    bindBarChart(ui.chart, chartRows);
+    /* 「按年份累计」那张图以前完全没绑：柱子是按钮、能聚焦，点了却什么都不发生
+       —— 用户报的「按年份累计点柱子不出饼图」就是这里。
+       对端没给独立容器时 renderYears 会退回 ui.chart，那种情况下不能再绑一次。 */
+    if (ui.yearChart && ui.yearChart !== ui.chart) bindBarChart(ui.yearChart, yearRows);
   }
 
   /* ── 事件 ───────────────────────────────────────────────────────── */

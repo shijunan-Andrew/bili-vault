@@ -506,21 +506,22 @@ body {
    八个色位全取自 theme.css 里现成的成对令牌（每个颜色都有配套的 -strong），
    深浅两套主题下都会跟着换，不新增任何色值。 */
 .stats-pie {
-  /* 饼图配色：只留品牌蓝一个色相，逐档往 --ink 里混。
-     浅色主题的 --ink 是近黑 → 越来越深的蓝；深色主题的 --ink 是近白 → 越来越亮的蓝。
-     两套主题各配一条自己的档位表（见下面的 html[data-theme="dark"] 覆盖）：
-     浅色从 92% 起手，最深那档在浅底上 3.35:1（旧表 100% 起手只有 2.97:1，卡在门槛下）；
-     深色从 92% 起手、按等亮度步长压到 22%，相邻两片在深底上仍能分开。
-     写死任何一档颜色都会在另一套主题里翻车，所以这里全部由 color-mix 现算。 */
+  /* 饼图配色：**分类色**，不是同色相的明度阶梯。
+     旧的八档全从 --brand 往 --ink 里混 → 一个色相、只差明度，几块挨在一起根本分不开
+     （用户原话「配色单调完全没有对比度」）；再叠上按名字哈希取色位，
+     四块年份还能撞进同一档，整张饼一个颜色。
+     现在八个色位色相全部拉开，并保持接近的感知亮度（oklch 的 L 一行），
+     深浅两套主题各一条自己的 L 表（深色下整体提亮，保证深底上也分得开）。
+     用 oklch 现算而写死十六进制，是为了深色主题能整体换一套亮度而不必抄两份色值。 */
   --pie-slice: var(--brand);
-  --pie-slice-0: color-mix(in srgb, var(--brand) 92%, var(--ink));
-  --pie-slice-1: color-mix(in srgb, var(--brand) 82%, var(--ink));
-  --pie-slice-2: color-mix(in srgb, var(--brand) 72%, var(--ink));
-  --pie-slice-3: color-mix(in srgb, var(--brand) 62%, var(--ink));
-  --pie-slice-4: color-mix(in srgb, var(--brand) 52%, var(--ink));
-  --pie-slice-5: color-mix(in srgb, var(--brand) 42%, var(--ink));
-  --pie-slice-6: color-mix(in srgb, var(--brand) 32%, var(--ink));
-  --pie-slice-7: color-mix(in srgb, var(--brand) 22%, var(--ink));
+  --pie-slice-0: oklch(0.62 0.15 232);
+  --pie-slice-1: oklch(0.66 0.15 150);
+  --pie-slice-2: oklch(0.75 0.15 78);
+  --pie-slice-3: oklch(0.58 0.18 25);
+  --pie-slice-4: oklch(0.55 0.17 300);
+  --pie-slice-5: oklch(0.68 0.11 195);
+  --pie-slice-6: oklch(0.60 0.18 350);
+  --pie-slice-7: oklch(0.52 0.05 250);
   display: flex;
   align-items: center;
   gap: var(--sp-5);
@@ -537,27 +538,29 @@ body {
    这里换一条按等亮度步长解出来的表，档距拉大，深底上相邻两片也分得开。
    两种深色都要覆盖：手动选深色是 <html data-theme="dark">，
    跟随系统时没有这个属性、由 theme.css 的媒体查询接手。 */
+/* 深色主题：同样是这八个色相，整条 L 表提亮（深底上浅色才显眼），
+   色相与顺序一字不动 —— 这样同一个收藏夹在浅色/深色下仍是「同一个颜色」。 */
 html[data-theme="dark"] .stats-pie {
-  --pie-slice-0: color-mix(in srgb, var(--brand) 92%, var(--ink));
-  --pie-slice-1: color-mix(in srgb, var(--brand) 78%, var(--ink));
-  --pie-slice-2: color-mix(in srgb, var(--brand) 66%, var(--ink));
-  --pie-slice-3: color-mix(in srgb, var(--brand) 56%, var(--ink));
-  --pie-slice-4: color-mix(in srgb, var(--brand) 47%, var(--ink));
-  --pie-slice-5: color-mix(in srgb, var(--brand) 39%, var(--ink));
-  --pie-slice-6: color-mix(in srgb, var(--brand) 30%, var(--ink));
-  --pie-slice-7: color-mix(in srgb, var(--brand) 22%, var(--ink));
+  --pie-slice-0: oklch(0.74 0.13 232);
+  --pie-slice-1: oklch(0.78 0.14 150);
+  --pie-slice-2: oklch(0.84 0.13 85);
+  --pie-slice-3: oklch(0.70 0.16 28);
+  --pie-slice-4: oklch(0.70 0.15 300);
+  --pie-slice-5: oklch(0.80 0.10 195);
+  --pie-slice-6: oklch(0.74 0.16 350);
+  --pie-slice-7: oklch(0.72 0.04 250);
 }
 @media (prefers-color-scheme: dark) {
   /* 跟随系统且没手动选浅色时，令牌本身就是深色那一套，档位表跟着换 */
   html:not([data-theme="light"]) .stats-pie {
-    --pie-slice-0: color-mix(in srgb, var(--brand) 92%, var(--ink));
-    --pie-slice-1: color-mix(in srgb, var(--brand) 78%, var(--ink));
-    --pie-slice-2: color-mix(in srgb, var(--brand) 66%, var(--ink));
-    --pie-slice-3: color-mix(in srgb, var(--brand) 56%, var(--ink));
-    --pie-slice-4: color-mix(in srgb, var(--brand) 47%, var(--ink));
-    --pie-slice-5: color-mix(in srgb, var(--brand) 39%, var(--ink));
-    --pie-slice-6: color-mix(in srgb, var(--brand) 30%, var(--ink));
-    --pie-slice-7: color-mix(in srgb, var(--brand) 22%, var(--ink));
+    --pie-slice-0: oklch(0.74 0.13 232);
+    --pie-slice-1: oklch(0.78 0.14 150);
+    --pie-slice-2: oklch(0.84 0.13 85);
+    --pie-slice-3: oklch(0.70 0.16 28);
+    --pie-slice-4: oklch(0.70 0.15 300);
+    --pie-slice-5: oklch(0.80 0.10 195);
+    --pie-slice-6: oklch(0.74 0.16 350);
+    --pie-slice-7: oklch(0.72 0.04 250);
   }
 }
 .stats-slice,

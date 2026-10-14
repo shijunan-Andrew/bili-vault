@@ -426,7 +426,9 @@ const EGG_JS = `// 2015 replica: every click leads to the live bilibili homepage
   }, true);
 
   // ---- 这次浏览里已经关过（哪怕打开的是缓存下来的旧 HTML）：直接不显示对话框
-  if (remembered()) closeDialog();
+  // 默认是藏着的（CSS 里 #eggDialogOverlay 就是 display:none），只有「这次该弹」才加
+  // data-egg-show 打开。反着做（默认显示、这里再 closeDialog）会让第二次进来的那一瞬间闪一下。
+  if (remembered()) closeDialog(); else overlay.setAttribute('data-egg-show', '');
 })();
 `;
 
@@ -477,6 +479,12 @@ const EGG_CSS = `<style>
   z-index: 2147483000;
   background: rgba(0, 0, 0, 0.5);
   text-align: center;
+  /* 默认藏起来，由脚本在「这次该弹」时加 data-egg-show 打开。
+     反着做（默认显示、脚本再关）会让第二次进来的那一瞬间闪一下这个弹窗。 */
+  display: none;
+}
+#eggDialogOverlay[data-egg-show] {
+  display: block;
 }
 #eggDialogBox {
   position: fixed;
