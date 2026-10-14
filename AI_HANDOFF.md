@@ -76,6 +76,15 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.6.5：首尾「整桶」的口径、饼图分块规则、图例滚动
+
+1. **首尾整桶要标出来**（用户报「首尾两根柱子跟区间天数对不上」）：`weeklyRows` / `monthlyRows` / `yearlyRows` 各自算一个 `partial`（这一桶跨出了区间：周 `week < bounds.from || end > bounds.to`，月用 `key`/`end`，年用 `year + "-01-01" < bounds.from || year + "-12-31" > bounds.to`）。`drawChart` 给这类柱子加 `stats-bar-partial`（`.stats-bar-partial`：虚线描边 + `fill-opacity: .42`，和「今天」那种空心是两套样式），`renderChart` 在 `#statsChartBoundaryNote` 里按粒度写「首尾两根是整周 / 整月 / 整年，条数包含区间外的记录。」。**别试图去「修正」这个数字**：`dailyRows` 只有 180 天，区间内的逐日明细根本不在这一页手里，能给的就是「整桶 + 说明」。
+2. **饼图分块**：`PIE_MAX_SLICES` 6 → 7、新增 `PIE_MIN_PERCENT = 3`，合并逻辑收进 `mergePieSlices(list, labels)`，`slicesOfDay` 与 `yearSlices` 共用。规则：占比 ≥3% 的各自一块、最多 7 块，其余并成一块；只剩一条小尾巴（`rest.length <= 1`）**不合并**（让它挂自己的名字，比塞进「其它」有用）；极端情况（每一块都不足 3%）留最大的 7 块、其余并掉。`labels.minor` 是「都因不足 3% 被并」的说法，`labels.many(n)` 是「被 7 块上限挤进来」的说法（图例上写「（11 个）」，用户一眼知道藏了几个）。**年份图先按条数挑、再按时间摆回去**（`yearSlices` 里那次 sort）—— 直接按时间挑会把后面的大年份错误地并进「其它年份」。
+3. **占比取整**：新增 `withPercents(slices, total)`（最大余数法）把整数占比写到 `slice.percent`，`drawPieTo` 与 `legendInto` 各自开头调一次。**别再写 `Math.round(count / total * 100)`**：各自圆整会凑出 99% / 101%，用户会以为哪里算错了。
+4. **图例**：`legendInto` 给每行加 `title` + `aria-label`（整句「名字：N 个视频，占 X%」，名字被 CSS 截断时也能看全），空名字回退到 `t("未归类收藏")`（以前摆一根横杠）；`stats.css` 的 `.stats-legend` 加 `max-height: min(38vh, 320px)` + `overflow-y: auto` + `overscroll-behavior: contain`。
+5. **年份轴标签抽稀**：`drawChart` 非 dates 分支里，`labelMode === "years"` 时隔 `Math.max(1, Math.ceil(rows.length / CHART_LABEL_LIMIT))` 根标一个（第一根和最后一根一定标）；周 / 月照旧每根都标 —— 少一个标签就少一段。
+6. **区间上限 1 年 → 10 年**：`stats-core.js` 的 `MAX_RANGE_DAYS` 365 → 3653；`stats.js` 的 `MAX_CUSTOM_DAYS` 改成 `numberOr(core && core.MAX_RANGE_DAYS, 3653)`（**定义挪到 `core` 之后**）；`rangeDayList` 的逐日上限从写死的 1000 改成 `MAX_CUSTOM_DAYS + 2` —— 写死会让「744 天」在日历提示里对、状态行里被算成 730 天（**同一个区间两个数**，用户第一眼就会看出来）。
+
 ## 1.6.4：上下两张图各管各的、年度饼图缺字段、返回设置别再关标签
 
 1. **上下两张图联动**（用户报「点上面的年份柱，下面那年也跟着亮、下面饼图还被顶掉」）：1.6.3 里「每日新增收藏数」和「按年份累计」**共用** `focusedDay` / `focusedRow`。现在拆成两套 —— `focusedDay`/`focusedRow` 归上面那张图，`yearFocusDay`/`yearFocusRow` 归年份图；`drawChart` 新增 `isFocused` 选项（默认仍看 `focusedDay`，年份图传自己的进去），`toggleBar(key, row, target)` 与 `bindBarChart(element, lookupOf, target)` 都带 target，点空白只收**自己这张图**的选中；`renderYearPie` 改读 `yearFocusRow`。

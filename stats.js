@@ -44,12 +44,14 @@
   /* 每个横轴日期至少占这么宽（「10-14」这种短标签），窄窗口自动再稀一档 */
   const CHART_LABEL_MIN_GAP = 34;
   const RESIZE_DELAY = 160;
-  /* 自定义区间最长一年（和 stats-core.js 的 MAX_RANGE_DAYS 对齐）。
-     以前这里是 400 天，比核心的 730 天紧 —— 结果「半年以上按月份聚合」
-     那档从界面上根本选不出来。 */
-  const MAX_CUSTOM_DAYS = 730;
+  /* 自定义区间能选多长，由 stats-core.js 的 MAX_RANGE_DAYS 说了算
+     （真的算出来在下面 core 之后，叫 MAX_CUSTOM_DAYS）。
+     两边各写一个数就会出现「界面能选、核心偷偷截断」这种最难受的组合。 */
   /* 扇形最多单独上色几块，剩下的并成「其他」 —— 图例太长反而看不清 */
-  const PIE_MAX_SLICES = 6;
+  const PIE_MAX_SLICES = 7;
+  /* 低于这个占比的收藏夹并成一块「其它收藏夹（不足 3%）」：饼图上那点小扇面
+     看不出是谁，图例又多一行。3% 是用户提的数，和「看趋势的柱子」同一个口径。 */
+  const PIE_MIN_PERCENT = 3;
   const DAY_MS = 86400000;
 
   /* 七个预置区间，顺序就是下拉里的顺序（文案由 t() 给，不在这里写死） */
@@ -59,6 +61,10 @@
   const DAY_TOLERANCE = 120000;
 
   const core = (typeof BcaStatsCore === "object" && BcaStatsCore) ? BcaStatsCore : null;
+  /* 界面侧的天数上限：跟核心对齐（核心没加载时退成十年）。
+     1.6.4 之前两边都写死 730 天，比「按年份汇总」那档还紧 ——
+     2024→2026 这种两年跨度在日历上直接被红字挡回去，选了也确定不了。 */
+  const MAX_CUSTOM_DAYS = Math.max(1, Math.floor(numberOr(core && core.MAX_RANGE_DAYS, 3653)));
   const i18n = (typeof BcaI18n === "object" && BcaI18n) ? BcaI18n : null;
   /* 词典由 i18n.js 管；这里只负责取词，取不到就照中文原文显示 */
   const t = (key, params) => (i18n && typeof i18n.t === "function" ? i18n.t(key, params) : key);
@@ -95,6 +101,7 @@
     chart: document.getElementById("statsChart"),
     chartLead: document.getElementById("statsChartLead"),
     chartNote: document.getElementById("statsChartNote"),
+    chartBoundaryNote: document.getElementById("statsChartBoundaryNote"),
     chartCaption: document.getElementById("statsChartCaption"),
     chartHint: document.getElementById("statsChartHint"),
     pie: document.getElementById("statsPie"),
@@ -437,7 +444,7 @@
     const last = dayStartTime(meta.to);
     if (!Number.isFinite(time) || !Number.isFinite(last)) return keys;
     let guard = 0;
-    while (time <= last && guard < 1000) {
+    while (time <= last && guard < MAX_CUSTOM_DAYS + 2) {
       keys.push(localDayKey(time));
       time = dayStartTime(localDayKey(time + DAY_MS));
       guard += 1;
@@ -718,7 +725,9 @@
       /* 看得见的柱子先画 */
       if (drawBars && count > 0) {
         appendSvg(svg, "rect", {
-          class: "stats-bar" + (isToday ? " stats-bar-today" : ""),
+          /* 头一桶 / 尾一桶是整周（整月、整年），条数含区间外的记录：
+             用虚线描边 + 半透明底标出来，免得用户拿区间天数去反推这根的数字 */
+          class: "stats-bar" + (isToday ? " stats-bar-today" : "") + (row.partial ? " stats-bar-partial" : ""),
           x: round2(center - barWidth2 / 2), y: round2(baseline - barHeight),
           width: round2(Math.max(1, barWidth2)), height: round2(Math.max(1, barHeight)),
           rx: round2(Math.min(4, barWidth2 / 2))
@@ -765,6 +774,12 @@
           }), row.label || key.slice(5));
         }
       } else {
+        /* 按年的图可能有几十根柱子：隔几年标一个（第一根和最后一根一定标），
+           光靠斜排也摆不下；周 / 月粒度照旧每根都标 —— 少一个标签就少一段。 */
+        const yearStride = labelMode === "years"
+          ? Math.max(1, Math.ceil(rows.length / CHART_LABEL_LIMIT))
+          : 1;
+        if (index % yearStride !== 0 && index !== rows.length - 1) return;
         const listed = semantic ? appendSvg(svg, "g", { class: "stats-bar-slot" }) : svg;
         const text = String(row.short || row.label || key);
         /* 斜着排时锚点钉在自己那格的刻度上、text-anchor 改成 end：
@@ -840,6 +855,81 @@
       " A " + radius + " " + radius + " 0 " + large + " 1 " + to[0] + " " + to[1] + " Z";
   }
 
+  /* 饼图分块规则（1.6.5 按用户提议改的）：
+     占比 ≥ PIE_MIN_PERCENT 的各自一块，最多 PIE_MAX_SLICES 块
+     （调色板 8 档，留一档给「其它」）；剩下的全并成一块「其它」。
+     改之前是「最大的 5 个 + 其它」：18 个收藏夹时会把 40% 的量悄没声地塞进
+     「其它收藏夹」，用户按图例看还以为收藏夹里就那么几个。
+     只剩一个小尾巴时不合并 —— 那一条挂着自己的名字比塞进「其它」有用。
+     labels.minor 是「都因为不足 3% 才被并」时用的说法，
+     labels.many(n) 是「≥3% 的超过 7 块、多出来的被挤进来」时用的说法。 */
+  function mergePieSlices(list, labels) {
+    const total = list.reduce((sum, item) => sum + item.count, 0);
+    if (list.length <= PIE_MAX_SLICES) return list;
+    const keep = [];
+    const rest = [];
+    list.forEach((item) => {
+      const percent = total > 0 ? (item.count / total) * 100 : 0;
+      if (percent >= PIE_MIN_PERCENT && keep.length < PIE_MAX_SLICES) keep.push(item);
+      else rest.push(item);
+    });
+    const sumOf = (items) => items.reduce((sum, item) => sum + item.count, 0);
+    if (!keep.length) {
+      /* 极端情况：每一块都不足 3%（收藏夹特别多）。那就把最大的几块留下来，
+         剩下的一律并掉 —— 全是 2% 的细条画出来谁也读不了。 */
+      const head = list.slice(0, PIE_MAX_SLICES);
+      const tail = list.slice(PIE_MAX_SLICES);
+      return head.concat([{ name: labels.many(tail.length), count: sumOf(tail), other: true }]);
+    }
+    if (rest.length <= 1) return list;
+    const allMinor = rest.every((item) => total > 0 && (item.count / total) * 100 < PIE_MIN_PERCENT);
+    return keep.concat([{
+      name: allMinor ? labels.minor : labels.many(rest.length),
+      count: sumOf(rest),
+      other: true
+    }]);
+  }
+
+  function pieLabelsForCollections() {
+    return {
+      minor: t("其它收藏夹（不足 3%）"),
+      many: (count) => t("其它收藏夹（{count} 个）", { count: formatCount(count) })
+    };
+  }
+
+  function pieLabelsForYears() {
+    return {
+      minor: t("其它年份"),
+      many: (count) => t("其它年份（{count} 个）", { count: formatCount(count) })
+    };
+  }
+
+  /* 占比取整：按最大余数法分配，保证加起来正好 100%
+     （各自四舍五入会凑出 99% / 101%，用户会以为哪里算错了）。
+     结果写在每一块自己的 percent 上，饼图提示、图例两处读同一份。 */
+  function withPercents(slices, total) {
+    const counts = slices.map((slice) => Math.max(0, numberOr(slice.count, 0)));
+    const sum = counts.reduce((acc, value) => acc + value, 0) || Math.max(0, numberOr(total, 0));
+    const parts = slices.map(() => 0);
+    if (sum > 0) {
+      const exact = counts.map((count) => (count / sum) * 100);
+      let used = 0;
+      exact.forEach((value, index) => { parts[index] = Math.floor(value); used += parts[index]; });
+      const order = exact
+        .map((value, index) => ({ index: index, rest: value - Math.floor(value) }))
+        .sort((a, b) => (b.rest - a.rest) || (a.index - b.index));
+      let left = 100 - used;
+      let cursor = 0;
+      while (left > 0 && order.length > 0) {
+        parts[order[cursor % order.length].index] += 1;
+        left -= 1;
+        cursor += 1;
+      }
+    }
+    slices.forEach((slice, index) => { slice.percent = parts[index]; });
+    return slices;
+  }
+
   /* 那天每个收藏夹各有多少条：byCollection 相加，名字全是数据、不进词典 */
   function slicesOfDay(row) {
     const list = [];
@@ -849,12 +939,7 @@
       if (count > 0) list.push({ name: name, count: count });
     });
     list.sort((a, b) => (b.count - a.count) || (a.name < b.name ? -1 : 1));
-    if (list.length <= PIE_MAX_SLICES) return list;
-    const head = list.slice(0, PIE_MAX_SLICES - 1);
-    const rest = list.slice(PIE_MAX_SLICES - 1);
-    const sum = rest.reduce((total, item) => total + item.count, 0);
-    head.push({ name: "", count: sum, other: true });
-    return head;
+    return mergePieSlices(list, pieLabelsForCollections());
   }
 
   /* 饼图本体：收藏夹构成和按年份构成共用一份，颜色档位也就跟着一致。
@@ -869,6 +954,7 @@
     host.textContent = "";
     const putBack = () => { if (placeholder) host.appendChild(placeholder); };
     if (!slices.length || total <= 0) { putBack(); return; }
+    withPercents(slices, total);
     const config = options || {};
     const size = config.size || 190;
     const cx = round2(size / 2);
@@ -893,9 +979,9 @@
       setText(appendSvg(group, "title", {}), config.labelFor
         ? config.labelFor(slice, total)
         : t("{name}：{count} 个视频，占 {percent}%", {
-          name: slice.other ? slice.name : (slice.name || "—"),
+          name: slice.other ? slice.name : (slice.name || t("未归类收藏")),
           count: formatCount(slice.count),
-          percent: formatCount(Math.round(slice.count / total * 100))
+          percent: formatCount(Number.isFinite(slice.percent) ? slice.percent : 0)
         }));
       /* 悬停「抬起」要绕**圆心**放大：写具体像素，百分比在 SVG 上各家算法不一。
          原点写在 <g> 上（CSS 的 :hover 就落在这个 <g> 上），
@@ -913,6 +999,7 @@
 
   function legendInto(list, slices, total) {
     if (!list) return;
+    withPercents(slices, total);
     list.textContent = "";
     slices.forEach((slice, index) => {
       const item = document.createElement("li");
@@ -922,11 +1009,20 @@
       mark.className = "stats-legend-mark" + (slice.other ? " stats-slice-other" : " stats-slice-" + (index % 8));
       const name = document.createElement("span");
       name.className = "stats-legend-name";
-      name.textContent = slice.other ? slice.name : (slice.name || "—");
+      /* 收藏夹名是数据、不进词典；名字是空串时给个说法，别在界面上摆一根横杠 */
+      const label = slice.other ? slice.name : (slice.name || t("未归类收藏"));
+      name.textContent = label;
       const value = document.createElement("span");
       value.className = "stats-legend-value tnum";
       value.textContent = t("{count} 个视频", { count: formatCount(slice.count) })
-        + " · " + formatCount(total > 0 ? Math.round(slice.count / total * 100) : 0) + "%";
+        + " · " + formatCount(Number.isFinite(slice.percent) ? slice.percent : 0) + "%";
+      /* 名字被 CSS 截断时，整行给个原生提示；读屏也念整句，而不是只念名字 */
+      const readout = t("{name}：{count} 个视频，占 {percent}%", {
+        name: label, count: formatCount(slice.count),
+        percent: formatCount(Number.isFinite(slice.percent) ? slice.percent : 0)
+      });
+      item.setAttribute("title", readout);
+      item.setAttribute("aria-label", readout);
       item.appendChild(mark);
       item.appendChild(name);
       item.appendChild(value);
@@ -1038,6 +1134,17 @@
         : t("{day} 新增了 {count} 个视频", { day: row.label || row.day, count: formatCount(row.count) }))
     });
     show(ui.chartNote, total <= 0);
+    /* 头尾两根是整周 / 整月 / 整年：它们的条数含区间外的记录，下面那句话把口径说清。
+       用户就是拿「已选 744 天」去反推那两根柱子才对不上的。 */
+    const boundary = mode !== "day" && rows.some((row) => row.partial);
+    if (boundary) {
+      setText(ui.chartBoundaryNote, mode === "year"
+        ? t("首尾两根是整年，条数包含区间外的记录。")
+        : (mode === "month"
+          ? t("首尾两根是整月，条数包含区间外的记录。")
+          : t("首尾两根是整周，条数包含区间外的记录。")));
+    }
+    show(ui.chartBoundaryNote, boundary);
     show(ui.chartCaption, mode === "day" && !!(drawn && drawn.todayMarked));
   }
 
@@ -1065,6 +1172,8 @@
         count: Math.max(0, numberOr(item && item.count, 0)),
         /* 这一桶里每个收藏夹各多少条：点柱子时要拿它拼饼图，所以在源头带下来 */
         by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        /* 整周统计：这一跨周跨出了区间（头一桶 / 尾一桶），条数含区间外的记录 */
+        partial: week < bounds.from || end > bounds.to,
         kind: "bucket"
       });
     });
@@ -1089,6 +1198,8 @@
         short: shortMonthLabel(key, previous),
         count: Math.max(0, numberOr(item && item.count, 0)),
         by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        /* 整月统计：这一桶跨出了区间（头一桶 / 尾一桶） */
+        partial: key < bounds.from || end > bounds.to,
         kind: "bucket"
       });
     });
@@ -1114,6 +1225,8 @@
         count: Math.max(0, numberOr(item && item.count, 0)),
         /* 这一年里每个收藏夹各多少条：点柱子时要拿它拼饼图，所以在源头带下来 */
         by: (item && item.byCollection && typeof item.byCollection === "object") ? item.byCollection : {},
+        /* 整年统计：这一桶跨出了区间（头一年 / 尾一年） */
+        partial: year + "-01-01" < bounds.from || year + "-12-31" > bounds.to,
         kind: "year"
       });
     });
@@ -1327,12 +1440,13 @@
       const count = Math.max(0, numberOr(row.count, 0));
       if (count > 0) list.push({ name: row.label || row.day, count: count });
     });
-    list.sort((a, b) => (a.name < b.name ? -1 : 1));
-    if (list.length <= PIE_MAX_SLICES) return list;
-    const head = list.slice(0, PIE_MAX_SLICES - 1);
-    const rest = list.slice(PIE_MAX_SLICES - 1);
-    head.push({ name: t("其它年份"), count: rest.reduce((sum, item) => sum + item.count, 0), other: true });
-    return head;
+    /* 年份按时间排（轴上的先后就是年份先后），但「留下哪几块」要看占比：
+       先按条数挑出够大的，剩下的并进「其它年份」，最后再按时间摆回去。 */
+    const byCount = list.slice().sort((a, b) => (b.count - a.count) || (a.name < b.name ? -1 : 1));
+    const picked = mergePieSlices(byCount, pieLabelsForYears());
+    if (!picked.some((slice) => slice.other)) return list;
+    picked.sort((a, b) => (a.other ? 1 : (b.other ? -1 : (a.name < b.name ? -1 : 1))));
+    return picked;
   }
 
   /* 年份构成：用年份图自己的选中键 yearFocusDay —— 点了某一年就出那一年的收藏夹构成
@@ -1348,8 +1462,9 @@
     drawPieTo(ui.yearPie, slices, total, {
       ariaLabel: yearRow ? t("收藏夹构成") : t("按年份的收藏占比饼图"),
       labelFor: (slice) => t("{name}：{count} 个视频，占 {percent}%", {
-        name: slice.name, count: formatCount(slice.count),
-        percent: formatCount(total > 0 ? Math.round(slice.count / total * 100) : 0)
+        name: slice.other ? slice.name : (slice.name || t("未归类收藏")),
+        count: formatCount(slice.count),
+        percent: formatCount(Number.isFinite(slice.percent) ? slice.percent : 0)
       })
     });
     legendInto(ui.yearPieLegend, slices, total);
@@ -1732,8 +1847,10 @@
     const high = from <= to ? to : from;
     const days = rangeDays(dayStartTime(low), dayEndTime(high));
     if (days > MAX_CUSTOM_DAYS) {
-      /* 日历只铺得下一年，超出就明说，不偷偷截断 */
-      setText(ui.calWarn, t("最长的自定义区间是 1 年，请把范围缩到一年以内。"));
+      /* 上限跟核心一致，真踩到就明说，不偷偷截断 */
+      setText(ui.calWarn, t("最长的自定义区间是 {years} 年，请把范围缩小一点。", {
+        years: formatCount(Math.max(1, Math.floor(MAX_CUSTOM_DAYS / 365)))
+      }));
       show(ui.calWarn, true);
       return;
     }

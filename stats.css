@@ -180,6 +180,14 @@ body {
   stroke: var(--brand-strong);
   stroke-width: 1.5;
 }
+/* 头尾那两根「整周 / 整月 / 整年」：条数含区间外的记录，用虚线描边 + 半透明底标出来。
+   不是「今天」那种空心（空心是浅底 + 实线描边），两者在深色主题下也不会看混。 */
+.stats-bar-partial {
+  fill-opacity: 0.42;
+  stroke: var(--brand);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
 /* 坐标轴与网格：一律走 --line / --line-soft，深色主题自动变浅 */
 .stats-axis-line {
   stroke: var(--line-soft);
@@ -626,6 +634,13 @@ html[data-theme="dark"] .stats-pie {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  /* 收藏夹多的日子（一天里几十个收藏夹）：图例自己滚，不把卡片撑成一条长龙。
+     分成 8 块上限之后最多也就 8 行，这里只是给窄屏和极长的名字兜底。
+     右侧留一点 padding 给滚动条，免得滚动条压住百分比。 */
+  max-height: min(38vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: var(--sp-1);
 }
 .stats-legend-item {
   display: flex;
