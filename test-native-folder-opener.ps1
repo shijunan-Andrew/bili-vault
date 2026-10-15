@@ -16,8 +16,22 @@ $launcherPath = Join-Path $HostRoot "folder-opener-launcher.exe"
 $workerPath = Join-Path $HostRoot "folder-opener-host.ps1"
 $settingsPath = Join-Path $HostRoot "settings.json"
 $manifestPath = Join-Path $HostRoot "$hostName.json"
-$registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+# 1.7.13（facet-native P2-n1）：注册表键按浏览器分。安装脚本从这一版起会为「本机装了
+# 哪些」逐个注册，所以自检也要逐个看，只要有一个键指向本目录的清单就算通过。
+$browserRoots = @(
+  "HKCU:\Software\Google\Chrome\NativeMessagingHosts",
+  "HKCU:\Software\Google\Chrome Beta\NativeMessagingHosts",
+  "HKCU:\Software\Google\Chrome Dev\NativeMessagingHosts",
+  "HKCU:\Software\Google\Chrome SxS\NativeMessagingHosts",
+  "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts",
+  "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
+  "HKCU:\Software\Vivaldi\NativeMessagingHosts",
+  "HKCU:\Software\Chromium\NativeMessagingHosts"
+)
 $problems = 0
+# 扩展侧（library.js 的 NATIVE_PROTOCOL_VERSION）认得的协议号。改协议要同时改三处：
+# 这里、native/folder-opener-host.ps1 的 $protocolVersion、native/folder-opener-launcher.cs 的 LauncherProtocolVersion。
+$expectedProtocol = 3
 
 # 失败必须由这里自己计数：以前它只打印不累加 $problems，调用方又忘了自己加，
 # 于是「清单 path 不对」「allowed_origins 为空」都会照常打印，最后仍然说「自检通过」——
@@ -42,17 +56,34 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
   $hasArgs = $manifest.PSObject.Properties.Name -contains "args"
   Write-Check (-not $hasArgs) "清单不含 Chrome 不支持的 args 字段" $(if ($hasArgs) { "存在 args，Chrome 会忽略它并导致启动失败" } else { "" })
   Write-Check ($manifest.path -eq $launcherPath) "清单 path 指向宿主启动器" ([string]$manifest.path)
-  Write-Check (@($manifest.allowed_origins).Count -gt 0) "清单 allowed_origins" ([string]::Join(", ", @($manifest.allowed_origins)))
+  # 1.7.13（facet-native P2-4 收尾）：以前只判 allowed_origins「非空」——
+  # 于是最常见的故障「ID 填错了」在自检里根本不存在，照样打印自检通过。
+  # settings.json 里的 extensionId 与清单是安装脚本同一次写下的，拿它当期望值。
+  $expectedId = ""
+  if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+    try { $expectedId = [string](Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json).extensionId } catch { $expectedId = "" }
+  }
+  if ($expectedId) {
+    Write-Check (@($manifest.allowed_origins) -contains "chrome-extension://$expectedId/") "清单 allowed_origins 与已装的扩展 ID 一致" "期望 chrome-extension://$expectedId/"
+  } else {
+    Write-Check (@($manifest.allowed_origins).Count -gt 0) "清单 allowed_origins（settings.json 里没有 extensionId，只能判非空）" ([string]::Join(", ", @($manifest.allowed_origins)))
+  }
 }
 
-if (Test-Path -LiteralPath $registryPath) {
-  # 光是「键在」不能算通过：Chrome 读的是默认值，默认值必须非空、而且指向一个真实
-  # 存在的清单文件，否则启动宿主时照样失败，而自检是绿的。
-  $registeredManifest = [string](Get-ItemProperty -Path $registryPath).'(default)'
-  $registeredOk = $registeredManifest -and (Test-Path -LiteralPath $registeredManifest -PathType Leaf)
-  Write-Check $registeredOk "注册表项" $(if ($registeredManifest) { $registeredManifest } else { "默认值为空" })
+# 1.7.13（facet-native P2-n1）：逐个浏览器键看默认值，必须正好指向本目录的清单文件。
+$registeredWhere = @()
+foreach ($browserRoot in $browserRoots) {
+  $candidate = Join-Path $browserRoot $hostName
+  if (-not (Test-Path -LiteralPath $candidate)) { continue }
+  $value = [string](Get-ItemProperty -Path $candidate -ErrorAction SilentlyContinue).'(default)'
+  if ($value) { $registeredWhere += "$browserRoot → $value" }
+}
+if (-not $registeredWhere.Count) {
+  Write-Check $false "注册表项" "没有任何浏览器的原生消息键指向本宿主（Chrome 正式版的键是 $([string]::Join("、", $browserRoots)) 里第一个）"
 } else {
-  Write-Check $false "注册表项" $registryPath
+  # 至少一个键必须指向本次自检的清单路径；指向别处的键单独提示（常见于换了宿主目录后没重装）。
+  $matchesThisHost = @($registeredWhere | Where-Object { $_ -like "*→ $manifestPath" }).Count -gt 0
+  Write-Check $matchesThisHost "注册表项" ([string]::Join("；", $registeredWhere))
 }
 
 function Send-NativeRequest([hashtable]$Payload) {
@@ -116,8 +147,17 @@ Write-Host "--- 协议自检：get-config ---" -ForegroundColor Cyan
 try {
   $config = Send-NativeRequest @{ action = "get-config" }
   if (-not $config.ok) { throw $config.message }
-  Write-Host ("  [OK]   协议版本：{0}" -f $config.version) -ForegroundColor Green
+  # 1.7.13（facet-native P2-6）：版本握手以前是单向的（宿主报、没人看）。
+  # 自检里把它变成断言：扩展认得的协议号是 3，宿主报不上来或报别的数，
+  # 就说明装的是老宿主 —— 这正是「点了没反应」的常见原因。
+  Write-Host ("  [OK]   宿主版本：{0}" -f $config.version) -ForegroundColor Green
   Write-Host ("  [OK]   下载目录：{0}（存在：{1}）" -f $config.downloadBasePath, $config.downloadBaseExists) -ForegroundColor Green
+  if ($null -eq $config.protocol) {
+    Write-Host "  [缺失] 协议版本：宿主没有报 protocol，装的多半是 1.7.13 之前的宿主。请重新运行 install-native-folder-opener.ps1。" -ForegroundColor Red
+    $problems += 1
+  } else {
+    Write-Check ([int]$config.protocol -eq $expectedProtocol) "协议版本" ("宿主报 {0}，扩展期望 {1}" -f $config.protocol, $expectedProtocol)
+  }
   if (-not $config.downloadBaseExists) {
     Write-Host "  [提示] 下载目录当前不存在；完成一次下载后它会被自动创建。" -ForegroundColor Yellow
   }

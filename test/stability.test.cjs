@@ -2690,6 +2690,90 @@ test("导入进度的落盘窗口放宽，复制绑定做了幂等（V1.7.12）"
   assert.equal(/button\.addEventListener\("click"/.test(copyFieldBody), false, "别在 copyFieldButton 里裸绑 click");
 });
 
+// ---- V1.7.13（审查报告 P2 批次 6：原生宿主）----
+// 原生宿主是独立的 PowerShell / C# 进程，测试跑不到它，只能靠文本断言守两件事：
+// 「两侧常量必须一致」和「已经修好的行为不许被改回去」。协议行为本身由
+// b_catch/_p2-batch6-native-probe.ps1 的探针真跑一遍（分片长度头 + 1 MiB 放大）。
+test("原生宿主的协议号三处一致，扩展侧真的会校验（V1.7.13）", () => {
+  const worker = readProjectFile("native/folder-opener-host.ps1");
+  const launcher = readProjectFile("native/folder-opener-launcher.cs");
+  const library = readProjectFile("library.js");
+  assert.match(worker, /\$protocolVersion = 3\b/, "工作脚本要报协议号 3");
+  assert.match(launcher, /LauncherProtocolVersion = 3;/, "启动器要报同一个协议号");
+  assert.match(library, /const NATIVE_PROTOCOL_VERSION = 3;/, "扩展侧要认得同一个协议号");
+  // 以前是单向握手：宿主每次都报 version，扩展从不看 —— 装了一版对不上的宿主
+  // 只会表现成「点了没反应」。
+  assert.match(library, /protocol !== NATIVE_PROTOCOL_VERSION/, "扩展侧必须真的比对协议号");
+  // 启动器自己产生的错误帧（长度非法、找不到工作脚本……）也要带 protocol，
+  // 否则扩展分不清「宿主版本旧」和「宿主根本没起来」。
+  assert.match(launcher, /"\{\\"ok\\":false,\\"protocol\\":" \+ LauncherProtocolVersion/, "启动器错误帧要带 protocol");
+  // 每条响应统一补 protocol / version，调用方不再各写一遍（漏一个就少一条握手信息）。
+  assert.match(worker, /if \(-not \$Response\.ContainsKey\("protocol"\)\) \{ \$Response\["protocol"\] = \$protocolVersion \}/, "响应要统一补 protocol");
+  assert.match(worker, /if \(-not \$Response\.ContainsKey\("version"\)\) \{ \$Response\["version"\] = \$hostVersion \}/, "响应要统一补 version");
+});
+
+test("长度头分片要读满、长度非法要先排空 body（V1.7.13）", () => {
+  const worker = readProjectFile("native/folder-opener-host.ps1");
+  // 修前是「一次裸 Read + 短读就 break」：帧头分片到达时脚本静默退出，
+  // stdout 0 字节、退出码 0，上层只看到「宿主没了」。
+  assert.match(worker, /while \(\$headerRead -lt 4\) \{/, "4 字节长度头必须循环读满");
+  assert.equal(/\$headerRead = \$inputStream\.Read\(\$header, 0, 4\)/.test(worker), false, "不许回到「一次裸 Read」");
+  // 修前拒绝非法的长度时不消费 body，剩下的字节被当成新的长度头 ——
+  // 实测一个 1 MiB 负载会放大出 262,146 条错误帧（19.4 MB stdout、63.8 秒）。
+  assert.match(worker, /if \(\$length -gt 0\) \{\s*\$remaining = \[int64\]\$length/, "长度非法时要把 body 排空");
+  assert.match(worker, /if \(-not \$drained\) \{ break \}/, "流断了就别再回帧");
+});
+
+test("自检不再结构性假绿：清单 ID 要跟已装的扩展 ID 比（V1.7.13）", () => {
+  const selfCheck = readProjectFile("test-native-folder-opener.ps1");
+  assert.match(selfCheck, /\$script:problems \+= 1/, "Write-Check 必须自己计数");
+  assert.equal(/\[bool\]\$manifest\.allowed_origins/.test(selfCheck), false, "别回到「只判非空」");
+  assert.match(selfCheck, /-contains "chrome-extension:\/\/\$expectedId\/"/, "allowed_origins 要跟 settings.json 里的 extensionId 比对");
+  assert.match(selfCheck, /\$expectedId = \[string\]\(Get-Content -LiteralPath \$settingsPath/, "期望 ID 来自 settings.json");
+  assert.match(selfCheck, /-like "\*→ \$manifestPath"/, "注册表默认值必须正好指向本目录的清单，指向别处的旧清单不算过");
+  // 只注册 Google Chrome 一个键 → Edge / Brave / Chrome Beta 上 sendNativeMessage
+  // 必然失败，而脚本照样打印「安装完成」。1.7.13 起按「本机装了哪些」逐个注册。
+  const installer = readProjectFile("install-native-folder-opener.ps1");
+  const browserKeys = installer.match(/NativeMessagingHosts\\\$hostName"/g) || [];
+  assert.ok(browserKeys.length >= 8, `安装脚本要按浏览器铺注册表键（现在 ${browserKeys.length} 条）`);
+  assert.match(readProjectFile("uninstall-native-folder-opener.ps1"), /foreach \(\$registryPath in \$registryPaths\)/, "卸载要逐个清掉这些键");
+});
+
+test("安装脚本先编译再落文件，-SkipRegistry 不许说「安装完成」（V1.7.13）", () => {
+  const installer = readProjectFile("install-native-folder-opener.ps1");
+  const compileIndex = installer.indexOf("正在编译宿主启动器");
+  const copyIndex = installer.indexOf("Copy-Item -LiteralPath $sourceScript");
+  assert.ok(compileIndex > 0 && copyIndex > 0, "找不到编译或拷贝步骤");
+  assert.ok(compileIndex < copyIndex, "编译必须排在拷贝工作脚本之前，否则编译失败会留下「新脚本 + 旧启动器」的混合态");
+  // 盘符根目录（D:\）的 GetDirectoryName 是 $null，不能拿它去 Test-Path
+  assert.match(installer, /if \(\[string\]::IsNullOrWhiteSpace\(\$parentPath\)\) \{/, "盘符根目录要单独处理");
+  assert.match(installer, /if \(\$SkipRegistry\) \{\s*Write-Host "已安装，但注册表未写入/, "-SkipRegistry 时不能打印「安装完成」");
+});
+
+test("所有 .ps1 / .cs 都存成 UTF-8 带 BOM（1.7.13 红线）", () => {
+  // AI_HANDOFF.md 的红线：PowerShell 5.1 会按系统 ANSI 代码页（本机 gb2312/936）
+  // 解析没有 BOM 的 .ps1，里面的中文注释会直接变成语法错误 —— 一个字节的差别，
+  // 症状却是「脚本全是乱码报错」。编辑工具很容易顺手把 BOM 剥掉，所以钉在这里。
+  // 唯一的例外是 bili-old-2015/tools/download.ps1：它自公开版本起就没有 BOM。
+  const allowNoBom = new Set(["bili-old-2015/tools/download.ps1"]);
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === ".git" || entry.name === "_ref") continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.(ps1|cs)$/i.test(entry.name)) continue;
+      const relative = path.relative(projectRoot, full).split(path.sep).join("/");
+      found.push(relative);
+      if (allowNoBom.has(relative)) continue;
+      const buffer = fs.readFileSync(full);
+      assert.ok(buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf, `${relative} 必须带 UTF-8 BOM`);
+    }
+  };
+  walk(projectRoot);
+  assert.ok(found.length >= 7, `至少要扫到 7 个脚本（现在扫到 ${found.length} 个）`);
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

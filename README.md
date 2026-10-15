@@ -129,6 +129,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 > 最新的在最上面，往下依次变旧。测试版（V1.0.0 之前）的开发历程见后面的「测试版版本说明」。
 
+## V1.7.13：原生目录助手的七处收尾
+
+七批里的第六批：**原生宿主**（`facet-native.md` 的 6 条 + 补充审查的 1 条）。改的全在 `native/` 与三个安装/自检脚本里，扩展侧只加了一处协议校验；界面、磁盘格式、storage 键都没有变化。
+
+- **长度头改成「读满为止」。** Native Messaging 的帧是流式的，4 字节长度前缀可能分两次到达。工作脚本原来是一次裸 `Read` 就判长度，短读直接退出——不回任何帧、退出码 0，上层只看到「宿主没了」（实测 2+2 分片：0 字节输出、432 ms 退出）。现在循环读到 4 字节；0 字节才算正常关流。启动器那侧本来就是读满的，所以这个缺陷只在绕过启动器直连宿主时暴露。
+- **长度非法时先把 body 排空再回错误帧。** 请求体超过 1 MiB 时脚本直接抛错，但那时候 body 一个字节都没读——剩下的字节会在下一轮循环里被当成新的长度头，于是每读 4 字节就回一条错误帧：喂 1 MiB 的负载实测放大出 **262,146 条错误帧、19.4 MB stdout、耗时 63.8 秒**。现在拒绝之前先按 64 KiB 分块把该读的字节读掉，只回一条错误帧。
+- **装到盘符根目录不再崩。** `-DownloadBasePath D:\` 时 `GetDirectoryName('D:\')` 返回 `$null`，紧接着 `Test-Path -LiteralPath $null` 抛的是裸的 `ParameterBindingValidationException`。运行时其实明确支持盘符根（`C:\` 能解析出 `C:\Users\Maxwell`），所以这里只是补上判断：父目录取不到时退回按「下载根目录本身」校验，并提示盘符根不太推荐。
+- **协议握手变成双向的。** 宿主一直在报 `version`，扩展侧从来不读。现在两边都有了协议号：`native/folder-opener-host.ps1` 的 `$protocolVersion`、`native/folder-opener-launcher.cs` 的 `LauncherProtocolVersion`、`library.js` 的 `NATIVE_PROTOCOL_VERSION`（都是 3，`test/stability.test.cjs` 有断言钉住三处一致）。帧格式变了但没重装的人，得到的是「协议版本对不上，请重新运行一次安装脚本」，而不是各种看不懂的解析失败；启动器自己的错误帧也带上了协议号与版本号，扩展才分得清「宿主版本旧」和「宿主根本没起来」。
+- **安装脚本先编译、后落文件。** 原来是先把工作脚本拷进宿主目录、再去找 `csc.exe` 编译——编译失败时留下一半新一半旧的混合态，提示却只有一句「编译失败」。现在顺序反过来：查源文件 → 找编译器 → 编译 → 写 settings → 拷工作脚本 → 写清单 → 写注册表。另外 `-SkipRegistry` 不再打印「安装完成。」，改成明说「已安装，但注册表未写入（-SkipRegistry）：浏览器还连不上原生助手。」
+- **注册表不再只铺 Chrome 一个键。** 原来只写 `HKCU:\Software\Google\Chrome\NativeMessagingHosts\`，于是 Edge、Brave、Chrome Beta 里 `sendNativeMessage` 必然失败，而安装脚本照样说「安装完成」。现在按「装没装」注册 8 个可能的键（Chrome 正式版始终注册；Chrome Beta/Dev/Canary、Edge、Brave、Vivaldi、Chromium 看各自的 `BLBeacon` 在不在——判据是 `BLBeacon` 而不是注册表键本身），卸载脚本按同一份清单逐个删。
+- **自检不再结构性假绿（这一条 1.7.8 只修了一半）。** 1.7.8 让 `Write-Check` 自己计数、注册表项要默认值非空且指向真实文件；但 `allowed_origins` 至今只判「条数大于 0」——换句话说，**ID 填错这个最常见的故障，自检照样全绿**。现在拿 `settings.json` 里记的 `extensionId` 逐字比对，注册表改成「至少有一个浏览器键的默认值正好指向本目录的清单」，并核对宿主报的 `protocol` 是不是扩展认得的那个。实测：把清单里的 ID 改成别的，自检报「清单 allowed_origins 与已装的扩展 ID 一致：期望 chrome-extension://…」，退出码 1。
+
+测试从 214 项增加到 **219** 项（新增 5 条守卫断言，其中一条扫全仓 `.ps1` / `.cs` 必须存成 UTF-8 带 BOM），词典 913 → 915 条（两条协议提示文案）。
+
 ## V1.7.12：十年的日历和上万条的筛选，都别再算第二遍
 
 七批里的第五批：**性能（第一份审计）**，`facet-perf.md` 的 7 条。这一版没有新功能，改的全是「同一份数据被反复算」的地方；界面、磁盘格式、storage 键都没有变化。
@@ -207,7 +221,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **`updateSavedFolderName` 的注释和代码对不上**：注释写「只在识别不到任何标签时提前返回」，代码其实两种旧标签（`保存文件夹：` / `所属收藏夹：`）都认得并会就地迁移。注释补成实际情况。
 - **`AI_HANDOFF.md` 还在教人「重新启用时改回 `chrome.runtime.getURL("retro.html")`」**，而 `retro.html/css/js` 在 1.5.9 就删了，真入口是 `bili-old-2015/index.html`。交接文档说错比不说更坏。
 - **`release.ps1` 里两处注释引用的历史数字**（V1.x 时期漏了 9 个版本的 README 小节、V1.4.0 的小节标题被误删整整缺了一版）标上了年代，免得被当成当前状态去核对。
-- **原生目录助手的自检脚本以前是「结构性假绿」**：`test-native-folder-opener.ps1` 里有两条检查只打印不计数，于是清单 `path` 写错、`allowed_origins` 为空都会照常打印、结尾仍然说「自检通过」；注册表那一条只要键在就算过，不看 Chrome 真正读的默认值是否为空、是否指向真实文件。现在失败由 `Write-Check` 一处计数，`allowed_origins` 按条数判断，注册表项要默认值非空且指向真实存在的清单文件才算过。
+- **原生目录助手的自检脚本以前是「结构性假绿」**：`test-native-folder-opener.ps1` 里有两条检查只打印不计数，于是清单 `path` 写错、`allowed_origins` 为空都会照常打印、结尾仍然说「自检通过」；注册表那一条只要键在就算过，不看 Chrome 真正读的默认值是否为空、是否指向真实文件。现在失败由 `Write-Check` 一处计数，`allowed_origins` 按条数判断，注册表项要默认值非空且指向真实存在的清单文件才算过。（1.7.13 又补上了当时缺的那一步：`allowed_origins` 现在跟 `settings.json` 里的扩展 ID 逐字比对，注册表默认值也要求正好指向本目录的清单——「ID 填错」这个最常见的故障在那之前是查不出来的。）
 
 顺带把工作区里开工前就改好、还没发版的三处也一起发了：`background.js` 顶部注释的理由写错（deadcode P2-4）、B 站视频页的 UP 主链接选择器不再扫全页（privacy P2-6）、`library.html` 的 `#toast` 去掉与 `role=status` 重复的 `aria-live`（ux P2-10）。
 
@@ -379,7 +393,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 **修掉一个上线级的 bug：彩蛋页的脚本根本没跑起来。** 你点「知道啦」关不掉，不是事件处理写错了 —— 而是那张页面的全部脚本都写在**内联 `<script>`** 里，而 MV3 扩展页默认只允许 `script-src 'self'`，内联脚本一律被拦。所以按钮点得到、点击事件也确实送到了按钮上，只是没有任何处理器活着；连页面别处的跳转也一起死着。现在脚本同时落成两份：内联副本（`file://` 直接打开照旧能用）+ 外链 `egg-2015.js`（扩展环境下真正跑起来的那份），并且给「知道啦」加了一条**纯 CSS 关闭通道**（按钮改成 `<label for>`，勾上隐藏的 checkbox 就把遮罩关掉）—— 就算脚本全被拦，也关得掉、也不会误跳转。「关掉之后不再回来」改用 `sessionStorage`，不再靠定时器。已经开着旧页面的标签按一次 F5 就生效，不需要重新加载扩展。
 
-**另外**：星期几改成七条独立词条（之前英文界面里会漏出「一…日」这类汉字）。两本词典各 827 → 847 条（**当前 913 条**<!-- i18n-count:913 -->，以 `node test/i18n-extract.cjs --check` 的输出为准），测试 198 项全绿。
+**另外**：星期几改成七条独立词条（之前英文界面里会漏出「一…日」这类汉字）。两本词典各 827 → 847 条（**当前 915 条**<!-- i18n-count:915 -->，以 `node test/i18n-extract.cjs --check` 的输出为准），测试 198 项全绿。
 
 ## V1.6.0：把上线前审查修完，统计页按你的要求重做
 
@@ -1336,7 +1350,7 @@ V1.1.20 只挡 `item.isInvalid`，V1.1.21 改用 `importUsefulTitle(item.title)`
 
 收藏夹移动或复制时会一并复制关联的下载目录；移动时再清理来源下载目录。删除视频或收藏夹可在确认窗口中选择是否同时删除关联下载，默认不勾选。下载失败会尝试写入本地备份文件夹的 `001错误报告`。旧的“未分类收藏”下载仍可按 BV/av 号识别并在移动或删除时纳入处理。
 
-稳定性回归检查**以 `node test/stability.test.cjs` 的实际输出为准**（用例还在持续增加，这里不写死数量）。其中包含**真执行 `archive-core.js` 纯函数的单元测试**（把模块 `require` 进来真的调用，覆盖安全命名、目录名与 BV/av 的互认、归档解析、分页、分享文案拆分、易变字段改写等）；其余静态断言覆盖目录结构与清单引用、多语言词典覆盖、归档格式与下载目录匹配、导入链路的失败与风控处理、缓存与封面 URL 生命周期、本地目录打开助手的目录限位，以及每个脚本能否真正解析。可在安装 Node.js 的环境中运行：`node test/stability.test.cjs`。<!-- test-count:214 -->
+稳定性回归检查**以 `node test/stability.test.cjs` 的实际输出为准**（用例还在持续增加，这里不写死数量）。其中包含**真执行 `archive-core.js` 纯函数的单元测试**（把模块 `require` 进来真的调用，覆盖安全命名、目录名与 BV/av 的互认、归档解析、分页、分享文案拆分、易变字段改写等）；其余静态断言覆盖目录结构与清单引用、多语言词典覆盖、归档格式与下载目录匹配、导入链路的失败与风控处理、缓存与封面 URL 生命周期、本地目录打开助手的目录限位，以及每个脚本能否真正解析。可在安装 Node.js 的环境中运行：`node test/stability.test.cjs`。<!-- test-count:219 -->
 
 ### 4.5：主题、多语言与若干交互调整
 

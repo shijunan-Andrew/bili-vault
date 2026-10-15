@@ -61,6 +61,8 @@
   "UP 主 UID": "Uploader UID",
   "UP 主主页": "Creator page",
   "UP主自行删除": "Deleted by the uploader",
+  "Windows 原生目录助手的协议版本对不上（它报 {got}，本插件需要 {want}）。请重新运行一次安装脚本。": "The Windows folder helper reports protocol {got}, but this extension needs {want}. Please run the install script again.",
+  "Windows 原生目录助手没有报告协议版本，装的多半是旧版本。请重新运行一次安装脚本。": "The Windows folder helper did not report a protocol version, so it is most likely an old build. Please run the install script again.",
   "Windows 原生目录助手未能完成请求。": "The Windows native folder helper could not complete the request.",
   "Windows 原生目录助手没有返回结果。": "The Windows native folder helper returned no result.",
   "av 号": "av ID",

@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **214** 项里<!-- test-count:214 -->，绝大多数是**读文件做文本正则断言**（另有 59 项真执行 `archive-core.js` 纯函数的单元测试，但那只覆盖纯逻辑）——
+`node test/stability.test.cjs` 的 **219** 项里<!-- test-count:219 -->，绝大多数是**读文件做文本正则断言**（另有 59 项真执行 `archive-core.js` 纯函数的单元测试，但那只覆盖纯逻辑）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -31,6 +31,17 @@
 - [ ] 已有一个**测试用的小收藏夹**（3–5 条就够，别拿上千条的默认收藏夹测）
 
 ---
+
+## V1.7.13 新增的几条
+
+本版改的是原生目录助手，装过旧版的机器**必须重跑一次 `install-native-folder-opener.ps1`**（帧里带了协议号，旧宿主会被扩展拒绝并提示重装）。
+
+1. **重跑安装脚本 + 自检**：`powershell -NoProfile -ExecutionPolicy Bypass -File install-native-folder-opener.ps1 -ExtensionId <你的扩展ID>`，然后 `powershell -NoProfile -ExecutionPolicy Bypass -File test-native-folder-opener.ps1`。结尾应是「自检通过」，并打印宿主版本 3.9.0 与协议版本。
+2. **故意把 ID 写错，自检必须失败**：把 `<宿主目录>\com.bcatch.folder_opener.json` 的 `allowed_origins` 改成 `chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/`，重跑自检，应看到「清单 allowed_origins 与已装的扩展 ID 一致：期望 chrome-extension://<你的ID>/」并且退出码 1。改回来。
+3. **协议对不上要给人话**：把 `native/folder-opener-host.ps1` 里的 `$protocolVersion` 临时改成 2（或留一份 1.7.13 之前的宿主），在收藏库里点「打开本地视频目录」，应提示「Windows 原生目录助手的协议版本对不上…请重新运行一次安装脚本。」，而不是静默失败。
+4. **盘符根不再崩**：`install-native-folder-opener.ps1 -DownloadBasePath "D:\"` 应给出「盘符根目录不太推荐」之类的提示，而不是一行 PowerShell 参数绑定异常。
+5. **Edge / Brave 也能用**：在 Edge 里加载同一份扩展，点「打开本地视频目录」应该真的打开资源管理器（旧版只在 Chrome 里能成）。安装脚本结尾会列出「已为以下浏览器注册原生消息宿主」。
+6. **`-SkipRegistry` 不再说「安装完成」**：带上这个开关跑一次，结尾必须是「已安装，但注册表未写入（-SkipRegistry）：浏览器还连不上原生助手。」
 
 ## V1.7.12 新增的几条
 

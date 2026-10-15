@@ -2662,6 +2662,12 @@ function openDetail(video, restoreTo, options = {}) {
 }
 
 const NATIVE_HOST_NAME = "com.bcatch.folder_opener";
+// 原生宿主的协议号。三处必须一致：这里、native/folder-opener-host.ps1 的
+// $protocolVersion、native/folder-opener-launcher.cs 的 LauncherProtocolVersion
+// （1.7.13 / facet-native P2-6；test/stability.test.cjs 有断言钉住）。
+// 以前版本握手是单向的 —— 宿主每次都报 version，扩展从不看，装了一版对不上的
+// 宿主只会表现成「点了没反应」。改帧格式或字段语义时必须同时改这三处。
+const NATIVE_PROTOCOL_VERSION = 3;
 
 // 本地目录打开助手（宿主启动器）以 Native Messaging 帧协议应答。失败时它会回一条
 // { ok: false, message } 的响应，这里把 message 原样带出去，避免只看到
@@ -2679,6 +2685,15 @@ function nativeHostRequest(message) {
         }
         if (!response) { finish(() => reject(new Error(BcaI18n.t("Windows 原生目录助手没有返回结果。")))); return; }
         if (!response.ok) { finish(() => reject(new Error(response.message ? BcaI18n.t(response.message) : BcaI18n.t("Windows 原生目录助手未能完成请求。")))); return; }
+        // 1.7.13（facet-native P2-6）：宿主每条帧都带 protocol，对不上就直说。
+        // 老宿主（1.7.12 及以前）没有这个字段 —— 那正是「点了没反应」的最常见原因。
+        const protocol = Number(response.protocol);
+        if (protocol !== NATIVE_PROTOCOL_VERSION) {
+          finish(() => reject(new Error(Number.isFinite(protocol) && response.protocol !== undefined
+            ? BcaI18n.t("Windows 原生目录助手的协议版本对不上（它报 {got}，本插件需要 {want}）。请重新运行一次安装脚本。", { got: protocol, want: NATIVE_PROTOCOL_VERSION })
+            : BcaI18n.t("Windows 原生目录助手没有报告协议版本，装的多半是旧版本。请重新运行一次安装脚本。"))));
+          return;
+        }
         finish(() => resolve(response));
       });
     } catch (error) {

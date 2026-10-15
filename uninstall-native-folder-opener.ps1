@@ -23,19 +23,35 @@ function Assert-HostRootSafe([string]$Path) {
 }
 
 $hostName = "com.bcatch.folder_opener"
-$registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+# 1.7.13（facet-native P2-n1）：安装脚本从这一版起会为「本机装了哪些」Chromium 浏览器
+# 逐个注册，卸载也必须逐个清。这里按同一份浏览器名单遍历，另外把 n1 之前只写过
+# Chrome 一个键的老装法一并覆盖到。
+$browserRoots = @(
+  "HKCU:\Software\Google\Chrome\NativeMessagingHosts",
+  "HKCU:\Software\Google\Chrome Beta\NativeMessagingHosts",
+  "HKCU:\Software\Google\Chrome Dev\NativeMessagingHosts",
+  "HKCU:\Software\Google\Chrome SxS\NativeMessagingHosts",
+  "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts",
+  "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
+  "HKCU:\Software\Vivaldi\NativeMessagingHosts",
+  "HKCU:\Software\Chromium\NativeMessagingHosts"
+)
+$registryPaths = $browserRoots | ForEach-Object { Join-Path $_ $hostName }
 if (-not $HostRoot) { $HostRoot = Join-Path $env:LOCALAPPDATA "BcaFolderOpener" }
 $HostRoot = Assert-HostRootSafe $HostRoot
 
 $removed = @()
 $failures = @()
 
-if (-not $SkipRegistry -and (Test-Path -LiteralPath $registryPath)) {
-  try {
-    Remove-Item -LiteralPath $registryPath -Recurse -Force
-    $removed += "注册表项 $registryPath"
-  } catch {
-    $failures += "注册表项 $registryPath：$($_.Exception.Message)"
+if (-not $SkipRegistry) {
+  foreach ($registryPath in $registryPaths) {
+    if (-not (Test-Path -LiteralPath $registryPath)) { continue }
+    try {
+      Remove-Item -LiteralPath $registryPath -Recurse -Force
+      $removed += "注册表项 $registryPath"
+    } catch {
+      $failures += "注册表项 $registryPath：$($_.Exception.Message)"
+    }
   }
 }
 

@@ -794,11 +794,11 @@ V1.2.3 起：**折叠的须知必须留个「口子」** —— 摘要行里固�
 1. **Chrome 的原生消息清单只识别 `name`、`description`、`path`、`type`、`allowed_origins`，不解析 `args`。** 3.7 把 PowerShell 的启动参数写进了 `args`，Chrome 忽略该字段后启动了一个没有任何参数的 `powershell.exe`：它把二进制帧当成命令读，协议当场损坏，扩展只能看到 `chrome.runtime.lastError`，于是永远提示“无法启动文件资源管理器”。因此清单的 `path` 必须指向一个不带参数即可运行的可执行文件，现在指向编译产物 `folder-opener-launcher.exe`。**任何后续改动都不要重新引入 `args`**（`test/stability.test.cjs` 里有对应的回归断言）。
 2. **`settings.json` 必须用 `-Encoding UTF8` 读取。** 3.7 的安装脚本以无 BOM 的 UTF-8 写该文件，而工作脚本用 `Get-Content -Raw`（PowerShell 5.1 默认按系统 ANSI 代码页）读取，中文下载路径被解坏，`ConvertFrom-Json` 直接抛出“无法识别的转义序列”，即使修好 `args` 也会继续失败。现在安装脚本写 UTF-8 带 BOM，工作脚本始终显式 `-Encoding UTF8`。所有 `.ps1` 与 `.cs` 源文件本身也必须保存为 **UTF-8 带 BOM**，否则 PowerShell 5.1 解析中文会乱码；写成不带 BOM 后必须补回。
 
-**运行链路**：Chrome 启动 `folder-opener-launcher.exe` → 启动器读取一条带 4 字节长度前缀的请求 → 转发给同目录的 `folder-opener-host.ps1`（`-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`，`CreateNoWindow`，不闪窗）→ 把响应帧原样写回 Chrome。启动器在自身失败时也会回一条 `{"ok":false,"message":…}` 帧，所以扩展能显示真正原因，而不是只有 Chrome 的 `native host has exited`。`sendNativeMessage` 每次调用都会新起一个宿主进程，因此启动器只处理一条消息后退出；若将来改用 `connectNative` 长连接，必须改成循环处理。
+**运行链路**：Chrome 启动 `folder-opener-launcher.exe` → 启动器读取一条带 4 字节长度前缀的请求 → 转发给同目录的 `folder-opener-host.ps1`（`-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`，`CreateNoWindow`，不闪窗）→ 把响应帧原样写回 Chrome。启动器在自身失败时也会回一条 `{"ok":false,"protocol":3,"version":…,"message":…}` 帧，所以扩展能显示真正原因，而不是只有 Chrome 的 `native host has exited`；**1.7.13 起错误帧也带协议号**，扩展才分得清「宿主版本旧」和「宿主根本没起来」。`sendNativeMessage` 每次调用都会新起一个宿主进程，因此启动器只处理一条消息后退出；若将来改用 `connectNative` 长连接，必须改成循环处理。
 
-**工作脚本协议**：`get-config` 返回 `downloadBasePath` 与 `version`；`resolve-directory` 只校验并返回绝对路径（不打开窗口），供“复制视频目录路径”使用；`open-directory` 校验后调用 `explorer.exe` 并返回 `targetPath`。三者都会校验目录名不含分隔符、目标路径必须仍在配置的下载根目录之内。
+**工作脚本协议**（当前 `protocol` = 3、`version` = 3.9.0）：每条响应都由 `Write-Response` 统一补上 `protocol` 与 `version` —— 三处常量必须一致：`native/folder-opener-host.ps1` 的 `$protocolVersion`、`native/folder-opener-launcher.cs` 的 `LauncherProtocolVersion`、`library.js` 的 `NATIVE_PROTOCOL_VERSION`（`test/stability.test.cjs` 有断言钉住）。长度前缀是 4 字节，**长度头必须循环读满**（分片到达时一次裸 `Read` 只会回 1~3 字节），**长度非法时必须先把 body 排空再回错误帧**，否则剩下的字节会被当成新的长度头继续解析。`get-config` 返回 `downloadBasePath`、`protocol` 与 `version`；`resolve-directory` 只校验并返回绝对路径（不打开窗口），供“复制视频目录路径”使用；`open-directory` 校验后调用 `explorer.exe` 并返回 `targetPath`。三者都会校验目录名不含分隔符、目标路径必须仍在配置的下载根目录之内。
 
-**排错顺序**：先运行 `test-native-folder-opener.ps1`（默认不打开资源管理器）。它检查宿主目录四个文件、清单是否含 `args`、`path` 是否指向启动器、注册表项，然后直接按帧协议调用启动器。自检通过说明原生侧没问题，剩下的就是扩展重载或 Chrome 未重启。改脚本后务必重新做 PowerShell 语法检查并重新编译启动器（重跑安装脚本即可）。
+**排错顺序**：先运行 `test-native-folder-opener.ps1`（默认不打开资源管理器）。它检查宿主目录四个文件、清单是否含 `args`、`path` 是否指向启动器、`allowed_origins` 是否**逐字等于 `settings.json` 里记的扩展 ID**（1.7.13 起才真的比对 ID；在那之前只判「非空」，所以最常见的那种故障——ID 填错——照样自检通过）、注册表里至少有一个浏览器键的默认值正好指向本目录的清单，然后直接按帧协议调用启动器，并核对宿主报的 `protocol` 是不是扩展认得的那个。自检通过说明原生侧没问题，剩下的就是扩展重载或 Chrome 未重启。改脚本后务必重新做 PowerShell 语法检查并重新编译启动器（重跑安装脚本即可）。
 
 ## `视频信息.txt` 格式（4.2 起）
 
@@ -904,7 +904,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:214 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:219 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

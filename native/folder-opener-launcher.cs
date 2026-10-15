@@ -16,6 +16,14 @@ internal static class FolderOpenerLauncher
 {
     private const int MaxMessageLength = 1024 * 1024;
 
+    // 1.7.13（facet-native P2-6）：协议号与宿主版本。
+    // 工作脚本自己的帧里也各带一份 version，但启动器**自己**产生的错误帧（长度非法、
+    // 找不到工作脚本、工作进程没输出……）以前一条 version 都没有，扩展侧无从判断
+    // 「是版本对不上」还是「压根没装好」。这一份必须与 native/folder-opener-host.ps1
+    // 里的 $hostVersion / $protocolVersion 保持一致。
+    private const string LauncherHostVersion = "3.9.0";
+    private const int LauncherProtocolVersion = 3;
+
     private static byte[] ReadExactly(Stream stream, int count)
     {
         byte[] buffer = new byte[count];
@@ -77,7 +85,12 @@ internal static class FolderOpenerLauncher
                 case '\r': text.Append("\\r"); break;
                 case '\t': text.Append("\\t"); break;
                 default:
-                    if (character < ' ') text.Append("\\u").Append(((int)character).ToString("x4"));
+                    // 1.7.13（facet-native 加固）：< 与 > 转成 \\uXXXX。
+                    // 它们不是 JSON 的保留字符，转义后字符串完全等价；但这样一来，
+                    // 就算某个调用方把帧当 HTML 塞进页面（innerHTML / 属性插值），
+                    // 也拼不出标签。这是纵深防御，不替代调用方的转义。
+                    if (character < ' ' || character == '<' || character == '>')
+                        text.Append("\\u").Append(((int)character).ToString("x4"));
                     else text.Append(character);
                     break;
             }
@@ -97,9 +110,17 @@ internal static class FolderOpenerLauncher
 
     // 失败时也要回一条协议内的响应，扩展才能显示真正的原因，
     // 而不是只看到 Chrome 的 “native host has exited”。
+    // 1.7.13（facet-native P2-6）：错误帧必须带 protocol + version，
+    // 否则扩展侧无法区分「宿主是老版本」和「宿主根本没装好」。
     private static void WriteErrorFrame(Stream stream, string message)
     {
-        try { WriteFrame(stream, "{\"ok\":false,\"message\":" + QuoteJson(message) + "}"); }
+        try
+        {
+            WriteFrame(stream,
+                "{\"ok\":false,\"protocol\":" + LauncherProtocolVersion +
+                ",\"version\":" + QuoteJson(LauncherHostVersion) +
+                ",\"message\":" + QuoteJson(message) + "}");
+        }
         catch (Exception) { }
     }
 
@@ -169,6 +190,13 @@ internal static class FolderOpenerLauncher
                 {
                     WriteErrorFrame(output, "本地目录打开助手没有返回结果（工作进程退出码 " + worker.ExitCode + "），请重新运行安装脚本。");
                     return 1;
+                }
+                if (worker.ExitCode != 0)
+                {
+                    // 已经转发过输出就不再补帧（补了扩展会收到第二段非预期的 JSON），
+                    // 但退出码要留在 stderr 里 —— Chrome 会把它记进扩展的错误日志。
+                    try { Console.Error.WriteLine("folder-opener-host.ps1 退出码 " + worker.ExitCode); }
+                    catch (Exception) { }
                 }
                 return worker.ExitCode;
             }
