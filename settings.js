@@ -117,6 +117,45 @@ async function forgetRememberedUid() {
   }
 }
 
+/* 1.7.17（facet-privacy P1-1）：卸载扩展时 Chrome 只删扩展自己，不会碰原生消息宿主。
+   残留 = 注册表项 + %LOCALAPPDATA%\BcaFolderOpener（settings.json 里有扩展 ID 和下载目录路径）。
+   这条命令和仓库里的 uninstall-native-folder-opener.ps1 做的是同一件事，但用户不需要手上
+   还留着安装包；两边的浏览器清单由 test/stability.test.cjs 的守卫断言保持同步。 */
+const NATIVE_CLEANUP_VENDORS = [
+  "Google\\Chrome",
+  "Google\\Chrome Beta",
+  "Google\\Chrome Dev",
+  "Google\\Chrome SxS",
+  "Microsoft\\Edge",
+  "BraveSoftware\\Brave-Browser",
+  "Vivaldi",
+  "Chromium"
+];
+
+function nativeCleanupCommand() {
+  const paths = NATIVE_CLEANUP_VENDORS.map((vendor) => `"HKCU:\\Software\\${vendor}\\NativeMessagingHosts\\com.bcatch.folder_opener"`);
+  paths.push('"$env:LOCALAPPDATA\\BcaFolderOpener"');
+  return `Remove-Item -LiteralPath @(${paths.join(", ")}) -Recurse -Force -ErrorAction SilentlyContinue`;
+}
+
+function showNativeCleanupStatus(text) {
+  const box = $("nativeCleanupStatus");
+  if (!box) return;
+  writeText(box, text);
+  setVisible(box, true);
+}
+
+async function copyNativeCleanupCommand() {
+  const command = nativeCleanupCommand();
+  try {
+    await navigator.clipboard.writeText(command);
+    showNativeCleanupStatus(BcaI18n.t("已复制。粘到 PowerShell 里回车即可完成清理。"));
+  } catch (_) {
+    // 剪贴板被拒（例如页面不在前台）时退回「让用户自己复制」，不能只报一句失败
+    window.prompt(BcaI18n.t("自动复制没成功，手动复制下面这条命令："), command);
+  }
+}
+
 // 「自定义」才显示背景图那一组；毛玻璃是全局效果，但强度滑块只在开关打开时才有意义
 function renderAppearance() {
   const custom = BcaTheme.current() === "custom";
@@ -455,6 +494,7 @@ async function boot() {
 
   // 1.7.11（facet-privacy P2-3）：缓存的 B 站 UID 要有一个能反悔的入口
   $("forgetUid")?.addEventListener("click", () => { forgetRememberedUid(); });
+  $("copyNativeCleanup")?.addEventListener("click", () => { copyNativeCleanupCommand(); });
 
   // 滑块要「拖着就生效」，所以监听 input 而不是 change（change 要等松手）
   const sliders = [

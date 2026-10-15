@@ -1548,11 +1548,15 @@ async function restoreViewSettings() {
 
    只导出「界面偏好」：主题、语言、每页数量、视图模式、收藏夹排序，以及当前这一页的
    筛选偏好。**绝不导出**目录授权句柄（IndexedDB 里的 rootHandle / downloadFolder）、
-   任何 B 站数据、任何错误报告内容，也不做除用户点选之外的文件访问。 */
-const CONFIG_APP_ID = "bili-vault/library-settings";
-const CONFIG_VERSION = 1;
-// 配置文件的显示名：里面是给机器/人读的英文标识，不进词典（不是界面文字）
-const CONFIG_NAME = "Bili Vault · library settings";
+   任何 B 站数据、任何错误报告内容，也不做除用户点选之外的文件访问。
+   1.7.17 起「收藏夹顺序 + 三项筛选」按**个人内容**对待：导出前会列出具体内容并要求确认，
+   设置页另外提供只导「外观与档位」的入口，导入侧同样会二次确认。 */
+// 1.7.17（facet-privacy P1-2）：配置文件的形状与「带了哪些个人内容」的判断都搬到了
+// archive-core.js —— 导出前的提示、导入时的二次确认、设置页的「只导外观与档位」
+// 读的是同一份实现，不会再各说各话。
+const CONFIG_APP_ID = BcaArchiveCore.CONFIG_APP_ID;
+const CONFIG_VERSION = BcaArchiveCore.CONFIG_VERSION;
+const CONFIG_NAME = BcaArchiveCore.CONFIG_NAME;
 
 function currentFilterPreferences() {
   return {
@@ -1564,26 +1568,38 @@ function currentFilterPreferences() {
   };
 }
 
-function buildConfigPayload() {
-  return {
-    app: CONFIG_APP_ID,
-    version: CONFIG_VERSION,
-    name: CONFIG_NAME,
-    exportedAt: new Date().toISOString(),
-    preferences: {
-      theme: BcaTheme.current(),
-      locale: BcaI18n.locale(),
-      pageSize,
-      viewMode,
-      collectionOrder: [...collectionOrder],
-      filters: currentFilterPreferences()
-    }
-  };
+/* includePersonal === false 时只带主题 / 语言 / 每页数量 / 视图模式（设置页那个入口用）。 */
+function buildConfigPayload(includePersonal = true) {
+  return BcaArchiveCore.buildConfigPayload({
+    theme: BcaTheme.current(),
+    locale: BcaI18n.locale(),
+    pageSize,
+    viewMode,
+    collectionOrder: [...collectionOrder],
+    filters: currentFilterPreferences()
+  }, { includePersonal });
 }
 
-function downloadConfigFile() {
+/* 「这份配置里带了哪些你自己的东西」—— 人话版。导出提示与导入确认共用同一份。 */
+function configPersonalSummaryText(payload) {
+  const fields = BcaArchiveCore.configPersonalFields(payload);
+  const parts = [];
+  if (fields.collections) parts.push(BcaI18n.t("收藏夹顺序里的 {count} 个收藏夹名", { count: fields.collections }));
+  if (fields.search) parts.push(BcaI18n.t("搜索关键词「{text}」", { text: fields.search }));
+  if (fields.upFilter) parts.push(BcaI18n.t("UP 主筛选「{text}」", { text: fields.upFilter }));
+  if (fields.tagFilter) parts.push(BcaI18n.t("标签筛选「{text}」", { text: fields.tagFilter }));
+  // 分隔符不进词典：和 refreshScanNotice 的「；」一样，按项目既有做法保持字面量
+  return parts.join("、");
+}
+
+function downloadConfigFile(includePersonal = true) {
   try {
-    const payload = buildConfigPayload();
+    const payload = buildConfigPayload(includePersonal);
+    // 1.7.17（facet-privacy P1-2）：导出前先把「里面有什么」摆出来。带了个人内容就必须
+    // 过一次确认 —— 配置文件是本项目里唯一「设计上要交给别人」的产物，顺手发出去就等于
+    // 把自己的收藏夹清单和检索习惯一起公开。
+    const detail = configPersonalSummaryText(payload);
+    if (detail && !window.confirm(BcaI18n.t("这份配置会带上你自己的内容：{detail}。发给别人就等于把这些一起公开。确定导出吗？", { detail }))) return;
     // 带 BOM，Windows 记事本打开也不会乱码
     const blob = new Blob([`\ufeff${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1594,7 +1610,9 @@ function downloadConfigFile() {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    showToast(BcaI18n.t("配置已导出。"));
+    showToast(includePersonal
+      ? BcaI18n.t("配置已导出（含收藏夹顺序与筛选）。")
+      : BcaI18n.t("配置已导出（只含外观与档位）。"));
   } catch (error) {
     showToast(BcaI18n.t("导出配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
   }
@@ -1693,6 +1711,12 @@ async function importConfigFromText(text) {
   }
   if (!payload || typeof payload !== "object" || payload.app !== CONFIG_APP_ID) {
     throw new Error(BcaI18n.t("这不是哔哩藏库导出的配置文件。"));
+  }
+  // 1.7.17（facet-privacy P1-2）：配置里带着收藏夹名 / 筛选关键词时，导入前二次确认。
+  // 那是别人（或你自己以前）的检索习惯，不该悄悄覆盖掉当前的排序与筛选。
+  const personalDetail = configPersonalSummaryText(payload);
+  if (personalDetail && !window.confirm(BcaI18n.t("这份配置里带着收藏夹名与筛选关键词：{detail}。导入会用它们覆盖当前的排序与筛选（本地归档文件不会被改动）。确定导入吗？", { detail: personalDetail }))) {
+    return false;
   }
   const preferences = sanitizeConfigPreferences(payload.preferences);
   const rawOrder = Array.isArray(payload.preferences?.collectionOrder) ? preferences.collectionOrder : [];
@@ -4717,7 +4741,9 @@ clearActionTargetsButton.addEventListener("click", () => {
 confirmBackdrop.addEventListener("click", (event) => {
   if (event.target === confirmBackdrop && !deleteInProgress) closeDeleteConfirmation();
 });
-exportConfigButton?.addEventListener("click", downloadConfigFile);
+exportConfigButton?.addEventListener("click", () => downloadConfigFile(true));
+// 1.7.17（facet-privacy P1-2）：不含收藏夹顺序与筛选的出口，点了不再弹确认
+(document.getElementById("exportConfigSlim"))?.addEventListener("click", () => downloadConfigFile(false));
 importConfigButton?.addEventListener("click", () => {
   configFileInput.value = "";
   configFileInput.click();
@@ -4735,6 +4761,8 @@ configFileInput?.addEventListener("change", async () => {
       }));
     }
     const warnings = await importConfigFromText(await file.text());
+    // 1.7.17：二次确认里点了取消 —— 什么都不做，也不报「已导入」
+    if (warnings === false) return;
     // 1.7.10（P2-2）：有没生效的项就必须说出来，不能一律报「配置已导入。」
     showToast(warnings?.length
       ? BcaI18n.t("配置已导入，但有 {count} 项没生效：{detail}", { count: warnings.length, detail: warnings.join("；") })

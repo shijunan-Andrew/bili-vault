@@ -50,6 +50,9 @@
         <div class="config-tools">
           <button id="exportConfig" class="button button-quiet config-button" type="button"><span data-icon="download"></span><span data-i18n="导出配置">导出配置</span></button>
           <button id="importConfig" class="button button-quiet config-button" type="button"><span data-icon="file"></span><span data-i18n="导入配置">导入配置</span></button>
+          <!-- 1.7.17（facet-privacy P1-2）：配置文件里默认带着收藏夹名和筛选关键词，
+               那是「你是谁、你在看什么」。给一个不含个人内容的出口，占一整行免得挤成三个小按钮。 -->
+          <button id="exportConfigSlim" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="download"></span><span data-i18n="只导外观与档位">只导外观与档位</span></button>
           <input id="configFileInput" type="file" accept="application/json,.json" hidden>
         </div>
       </div>

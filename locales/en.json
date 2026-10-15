@@ -919,5 +919,19 @@
   "Windows 原生目录助手的协议版本对不上（它报 {got}，本插件需要 {want}）。请重新运行一次安装脚本。": "The Windows folder helper reports protocol {got}, but this extension needs {want}. Please run the install script again.",
   "Windows 原生目录助手没有报告协议版本，装的多半是旧版本。请重新运行一次安装脚本。": "The Windows folder helper did not report a protocol version, so it is most likely an old build. Please run the install script again.",
   "Windows 原生目录助手没有返回结果。": "The Windows native folder helper returned no result.",
-  "Windows 原生目录助手未能完成请求。": "The Windows native folder helper could not complete the request."
+  "Windows 原生目录助手未能完成请求。": "The Windows native folder helper could not complete the request.",
+  "收藏夹顺序里的 {count} 个收藏夹名": "{count} collection names from the folder order",
+  "搜索关键词「{text}」": "search keyword \"{text}\"",
+  "UP 主筛选「{text}」": "uploader filter \"{text}\"",
+  "标签筛选「{text}」": "tag filter \"{text}\"",
+  "这份配置会带上你自己的内容：{detail}。发给别人就等于把这些一起公开。确定导出吗？": "This config carries your own content: {detail}. Sharing it publishes all of it. Export anyway?",
+  "配置已导出（含收藏夹顺序与筛选）。": "Config exported (including folder order and filters).",
+  "配置已导出（只含外观与档位）。": "Config exported (appearance and layout only).",
+  "这份配置里带着收藏夹名与筛选关键词：{detail}。导入会用它们覆盖当前的排序与筛选（本地归档文件不会被改动）。确定导入吗？": "This config carries collection names and filter keywords: {detail}. Importing overwrites the current order and filters (local archive files are not touched). Import anyway?",
+  "清理本机的原生目录助手": "Clean up the Windows folder helper",
+  "点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。它会删掉原生消息宿主、注册表项和残留的文件夹（里面有你选择过的下载目录路径）。": "The button copies a command; paste it into PowerShell and press Enter. It removes the native messaging host, its registry keys and the leftover folder (which holds the download path you picked).",
+  "复制清理命令": "Copy the clean-up command",
+  "已复制。粘到 PowerShell 里回车即可完成清理。": "Copied. Paste it into PowerShell and press Enter to finish.",
+  "只导外观与档位": "Appearance and layout only",
+  "自动复制没成功，手动复制下面这条命令：": "Copying failed. Copy this command manually:"
 }

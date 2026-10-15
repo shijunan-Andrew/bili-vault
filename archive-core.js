@@ -412,6 +412,95 @@
     return detail ? `${hint}（${name}：${detail}）` : `${hint}（${name}）`;
   }
 
+  /* ------------------------------------------------------------------
+     配置文件（导出 / 导入）的形状：全仓唯一一份。
+
+     1.7.17（facet-privacy P1-1/P1-2）：以前这个对象由 library.js 自己拼，于是只有那一页
+     知道「导出去的到底包含什么」—— 导出前没有任何提示，也没有「只导外观」的选项，
+     而配置文件偏偏是本项目里唯一「设计上要交给别人」的产物。挪到这里有两个好处：
+       ① 「包含哪些个人内容」变成可测的纯函数：导出前的提示、导入时的二次确认、设置页的
+          「只导外观与档位」读的是同一份判断，不会各说各话；
+       ② 设置页也能用它，不必再复制一份字面量。
+
+     个人内容 = 收藏夹顺序（一串用户自建的收藏夹名）+ 搜索关键词 + UP 主筛选 + 标签筛选。
+     ------------------------------------------------------------------ */
+  const CONFIG_APP_ID = "bili-vault/library-settings";
+  const CONFIG_VERSION = 1;
+  // 配置文件的显示名：给机器/人读的英文标识，不进词典（不是界面文字）
+  const CONFIG_NAME = "Bili Vault · library settings";
+
+  // 与 library.js 导入侧同一组上限：最多 500 条、每条最多 120 字符
+  const CONFIG_MAX_ORDER_ENTRIES = 500;
+  const CONFIG_MAX_TEXT_LENGTH = 120;
+
+  function normalizeConfigPreferences(raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const filters = source.filters && typeof source.filters === "object" ? source.filters : {};
+    return {
+      theme: typeof source.theme === "string" ? source.theme : "system",
+      locale: typeof source.locale === "string" ? source.locale : "zh-CN",
+      pageSize: source.pageSize,
+      viewMode: source.viewMode,
+      // 1.7.17：封顶跟着形状一起搬过来。原来只有导入侧的 sanitizeConfigPreferences 封顶，
+      // 导出侧不封 —— 收藏夹多、关键词长的时候，导出的文件本身就能撑到几百 KB。
+      collectionOrder: (Array.isArray(source.collectionOrder) ? source.collectionOrder : [])
+        .filter((name) => typeof name === "string")
+        .slice(0, CONFIG_MAX_ORDER_ENTRIES)
+        .map((name) => name.slice(0, CONFIG_MAX_TEXT_LENGTH)),
+      filters: {
+        search: typeof filters.search === "string" ? filters.search.slice(0, CONFIG_MAX_TEXT_LENGTH) : "",
+        upFilter: typeof filters.upFilter === "string" ? filters.upFilter.slice(0, CONFIG_MAX_TEXT_LENGTH) : "all",
+        tagFilter: typeof filters.tagFilter === "string" ? filters.tagFilter.slice(0, CONFIG_MAX_TEXT_LENGTH) : "all"
+      }
+    };
+  }
+
+  /* includePersonal === false 时只导出主题、语言、每页数量、视图模式 —— 也就是「外观与档位」，
+     可以放心发给别人。true / 不传时带上收藏夹顺序与三项筛选。
+     `_containsPersonalData` 是给导入方看的自述字段：导入时按它（以及真实的字段存在性）
+     决定要不要弹二次确认。 */
+  function buildConfigPayload(preferences, options = {}) {
+    const includePersonal = options.includePersonal !== false;
+    const prefs = normalizeConfigPreferences(preferences);
+    const payload = {
+      app: CONFIG_APP_ID,
+      version: CONFIG_VERSION,
+      name: CONFIG_NAME,
+      exportedAt: new Date().toISOString(),
+      _containsPersonalData: includePersonal,
+      preferences: {
+        theme: prefs.theme,
+        locale: prefs.locale,
+        pageSize: prefs.pageSize,
+        viewMode: prefs.viewMode
+      }
+    };
+    if (includePersonal) {
+      payload.preferences.collectionOrder = prefs.collectionOrder.slice();
+      payload.preferences.filters = { ...prefs.filters };
+    }
+    return payload;
+  }
+
+  /* 这份配置里到底带了哪些个人内容 —— 导出前的提示、导入时的二次确认、
+     设置页的说明都读它。返回「有什么」，拼文案是调用方的事。 */
+  function configPersonalFields(payload) {
+    const prefs = payload && payload.preferences && typeof payload.preferences === "object" ? payload.preferences : {};
+    const filters = prefs.filters && typeof prefs.filters === "object" ? prefs.filters : {};
+    return {
+      collections: Array.isArray(prefs.collectionOrder) ? prefs.collectionOrder.filter((name) => typeof name === "string").length : 0,
+      search: typeof filters.search === "string" ? filters.search : "",
+      upFilter: typeof filters.upFilter === "string" && filters.upFilter !== "all" ? filters.upFilter : "",
+      tagFilter: typeof filters.tagFilter === "string" && filters.tagFilter !== "all" ? filters.tagFilter : ""
+    };
+  }
+
+  function configHasPersonalData(payload) {
+    if (payload && payload._containsPersonalData === true) return true;
+    const fields = configPersonalFields(payload);
+    return Boolean(fields.collections || fields.search || fields.upFilter || fields.tagFilter);
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,
@@ -437,6 +526,14 @@
     // patchVolatileFields 与界面侧的 library.js 都引用这里，不再各自复制字面量。
     STAT_KEYS,
     STAT_LABELS,
+    // 配置文件的形状与「带了哪些个人内容」：library.js 与 settings.js 共用同一份
+    CONFIG_APP_ID,
+    CONFIG_VERSION,
+    CONFIG_NAME,
+    normalizeConfigPreferences,
+    buildConfigPayload,
+    configPersonalFields,
+    configHasPersonalData,
     parseInfoFile,
     descriptionFromInfo,
     tagsFromInfo,

@@ -5,7 +5,7 @@
 ## 项目基线
 
 - 项目目录：`Desktop\bili-vault\` —— **仓库根就是扩展目录**，扩展文件直接放在根目录，不再套一层带版本号的文件夹（版本交给 git tag 管理）。V1.0.0 交付时曾短暂叫过 `b-vault-V1.0.0`，**该名字已废弃**。**1.0–4.9 的独立文件夹快照已经删除**：它们全部重放成了 git 历史与 tag，所以取历史版本一律走 git，不要再去找 `bili-vault-beta*` 目录（那些目录已经不存在了）。
-- 扩展版本：**以 `manifest.json` 的 `version` 为准，这里不写死**（界面上的版本号是它加上 `library.js` / `popup.js` 里的 `RELEASE_CHANNEL` 前缀拼出来的；两处常量必须一致）。Chrome Manifest V3，最低 Chrome 版本 111。测试版时期界面显示 `beta4.x`，差别只在那两处 `RELEASE_CHANNEL` 常量。
+- 扩展版本：**以 `manifest.json` 的 `version` 为准，这里不写死**（界面上的版本号是它加上 `library.js` / `popup.js` 里的 `RELEASE_CHANNEL` 前缀拼出来的；两处常量必须一致）。Chrome Manifest V3，最低 Chrome 版本 111（数字的唯一出处是 `manifest.json` 的 `minimum_chrome_version`；理由见 README 的「运行环境」一节 —— 整套毛玻璃靠 `color-mix()` 推底色，它进 Chrome 稳定版正是 111。README 那段与 manifest 由测试核对，不要只改一边）。测试版时期界面显示 `beta4.x`，差别只在那两处 `RELEASE_CHANNEL` 常量。
 - **版本管理方式在 V1.0.0 改了**：以前每个版本是一个独立文件夹（`b_catch_*` → `bili-vault-beta*`），现在**改用 git**——每个版本一个 commit 与一个同名 tag（`beta1.0` … `beta4.9`、`V1.0.0` 一路到当前版本；**tag 数量每次发布都在涨，别在任何地方写死**），提交日期用的是各版本快照的真实文件时间，所以 `git log` 直接就是那条时间线。远程：`https://github.com/shijunan-Andrew/bili-vault`。**新版本直接在当前目录改并提交，不要再复制文件夹。**
 - **历史版本编号沿革**：项目最初叫 `b_catch`，目录名 `b_catch_1.0` … `b_catch_3.8`，后来随改名统一成 `bili-vault-beta1.0` … `bili-vault-beta3.8`。**这些快照目录现在都已删除**，内容完整保留在 git 历史里（`git show beta2.0:manifest.json` 这样就能取到）。完整的逐版本演变见 `README.md` 的版本历史段，图示与量化数据见 `Desktop\bili-vault开发文档\`。
 
@@ -904,7 +904,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:224 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:226 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

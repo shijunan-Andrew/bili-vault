@@ -329,7 +329,22 @@
           </div>
         </div>
 
+        <!-- 1.7.17（facet-privacy P1-1）：Chrome 卸载扩展不会动原生消息宿主，残留的是
+             8 个 HKCU 注册表项 + %LOCALAPPDATA%\BcaFolderOpener（settings.json 里存着扩展 ID
+             白名单和你选过的下载目录绝对路径）。原来只有 README 里一句「跑一下卸载脚本」，
+             手上没留安装包就收不了尾；这里给一条能直接粘进 PowerShell 的命令。 -->
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="清理本机的原生目录助手">清理本机的原生目录助手</p>
+            <p class="setting-row-desc" data-i18n="点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。它会删掉原生消息宿主、注册表项和残留的文件夹（里面有你选择过的下载目录路径）。">点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。它会删掉原生消息宿主、注册表项和残留的文件夹（里面有你选择过的下载目录路径）。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="copyNativeCleanup" data-i18n="复制清理命令">复制清理命令</button>
+          </div>
+        </div>
+
         <p class="row-status" id="forgetUidStatus" role="status" hidden></p>
+        <p class="row-status" id="nativeCleanupStatus" role="status" hidden></p>
       </section>
 
       <p class="settings-foot" data-i18n="外观、语言、数据统计和使用说明都在这里改，改完立即生效。">外观、语言、数据统计和使用说明都在这里改，改完立即生效。</p>

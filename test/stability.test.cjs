@@ -2879,6 +2879,39 @@ test("写失败不再无条件删记录：有内容就留、空的才删（V1.7.
   assert.match(lib.slice(Math.max(0, copyCatch - 500), copyCatch), /这里的回滚\*\*故意保留\*\*/);
 });
 
+// ---- V1.7.17（审计补漏：compat ① 最低版本可验证、原生助手清单三处同步）----
+
+test("最低 Chrome 版本的理由写清楚，且与 manifest 同源（V1.7.17）", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  assert.equal(manifest.minimum_chrome_version, "111", "111 是硬底线：改成别的值之前先确认 color-mix 有替代方案");
+  const theme = readProjectFile("theme.css");
+  assert.ok(theme.includes("color-mix("), "毛玻璃底色是从 --surface 用 color-mix() 推出来的，这就是 111 的理由");
+  const readme = readProjectFile("README.md");
+  const at = readme.indexOf("### 运行环境");
+  assert.ok(at > 0, "README 要有「运行环境」一节，把最低版本和理由写在用户看得到的地方");
+  const section = readme.slice(at, at + 1200);
+  assert.match(section, /Chrome 111/, "要写明最低版本");
+  assert.match(section, /color-mix\(\)/, "要写明为什么是 111");
+  assert.match(section, /minimum_chrome_version/, "要指出数字的唯一出处，别让两边各写一个");
+  assert.match(section, /只注册了 Chrome/, "Edge / Brave 能装但原生助手用不了，这件事必须说出来");
+  assert.match(readProjectFile("AI_HANDOFF.md"), /color-mix\(\)/, "AI_HANDOFF 也要写同一个理由");
+});
+
+test("原生宿主的浏览器清单三处一致（V1.7.17）", () => {
+  const vendorPattern = /HKCU:\\Software\\([A-Za-z0-9 .\\-]+?)\\NativeMessagingHosts/g;
+  const listOf = (text) => [...text.matchAll(vendorPattern)].map((match) => match[1]);
+  const install = listOf(readProjectFile("install-native-folder-opener.ps1"));
+  const uninstall = listOf(readProjectFile("uninstall-native-folder-opener.ps1"));
+  assert.ok(install.length >= 6, "至少覆盖 Chrome / Edge / Brave 这几家");
+  assert.deepEqual(install, uninstall, "安装与卸载脚本的浏览器清单必须一致，否则卸载会漏键");
+  const block = (readProjectFile("settings.js").match(/const NATIVE_CLEANUP_VENDORS = \[([\s\S]*?)\];/) || [])[1];
+  assert.ok(block, "设置页要有一份能从界面复制的清理命令");
+  const cleanup = [...block.matchAll(/"([^"]+)"/g)].map((match) => match[1].replace(/\\\\/g, "\\"));
+  assert.deepEqual(cleanup, install, "设置页复制的清理命令要覆盖同一批浏览器，不能只清 Chrome");
+  const script = readProjectFile("settings.js");
+  assert.match(script, /LOCALAPPDATA\\\\BcaFolderOpener/, "残留文件夹（里面有扩展 ID 与下载目录路径）也要一起清掉");
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

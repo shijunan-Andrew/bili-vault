@@ -570,6 +570,81 @@ test("withSourceCollection 没有来源收藏夹时用兜底", () => {
   assert.equal(core.withSourceCollection(null, {}).collection, "未分类收藏");
 });
 
+/* ───────────── 1.7.17：配置文件的形状与「个人内容」判断（facet-privacy P1-2）─────────────
+   导出侧要靠它列「里面有什么」，导入侧要靠它决定要不要二次确认 ——
+   两处用的是同一份实现，所以这里真跑一遍，而不是断言「源码里有这行字」。 */
+
+const samplePreferences = (overrides = {}) => Object.assign({
+  theme: "dark",
+  locale: "en",
+  pageSize: 60,
+  viewMode: "grid",
+  collectionOrder: ["动画", "音乐"],
+  filters: { search: "某科室", videoFilter: "downloaded", upFilter: "UP1", tagFilter: "", sort: "views" }
+}, overrides);
+
+test("buildConfigPayload：完整导出带收藏夹顺序与筛选，并标记含个人内容", () => {
+  const payload = core.buildConfigPayload(samplePreferences());
+  assert.equal(payload.app, core.CONFIG_APP_ID);
+  assert.equal(payload.version, core.CONFIG_VERSION);
+  assert.equal(payload._containsPersonalData, true);
+  assert.deepEqual(payload.preferences.collectionOrder, ["动画", "音乐"]);
+  assert.equal(payload.preferences.filters.search, "某科室");
+  assert.equal(payload.preferences.theme, "dark");
+});
+
+test("buildConfigPayload：includePersonal=false 时只剩外观与档位", () => {
+  const payload = core.buildConfigPayload(samplePreferences(), { includePersonal: false });
+  assert.equal(payload._containsPersonalData, false);
+  assert.equal(payload.preferences.collectionOrder, undefined);
+  assert.equal(payload.preferences.filters, undefined);
+  assert.deepEqual(Object.keys(payload.preferences).sort(), ["locale", "pageSize", "theme", "viewMode"]);
+});
+
+test("buildConfigPayload：坏输入不会让导出炸掉，坏值退回默认", () => {
+  const payload = core.buildConfigPayload({ theme: 42, pageSize: "大", collectionOrder: "不是数组", filters: null });
+  assert.equal(payload.preferences.theme, "system");
+  assert.equal(payload.preferences.locale, "zh-CN");
+  assert.deepEqual(payload.preferences.collectionOrder, []);
+  assert.equal(payload.preferences.filters.search, "");
+  assert.equal(payload.preferences.filters.upFilter, "all");
+  assert.deepEqual(core.configPersonalFields(payload), { collections: 0, search: "", upFilter: "", tagFilter: "" });
+});
+
+test("configPersonalFields：逐项报数，空项不报", () => {
+  const fields = core.configPersonalFields(core.buildConfigPayload(samplePreferences()));
+  assert.equal(fields.collections, 2);
+  assert.equal(fields.search, "某科室");
+  assert.equal(fields.upFilter, "UP1");
+  assert.equal(fields.tagFilter, "");
+  const slim = core.configPersonalFields(core.buildConfigPayload(samplePreferences(), { includePersonal: false }));
+  assert.deepEqual(slim, { collections: 0, search: "", upFilter: "", tagFilter: "" });
+});
+
+test("configHasPersonalData：认标记，也认实际内容（旧文件没有标记）", () => {
+  assert.equal(core.configHasPersonalData(core.buildConfigPayload(samplePreferences())), true);
+  assert.equal(core.configHasPersonalData(core.buildConfigPayload(samplePreferences(), { includePersonal: false })), false);
+  // 1.7.17 之前导出的文件没有 _containsPersonalData，只能看内容
+  const legacy = { app: core.CONFIG_APP_ID, version: 1, preferences: { theme: "dark", collectionOrder: ["老收藏夹"] } };
+  assert.equal(core.configHasPersonalData(legacy), true);
+  assert.equal(core.configHasPersonalData({ preferences: { theme: "dark" } }), false);
+  assert.equal(core.configHasPersonalData(null), false);
+});
+
+test("normalizeConfigPreferences：收藏夹顺序条数与单条长度都封顶", () => {
+  const long = "收".repeat(400);
+  const many = Array.from({ length: 600 }, (_value, index) => `夹${index}`);
+  const prefs = core.normalizeConfigPreferences({ collectionOrder: [...many, long, 42] });
+  assert.equal(prefs.collectionOrder.length, 500, "条数封顶 500");
+  assert.equal(prefs.collectionOrder[499], "夹499");
+  assert.equal(prefs.collectionOrder.includes(long), false, "第 601 条是超长串，被条数闸砍掉");
+  const single = core.normalizeConfigPreferences({ collectionOrder: [long, "短的"] });
+  assert.equal(single.collectionOrder[0].length, 120, "单条也要封顶");
+  assert.equal(single.collectionOrder[1], "短的", "没超长的原样保留");
+  assert.equal(single.collectionOrder[0].startsWith("收"), true, "截断保留前缀");
+  assert.equal(core.normalizeConfigPreferences({ filters: { search: "x".repeat(400) } }).filters.search.length, 120);
+});
+
 /* ───────────────────────── 汇总 ─────────────────────────
    直接运行时：打印结果并设置退出码。
    被 stability.test.cjs require 时：只把 results 交出去，由那边并进它自己的断言。 */
