@@ -313,50 +313,23 @@ async function uniqueTimeFolder(parent, name) {
    原样抛出，绝不退回就地写（退回就地写就是把正式文件截成半截）。
    失败且临时文件已经写完整时必须留着它 —— 那是唯一一份完整内容。 */
 async function writeFile(directory, name, content) {
-  const tempName = `.${name}.${Date.now().toString(36)}.tmp`;
-  let tempReady = false;
+  /* 1.7.1：这里**完整退回** 1.7.0 之前的就地写。
+     1.7.0（批次 B）曾把它改成「临时文件 + move() 覆盖」，真机反馈是「手动收藏和导入
+     视频时无法把视频导入到本地收藏夹」：`addManualVideo`（background.js:596-608）与
+     `saveImportedItem`（background.js:2960-2975）在 writeFile 抛错时都会把整条记录目录
+     删掉，所以这一步一旦失败，用户看到的就是「提示正在保存、但本地收藏夹里什么都没有」。
+     归档链路上 1.7.0 只改过这一个函数，两条链路又都失败，所以先把它退回原样；
+     move() 在 service worker 里的真实行为还没在真机上验证过，等验证过再上原子写。
+     代价（已知）：写到一半断电仍会留下半截正文 —— 这一条 P1 留到 1.7.2 再修。 */
+  const file = await directory.getFileHandle(name, { create: true });
+  const writable = await file.createWritable();
   try {
-    const temp = await directory.getFileHandle(tempName, { create: true });
-    const tempWritable = await temp.createWritable();
-    await tempWritable.write(content);
-    await tempWritable.close();
-    tempReady = true;
-    if (typeof temp.move === "function") {
-      try {
-        await temp.move(directory, name);
-        return;
-      } catch (moveError) {
-        const unsupported = moveError && (moveError.name === "NotSupportedError" || moveError.name === "TypeError");
-        if (!unsupported) throw moveError;
-        console.warn("本机不支持 move()，归档正文退回就地写。", moveError);
-      }
-    }
-    const file = await directory.getFileHandle(name, { create: true });
-    const writable = await file.createWritable();
-    try {
-      await writable.write(content);
-      await writable.close();
-    } catch (error) {
-      try { await writable.abort(); } catch (_) {}
-      throw error;
-    }
+    await writable.write(content);
+    await writable.close();
   } catch (error) {
-    if (tempReady) {
-      console.warn(`写 ${name} 失败，临时文件 ${tempName} 里留着一份完整内容，已保留。`, error);
-      // 1.7.0（批次 B）：留着临时文件却不说，用户只会看到文件夹里凭空多了个怪文件。
-      // 与 library.js 的 writeFileAtomically 保持一致，把这件事也写进弹窗「最近状态」。
-      chrome.storage.local.set({
-        lastResult: {
-          message: `写 ${name} 失败，已保留临时文件 ${tempName}（里面是完整内容，可手动恢复）。`,
-          createdAt: Date.now()
-        }
-      }).catch(() => {});
-    } else {
-      await directory.removeEntry(tempName).catch(() => {});
-    }
+    try { await writable.abort(); } catch (_) {}
     throw error;
   }
-  await directory.removeEntry(tempName).catch(() => {});
 }
 
 // 按 CSS object-fit: cover 的语义取源图中心最大的 16:9 区域，避免拉伸变形

@@ -3368,10 +3368,11 @@ async function writeFileAtomically(directory, file, text) {
         await temp.move(directory, file.name);
         return;
       } catch (moveError) {
-        // 1.7.0：分清「这台机器没有 move()」和「这次换名失败」。前者可以退回就地写，
-        // 后者（磁盘满、权限、文件被占用）退回就地写只会把正式文件截成半截 —— 原样抛出。
-        if (!isMoveUnsupportedError(moveError)) throw moveError;
-        console.warn("本机不支持 move()，退回就地写。", moveError);
+        // 1.7.1：换名失败一律退回就地写（与 1.7.0 之前一致）。1.7.0 曾按「不支持 / 其它失败」
+        // 分流、把其它失败原样抛出 —— 那会把「原本能写成功的一次写入」变成硬失败（数据库停更、
+        // 归档记录被调用方删掉）。现在临时文件在就地写失败时会被保留并写进弹窗状态，
+        // 所以「退回就地写」不再等于静默丢数据。
+        console.warn("换名失败，退回就地写。", moveError);
       }
     }
     await writeFileInPlace(file, text);
@@ -3391,13 +3392,6 @@ async function writeFileAtomically(directory, file, text) {
     throw error;
   }
   await directory.removeEntry(tempName).catch(() => {});
-}
-
-/* move() 存在但抛错时要分清两种：NotSupportedError / TypeError 才算「这台机器不支持」，
-   其余（磁盘满、权限、被占用）必须原样抛出 —— 退回就地写会把正式文件截成半截。 */
-function isMoveUnsupportedError(error) {
-  const name = error && error.name;
-  return name === "NotSupportedError" || name === "TypeError";
 }
 
 // 退路专用：move() 不可用时的就地写。临时文件已经写完了，内容就在手上。
