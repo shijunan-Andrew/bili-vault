@@ -1770,7 +1770,7 @@ let importStatePublishAt = 0;
 const IMPORT_RUN_SESSION_KEY = "bcaImportRun";                  // 正在进行的导入（断点 + 回滚日志）
 // 必须明显小于 30 秒的回收阈值，留出一次请求的最长耗时（15 秒）的余量
 const IMPORT_KEEPALIVE_INTERVAL_MS = 20000;
-const IMPORT_RUN_PUBLISH_INTERVAL_MS = 5000;                    // 断点落盘节流
+const IMPORT_RUN_PUBLISH_INTERVAL_MS = 15000;                   // 断点落盘节流（1.7.7：5000 → 15000，会话快照最多 2MB，别每 5 秒序列化一次）
 // 4.9.x：串行队列（saveQueue）的等待上限。导入暂停时队列会一直停在 importWaitIfPaused 上，
 // 排在它后面的请求原本会永久挂着、既不执行也不报错（收藏库的「更新视频状态」因此
 // 永远显示"更新中"）。超过这个时长就明确回一句"队列被占用"，而不是无限等待。
@@ -2098,15 +2098,23 @@ async function importRecoverInterruptedImport() {
   return true;
 }
 
+let importStatePublishedText = "";
+
 // 进度更新很密集，写 storage 要节流；关键状态变化用 force 立即落盘
 function publishImportState(patch, force = false) {
   importState = { ...importState, ...patch, updatedAt: Date.now() };
   const now = Date.now();
   if (!force && now - importStatePublishAt < 500) return;
-  importStatePublishAt = now;
   // active 是"这一次是否真的有活动导入"的即时答案（由 get-status / bca-import-probe 填），
   // 只在内存和响应里有效，不落盘——落盘就会变成下一个需要探活复位的"残影"。
   const { active: _active, ...persisted } = importState;
+  /* 1.7.7（P1-3）：内容没变就不写、也不广播。导入期间原来是每 500ms 一次
+     chrome.storage.local.set —— 每次写入都会重置 service worker 的 30 秒空闲计时器，
+     SW 于是整轮导入都回收不了（而 text/running/paused 实际几十秒才变一次）。 */
+  const text = JSON.stringify(persisted);
+  if (text === importStatePublishedText) return;
+  importStatePublishedText = text;
+  importStatePublishAt = now;
   chrome.storage.local.set({ importState: persisted }).catch(() => {});
 }
 
@@ -2787,14 +2795,22 @@ function reportStatsWriteBlocked(message) {
 }
 
 /* 改写正文之前把上一版原文留一份 database.bak.json。只在原文读得出来且非空时做；
-   写不进去不拦正文 —— 备份是加分项，不是前置条件。 */
+   写不进去不拦正文 —— 备份是加分项，不是前置条件。
+   1.7.7（P1-2）：加了时间闸。以前每次改写正文都整份复制一份 .bak，而"摸一次宠物"
+   （1000 条 = 227KB）也会走这条路 —— 连点十次就是 2.3MB 白写。现在至少隔
+   STATS_BAK_MIN_INTERVAL_MS 才轮转一次，仍然满足"备份比正文早一版"。 */
+const STATS_BAK_MIN_INTERVAL_MS = 10 * 60 * 1000;
+let statsBakArchivedAt = 0;
 async function archivePreviousStatsDatabase(read) {
   if (!read || !read.directory || !read.text || !read.text.trim()) return "";
+  const now = Date.now();
+  if (now - statsBakArchivedAt < STATS_BAK_MIN_INTERVAL_MS) return "";
   try {
     const handle = await read.directory.getFileHandle(STATS_PREVIOUS_DATABASE_NAME, { create: true });
     const writable = await handle.createWritable();
     await writable.write(read.text);
     await writable.close();
+    statsBakArchivedAt = now;
     return STATS_PREVIOUS_DATABASE_NAME;
   } catch (error) {
     console.warn("上一版数据库备份写入失败（正文照写）。", error);

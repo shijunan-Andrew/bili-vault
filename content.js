@@ -84,9 +84,14 @@
     return String(element?.innerText || element?.textContent || "").replace(/\s+/g, " ").trim();
   }
 
+  /* 1.7.7（P1-4）：这里是"每个视频页每次点击"都要跑的路径，而 B 站页面上绝大多数点击
+     都不是收藏弹窗。真正的开销在 visible() 的 getComputedStyle + getBoundingClientRect
+     和 textOf() 的 innerText（都要一次布局）。弹窗一定是个"有子元素的容器"，所以先按
+     这一点筛掉路径上的叶子节点（占大多数），语义不变、代价小一个量级。 */
   function findFavoriteDialog(event) {
     for (const item of event.composedPath()) {
-      if (!(item instanceof Element) || !visible(item)) continue;
+      if (!(item instanceof Element) || !item.childElementCount) continue;
+      if (!visible(item)) continue;
       const text = textOf(item);
       if (FAV_DIALOG_TITLE.test(text) && CONFIRM_MENTION.test(text)) return item;
     }

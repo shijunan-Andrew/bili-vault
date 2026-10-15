@@ -2101,20 +2101,56 @@
 
   /* 语言切换立刻生效：i18n.js 自己只负责静态那批 [data-i18n]，
      脚本填进去的正文得在它换完词典之后再画一遍。 */
+  /* 1.7.7（P1-1）：快照的「实质指纹」——不算 updatedAt。收藏库每秒写一次 bcaStats
+     （1.7.6 之前那个环路）时，这一页原来也跟着每秒整页重绘一次图表。 */
+  function snapshotFingerprint(snapshot) {
+    if (!snapshot) return "";
+    try {
+      return JSON.stringify([
+        snapshot.videos,
+        snapshot.days,
+        snapshot.totals,
+        snapshot.firstSeen,
+        snapshot.collections,
+        snapshot.topCollection,
+        Array.isArray(snapshot.daily) ? snapshot.daily.length : 0,
+        Array.isArray(snapshot.dailyRows) ? snapshot.dailyRows.length : 0,
+        Array.isArray(snapshot.weekly) ? snapshot.weekly.length : 0,
+        Array.isArray(snapshot.monthly) ? snapshot.monthly.length : 0
+      ]);
+    } catch (_) { return ""; }
+  }
+
   function watchStorage() {
     if (!chrome.storage || !chrome.storage.onChanged) return;
+    /* 1.7.7（P1-1）：① 实质字段没变的快照不再重绘；② 重绘加 300ms 防抖。
+       以前任何 bcaStats 写入（包括"只有 updatedAt 变了"）都会整页重建 4 张卡 + 3 张图。 */
+    let pendingSnapshot = null;
+    let renderTimer = 0;
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !changes) return;
       const localeChanged = Boolean(changes[i18n ? i18n.STORAGE_KEY : "bcaLocale"]);
       const next = changes[i18n ? i18n.STORAGE_KEY : "bcaLocale"]?.newValue;
-      const statsChanged = Boolean(changes[STATS_KEY]);
+      let statsChanged = false;
+      if (changes[STATS_KEY]) {
+        const incoming = normalizeSnapshot(changes[STATS_KEY].newValue);
+        if (snapshotFingerprint(incoming) !== snapshotFingerprint(stats)) {
+          pendingSnapshot = incoming;
+          statsChanged = true;
+        }
+      }
       if (!localeChanged && !statsChanged) return;
       const ready = (localeChanged && i18n) ? i18n.use(next, { silent: true }) : Promise.resolve();
       Promise.resolve(ready)
         .then(() => {
           /* 库页刚扫完 / 刚清空数据：同一次事件里把快照也换掉 */
-          if (statsChanged) stats = normalizeSnapshot(changes[STATS_KEY].newValue);
-          if (loaded) render();
+          if (statsChanged) stats = pendingSnapshot;
+          if (!loaded) return;
+          if (renderTimer) window.clearTimeout(renderTimer);
+          renderTimer = window.setTimeout(() => {
+            renderTimer = 0;
+            render();
+          }, 300);
         })
         .catch(() => {});
     });

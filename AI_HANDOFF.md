@@ -76,6 +76,17 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.7.7：断掉「库页自我维持的每秒一轮」（性能审计第 2 份，P0×2 + P1×5）
+
+1. **P0-1 自我维持环路**（library.js）：`displayRoot` → `syncStatsDatabase()` → `storage.local.set({bcaStats})` → 本页自己的 `storage.onChanged` → `scheduleArchiveRefresh()`（900ms）→ 再 `displayRoot`。燃料是 `snapshot()` 的 `updatedAt` 每次都是新的。修法两层：`syncStatsDatabase()` 先算「实质指纹」（`publishedStatsFingerprintOf()`，只看 videos/days/totals/firstSeen/collections/daily/dailyRows/topCollection，**不算 updatedAt**），相同就直接 return（数据库与快照都不写）；`storage.onChanged` 里收到 `bcaStats` 时也先比指纹，相同就是自己的回声、不重扫。真机可验：空闲时 `database.json` 的 mtime 不再每秒跳动。
+2. **P0-2 切回标签页整树重扫下载目录**（library.js）：`window.addEventListener("focus", refreshDownloadStatuses)` 删除（与 `visibilitychange` 重复）；`refreshDownloadStatuses(force = false)` 加 `DOWNLOAD_STATUS_MIN_INTERVAL_MS = 60000` 最小间隔，只有 `downloadRevision`（下载真的写完）传 `true` 绕过。
+3. **P1-1 统计页每秒整页重绘**（stats.js）：`watchStorage()` 改成「实质指纹比较 + 300ms 防抖」，只有 `updatedAt` 变了的快照不再触发 `render()`。
+4. **P1-2 每次写库都整份复制 `.bak`**（background.js）：`archivePreviousStatsDatabase()` 加 `STATS_BAK_MIN_INTERVAL_MS = 10 分钟` 时间闸（仍然满足「备份比正文早一版」）。
+5. **P1-3 导入进度 500ms 落盘**（background.js）：`publishImportState()` 序列化后与上次写入的字符串比较，相同就不写、不广播；`IMPORT_RUN_PUBLISH_INTERVAL_MS` 5000 → 15000。
+6. **P1-4 每次点击都做样式/布局计算**（content.js）：`findFavoriteDialog()` 先按 `childElementCount` 筛掉路径上的叶子节点（弹窗必是有子元素的容器），语义不变、`getComputedStyle`/`innerText` 调用量小一个量级。
+7. **P2-4 封面缓存**：`ARCHIVE_CACHE_MAX_PER_ROOT` 4000 → 600。
+8. **测试**：两条文本断言按新契约改写（不再要求 `focus` 监听；要求 `publishedStatsFingerprintOf` 存在），196 项保持全绿。
+
 ## 1.7.6：饼图分块口径换回「数量排名前五」
 
 1. 规则（`stats.js`）：`const PIE_TOP_NAMED = 5; const PIE_MAX_SLICES = PIE_TOP_NAMED + 1;`，`mergePieSlices(list, otherLabel)` 只保留 `list.slice(0, PIE_TOP_NAMED)`，其余求和成一块 `{name: otherLabel, other: true}`；`list.length <= PIE_TOP_NAMED` 时不合并。

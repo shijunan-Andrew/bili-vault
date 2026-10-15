@@ -1145,10 +1145,14 @@ test("the library no longer rescans the download tree on a timer", () => {
   // 只允许出现在注释里说明为什么删。
   const code = library.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.equal(/setInterval/.test(code), false, "代码里不该再有 setInterval");
-  // 三条按需触发路径必须保留
-  assert.match(library, /addEventListener\("focus", refreshDownloadStatuses\)/);
-  assert.match(library, /addEventListener\("visibilitychange"/);
+  // 1.7.7（P0-2）：按需触发只剩两条 —— "下载真的写完"（downloadRevision，可绕过节流）
+  // 与"标签页重新可见"（受最小间隔节流）；window 的 focus 监听已删（与 visibilitychange
+  // 重复，等于同一棵树扫两遍）。
   assert.match(library, /changes\.downloadRevision/);
+  assert.match(library, /refreshDownloadStatuses\(true\)/, "downloadRevision 要能绕过最小间隔");
+  assert.match(library, /addEventListener\("visibilitychange"/);
+  assert.match(library, /DOWNLOAD_STATUS_MIN_INTERVAL_MS/, "切回标签页时的整树扫描要有最小间隔");
+  assert.equal(/addEventListener\("focus", refreshDownloadStatuses\)/.test(library), false, "focus 监听不该再整树重扫");
 });
 
 test("filter options are rebuilt on demand, not on every keystroke", () => {
@@ -4407,7 +4411,10 @@ test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {
   // 收藏库：扫描完把数据库整份重建（看得到的才算数，删掉的视频不该留在统计里）
   assert.ok(library.includes("async function syncStatsDatabase("), "收藏库要有同步助手");
   assert.ok(library.includes("core.databaseFromVideos(videos, { previous })"), "要整份重建并保留宠物状态");
-  assert.ok(library.includes("bcaStats: Object.assign(core.snapshot(database)"), "同步完也要发同形状的快照");
+  assert.ok(library.includes("const payload = Object.assign(core.snapshot(database), { daily: core.recentDays(database) })"), "同步完也要发同形状的快照");
+  // 1.7.7（P0-1）：写之前必须比实质指纹 —— 少了它，"写 → onChanged → 重扫 → 再写"
+  // 就是一个开着页面就每秒一轮、永不停止的环路。
+  assert.ok(library.includes("publishedStatsFingerprintOf"), "快照没变时不许再写（P0-1 环路）");
   assert.ok(library.includes("syncStatsDatabase(handle)"), "同步助手要真的被调用");
 
   // 设置页：数据统计与宠物挂件两个入口

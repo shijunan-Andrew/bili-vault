@@ -427,7 +427,9 @@ function matchDownloadedDirectory(video, index) {
    4. 「刷新」按钮走强制全量（clearArchiveCache），缓存出问题时永远有退路；
    5. 读取失败（权限被撤、文件被占用）不写进缓存，避免把一次偶发失败固化下来。
    缓存只在内存里，页面关掉就没了，不写 localStorage / chrome.storage。 */
-const ARCHIVE_CACHE_MAX_PER_ROOT = 4000;
+/* 1.7.7（P2-4）：封面缓存上限。原来 4000 是按"最多 4000 个视频目录"设的，而页面同时
+   最多显示 25 张卡 —— 上限太高等于让整库的 blob: URL 常驻内存。 */
+const ARCHIVE_CACHE_MAX_PER_ROOT = 600;
 const archiveCache = new Map();        // rootKey -> Map<"收藏夹/目录", entry>
 const lastScanRecordCount = new Map(); // rootKey -> 上次扫描的记录数，用于先给一行 0/N
 const rootKeyIds = new WeakMap();
@@ -3429,6 +3431,29 @@ async function writeFileInPlace(file, text) {
    （见 writeFileAtomically）。原来的 createWritable→write→close 是截断式就地写，
    写一半被关掉页面/断电就留下半截 JSON；而读侧（这里和 background.js 的
    readStatsDatabase）遇到坏 JSON 是静默重建，等于把历史统计与亲密度清零还不告诉用户。 */
+
+/* 1.7.7（P0-1）：本页发布 bcaStats 的「实质指纹」——只看会真正改变列表/图表内容的字段，
+   **不算 updatedAt**（它每次写入都不同，正是那个自我维持环路唯一的燃料）。
+   syncStatsDatabase 写之前比它，onChanged 里收到自己的回声也比它。 */
+let publishedStatsFingerprint = "";
+function publishedStatsFingerprintOf(stats) {
+  if (!stats) return "";
+  try {
+    return JSON.stringify([
+      stats.videos,
+      stats.days,
+      stats.totals,
+      stats.firstSeen,
+      Array.isArray(stats.collections)
+        ? stats.collections.map((item) => `${item?.name}:${item?.count}`).join("|")
+        : stats.collections,
+      Array.isArray(stats.daily) ? stats.daily.length : 0,
+      Array.isArray(stats.dailyRows) ? stats.dailyRows.length : 0,
+      stats.topCollection && stats.topCollection.name
+    ]);
+  } catch (_) { return ""; }
+}
+
 async function syncStatsDatabase(handle) {
   const core = globalThis.BcaStatsCore;
   if (!handle || !core) return;
@@ -3449,12 +3474,17 @@ async function syncStatsDatabase(handle) {
       return;
     }
     const database = core.databaseFromVideos(videos, { previous });
-    await writeFileAtomically(directory, file, JSON.stringify(database));
     // 1.5.0：和 background.js 的 publishStatsSnapshot 保持同一形状 —— snapshot() 的
     // days.days 是「库里有几天」的数字，每日明细另算一份 daily 给统计页画柱子。
-    await chrome.storage.local.set({
-      bcaStats: Object.assign(core.snapshot(database), { daily: core.recentDays(database) })
-    });
+    const payload = Object.assign(core.snapshot(database), { daily: core.recentDays(database) });
+    /* 1.7.7（P0-1）：实质内容没变就一个字节都不写。以前这里每次都写（快照必然带新的
+       updatedAt），而本页自己又订阅 bcaStats → 900ms 后再整树重扫 → 再写：不用导入、
+       开着收藏库页就每秒一轮（磁盘每秒 ~227KB、storage 每秒一次、SW 永不回收）。 */
+    const fingerprint = publishedStatsFingerprintOf(payload);
+    if (fingerprint && fingerprint === publishedStatsFingerprint) return;
+    await writeFileAtomically(directory, file, JSON.stringify(database));
+    publishedStatsFingerprint = fingerprint;
+    await chrome.storage.local.set({ bcaStats: payload });
   } catch (error) {
     console.warn("同步本地数据库失败（收藏库不受影响）", error);
   }
@@ -3759,8 +3789,16 @@ function renderDiffDialog(response) {
   diffDialogStatus.hidden = true;
 }
 
-async function refreshDownloadStatuses() {
+/* 1.7.7（P0-2）：refreshDownloadStatuses 的最小间隔。切回标签页属于高频动作，
+   而整树扫描是上万次 FS 往返；downloadRevision（真正写完下载）用 force 绕过。 */
+const DOWNLOAD_STATUS_MIN_INTERVAL_MS = 60 * 1000;
+let lastDownloadStatusCheckAt = 0;
+
+async function refreshDownloadStatuses(force = false) {
   if (!rootHandle || downloadStatusCheckRunning) return;
+  const now = Date.now();
+  if (!force && now - lastDownloadStatusCheckAt < DOWNLOAD_STATUS_MIN_INTERVAL_MS) return;
+  lastDownloadStatusCheckAt = now;
   downloadStatusCheckRunning = true;
   try {
     const index = await scanDownloadedDirectories(rootHandle);
@@ -4214,12 +4252,18 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   // 1.7.5：新记录落盘后刷新列表 —— 但**导入期间不刷**（那时每批快照都会写 bcaStats，
   // 575 个记录会被整树重扫一遍又一遍）。导入结束由 applyImportState 统一收口补一次；
   // 手动收藏 / 补存这类单条写入没有导入在跑，仍然会立刻反映到列表上。
-  if (changes.bcaStats && !importIsRunning) scheduleArchiveRefresh();
+  /* 1.7.7（P0-1）：本页自己写的快照会被自己收到。指纹相同就是自己的回声 —— 不重扫。
+     这一条与 syncStatsDatabase 的「没变不写」一起把那个每秒一轮的环路彻底断掉；
+     后台写进来的（导入 / 手动收藏）实质字段一定变了，照旧刷新。 */
+  if (changes.bcaStats) {
+    const incomingFingerprint = publishedStatsFingerprintOf(changes.bcaStats.newValue);
+    if (incomingFingerprint !== publishedStatsFingerprint && !importIsRunning) scheduleArchiveRefresh();
+  }
   // P2-8：后台把导入状态写在 importState 上，订阅它就能在收藏库里给出「导入进行中」的提示
   if (changes.importState) applyImportState(changes.importState.newValue);
   if (changes.downloadRevision && rootHandle) {
     invalidateStorageUsageCache(); // 下载目录变了：体积统计的缓存作废（P2-12）
-    refreshDownloadStatuses();
+    refreshDownloadStatuses(true);
   }
   /* 在弹窗里换了备份文件夹：本页面开着的时候不会自己知道，靠这个信号叫醒。
      之前只读一次句柄就再也不看，于是弹窗和收藏库会各显示一个目录名。 */
@@ -4241,9 +4285,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 function reportLocaleSwitchFailure(error) {
   showToast(BcaI18n.t("切换界面语言失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
 }
-window.addEventListener("focus", refreshDownloadStatuses);
+window.addEventListener("focus", () => { if (rootHandle) updateStorageUsage(rootHandle); });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
+  /* 1.7.7（P0-2）：切回标签页/窗口获焦不再整树重扫 000视频下载。那是文件系统调用
+     （几千个目录 = 上万次 Mojo IPC），而"下载目录真的变了"本来就有 downloadRevision
+     这个专门信号（见上面的 onChanged）；这里只补一次带缓存的体积统计。 */
   refreshDownloadStatuses();
   /* 1.7.5：切回标签页不再整树重扫视频资料 —— 用户的要求是「浏览行为不算」，
      只有导入新视频 / 删除视频 / 点刷新这类主动行为才重扫（导入结束那一次由
@@ -4254,9 +4301,10 @@ document.addEventListener("visibilitychange", () => {
 // 4.9：这里原来有一个 60 秒的 window.setInterval，只要页面在前台就整树重扫一遍
 // 000视频下载。递归扫描是文件系统调用，10000 条记录时相当于每分钟上万次，页面
 // 一直开着就在持续打盘，收益却接近于零。**不要再把定时器加回来**：按需触发已经够用——
-//   1. 下载页写 chrome.storage.local.downloadRevision 时，上面的 onChanged 会触发；
-//   2. 窗口重新获得焦点（focus）触发一次；
-//   3. 标签页重新可见（visibilitychange → visible）触发一次。
+//   1. 下载页写 chrome.storage.local.downloadRevision 时，上面的 onChanged 会触发（force）；
+//   2. 标签页重新可见（visibilitychange → visible）触发一次（受 DOWNLOAD_STATUS_MIN_INTERVAL_MS 节流）。
+// 1.7.7（P0-2）：连 window 的 focus 监听也删了 —— 它和 visibilitychange 在真实使用里
+// 高度重叠（都是"人回到这个窗口"），等于同一棵树被扫两遍。
 // 唯一的行为变化：页面在前台闲置时不会再自动刷新「已下载」状态，切回本页或
 // 下载完成后仍然会刷新（写在 AI_HANDOFF 里的「前台定时扫描间隔 60 秒」要一起改掉）。
 BcaI18n.init().catch(() => {}).then(() => Promise.all([
