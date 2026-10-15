@@ -161,7 +161,7 @@ let currentPage = 1;
 let pageCount = 1;
 let viewMode = "grid";
 let statusRefreshInProgress = false;
-// 顶部“本地收藏夹占用”的递归统计状态：防止重复并发扫描，只保留最后一次请求的根目录
+// 顶部“本地归档占用”的递归统计状态：防止重复并发扫描，只保留最后一次请求的根目录
 let storageUsageRunning = false;
 let storageUsageQueuedRoot = null;
 // 4.6：上一次扫描的统计（进度、缓存命中）与当前是否强制全量
@@ -681,7 +681,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
     }
     stats.total += records.length;
   }
-  const progress = progressNotifier(scanNoticeText, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
+  const progress = progressNotifier(scanNoticeText, (value) => scanProgressText(value));
   try {
     for (const collectionEntry of collections) {
       const videos = [];
@@ -907,7 +907,7 @@ function selectedRecords() {
 
 function updateBatchControls() {
   const records = selectedRecords();
-  selectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: records.length });
+  selectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: formatCountText(records.length) });
   const allVisibleSelected = visibleVideoIds.length > 0 && visibleVideoIds.every((id) => selectedVideoIds.has(id));
   selectVisibleButton.textContent = allVisibleSelected ? BcaI18n.t("取消当前结果选择") : BcaI18n.t("全选当前结果");
   selectVisibleButton.disabled = visibleVideoIds.length === 0;
@@ -1086,9 +1086,9 @@ function renderVideos() {
         total: filterTotal,
         kind: videoFilter === "invalid" ? BcaI18n.t("失效") : BcaI18n.t("已下载")
       })
-    : query || upFilter !== "all" || tagFilter !== "all" ? BcaI18n.t("{shown} / {total} 个视频", { shown: matching.length, total: videos.length }) : BcaI18n.t("{count} 个视频", { count: videos.length });
+    : query || upFilter !== "all" || tagFilter !== "all" ? BcaI18n.t("{shown} / {total} 个视频", { shown: formatCountText(matching.length), total: formatCountText(videos.length) }) : BcaI18n.t("{count} 个视频", { count: formatCountText(videos.length) });
   const pageLabel = pageCount > 1 ? ` · ${BcaI18n.t("第 {page}/{pages} 页", { page: currentPage, pages: pageCount })}` : "";
-  resultSummary.textContent = (selectedCollection === "*" ? BcaI18n.t("{count}，来自 {collections} 个收藏夹", { count: countLabel, collections: collections.length }) : countLabel) + pageLabel;
+  resultSummary.textContent = (selectedCollection === "*" ? BcaI18n.t("{count}，来自 {collections} 个收藏夹", { count: countLabel, collections: formatCountText(collections.length) }) : countLabel) + pageLabel;
   videoGrid.replaceChildren(...pageVideos.map((video) => {
     const card = document.createElement("article");
     card.className = "video-card";
@@ -1119,10 +1119,28 @@ function renderVideos() {
       ? (video.invalidReason ? `${BcaI18n.t("已失效")} · ${video.invalidReason}` : BcaI18n.t("已失效"))
       : (video.upName || video.bvid || BcaI18n.t("本地收藏视频"));
     // 4.6：卡片上显示相对时间，完整时间放到 title 上（详情面板保持原样）
+    // ux P2-11：完整时间原来**只**写在 card.title 上 —— title 读屏不播报、也不能键盘聚焦，
+    //   读屏用户永远拿不到精确收藏时间。这里换成真正的 <time datetime>，并把完整时间放进
+    //   它的 aria-label。卡片是 role=button + tabindex=0，聚焦时计算可访问名会把子元素的
+    //   aria-label 一起读出来，所以键盘与读屏都能拿到；title 只留作鼠标悬停的视觉补充。
     const dateText = relativeTime(video.favoriteAt);
     const dateCell = card.querySelector(".card-date");
-    dateCell.textContent = dateText;
-    if (dateText) card.title = `${video.favoriteAt}（${compactDate(video.favoriteAt)}）`;
+    if (dateText) {
+      const stampText = `${video.favoriteAt}（${compactDate(video.favoriteAt)}）`;
+      const raw = String(video.favoriteAt || "");
+      const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw) ? raw.replace(" ", "T")
+        : (/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "");
+      const stamp = document.createElement("time");
+      if (iso) stamp.dateTime = iso;
+      stamp.textContent = dateText;
+      stamp.title = stampText;
+      stamp.setAttribute("aria-label", stampText);
+      dateCell.textContent = "";
+      dateCell.appendChild(stamp);
+      card.title = stampText;
+    } else {
+      dateCell.textContent = dateText;
+    }
     card.addEventListener("click", (event) => {
       if (!selectionMode) { openDetail(video, card); return; }
       if (event.shiftKey) { selectVideoRange(video.id); return; }
@@ -1230,7 +1248,7 @@ function renderPager(total) {
 
   const info = document.createElement("span");
   info.className = "pager-info tnum";
-  info.textContent = BcaI18n.t("共 {pages} 页 / {total} 个，跳至", { pages: pageCount, total });
+  info.textContent = BcaI18n.t("共 {pages} 页 / {total} 个，跳至", { pages: formatCountText(pageCount), total: formatCountText(total) });
 
   const jump = document.createElement("input");
   jump.type = "number";
@@ -1465,14 +1483,46 @@ let statusShowingResult = false;
 // 4.6：后台每条都会回一次 bca-status-progress，这里记住「第几条」好拼成本地化的 N/M
 let statusProgressState = { done: 0, total: 0, title: "" };
 
+/* 1.7.9（ux P2-5）：这块提示是 role="status"，每次改文本屏幕阅读器都要播报一遍。
+   一个收藏夹几百条时后台会一条一条地回进度，原来每次都直接写 textContent ——
+   读屏会被刷屏、浏览器也要反复重排这一段。这里按 500ms 节流：状态照收，
+   只把「写 DOM」的频率压下来，并且保证最后一次一定落盘（否则会停在 17/20）。 */
+const STATUS_PROGRESS_THROTTLE_MS = 500;
+let statusProgressShownAt = 0;
+let statusProgressTimer = 0;
+
+function flushStatusProgress() {
+  statusProgressTimer = 0;
+  statusProgressShownAt = Date.now();
+  statusConfirmProgress.hidden = false;
+  statusConfirmProgress.textContent = statusProgressText(statusProgressState);
+}
+
+// 收尾/清空用：立刻落盘，把还挂着的定时器撤掉
+function flushStatusProgressNow() {
+  if (statusProgressTimer) {
+    clearTimeout(statusProgressTimer);
+    statusProgressTimer = 0;
+  }
+  flushStatusProgress();
+}
+
+function cancelStatusProgressTimer() {
+  if (statusProgressTimer) {
+    clearTimeout(statusProgressTimer);
+    statusProgressTimer = 0;
+  }
+}
+
 function resetStatusProgress() {
+  cancelStatusProgressTimer();
   statusProgressState = { done: 0, total: 0, title: "" };
 }
 
 // 后台的进度文案固定是中文（service worker 不参与多语言），所以只从里面取出
 // 已经算好的「3/20」与标题，再用本地语言重新拼一遍；取不到就原样显示。
 function statusProgressText(state) {
-  const counter = state.done && state.total ? `${state.done}/${state.total}` : "";
+  const counter = state.done && state.total ? formatProgressCounter(state.done, state.total) : "";
   if (!counter) return state.title || "";
   return state.title
     ? BcaI18n.t("正在更新视频状态 {counter}：{title}", { counter, title: state.title })
@@ -1490,8 +1540,13 @@ function applyStatusProgress(message) {
   } else if (text) {
     statusProgressState.title = text;
   }
-  statusConfirmProgress.hidden = false;
-  statusConfirmProgress.textContent = statusProgressText(statusProgressState);
+  // 节流：距上次写屏不到 500ms 就只挂一个尾随定时器（同一个时刻只有一个）
+  const since = Date.now() - statusProgressShownAt;
+  if (since >= STATUS_PROGRESS_THROTTLE_MS) {
+    flushStatusProgressNow();
+  } else if (!statusProgressTimer) {
+    statusProgressTimer = setTimeout(flushStatusProgress, STATUS_PROGRESS_THROTTLE_MS - since);
+  }
 }
 
 /* ---------------- 4.6：最近一次失败的记录 ----------------
@@ -1625,6 +1680,9 @@ function openStatusConfirm(videos, source) {
   if (targets.length > capped) {
     statusConfirmMore.textContent = BcaI18n.t("所选较多，本次只处理前 {count} 条；完成后可以再点一次继续。", { count: capped });
   }
+  // 1.7.9（ux P2-5）：这里清空时要撤掉还挂着的节流定时器 —— 否则它会在这个
+  // 对话框已经重新打开之后才落盘，把上一次的「17/20」重新写回一行空白提示里。
+  cancelStatusProgressTimer();
   statusConfirmProgress.hidden = true;
   statusConfirmProgress.textContent = "";
   statusConfirmGo.disabled = false;
@@ -1750,6 +1808,9 @@ async function runStatusRefresh() {
     if (!result?.ok) throw new Error(result?.message || BcaI18n.t("更新失败。"));
     const summary = targets.length === 1 ? statusDetailText(result) : statusSummaryText(result);
     const remaining = Number(result.remaining) || 0;
+    // 1.7.9（ux P2-5）：先撤掉节流里还没落盘的那次进度写入，否则它会在这行之后
+    // 才执行，把刚写好的结果摘要又盖回「正在更新视频状态 20/20…」。
+    cancelStatusProgressTimer();
     statusConfirmProgress.textContent = summary + (remaining ? BcaI18n.t("还有 {count} 条没处理，可以再点一次继续。", { count: remaining }) : "");
     // 有失败就列出来；后台只回 reportPath 时也能用它提示，不用去翻 001错误报告
     const failures = Array.isArray(result.failures) ? result.failures : [];
@@ -2125,13 +2186,18 @@ function copyFieldButton(value, label) {
   return button;
 }
 
-// B / KB / MB / GB，KB 及以上保留 2 位小数（顶部占用和详情里的下载体积共用）
-function formatBytes(value) {
-  const bytes = Number(value) || 0;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(2)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+// 1.7.9（ux P2-6）：体积 / 计数 / 进度三处数字格式统一由 archive-core.js 的实现提供
+// （library.html 里 archive-core.js 排在 library.js 前面，所以顶层就能取到）。
+const formatBytes = BcaArchiveCore.formatBytes;
+const formatCountText = BcaArchiveCore.formatCountText;
+const formatProgressCounter = BcaArchiveCore.formatProgressCounter;
+
+// 扫描进度文案：两个数也过一遍统一格式化，别在这里裸拼数字
+function scanProgressText(value) {
+  return BcaI18n.t("正在读取 {done}/{total}…", {
+    done: formatCountText(value?.done),
+    total: formatCountText(value?.total)
+  });
 }
 
 // 递归累加整个根目录的文件大小，包含 000视频下载、001错误报告 等所有子目录
@@ -2144,7 +2210,7 @@ async function directorySize(directory) {
   return total;
 }
 
-/* ---------------- 4.2：顶部“本地收藏夹占用” ---------------- */
+/* ---------------- 4.2：顶部“本地归档占用” ---------------- */
 
 /* P2-12：递归累加整个根目录的字节数是纯「后台跑腿」的活，三条约束：
    1) 延后 —— 列表渲染完再排队，交给 requestIdleCallback（没有就退化成 setTimeout），
@@ -2479,9 +2545,9 @@ function openConfirmBackdrop() {
 
 function askToDeleteVideo(video) {
   pendingDeleteAction = { type: "video", video };
-  confirmTitle.textContent = BcaI18n.t("删除本地归档？");
-  confirmMessage.textContent = BcaI18n.t("将删除本地目录“{path}”及其中的封面和视频信息。B 站账户里的收藏不会改变。", { path: `${video.collection}/${video.directory}` });
-  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件");
+  confirmTitle.textContent = BcaI18n.t("删除本地归档（含封面与视频信息，不进回收站）？");
+  confirmMessage.textContent = BcaI18n.t("将删除视频目录“{path}”（含封面与视频信息）。此操作不会更改 B 站账户中的收藏。", { path: `${video.collection}/${video.directory}` });
+  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件，不可恢复");
   deleteDownloadsOption.hidden = !video.hasDownloadFiles;
   deleteAssociatedDownloads.checked = false;
   openConfirmBackdrop();
@@ -2490,8 +2556,8 @@ function askToDeleteVideo(video) {
 function askToDeleteCollection(collection) {
   if (!collection) return;
   pendingDeleteAction = { type: "collection", collection };
-  confirmTitle.textContent = BcaI18n.t("删除整个本地收藏夹？");
-  confirmMessage.textContent = BcaI18n.t("将永久删除本地收藏夹“{name}”及其全部文件（当前识别到 {count} 个视频；目录里无法识别的文件、你自己放进去的东西也会一起删掉）。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { name: collection.name, count: collection.videos.length });
+  confirmTitle.textContent = BcaI18n.t("删除整个本地归档？");
+  confirmMessage.textContent = BcaI18n.t("将永久删除本地归档“{name}”及其全部文件（当前识别到 {count} 个视频；目录里无法识别的文件、你自己放进去的东西也会一起删掉）。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { name: collection.name, count: collection.videos.length });
   confirmDeleteButton.textContent = BcaI18n.t("删除收藏夹");
   deleteDownloadsOption.hidden = !collection.videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
@@ -2502,7 +2568,7 @@ function askToDeleteBatch(videos) {
   if (!videos.length) return;
   pendingDeleteAction = { type: "batch", videos };
   confirmTitle.textContent = BcaI18n.t("删除选中的本地归档？");
-  confirmMessage.textContent = BcaI18n.t("将永久删除选中的 {count} 个视频目录及其中的封面和视频信息。此操作只影响本地文件，不会更改 B 站账户中的收藏。", { count: videos.length });
+  confirmMessage.textContent = BcaI18n.t("将永久删除选中的 {count} 个视频目录及其中的封面和视频信息。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { count: videos.length });
   confirmDeleteButton.textContent = BcaI18n.t("删除 {count} 个视频", { count: videos.length });
   deleteDownloadsOption.hidden = !videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
@@ -2516,8 +2582,8 @@ function closeDeleteConfirmation() {
   deleteDownloadsOption.hidden = true;
   deleteAssociatedDownloads.checked = false;
   pendingDeleteAction = null;
-  confirmTitle.textContent = BcaI18n.t("删除本地归档？");
-  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件");
+  confirmTitle.textContent = BcaI18n.t("删除本地归档（含封面与视频信息，不进回收站）？");
+  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件，不可恢复");
 }
 
 async function copyDirectoryContents(source, target) {
@@ -3011,7 +3077,7 @@ function openCollectionActionDialog(videos, source) {
     }
     const count = document.createElement("small");
     count.className = "collection-action-video-count";
-    count.textContent = BcaI18n.t("{count} 个视频", { count: collection.videos.length });
+    count.textContent = BcaI18n.t("{count} 个视频", { count: formatCountText(collection.videos.length) });
     row.append(checkbox, icon, name, count);
     collectionActionList.append(row);
   }
@@ -3152,7 +3218,7 @@ async function confirmPendingDelete() {
        catch 接住，弹出来的却是「删除失败」，用户只会再点一次「删除」再吃一次同样的错。 */
     const refreshError = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
     if (action.type === "collection") {
-      showResultDialog(BcaI18n.t("已删除本地收藏夹"), [BcaI18n.t("“{name}”", { name: action.collection.name }), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      showResultDialog(BcaI18n.t("已删除整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       // 1.7.0（批次 B / P1）：原来失败清单只把**第一条**塞进 3 秒就消失的 toast，
@@ -3324,7 +3390,7 @@ videoForm.addEventListener("submit", async (event) => {
     videoForm.reset();
     const collectionToSelect = collectionNames.includes(selectedCollection) ? selectedCollection : collectionNames[0];
     await displayRoot(rootHandle, collectionToSelect, BcaI18n.t("已读取"), { allowDuringWrite: true });
-    showToast(result.message ? BcaI18n.t(result.message) : BcaI18n.t("视频已添加到本地收藏夹"));
+    showToast(result.message ? BcaI18n.t(result.message) : BcaI18n.t("视频已添加到本地归档"));
   } catch (error) {
     showToast(BcaI18n.t("添加失败：{message}", { message: error?.message || BcaI18n.t("无法解析或保存视频。") }));
   } finally {
@@ -3508,7 +3574,7 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   rootHandle = handle;
   // 先按上一次的记录数给一行「正在读取 0/43…」，别让界面在这次扫描期间完全没反应
   lastScanInfo = null;
-  scanNoticeRefresh = progressNotifier(scanNoticeText, (value) => BcaI18n.t("正在读取 {done}/{total}…", value));
+  scanNoticeRefresh = progressNotifier(scanNoticeText, (value) => scanProgressText(value));
   scanNoticeRefresh.update({ done: 0, total: lastScanRecordCount.get(rootCacheKey(handle)) || 0 });
   const result = await scanRoot(handle, preserveDownloadStatuses);
   forceFullScan = false;
@@ -3545,7 +3611,7 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   syncDetailDownloadAction();
   // 1.7.3：自动刷新（导入落盘后自己重画列表）不弹「已读取 N 个视频」——
   // 真机上导入期间每写一批就弹一次，很吵。手动刷新照旧提示。
-  if (options.silentToast !== true) showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: allVideos().length }));
+  if (options.silentToast !== true) showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: formatCountText(allVideos().length) }));
   // 大目录的递归体积统计很慢，放在渲染之后异步跑，不阻塞界面
   updateStorageUsage(handle);
   // 1.5.0：数据库同步也放在渲染之后，同样是「慢活不挡界面」
@@ -3564,7 +3630,7 @@ function syncDetailDownloadAction() {
 }
 
 /* V1.1.0：与 B 站对比当前选中的收藏夹。
-   与插件弹窗里的「先看差异」走同一条后台消息，只是这里用本地收藏夹名去匹配远程收藏夹
+   与插件弹窗里的「先看差异」走同一条后台消息，只是这里用本地归档名去匹配远程收藏夹
    （收藏库拿不到远程 media_id）。 */
 // V1.1.3：点按钮先弹确认框，确认后才真的开始对比。
 // （V1.1.0~V1.1.2 这里漏了 addEventListener，按钮点了完全没反应。）

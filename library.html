@@ -62,7 +62,7 @@
         <div class="breadcrumb"><span id="breadcrumbRoot" data-i18n="本地资料">本地资料</span><span class="crumb-slash">/</span><strong id="currentCollection" data-i18n="全部收藏">全部收藏</strong></div>
         <div class="top-actions">
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel" data-i18n="尚未选择目录">尚未选择目录</span></div>
-          <div class="usage-label"><span data-i18n="本地收藏夹占用：">本地收藏夹占用：</span><b id="storageUsage" class="tnum">—</b></div>
+          <div class="usage-label"><span data-i18n="本地归档占用：">本地归档占用：</span><b id="storageUsage" class="tnum">—</b></div>
           <button id="diffLibrary" class="button button-quiet" type="button" disabled data-i18n="与 B 站对比" data-i18n-title="只对比收藏夹列表，不抓取每条视频的详情，很快完成">与 B 站对比</button>
     <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录" data-i18n-title="重新读取本地收藏目录"><span data-icon="refresh"></span><span data-i18n="刷新">刷新</span></button>
           <button id="chooseRoot" class="button button-primary"><span class="choose-root-icon" data-icon="plus"></span><span data-busy-label="idle" data-i18n="选择本地备份文件夹">选择本地备份文件夹</span><span data-busy-label="reading" data-i18n="正在读取…" hidden>正在读取…</span><span data-busy-label="refreshing" data-i18n="正在刷新…" hidden>正在刷新…</span><span data-busy-label="connecting" data-i18n="正在连接上次目录…" hidden>正在连接上次目录…</span><span data-busy-label="loading-last" data-i18n="正在读取上次目录…" hidden>正在读取上次目录…</span></button>
@@ -132,7 +132,7 @@
             <div class="batch-selection-tools">
               <strong id="selectedCount">已选 0 个</strong>
               <button id="selectVisible" class="text-button" type="button">全选当前结果</button>
-              <button id="exitBatch" class="text-button" type="button" data-i18n="完成">完成</button>
+              <button id="exitBatch" class="text-button" type="button" data-i18n="退出批量管理">退出批量管理</button>
             </div>
             <div class="batch-actions">
               <button id="updateSelected" class="button button-warning" type="button" disabled><span data-icon="refresh"></span><span data-i18n="更新视频状态">更新视频状态</span></button>
@@ -154,8 +154,10 @@
           <div class="view-controls">
             <label class="search-box">
               <span class="icon-slot" data-icon="search"></span>
-              <input id="searchInput" type="search" placeholder="搜索标题、UP 主或 BV 号" autocomplete="off" data-i18n-placeholder="搜索标题、UP 主或 BV 号">
-              <kbd>Ctrl K</kbd>
+              <input id="searchInput" type="search" placeholder="搜索标题、UP 主或 BV 号" autocomplete="off" data-i18n-placeholder="搜索标题、UP 主或 BV 号" aria-keyshortcuts="Control+K">
+              <!-- kbd 纯装饰：真实快捷键语义在 input 的 aria-keyshortcuts 上；不加 aria-hidden
+                   的话它会并进 input 的可访问名，读出来变成「搜索标题、UP 主或 BV 号 Ctrl K」。 -->
+              <kbd aria-hidden="true">Ctrl K</kbd>
             </label>
             <label class="video-filter"><span data-icon="filter"></span><select id="videoFilter" aria-label="筛选视频" data-i18n-aria="筛选视频"><option value="all" data-i18n="全部视频">全部视频</option><option value="invalid" data-i18n="已失效视频">已失效视频</option><option value="downloaded" data-i18n="已下载视频">已下载视频</option></select></label>
             <label class="video-filter"><span data-icon="user"></span><select id="upFilter" aria-label="按 UP 主筛选" data-i18n-aria="按 UP 主筛选"><option value="all" data-i18n="全部 UP 主">全部 UP 主</option></select></label>
@@ -325,13 +327,13 @@
   <div id="confirmBackdrop" class="confirm-backdrop" hidden>
     <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="confirm-icon" data-icon="alert"></div>
-      <h2 id="confirmTitle">删除本地归档？</h2>
+      <h2 id="confirmTitle">删除本地归档（含封面与视频信息，不进回收站）？</h2>
       <p id="confirmMessage"></p>
       <p class="confirm-warning" data-i18n="本地删除不可恢复：不会进系统回收站，删掉就找不回来了。">本地删除不可恢复：不会进系统回收站，删掉就找不回来了。</p>
       <label id="deleteDownloadsOption" class="delete-downloads-option" hidden><input id="deleteAssociatedDownloads" type="checkbox"><span data-i18n="同时删除关联的本地下载文件">同时删除关联的本地下载文件</span></label>
       <div class="confirm-actions">
         <button id="cancelDelete" class="button button-quiet" type="button" data-i18n="取消">取消</button>
-        <button id="confirmDelete" class="button button-danger" type="button">删除本地文件</button>
+        <button id="confirmDelete" class="button button-danger" type="button">删除本地文件，不可恢复</button>
       </div>
     </section>
   </div>

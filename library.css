@@ -298,7 +298,7 @@ html.banner-visible { --banner-h: 42px; }
 .top-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .root-label { display: flex; align-items: center; gap: var(--sp-2); max-width: 220px; color: var(--muted); font-size: var(--fs-sm); }
 .root-label span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 本地收藏夹占用：与 #rootLabel 同排的只读展示，数值异步算完后替换“正在计算…” */
+/* 本地归档占用：与 #rootLabel 同排的只读展示，数值异步算完后替换“正在计算…” */
 .usage-label { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
 .usage-label b { color: var(--text); font-weight: 650; }
 .status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--ghost); }
@@ -1085,7 +1085,7 @@ a.detail-tag:hover { border-color: var(--brand-line); color: var(--brand-deep); 
 .editor-actions .button { min-width: 108px; }
 
 .target-checkbox-list { display: grid; max-height: 168px; gap: 2px; overflow: auto; margin: 0 0 var(--sp-4); padding: 6px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); }
-.target-checkbox-list:empty::after { content: "暂无本地收藏夹"; padding: var(--sp-2); color: var(--faint); font-size: var(--fs-sm); }
+.target-checkbox-list:empty::after { content: "暂无本地归档"; padding: var(--sp-2); color: var(--faint); font-size: var(--fs-sm); }
 /* 同上：这个也是 <label>，而且就在 videoDialog（.editor-dialog）里，
    不加前缀 display:flex 同样会被 .editor-dialog label 盖成 block。 */
 .editor-dialog .target-checkbox-option { display: flex; align-items: center; min-width: 0; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-xs); color: var(--text); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }

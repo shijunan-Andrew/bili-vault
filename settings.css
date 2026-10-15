@@ -56,7 +56,7 @@
 .settings-search input {
   width: 100%;
   min-height: 34px;
-  padding: 0 var(--sp-3) 0 32px;
+  padding: 0 62px 0 32px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   color: var(--ink);
@@ -65,6 +65,22 @@
 }
 .settings-search input::placeholder { color: var(--faint); }
 .settings-search input:focus-visible { border-color: var(--brand); background: var(--surface); outline: none; box-shadow: var(--focus-ring); }
+
+/* 搜索框上的快捷键提示。settings.css 原来没有 kbd 规则，这里跟 library.css 的 kbd 写法逐字一致；
+   input 的右内边距（上面那句 62px）是给它让位的。 */
+.settings-search kbd {
+  position: absolute;
+  right: var(--sp-2);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  background: var(--surface-soft);
+  font: var(--fs-micro)/1 var(--font-sans);
+  pointer-events: none;
+}
 
 /* 结果下拉：一屏最多 8 条，超了在框内滚 */
 .search-results {
@@ -197,6 +213,9 @@
   line-height: 1.6;
 }
 .row-error { margin: 0; color: var(--warning); font-size: var(--fs-base); }
+/* 1.7.9（ux P2-4）：操作成功的落地提示（背景图已移除）。和 .row-error 同一个位置，
+   但走 --muted 而不是 --warning —— 成功不是警告，不该用警示色。 */
+.row-status { margin: 0; color: var(--muted); font-size: var(--fs-base); }
 
 /* 开关：结构照 popup.css 的 .toggle-switch（圆槽 + 一个圆点，.off 时点回到左边），
    但配色走 --surface-sunken / --brand 令牌 —— popup.css 那版里底色与圆点是写死的，

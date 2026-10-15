@@ -74,6 +74,24 @@
     </div>
   </div>
 
+  <!-- 1.7.9（ux P2-3）：界面里「收藏夹 / 本地归档 / 视频目录 / 本地备份文件夹」
+       四个说法同时出现，其中前两个只差两个字，删东西时最容易点错。
+       正文各处已经统一改口，这里再给一张对照表，看文档的人一眼能对上。 -->
+  <h3 data-i18n="术语对照：三个「夹」别混">术语对照：三个「夹」别混</h3>
+  <p data-i18n="这一个插件里同时出现好几个「夹」，说的不是一回事。看文档和界面时对着这张表认：">这一个插件里同时出现好几个「夹」，说的不是一回事。看文档和界面时对着这张表认：</p>
+  <table>
+    <tr><th data-i18n="界面上的说法">界面上的说法</th><th data-i18n="实际指的是什么">实际指的是什么</th></tr>
+    <tr><td data-i18n="收藏夹">收藏夹</td><td data-i18n="B 站账号里的收藏夹。插件只读不写，删除本地文件不会动它。">B 站账号里的收藏夹。插件只读不写，删除本地文件不会动它。</td></tr>
+    <tr><td data-i18n="本地归档">本地归档</td><td data-i18n="插件在你选的文件夹里建出来的那些目录：一个视频一个目录，含封面与视频信息。界面上「删除本地归档」删的就是它，动不到 B 站。">插件在你选的文件夹里建出来的那些目录：一个视频一个目录，含封面与视频信息。界面上「删除本地归档」删的就是它，动不到 B 站。</td></tr>
+    <tr><td data-i18n="视频目录">视频目录</td><td data-i18n="本地归档里面、单个视频的那一层目录，封面和「视频信息.txt」都在里面。">本地归档里面、单个视频的那一层目录，封面和「视频信息.txt」都在里面。</td></tr>
+    <tr><td data-i18n="本地备份文件夹">本地备份文件夹</td><td data-i18n="你在插件里选的那个根目录，所有本地归档都建在它下面。">你在插件里选的那个根目录，所有本地归档都建在它下面。</td></tr>
+  </table>
+
+  <div class="callout">
+    <b data-i18n="为什么改叫「本地归档」">为什么改叫「本地归档」</b>
+    <span data-i18n="1.7.9 起统一改口：以前本地那份也叫「本地收藏夹」，和 B 站上的收藏夹只差两个字，删东西时很容易点错。现在本地那份一律叫「本地归档」。">1.7.9 起统一改口：以前本地那份也叫「本地收藏夹」，和 B 站上的收藏夹只差两个字，删东西时很容易点错。现在本地那份一律叫「本地归档」。</span>
+  </div>
+
   <h2 id="first" data-i18n="二、第一次用：三步">二、第一次用：三步</h2>
 
   <ol class="steps">
@@ -115,7 +133,7 @@
             <span style="flex:1;text-align:center;padding:8px;border:1px solid var(--line);border-radius:var(--r-sm);font-weight:600" data-i18n="暂停导入">暂停导入</span>
             <span style="flex:1;text-align:center;padding:8px;border:1px solid var(--line);border-radius:var(--r-sm);font-weight:600" data-i18n="取消导入">取消导入</span>
           </div>
-          <p class="note" data-i18n="取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。">取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。</p>
+          <p class="note" data-i18n="取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地归档里的内容不会被删除。">取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地归档里的内容不会被删除。</p>
         </div>
       </div>
     </li>
@@ -216,7 +234,7 @@
     <div class="lib-top">
       <span class="crumb">_测试归档 / <b data-i18n="全部收藏">全部收藏</b></span>
       <span class="spacer"></span>
-      <span class="muted" style="font-size:12.5px"><span data-i18n="本地收藏夹占用：">本地收藏夹占用：</span>4.45 MB</span>
+      <span class="muted" style="font-size:12.5px"><span data-i18n="本地归档占用：">本地归档占用：</span>4.45 MB</span>
       <span class="btn" data-i18n="与 B 站对比">与 B 站对比</span>
       <span class="btn">↻ <span data-i18n="刷新">刷新</span></span>
       <span class="btn primary">＋ <span data-i18n="选择收藏根目录">选择收藏根目录</span></span>

@@ -316,9 +316,9 @@ async function uniqueTimeFolder(parent, name) {
 async function writeFile(directory, name, content) {
   /* 1.7.1：这里**完整退回** 1.7.0 之前的就地写。
      1.7.0（批次 B）曾把它改成「临时文件 + move() 覆盖」，真机反馈是「手动收藏和导入
-     视频时无法把视频导入到本地收藏夹」：`addManualVideo`（background.js:596-608）与
+     视频时无法把视频导入到本地归档」：`addManualVideo`（background.js:596-608）与
      `saveImportedItem`（background.js:2960-2975）在 writeFile 抛错时都会把整条记录目录
-     删掉，所以这一步一旦失败，用户看到的就是「提示正在保存、但本地收藏夹里什么都没有」。
+     删掉，所以这一步一旦失败，用户看到的就是「提示正在保存、但本地归档里什么都没有」。
      归档链路上 1.7.0 只改过这一个函数，两条链路又都失败，所以先把它退回原样；
      move() 在 service worker 里的真实行为还没在真机上验证过，等验证过再上原子写。
      代价（已知）：写到一半断电仍会留下半截正文 —— 这一条 P1 留到 1.7.2 再修。 */
@@ -1447,7 +1447,7 @@ async function importRunLimited(items, limit, worker) {
    - 每条视频都抓一次完整资料（标签、简介、发布时间、分区、互动数据、UP 主粉丝数），
      不再只补“缺失”的字段；
    - 支持暂停 / 继续 / 取消，取消时回滚本次新建的目录与被改写的文件，
-     导入前就在本地收藏夹里的内容保持不动；
+     导入前就在本地归档里的内容保持不动；
    - 本地没有同名收藏夹时全量导入，已有同名收藏夹时补齐缺失视频，
      并按新格式刷新数据不完整的旧记录。
    ========================================================================== */
@@ -4014,7 +4014,7 @@ async function diffBiliFavoritesInner(data, tabId = null) {
   const folderIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
   const resolved = await resolveDiffUid(data?.uid, tabId);
   const folders = await listBiliFavoriteFolders(resolved.uid, resolved.tabId);
-  // 收藏库（独立扩展页）手上只有本地收藏夹名，没有远程 media_id，所以也支持按名字匹配。
+  // 收藏库（独立扩展页）手上只有本地归档名，没有远程 media_id，所以也支持按名字匹配。
   // 本地目录名与 B 站收藏夹名本来就要求一致（导入就是按名字建目录的）。
   const titles = new Set((Array.isArray(data?.folderTitles) ? data.folderTitles : []).map(String));
   const picked = folderIds.size
@@ -4022,7 +4022,7 @@ async function diffBiliFavoritesInner(data, tabId = null) {
     : titles.size
       ? folders.filter((folder) => titles.has(folder.title))
       : folders;
-  if (!picked.length) throw new Error("没有找到要对比的收藏夹。如果本地收藏夹改过名，请先在 B 站核对名称。");
+  if (!picked.length) throw new Error("没有找到要对比的收藏夹。如果本地归档改过名，请先在 B 站核对名称。");
 
   const root = await getRootHandle();
   if (!root) throw new Error("还没有设置本地备份文件夹，无法与本地对比。");

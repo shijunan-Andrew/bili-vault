@@ -59,6 +59,36 @@ function clearWallpaperError() {
   setVisible($("wallpaperErrorRow"), false);
 }
 
+// 1.7.9（ux P2-4）：操作成功也要有落地反馈。原来「移除背景图片」点完界面纹丝不动
+// （按钮自己藏起来而已），用户没法确认到底生效没有。这里给一句 role="status" 的话，
+// 4 秒后自己收起 —— 提示是「已经发生的事」，不需要用户手动关掉。
+let wallpaperStatusTimer = 0;
+const WALLPAPER_STATUS_MS = 4000;
+
+function showWallpaperStatus(key) {
+  const box = $("wallpaperStatus");
+  if (!box) return;
+  writeText(box, BcaI18n.t(key));
+  setVisible(box, true);
+  if (wallpaperStatusTimer) clearTimeout(wallpaperStatusTimer);
+  wallpaperStatusTimer = setTimeout(() => {
+    wallpaperStatusTimer = 0;
+    setVisible(box, false);
+  }, WALLPAPER_STATUS_MS);
+}
+
+function clearWallpaperStatus() {
+  if (wallpaperStatusTimer) {
+    clearTimeout(wallpaperStatusTimer);
+    wallpaperStatusTimer = 0;
+  }
+  const box = $("wallpaperStatus");
+  if (box) {
+    setVisible(box, false);
+    writeText(box, "");
+  }
+}
+
 // 「自定义」才显示背景图那一组；毛玻璃是全局效果，但强度滑块只在开关打开时才有意义
 function renderAppearance() {
   const custom = BcaTheme.current() === "custom";
@@ -362,9 +392,18 @@ async function boot() {
     if (file) selectWallpaperFile(file);
   });
   $("wallpaperRemove")?.addEventListener("click", () => {
+    // 1.7.9（ux P2-4）：先问一句。移除是「删掉存着的那张图」，本地原图要是已经不在，
+    // 就再也回不到这张背景了 —— 这种不可逆操作不能点一下就算。
+    // 用原生 confirm 而不是自建对话框：设置页没有对话框组件（收藏库那套在 library.js 里，
+    // 两边是各自独立的页面），为一句确认搬一整套 DOM + 焦点管理不划算。
+    if (!window.confirm(BcaI18n.t("移除后要重新选图才能恢复，确定移除背景图片吗？"))) return;
     clearWallpaperError();
+    clearWallpaperStatus();
     Promise.resolve(BcaTheme.clearWallpaper())
-      .then(() => refreshWallpaperState())
+      .then(() => {
+        refreshWallpaperState();
+        showWallpaperStatus("背景图已移除");
+      })
       .catch(() => showWallpaperError("浏览器不让存背景图片，可能是空间不够。"));
   });
 
@@ -503,6 +542,16 @@ async function boot() {
   search?.addEventListener("input", (event) => renderSearchResults(event.target.value));
   // 点结果之前会先 blur，所以这里不能用 blur 收起下拉，只能点空白处收
   search?.addEventListener("keydown", (event) => { if (event.key === "Escape") { search.value = ""; renderSearchResults(""); } });
+  // 1.7.9（ux P2-7）：收藏库那边 Ctrl/⌘+K 能聚焦搜索框，设置页也有搜索框却不认这个键 ——
+  //   同一个插件里同一个快捷键两种行为，用户只能靠猜。这里补齐；提示用的 <kbd> 在 settings.html
+  //   的 .settings-search 里，快捷键语义由 input 的 aria-keyshortcuts 表达。
+  document.addEventListener("keydown", (event) => {
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
+    if (!search) return;
+    event.preventDefault();
+    search.focus();
+    search.select();
+  });
   document.addEventListener("click", (event) => {
     if (!event.target.closest?.(".settings-search")) renderSearchResults("");
   });

@@ -142,7 +142,7 @@
             <button id="pauseImport" class="secondary" type="button" data-i18n="暂停导入">暂停导入</button>
             <button id="cancelImport" class="secondary danger" type="button" data-i18n="取消导入">取消导入</button>
           </div>
-          <p id="importControlHint" class="import-control-hint" data-i18n="取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。" hidden>取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地收藏夹里的内容不会被删除。</p>
+          <p id="importControlHint" class="import-control-hint" data-i18n="取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地归档里的内容不会被删除。" hidden>取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地归档里的内容不会被删除。</p>
           <div id="importStatus" class="import-status" role="status"></div>
         </div>
       </div>
@@ -158,9 +158,17 @@
         <summary id="resultDetailsSummary" data-i18n="查看保存位置">查看保存位置</summary>
         <div id="resultPath" class="result-path"></div>
       </details>
-      <div id="lastError" class="error-block" hidden>
-        <div class="error-title"><span data-icon="alert"></span><span data-i18n="最近一次错误">最近一次错误</span></div>
-        <pre id="errorText"></pre>
+      <!-- 1.7.9（ux P2-8）：这块是「出事了」的唯一痕迹，但以前直接铺报告原文 ——
+           第一屏看到的是「B站收藏夹本地导入报告 / 插件版本 / 提示…」，真正那句失败
+           埋在几十行以后。现在：role="alert" 让读屏立刻播报，先给人话摘要，
+           报告全文折进 <details>，要发给开发者的人一样拿得到全文。 -->
+      <div id="lastError" class="error-block" role="alert" hidden>
+        <div class="error-title" id="errorTitle" tabindex="-1"><span data-icon="alert"></span><span data-i18n="最近一次错误">最近一次错误</span></div>
+        <p id="errorSummary" class="error-summary"></p>
+        <details id="errorDetails" class="error-details">
+          <summary data-i18n="查看错误详情">查看错误详情</summary>
+          <pre id="errorText"></pre>
+        </details>
         <div id="reportPath" class="report-path"></div>
         <button id="downloadReport" class="secondary" data-i18n="下载错误报告">下载错误报告</button>
       </div>

@@ -397,7 +397,9 @@ html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
 /* 尊重系统的“减少动态效果”设置。
    1.4.1 起这里也管毛玻璃：backdrop-filter 每帧都要重新采样背景，
    是这套外观里最贵的一项，而「减少动态效果」的用户往往就是要省这个。
-   关掉 blur 而不是整块禁用玻璃：底色仍是那层半透明 surface，可读性不变。 */
+   关掉 blur 而不是整块禁用玻璃：底色仍是那层半透明 surface，可读性不变。
+   1.7.9：清单以前只管收藏库与设置页的类名，统计页（stats.css 那份毛玻璃）漏在外面 ——
+   统计页照样跟着主题透，却不肯在减少动态效果时关掉 blur。补齐统计页的类名。 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;
@@ -406,9 +408,48 @@ html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
     scroll-behavior: auto !important;
   }
   html.bca-glass :is(.video-card, .detail-panel, .batch-toolbar,
-    .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast),
-  html.bca-glass .topbar {
+    .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast,
+    .stats-card, .stats-foot, .stats-tile, .stats-top-row, .stats-picker-menu),
+  html.bca-glass :is(.topbar, .stats-topbar) {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
+}
+
+/* 高对比度模式（Windows 的「对比度主题」、Chrome 的 forced colors）。
+   1.7.9（compat C3）：以前是全仓零适配 —— 系统在这个模式下会把颜色换成用户选的
+   高对比调色板，但有四件事它换不好，都是这套外观自己造出来的：
+   ① 毛玻璃：backdrop-filter 不在系统的替换范围内，会留在原地把背后内容糊成一团；
+   ② 半透明底色（--bca-glass-surface 是 color-mix 出来的）：换成系统色后仍然半透明，
+      正文压在图或卡片上，对比度没有保证；
+   ③ 卡片之间的分界：这套界面主要靠底色差分区块，颜色被抽掉之后块与块会糊在一起，
+      所以补一条 1px 实边框 —— 在高对比模式下边框是唯一可靠的分界手段；
+   ④ 背景图与遮罩：照片本身是内容，不该被系统色覆盖，但遮罩那层雾在高对比下
+      纯属降对比度的噪音，直接去掉。
+   颜色一律用系统关键字（Canvas / CanvasText / LinkText），不是写死的色值。 */
+@media (forced-colors: active) {
+  html.bca-glass :is(.sidebar, .video-card, .detail-panel, .batch-toolbar, .confirm-dialog,
+    .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast,
+    .stats-card, .stats-foot, .stats-tile, .stats-top-row, .stats-picker-menu),
+  html.bca-glass :is(.topbar, .stats-topbar) {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+  /* 状态不能只靠颜色：高对比模式下 --brand / --warning 全被换成同一个系统色，
+     选中、悬停、失效三种卡片状态会长得一模一样，所以补边框粗细与线型。 */
+  .video-card:hover,
+  .video-card.selected,
+  .video-card.invalid-video {
+    border: 2px solid CanvasText;
+  }
+  /* 图表与像素画的颜色本身就是信息（饼图每一片、小鲸鱼每一帧），
+     让系统把它们涂成同一个颜色就什么都没了 —— 这两处保留原色。 */
+  .stats-pie,
+  .bca-pet-sprite {
+    forced-color-adjust: none;
+  }
+  /* 遮罩是自定义外观的「雾」，高对比度下它只会把正文压暗，去掉。 */
+  .bca-wallpaper-veil { display: none !important; }
 }

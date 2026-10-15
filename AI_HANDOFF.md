@@ -904,7 +904,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:198 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:203 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

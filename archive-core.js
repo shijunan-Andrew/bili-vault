@@ -288,6 +288,32 @@
     return lines.join(newline);
   }
 
+  /* 1.7.9（ux P2-6）：全站统一的数字格式。
+     原来体积是「1.50 MB」（两位小数）、计数是「1234 个」（没有分隔符）、进度是「1/20」
+     （斜杠硬拼），同一个界面里三种风格；上千条时读不出量级。
+     这里集中成一个小模块，页面侧（library.js）通过 BcaArchiveCore 取用。 */
+  function formatCountText(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return value === undefined || value === null ? "" : String(value);
+    // 三种界面语言（简中 / 繁中 / 英文）的分组符号都是逗号，所以固定按 en-US 分组，
+    // 不让数字格式跟着界面语言漂。单位换算（万 / 亿 vs K / M / B）是 formatCount 的职责，不在这里。
+    return num.toLocaleString("en-US");
+  }
+
+  // B / KB / MB / GB，KB 及以上保留 2 位小数（顶部占用与详情里的下载体积共用）
+  function formatBytes(value) {
+    const bytes = Number(value) || 0;
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(2)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  }
+
+  // 进度一律「已完成/总数」，两个数都过 formatCountText，与计数文案同源
+  function formatProgressCounter(done, total) {
+    return `${formatCountText(done)}/${formatCountText(total)}`;
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     withSourceCollection,
@@ -302,6 +328,10 @@
     downloadPathLabel,
     joinDownloadPath,
     isPlaceholderValue,
+    // 数字格式化：体积 / 计数 / 进度三处共用同一份实现（ux P2-6）
+    formatCountText,
+    formatBytes,
+    formatProgressCounter,
     // 互动数据六键与六个中文标签：全仓唯一一份。写归档的 statsSectionLines /
     // patchVolatileFields 与界面侧的 library.js 都引用这里，不再各自复制字面量。
     STAT_KEYS,

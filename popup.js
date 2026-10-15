@@ -33,6 +33,9 @@ const diffStartConfirm = document.getElementById("diffStartConfirm");
 const diffStartDetail = document.getElementById("diffStartDetail");
 const lastError = document.getElementById("lastError");
 const errorText = document.getElementById("errorText");
+// 1.7.9（ux P2-8）：错误块现在分三层 —— 标题（可编程聚焦）、人话摘要、折叠的报告原文
+const errorTitle = document.getElementById("errorTitle");
+const errorSummary = document.getElementById("errorSummary");
 const reportPath = document.getElementById("reportPath");
 const downloadButton = document.getElementById("downloadReport");
 const importSelectionView = document.getElementById("importSelectionView");
@@ -628,6 +631,21 @@ async function loadRootHandle() {
   }
 }
 
+/* 1.7.9（ux P2-8）：把 16000 字的报告压成一句人话。
+   报告的开头固定是「B站收藏夹本地导入报告 / 插件版本 / 提示 / 开始时间」，
+   真正的那句失败在几十行以后 —— 所以不能取首行，要挑带结论关键词的那一行。
+   挑不到就退回一句通用说明（至少比一屏报告原文强）。 */
+function errorSummaryText(error) {
+  if (error?.needsReauth) return BcaI18n.t("本地归档文件夹的写入授权已失效，需要重新授权。");
+  const lines = String(error?.report || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const keyLine = lines.find((line) => /失败|中止|冲突|失效|错误/.test(line));
+  if (!keyLine) return BcaI18n.t("最近一次操作没有成功完成，下面是完整报告。");
+  return keyLine.length > 120 ? `${keyLine.slice(0, 119)}…` : keyLine;
+}
+
 async function refreshStatus() {
   const status = await chrome.runtime.sendMessage({ type: "get-status" });
   rootHandle = await loadRootHandle().catch(() => null);
@@ -668,13 +686,27 @@ async function refreshStatus() {
   if (status.lastError?.report) {
     errorReport = status.lastError.report;
     errorText.textContent = errorReport;
+    if (errorSummary) errorSummary.textContent = errorSummaryText(status.lastError);
     reportPath.textContent = status.lastError.reportPath
       ? BcaI18n.t("本地报告：{path}", { path: status.lastError.reportPath })
       : BcaI18n.t("报告暂存在插件中，可下载到本地。");
     lastError.hidden = false;
+    /* 1.7.9（ux P2-8）：出过错就必须看得见。卡片默认是收起的（上面只有 lastResult.failed
+       才会展开），而「读取失败」「授权失效」这类错误根本不会写 lastResult —— 结果就是
+       弹窗打开后一切正常，错误躺在折叠里没人知道。这里和失败结果一样强制展开，
+       并把焦点交给错误标题：读屏会读它，键盘用户往下 Tab 就是下载报告。
+       tabindex="-1" 让标题可编程聚焦但不占 Tab 位；focus 失败（老 Chrome 不认
+       options）也不能连累整个渲染，所以单独包一层。 */
+    if (statusCard) statusCard.open = true;
+    try {
+      errorTitle?.focus({ preventScroll: false });
+    } catch {
+      errorTitle?.focus();
+    }
   } else {
     lastError.hidden = true;
     errorReport = "";
+    if (errorSummary) errorSummary.textContent = "";
   }
   // BUG-8：优先用后台给的结构化字段 lastError.needsReauth 判断要不要显示「重新授权」。
   // 以前这里靠 includes 匹配 background 写的中文原文，文案一改（就像这次统一术语）

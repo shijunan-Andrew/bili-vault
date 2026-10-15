@@ -44,7 +44,10 @@
       <div class="settings-search">
         <span class="search-icon" data-icon="search" aria-hidden="true"></span>
         <input id="settingsSearch" type="search" autocomplete="off" data-i18n-placeholder="搜索设置" placeholder="搜索设置"
-               data-i18n-aria="搜索设置" aria-label="搜索设置">
+               data-i18n-aria="搜索设置" aria-label="搜索设置" aria-keyshortcuts="Control+K">
+        <!-- 快捷键提示：与收藏库搜索框同一套（settings.js 里 Ctrl/⌘+K 聚焦本框）。
+             kbd 是纯装饰，真正的快捷键语义在 input 的 aria-keyshortcuts 上。 -->
+        <kbd aria-hidden="true">Ctrl K</kbd>
         <!-- 下拉默认 hidden；theme.css 有 [hidden] { display:none !important } 兜底 -->
         <div id="searchResults" class="search-results" role="listbox" data-i18n-aria="搜索结果" aria-label="搜索结果" hidden></div>
       </div>
@@ -115,6 +118,9 @@
             <input type="file" id="wallpaperFile" class="hidden-file-input" accept="image/*" tabindex="-1" data-i18n-aria="选择背景图片" aria-label="选择背景图片">
             <button id="wallpaperChoose" class="button button-quiet" type="button" data-i18n="选择背景图片">选择背景图片</button>
             <button id="wallpaperRemove" class="button button-quiet button-warn" type="button" data-i18n="移除背景图片">移除背景图片</button>
+            <!-- 1.7.9（ux P2-4）：移除背景图原来是「点一下就没了」，既没有确认也没有任何反馈，
+                 误点只能重新选图。这里补一个落地提示；role="status" 是礼貌级播报，不打断朗读。 -->
+            <p class="row-status" id="wallpaperStatus" role="status" hidden></p>
           </div>
         </div>
 

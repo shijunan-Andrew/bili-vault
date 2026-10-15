@@ -209,6 +209,12 @@ button:disabled { cursor: wait; opacity: .6; }
 .result-path { max-height: 92px; margin-top: 5px; overflow: auto; color: var(--muted); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .error-block { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
 .error-title { display: flex; align-items: center; gap: 5px; color: var(--danger); font-size: var(--fs-base); font-weight: 700; }
+/* 1.7.9（ux P2-8）：报告原文上面那行人话摘要。标题用 tabindex="-1" 接收焦点
+   （打开弹窗时把注意力带过来），但不画焦点框 —— 它是个标题，不是可操作项。 */
+.error-title:focus { outline: none; }
+.error-summary { margin: 6px 0 0; color: var(--text); font-size: var(--fs-base); line-height: 1.6; overflow-wrap: anywhere; }
+.error-details { margin-top: 6px; }
+.error-details summary { cursor: pointer; color: var(--muted); font-size: var(--fs-sm); }
 .error-block pre { max-height: 112px; margin: 6px 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: var(--fs-sm)/1.6 var(--font-sans); }
 .report-path { color: var(--faint); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 

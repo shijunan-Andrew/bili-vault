@@ -632,6 +632,52 @@
     return Math.round(Math.min(ceiling, Math.max(floor, need)) * 10) / 10;
   }
 
+  /* 1.7.9（ux P2-12）：统计图原来只有视觉一条路 —— 柱子是 role="button"，读屏能一根
+     一根地听，但「把这段时间的数据抄下来 / 前后对照 / 放大看」都做不到；色觉障碍用户
+     更是完全拿不到饼图的构成（饼图只有 aria-label 一句话）。所以每张图下面挂一份
+     <table>（带 <caption>），默认收起、不占版面。表格与图同源，用的是同一份 rows，
+     不另存一份数据，也就不会出现「图对表不对」。 */
+  function renderChartTable(host, caption, headCells, rows) {
+    if (!host || !rows.length) return;
+    const details = document.createElement("details");
+    details.className = "stats-table";
+    const summary = document.createElement("summary");
+    summary.textContent = t("查看数据表（{count} 行）", { count: formatCount(rows.length) });
+    details.appendChild(summary);
+
+    const table = document.createElement("table");
+    const captionEl = document.createElement("caption");
+    captionEl.textContent = caption;
+    table.appendChild(captionEl);
+
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    for (const cell of headCells) {
+      const th = document.createElement("th");
+      th.setAttribute("scope", "col");
+      th.textContent = cell;
+      headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      row.forEach((value, index) => {
+        // 第一列是行标题（日期 / 收藏夹名），读屏会连着它念后面的数字
+        const cell = document.createElement(index === 0 ? "th" : "td");
+        if (index === 0) cell.setAttribute("scope", "row");
+        cell.textContent = String(value);
+        tr.appendChild(cell);
+      });
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    details.appendChild(table);
+    host.appendChild(details);
+  }
+
   /**
    * 画一排柱子。rows 里每个元素 { day, count, label? }，一天一根。
    * options.labelMode: "dates" 标到横轴上（天） / "none" 不标（年，图例另有其事）。
@@ -824,6 +870,13 @@
     }), formatCount(0));
 
     host.appendChild(svg);
+    // 1.7.9（ux P2-12）：图旁边配一份可读的数据表（默认收起）
+    renderChartTable(
+      host,
+      config.ariaLabel || t("每天的新增数量柱状图", { days: formatCount(rows.length) }),
+      [config.tableHeadLabel || t("日期"), t("新增数量")],
+      rows.map((row) => [String(row.label || dateKey(row) || ""), formatCount(numberOr(row.count, 0))])
+    );
     return { todayMarked: markIndex >= 0, max: max };
   }
 
@@ -956,6 +1009,20 @@
     });
     putBack();
     host.appendChild(svg);
+    /* 1.7.9（ux P2-12）：饼图是整套界面里最依赖颜色的一张 —— 扇形全靠颜色区分，
+       读屏能听到的只有 options.ariaLabel 那一句。配一份与图同源的数据表。 */
+    withPercents(slices, total);
+    const pieLabel = (slice) => (slice.other ? slice.name : (slice.name || t("未归类收藏")));
+    renderChartTable(
+      host,
+      options.ariaLabel || t("收藏夹构成"),
+      [options.tableHeadLabel || t("收藏夹"), t("视频数"), t("占比")],
+      slices.map((slice) => [
+        pieLabel(slice),
+        formatCount(slice.count),
+        formatCount(Number.isFinite(slice.percent) ? slice.percent : 0) + "%"
+      ])
+    );
   }
 
   function drawPie(host, slices, total) {
@@ -1385,6 +1452,8 @@
          下面这张会跟着亮（用户报的「上下两个柱子会关联」）。 */
       isFocused: (key) => key === yearFocusDay,
       ariaLabel: t("按年份的收藏数量柱状图"),
+      // 年份柱状图的数据表第一列也是年份（1.7.9 / ux P2-12）
+      tableHeadLabel: t("年份"),
       /* 年份柱子的读屏措辞不能带「这一天」：用现成的「{day} 新增了 {count} 个视频」
          这条词条，把年份当主语，读出来是「2024 新增了 62 个视频」。 */
       ariaLabelFor: (row) => t("{day} 新增了 {count} 个视频", {
@@ -1426,6 +1495,8 @@
     const total = slices.reduce((sum, slice) => sum + slice.count, 0);
     drawPieTo(ui.yearPie, slices, total, {
       ariaLabel: yearRow ? t("收藏夹构成") : t("按年份的收藏占比饼图"),
+      // 年份构成那张表的第一列是年份，不是收藏夹名（1.7.9 / ux P2-12）
+      tableHeadLabel: t("年份"),
       labelFor: (slice) => t("{name}：{count} 个视频，占 {percent}%", {
         name: slice.other ? slice.name : (slice.name || t("未归类收藏")),
         count: formatCount(slice.count),
@@ -1611,11 +1682,17 @@
      1.7.0（批次 B）：这里原来也叫 monthText，和上面那个按日键取月份的同名函数撞车 ——
      同一个作用域里后声明的那个赢，于是 monthlyRows 的 label 实际走到这一支，
      `new Date("2026-01")` 按 UTC 解析，UTC 以西的机器上月份标签会差一个月。
-     两个函数各自改名，别再撞。 */
+     两个函数各自改名，别再撞。
+     1.7.9：这里原来是自己拼的「年 / 月」。和 1.6.1 的星期几是同一类问题 ——
+     硬拼的汉字在英文界面里会原样漏出来。改成复用上面 monthText 的那条同名词条，
+     词典里本来就有，不用新增条目；formatCount 只管数字的单位换算，不是模板。 */
   function calendarMonthText(time) {
     const date = new Date(time);
     if (Number.isNaN(date.getTime())) return "";
-    return date.getFullYear() + " 年 " + (date.getMonth() + 1) + " 月";
+    return t("{year}年{month}月", {
+      year: date.getFullYear(),
+      month: formatCount(date.getMonth() + 1)
+    });
   }
 
   /* 两个月并排：左边是 view 那个月，右边是它的下个月。

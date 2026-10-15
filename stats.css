@@ -900,3 +900,32 @@ html.bca-glass .stats-topbar {
   }
   .stats-legend-item:hover .stats-legend-mark { transform: none; }
 }
+
+/* 1.7.9（ux P2-12）：每张图下面的数据表替代（<details> 默认收起）。
+   它服务两类人：读屏用户（柱子和扇形再多也只是「听个大概」），
+   以及想把某段时间的数字抄下来核对的人。所以这里不用 sr-only 藏起来 ——
+   藏起来等于只有读屏拿得到，看得见的人反而没了这条退路。
+   数字列用 tabular-nums 对齐，扫一眼就能上下比大小。 */
+.stats-table { margin-top: var(--sp-3); }
+.stats-table > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-sm); }
+.stats-table table {
+  width: 100%;
+  margin-top: var(--sp-2);
+  border-collapse: collapse;
+  font-size: var(--fs-base);
+}
+.stats-table caption {
+  padding-bottom: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+.stats-table th,
+.stats-table td {
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.stats-table thead th { color: var(--muted); font-weight: 600; }
+.stats-table tbody th { color: var(--text); font-weight: 400; }
+.stats-table td { color: var(--text); font-variant-numeric: tabular-nums; }

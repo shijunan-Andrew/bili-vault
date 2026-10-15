@@ -2328,6 +2328,114 @@ test("translations keep real folder and file names verbatim", () => {
     }
   }
 });
+// ---- V1.7.9（审查报告 P2 批次 2）------------------------------------------
+
+test("毛玻璃的降级清单同时覆盖统计页，高对比度模式也有兜底（V1.7.9）", () => {
+  // 统计页的毛玻璃类名写在 stats.css 里，theme.css 的两份降级清单以前只管
+  // 收藏库与设置页 —— 统计页照样跟着主题透，却不肯在减少动态效果时关掉 blur。
+  const statsStyles = readProjectFile("stats.css");
+  const glassClasses = [".stats-card", ".stats-foot", ".stats-topbar", ".stats-picker-menu", ".stats-tile", ".stats-top-row"];
+  for (const name of glassClasses) {
+    assert.ok(statsStyles.includes(name), `stats.css 里应该有毛玻璃类名 ${name}`);
+  }
+  const theme = readProjectFile("theme.css");
+  const reduced = theme.match(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/);
+  assert.ok(reduced, "theme.css 里应该有 prefers-reduced-motion 块");
+  assert.match(reduced[0], /backdrop-filter: none !important/);
+  const forced = theme.match(/@media \(forced-colors: active\) \{[\s\S]*?\n\}/);
+  assert.ok(forced, "theme.css 里应该有 forced-colors: active 块");
+  for (const name of glassClasses) {
+    assert.ok(reduced[0].includes(name), `减少动态效果的玻璃清单漏了 ${name}`);
+    assert.ok(forced[0].includes(name), `高对比度的玻璃清单漏了 ${name}`);
+  }
+  // 高对比度下颜色被系统换成单一调色板，块与块的分界只能靠系统色画的边框。
+  assert.match(forced[0], /background: Canvas;/);
+  assert.match(forced[0], /border: 1px solid CanvasText;/);
+  // 饼图每一片、像素画每一帧的颜色本身就是信息，不能被系统涂成同一个颜色。
+  assert.match(forced[0], /forced-color-adjust: none/);
+});
+
+test("界面与词典统一说「本地归档」，术语表给出对照（V1.7.9）", () => {
+  // 「本地收藏夹」和 B 站账户里的「收藏夹」只差两个字，删除确认时最容易点错。
+  // guide.html 的术语表本身要提到旧说法（解释为什么改名），是唯一豁免。
+  const uiFiles = ["library.html", "library.js", "popup.html", "popup.js", "tutorial.html",
+    "tutorial.js", "settings.html", "settings.js", "stats.html", "stats.js",
+    "content.js", "background.js", "manifest.json", "guide.html"];
+  const offenders = [];
+  for (const file of uiFiles) {
+    const hits = (readProjectFile(file).match(/本地收藏夹/g) || []).length;
+    if (hits) offenders.push(`${file} 命中 ${hits} 次`);
+  }
+  assert.ok(
+    offenders.length <= 1 && offenders[0].startsWith("guide.html"),
+    `旧说法「本地收藏夹」只允许留在 guide.html 的术语表里，实际：${offenders.join("、") || "无"}`
+  );
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = i18nTools.readDictionary(locale) || {};
+    for (const [key, value] of Object.entries(dictionary)) {
+      if (key.startsWith("1.7.9 起统一改口")) continue; // 术语表那条要复述旧说法
+      assert.ok(!key.includes("本地收藏夹"), `${locale} 里还留着旧键：${key}`);
+      assert.ok(!String(value).includes("本地收藏夹"), `${locale} 的译文里还留着旧说法：${key}`);
+    }
+  }
+  const guide = readProjectFile("guide.html");
+  assert.match(guide, /术语对照：三个「夹」别混/);
+  assert.match(guide, /data-i18n="本地归档"/);
+  assert.match(guide, /data-i18n="本地备份文件夹"/);
+});
+
+test("两张统计图都能以表格读到（V1.7.9）", () => {
+  const stats = readProjectFile("stats.js");
+  assert.match(stats, /function renderChartTable\(host, caption, headCells, rows\) \{/);
+  for (const [name, signature] of [
+    ["drawChart", /function drawChart\(host, rows, options\) \{[\s\S]*?\n\}/],
+    ["drawPieTo", /function drawPieTo\(host, slices, total, options\) \{[\s\S]*?\n\}/]
+  ]) {
+    const body = stats.match(signature);
+    assert.ok(body, `stats.js 里应该有 ${name}`);
+    assert.ok(body[0].includes("renderChartTable("), `${name} 应该配一份可读的数据表`);
+  }
+  // 表格本身要是真表格：有 caption，不是拿 div 拼的。
+  assert.match(stats, /<caption>/);
+  assert.match(stats, /document\.createElement\("table"\)/);
+  assert.match(readProjectFile("stats.css"), /\.stats-table/);
+});
+
+test("批量进度播报有节流，且弹层关掉后不会再补写一次（V1.7.9）", () => {
+  const library = readProjectFile("library.js");
+  const throttle = library.match(/const STATUS_PROGRESS_THROTTLE_MS = (\d+);/);
+  assert.ok(throttle, "library.js 里应该有 STATUS_PROGRESS_THROTTLE_MS");
+  assert.ok(Number(throttle[1]) >= 500, `进度播报间隔至少 500ms，实际 ${throttle[1]}ms`);
+  const apply = library.match(/function applyStatusProgress\(message\) \{[\s\S]*?\n\}/);
+  assert.ok(apply, "library.js 里应该有 applyStatusProgress");
+  assert.ok(apply[0].includes("STATUS_PROGRESS_THROTTLE_MS"), "applyStatusProgress 应该走节流，不能每条都写 role=status");
+  // 有节流就必须有取消，否则弹层关掉、进度条刚清空，那个 setTimeout 还会回来补写一次。
+  assert.match(library, /function cancelStatusProgressTimer\(\) \{/);
+  assert.ok(library.includes("cancelStatusProgressTimer();"), "取消函数必须真的被调用");
+});
+
+test("快捷键交给读屏，失败时弹窗给出人话摘要，移除背景图要确认且有反馈（V1.7.9）", () => {
+  // Ctrl K 画成 <kbd> 只是给人看的；语义挂在 input 上才读得出来。
+  assert.match(readProjectFile("library.html"), /id="searchInput"[^>]*aria-keyshortcuts="Control\+K"/);
+  assert.match(readProjectFile("settings.html"), /aria-keyshortcuts="Control\+K"/);
+  // 出错时不展开、不报读屏，报告就埋在折叠区里没人看见。
+  const popupHtml = readProjectFile("popup.html");
+  assert.match(popupHtml, /id="errorTitle"/);
+  assert.match(popupHtml, /role="alert"/);
+  assert.match(popupHtml, /<summary data-i18n="查看错误详情">查看错误详情<\/summary>/);
+  const popup = readProjectFile("popup.js");
+  assert.match(popup, /function errorSummaryText\(error\) \{/);
+  assert.match(popup, /errorSummary\.textContent = errorSummaryText\(/);
+  assert.match(popup, /if \(statusCard\) statusCard\.open = true;/);
+  assert.match(popup, /errorTitle\?\.focus\(/);
+  // 移除背景图：先问一句，成了要给 role=status 的反馈。
+  const settings = readProjectFile("settings.js");
+  assert.match(settings, /const WALLPAPER_STATUS_MS = \d+;/);
+  assert.match(settings, /window\.confirm\(BcaI18n\.t\("移除后要重新选图才能恢复，确定移除背景图片吗？"\)\)/);
+  assert.match(settings, /showWallpaperStatus\("背景图已移除"\)/);
+  assert.match(readProjectFile("settings.html"), /id="wallpaperStatus" role="status" hidden/);
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
