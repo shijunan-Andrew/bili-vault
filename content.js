@@ -338,21 +338,30 @@
 
   function sendFavorite(data, signature) {
     showNotice(BcaI18n.t("正在归档视频…"), BcaI18n.t("B站已完成收藏，正在保存视频信息和封面。"), "", false);
-    chrome.runtime.sendMessage({ type: "save-favorite", data }, (result) => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        showNotice(BcaI18n.t("归档失败"), BcaI18n.t("插件后台暂时无法处理这次收藏。"), runtimeError.message, true);
-      } else if (result?.busyImport) {
-        // 1.7.3：队列里正在导入时后台会立刻回 busyImport（不再让这次收藏干等），
-        // 这里给一句用户能照做的话，而不是笼统的「归档失败」。
+    // 1.7.4：先问一句后台有没有导入在跑。有就**当场取消这次手动归档**并说清楚，
+    // 不让用户看着「正在归档视频…」等下去（真机上等过几分钟，最长那次提示都没回来）。
+    chrome.runtime.sendMessage({ type: "bca-import-status" }, (status) => {
+      void chrome.runtime.lastError;
+      if (status?.active) {
         showNotice(BcaI18n.t("导入进行中"), BcaI18n.t("目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。"), "", true);
-      } else if (!result?.ok) {
-        // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
-        showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);
-      } else {
-        rememberSeen(signature);
-        showNotice(BcaI18n.t("归档成功"), result?.message || BcaI18n.t("已保存视频信息和封面。"), result?.path || "", false, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
+        return;
       }
+      chrome.runtime.sendMessage({ type: "save-favorite", data }, (result) => {
+        const runtimeError = chrome.runtime.lastError;
+        if (runtimeError) {
+          showNotice(BcaI18n.t("归档失败"), BcaI18n.t("插件后台暂时无法处理这次收藏。"), runtimeError.message, true);
+        } else if (result?.busyImport) {
+          // 1.7.3：后台发现队列里正在导入时会立刻回 busyImport（兜住「问的时候还没开始、
+          // 发出去的时候已经开始了」这种抢跑），这里给一句用户能照做的话。
+          showNotice(BcaI18n.t("导入进行中"), BcaI18n.t("目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。"), "", true);
+        } else if (!result?.ok) {
+          // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
+          showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);
+        } else {
+          rememberSeen(signature);
+          showNotice(BcaI18n.t("归档成功"), result?.message || BcaI18n.t("已保存视频信息和封面。"), result?.path || "", false, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
+        }
+      });
     });
   }
 

@@ -4226,7 +4226,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 1.7.3：导入正在跑（或已有一轮导入在排队）时不再让这次收藏干等 —— 等下去既可能碰上
     // service worker 被回收，用户也只能看着「正在归档视频…」。直接回一句能照做的话：
     // 「目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。」
-    if (importRun.active || importPending > 0) {
+    // 1.7.4：判据补上 importState.running —— 它是三个里最耐得住 SW 回收的一个（内存态，
+    // 且启动时会按 session 里的记录复位，不会留下长期为真的残影）。
+    if (importRun.active || importPending > 0 || importState.running) {
       sendResponse({ ok: false, busyImport: true });
       return true;
     }
