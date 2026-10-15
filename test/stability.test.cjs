@@ -2847,6 +2847,13 @@ test("换名失败一律退回就地写，不许再按错误名挑名单（V1.7.
   assert.doesNotMatch(body, /throw moveError/, "换名失败必须退回就地写，不许原样抛出");
   assert.match(body, /await temp\.move\(directory, name\);/, "要真的试过换名覆盖");
   assert.match(body, /renameNote = renameFailureNote\(error\);/, "换名失败要把错误名记下来");
+  // 兜底必须是「无条件」的：从换名调用到记下原因之间不许出现任何 throw。
+  // 只写 assert.doesNotMatch(body, /unsupported/) 不够 —— 把名单换个变量名，
+  // 或者写成 if (error.name !== 'NoModificationAllowedError') throw error; 都能绕过去。
+  const moveAt = body.indexOf("await temp.move(directory, name);");
+  const noteAt = body.indexOf("renameFailureNote(error)", moveAt);
+  assert.ok(moveAt > 0 && noteAt > moveAt, "换名之后要能把失败原因记下来");
+  assert.doesNotMatch(body.slice(moveAt, noteAt), /throw\b/, "换名失败不许在记原因之前抛出");
   // library.js 那一份同样要能报出原因（两份必须行为一致）
   const lib = readProjectFile("library.js");
   assert.match(lib, /function renameFailureNote\(error\) \{/);
