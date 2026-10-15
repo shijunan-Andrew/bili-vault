@@ -3,6 +3,10 @@
   window.__BCA_FAVORITES_IMPORT_LOADED__ = true;
   if (!location.pathname.includes("/favlist")) return;
 
+  // 1.7.14（facet-compat C5）：这两条 runtime.sendMessage 原来是「后台不回来就永远不回来」，
+  // B 站页面上的导入面板会一直转圈。加一个超时兜底，到点回一句人话。
+  const FAVORITES_MESSAGE_TIMEOUT_MS = 15000;
+
   function pageUid() {
     return location.pathname.match(/^\/(\d+)\/favlist/)?.[1] || "";
   }
@@ -31,9 +35,17 @@
       return true;
     }
     if (message?.type === "bca-list-import-folders") {
+      let answered = false;
+      const answer = (payload) => {
+        if (answered) return;
+        answered = true;
+        clearTimeout(timer);
+        try { sendResponse(payload); } catch (_) {}
+      };
+      const timer = setTimeout(() => answer({ ok: false, message: "后台没有回应（超过 15 秒）。请重新加载 B 站页面或重启浏览器再试一次。" }), FAVORITES_MESSAGE_TIMEOUT_MS);
       chrome.runtime.sendMessage({ type: "list-bili-favorite-folders", uid: pageUid() }, (response) => {
         const error = chrome.runtime.lastError;
-        sendResponse(error ? { ok: false, message: error.message } : response || { ok: false, message: "读取收藏夹失败。" });
+        answer(error ? { ok: false, message: error.message } : response || { ok: false, message: "读取收藏夹失败。" });
       });
       return true;
     }
@@ -41,9 +53,17 @@
       // recentDays 只在「开始更新」时带上；不传就是全量导入
       const payload = { type: "import-bili-favorites", uid: pageUid(), folderIds: message.folderIds };
       if (message.recentDays) payload.recentDays = message.recentDays;
+      let answered = false;
+      const answer = (payload) => {
+        if (answered) return;
+        answered = true;
+        clearTimeout(timer);
+        try { sendResponse(payload); } catch (_) {}
+      };
+      const timer = setTimeout(() => answer({ ok: false, message: "后台没有回应（超过 15 秒）。请重新加载 B 站页面或重启浏览器再试一次。" }), FAVORITES_MESSAGE_TIMEOUT_MS);
       chrome.runtime.sendMessage(payload, (response) => {
         const error = chrome.runtime.lastError;
-        sendResponse(error ? { ok: false, message: error.message } : response || { ok: false, message: "导入失败。" });
+        answer(error ? { ok: false, message: error.message } : response || { ok: false, message: "导入失败。" });
       });
       return true;
     }

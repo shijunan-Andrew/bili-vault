@@ -12,6 +12,7 @@
 
 const themeButtons = [...document.querySelectorAll(".segmented button[data-theme-value]")];
 const localeButtons = [...document.querySelectorAll(".segmented button[data-locale]")];
+const localeStatus = document.getElementById("localeStatus");
 
 /* ------------------------------------------------------------------ *
  * 主题
@@ -189,9 +190,27 @@ function applyTitle() {
   document.title = BcaI18n.t("哔哩藏库 · 设置");
 }
 
+// 1.7.14（facet-compat C5）：词典没取回来时 i18n 会静默退回中文原文，用户点了
+// 「繁體中文 / English」却什么都没变，只能自己猜。这里把原因摊开说，并给出可做的事。
+function showLocaleFailure() {
+  if (!localeStatus) return;
+  const failure = BcaI18n.loadFailure?.();
+  if (!failure) {
+    localeStatus.hidden = true;
+    writeText(localeStatus, "");
+    return;
+  }
+  writeText(localeStatus, BcaI18n.t("界面文字没能切换成 {locale}：词典没读出来（{reason}）。界面暂时按中文原文显示，重新加载设置页或重启浏览器再试一次。", {
+    locale: failure.locale,
+    reason: failure.reason
+  }));
+  localeStatus.hidden = false;
+}
+
 async function applyLocale(locale) {
   await BcaI18n.use(locale);
   renderLocaleOptions();
+  showLocaleFailure();
 }
 
 /* ------------------------------------------------------------------ *
@@ -607,7 +626,7 @@ async function boot() {
     if (areaName !== "local") return;
     const next = changes[BcaI18n.STORAGE_KEY]?.newValue;
     if (!BcaI18n.isSupported(next) || next === BcaI18n.locale()) return;
-    Promise.resolve(BcaI18n.use(next, { silent: true })).catch(() => {}).then(renderLocaleOptions);
+    Promise.resolve(BcaI18n.use(next, { silent: true })).catch(() => {}).then(() => { renderLocaleOptions(); showLocaleFailure(); });
   });
 
   // V1.4.1：「返回收藏库」改成把这个标签页本身导航回去，不再先 window.close()。

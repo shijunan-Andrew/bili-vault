@@ -43,6 +43,31 @@
     return out;
   }
 
+  // 1.7.14（facet-compat C5）：词典取不回来时原来只有一个 `catch (_) { return 空词典 }`，
+  // 界面会永久停在中文，用户和排查的人都不知道发生过什么（内容脚本那条
+  // runtime.sendMessage 更是连超时都没有，后台没起来时会永远挂着）。
+  // 现在：① 请求带超时；② 失败记成 lastFailure + 一条 console.warn；
+  //       ③ 设置页据此给一句看得见的说明。
+  const LOCALE_REQUEST_TIMEOUT_MS = 3000;
+  let lastFailure = null;
+
+  // 设置页用它决定要不要给一句看得见的说明
+  function loadFailure() { return lastFailure; }
+
+  function noteFailure(locale, reason) {
+    lastFailure = Object.freeze({ locale, reason: String(reason), at: Date.now() });
+    try { console.warn(`[哔哩藏库] ${locale} 词典没取到（${reason}），界面暂时按中文原文显示。`); } catch (_) {}
+  }
+
+  function withTimeout(promise, ms) {
+    let timer = 0;
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms); });
+    return Promise.race([promise, timeout]).then(
+      (value) => { clearTimeout(timer); return value; },
+      (error) => { clearTimeout(timer); throw error; }
+    );
+  }
+
   async function loadTable(locale) {
     if (locale === DEFAULT_LOCALE) return Object.create(null);
     try {
@@ -51,18 +76,31 @@
       // （否则 B 站页面能把收藏库嵌进 iframe 做点击劫持）。
       // 所以内容脚本改由后台代取词典——service worker 读自己的资源不受此限。
       if (!inExtensionPage()) {
-        const response = await chrome.runtime.sendMessage({ type: "bca-locale", locale });
+        const response = await withTimeout(
+          chrome.runtime.sendMessage({ type: "bca-locale", locale }),
+          LOCALE_REQUEST_TIMEOUT_MS
+        );
         const dictionary = response?.ok ? response.dictionary : null;
-        return dictionary && typeof dictionary === "object"
-          ? Object.assign(Object.create(null), dictionary)
-          : Object.create(null);
+        if (!dictionary || typeof dictionary !== "object" || !Object.keys(dictionary).length) {
+          noteFailure(locale, response ? "后台回的词典是空的" : `后台 ${LOCALE_REQUEST_TIMEOUT_MS} 毫秒内没有回应`);
+          return Object.create(null);
+        }
+        return Object.assign(Object.create(null), dictionary);
       }
       const response = await fetch(chrome.runtime.getURL(`locales/${locale}.json`));
-      if (!response.ok) return Object.create(null);
+      if (!response.ok) {
+        noteFailure(locale, `读词典文件失败（HTTP ${response.status}）`);
+        return Object.create(null);
+      }
       const payload = await response.json();
-      return payload && typeof payload === "object" ? Object.assign(Object.create(null), payload) : Object.create(null);
-    } catch (_) {
-      // 词典缺失或损坏时退回原文，不能让整个界面打不开
+      if (!payload || typeof payload !== "object" || !Object.keys(payload).length) {
+        noteFailure(locale, "词典文件是空的");
+        return Object.create(null);
+      }
+      return Object.assign(Object.create(null), payload);
+    } catch (error) {
+      // 词典缺失或损坏时退回原文，不能让整个界面打不开 —— 但这次要留下痕迹
+      noteFailure(locale, error?.message || String(error));
       return Object.create(null);
     }
   }
@@ -100,6 +138,8 @@
     if (!loading || current !== next) loading = loadTable(next);
     table = await loading;
     current = next;
+    // 切到中文是天生不需要词典的；切到别的语言却拿到空表，说明 lastFailure 还成立
+    if (next === DEFAULT_LOCALE || Object.keys(table).length) lastFailure = null;
     if (inExtensionPage()) {
       try { document.documentElement.lang = next; } catch (_) {}
       apply(document);
@@ -134,7 +174,7 @@
   }
 
   global.BcaI18n = Object.freeze({
-    t, use, init, apply, locale, locales, onChange, isSupported,
+    t, use, init, apply, locale, locales, onChange, isSupported, loadFailure,
     LOCALES, DEFAULT_LOCALE, STORAGE_KEY
   });
 })(globalThis);

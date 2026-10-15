@@ -3810,6 +3810,10 @@ async function writeFileAtomically(directory, file, text) {
     }
     await writeFileInPlace(file, text);
   } catch (error) {
+    // 1.7.14（facet-compat C4）：写不进去的原因翻成人话再往下传，
+    // 免得弹窗和日志里只有一句英文异常名。
+    const friendly = BcaArchiveCore.describeFileSystemError(error);
+    if (friendly) error = new Error(friendly);
     if (!tempReady) {
       // 临时文件自己就没写成功：里面是半截内容，留着只会让人误以为能恢复
       await directory.removeEntry(tempName).catch(() => {});
@@ -3828,10 +3832,21 @@ async function writeFileAtomically(directory, file, text) {
 }
 
 // 退路专用：move() 不可用时的就地写。临时文件已经写完了，内容就在手上。
+// 1.7.14（facet-compat C4）：只读目录 / 磁盘满 / 授权被撤销分别是
+// NoModificationAllowedError / QuotaExceededError / NotAllowedError，
+// 统一翻成人话再抛（分类表的权威出处是 archive-core.js）。
 async function writeFileInPlace(file, text) {
-  const writable = await file.createWritable();
-  await writable.write(text);
-  await writable.close();
+  let writable;
+  try {
+    writable = await file.createWritable();
+    await writable.write(text);
+    await writable.close();
+  } catch (error) {
+    try { await writable?.abort(); } catch (_) {}
+    const friendly = BcaArchiveCore.describeFileSystemError(error);
+    if (friendly) throw new Error(friendly);
+    throw error;
+  }
 }
 
 /* 1.5.0：把这次扫描的结果同步进本地数据库（003database/database.json）。
@@ -4403,6 +4418,20 @@ function showWelcomeChooseLabel(mode) {
   });
 }
 
+// 1.7.14（facet-compat C6）：句柄在、授权也在，但目录已经不在了（被删除 / 改名 /
+// 换了盘符）。以前这种情况下会走到扫描深处才炸，界面上只剩一句英文异常名，
+// 或者干脆画出一个空库 —— 用户会以为归档全丢了。
+function showRootMissing(name) {
+  rootHandle = null;
+  setDynamicText(rootLabel, BcaI18n.t("上次目录已失联"));
+  updateStorageUsage(null);
+  statusDot.classList.remove("ready");
+  showWelcomeChooseLabel("choose");
+  setDynamicText(welcomeCopy, BcaI18n.t("上次选择的目录“{name}”已经不在了（被删除、改名或换了盘符）。请重新选择本地备份文件夹。", { name }));
+  setDynamicText(welcomeFootnote, BcaI18n.t("目录如果只是换了位置，重新选中它就行 —— 归档文件本身不会被改动。"));
+  showToast(BcaI18n.t("上次选择的目录“{name}”已经不在了，请重新选择本地备份文件夹。", { name }));
+}
+
 async function restoreLastRoot() {
   try {
     const handle = await loadSavedHandle();
@@ -4414,6 +4443,14 @@ async function restoreLastRoot() {
     setDynamicText(welcomeCopy, BcaI18n.t("已找到上次选择的目录“{name}”。正在检查访问权限。", { name: handle.name }));
     const permission = await handle.queryPermission({ mode: "read" });
     if (permission === "granted") {
+      // 1.7.14（facet-compat C6）：授权还在，目录本身却可能已经被删 / 改名 / 换盘。
+      // 这里先探一次（只读一个条目），探测失败就别再往下走成「空库」。
+      try {
+        for await (const _entry of handle.values()) break;
+      } catch (error) {
+        if (error?.name === "NotFoundError") { showRootMissing(handle.name); return; }
+        throw error;
+      }
       setBusy(true, "loading-last");
       // 老用户可能只授过只读权限：建目录会失败，但那只影响目录树，不影响读归档
       try { await ensureRootStructure(handle); } catch (_) { /* 忽略 */ }

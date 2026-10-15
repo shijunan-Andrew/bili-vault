@@ -2774,6 +2774,23 @@ test("所有 .ps1 / .cs 都存成 UTF-8 带 BOM（1.7.13 红线）", () => {
   assert.ok(found.length >= 7, `至少要扫到 7 个脚本（现在扫到 ${found.length} 个）`);
 });
 
+// ---- V1.7.14（审查报告 P2 批次 7）----
+test("stats-core 的导出面与统计页的真实用法对得上（V1.7.14）", () => {
+  // 1.7.14（deadcode P2-1）：stats-core.js 的注释曾声称界面用它的聚合 API，实际
+  // stats.js 只读 5 个成员，两张图和三个大数字都走 snapshot() 的预聚合字段。
+  // 这份名单就是契约：统计页多读一个成员，说明依赖关系变了，注释与说明要跟着改。
+  const core = readProjectFile("stats-core.js");
+  const stats = readProjectFile("stats.js");
+  const used = [...new Set([...stats.matchAll(/(?<![-\w])core\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/g)].map((match) => match[1]))].sort();
+  assert.deepEqual(used, ["MAX_RANGE_DAYS", "RECENT_WINDOW_DAYS", "dayKeyToTime", "localDayKey", "rangeFor"],
+    "统计页读的 stats-core 成员变了，请同步更新 stats-core.js 顶部 1.7.14 的说明与本断言");
+  // 说明必须是事实：不许再写着「界面按 RANGE_PRESETS 渲染下拉框」这类不成立的承诺
+  assert.equal(core.includes("界面按 RANGE_PRESETS"), false, "stats-core.js 不许再声称界面按 RANGE_PRESETS 渲染下拉框");
+  assert.equal(core.includes("柱状图（seriesInRange）、大数字（totalInRange）、饼图（collectionBreakdown）"), false,
+    "stats-core.js 不许再声称这三处聚合是界面的实现");
+  assert.match(core, /1\.7\.14（deadcode P2-1）/, "stats-core.js 顶部要写明导出面与真实用法的差距");
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

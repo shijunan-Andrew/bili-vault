@@ -207,6 +207,10 @@
               <button type="button" class="segmented-button" data-locale="en" aria-pressed="false" title="English"><span class="segmented-icon" data-icon="globe"></span>English</button>
             </div>
           </div>
+          <!-- 1.7.14（facet-compat C5）：词典取不回来时 i18n 会退回中文原文，
+               以前这是只有控制台知道的静默失败。现在在这里明说一句。
+               它独占一行：这句话可能很长，塞进右侧控件列会把左边的说明挤成一条竖线。 -->
+          <p class="row-error" id="localeStatus" role="status" hidden></p>
         </div>
       </section>
 

@@ -192,6 +192,10 @@
 .setting-row-desc { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
 /* 右侧控件：右对齐、不换行；分段控件与滑块在这里各有固定宽度 */
 .setting-row-control { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; gap: var(--sp-2); white-space: nowrap; }
+/* 1.7.14（facet-compat C5）：词典没读出来时的说明可能很长，让它独占一行 ——
+   塞在 .setting-row-control（nowrap + flex:0 0 auto）里会把左边的说明挤成一条竖线。 */
+.setting-row { flex-wrap: wrap; }
+.setting-row > #localeStatus { flex: 1 1 100%; margin: var(--sp-2) 0 0; white-space: normal; text-align: left; }
 .setting-row-control .segmented { flex: 0 0 auto; width: 320px; }
 .setting-row-control .segmented-button { min-width: 0; }
 .setting-slider { display: flex; align-items: center; gap: var(--sp-3); width: 264px; }

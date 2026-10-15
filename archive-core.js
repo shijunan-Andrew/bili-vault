@@ -389,6 +389,29 @@
     return `${formatCountText(done)}/${formatCountText(total)}`;
   }
 
+  /* 1.7.14（facet-compat C4）：文件系统错误的分类。
+     以前只有 NotFoundError / TypeMismatchError 有专门分支，于是三种很常见的环境问题
+     全都冒泡成「一次归档失败 + 一句看不懂的英文」：
+       - 目标目录只读 / 被 ACL、BitLocker 或同步盘保护 → createWritable() 抛 NoModificationAllowedError
+       - 磁盘满 → QuotaExceededError
+       - 授权在 queryPermission 与 createWritable() 之间被撤销 → NotAllowedError
+     这份映射是权威出处；background.js 里有一份逐字相同的副本（service worker 是
+     ES module，拿不到经典脚本），由 test/stability.test.cjs 的守卫断言逐项比对。 */
+  const FILE_SYSTEM_ERROR_HINTS = Object.freeze({
+    NotAllowedError: "写入授权已失效，请在插件图标里点“重新授权本地备份文件夹”，允许访问后重试。",
+    NoModificationAllowedError: "目标文件夹不可写（只读、被系统保护，或同步盘临时锁定）。请换一个本地文件夹再试。",
+    QuotaExceededError: "磁盘空间不足，写不进去了。清出一些空间或换一个本地文件夹再试。",
+    InvalidModificationError: "目标文件夹不允许这样改动，请换一个本地文件夹再试。"
+  });
+
+  function describeFileSystemError(error) {
+    const name = String(error?.name || "");
+    const hint = FILE_SYSTEM_ERROR_HINTS[name];
+    if (!hint) return "";
+    const detail = String(error?.message || "").trim();
+    return detail ? `${hint}（${name}：${detail}）` : `${hint}（${name}）`;
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,
@@ -409,6 +432,7 @@
     formatCountText,
     formatBytes,
     formatProgressCounter,
+    describeFileSystemError,
     // 互动数据六键与六个中文标签：全仓唯一一份。写归档的 statsSectionLines /
     // patchVolatileFields 与界面侧的 library.js 都引用这里，不再各自复制字面量。
     STAT_KEYS,

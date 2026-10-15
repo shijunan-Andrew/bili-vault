@@ -271,7 +271,10 @@
   }
 
   /* 本文件里的兜底实现：本地日边界、两端都含，口径与 stats-core.rangeFor 对齐。
-     preset 认不出来（或数据坏了）时给近 7 天，绝不返回空区间。 */
+     preset 认不出来（或数据坏了）时给近 7 天，绝不返回空区间。
+     1.7.14（deadcode P2-1）：stats.html 无条件先加载 stats-core.js，所以 core 在真实页面
+     里永远是对象，这些 core 为空的兜底分支其实不可达 —— 留着是为了「只加载 stats.js」
+     的极端场景（以及单文件调试），不是第二套在跑的实现。 */
   function fallbackRange(presetName, now, customIn) {
     const stamp = numberOr(now, Date.now());
     const today = new Date(stamp);

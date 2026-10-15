@@ -318,10 +318,48 @@ function formatPublishDate(value) {
   return `${formatDateTime(date)} ${week}`;
 }
 
+/* 1.7.14（facet-compat C4）：文件系统错误分类。权威表和 archive-core.js 里那份
+   逐字相同 —— service worker 是 ES module，拿不到经典脚本，只能各留一份，
+   由 test/stability.test.cjs 的守卫断言逐项比对。 */
+const FILE_SYSTEM_ERROR_HINTS = Object.freeze({
+  NotAllowedError: "写入授权已失效，请在插件图标里点“重新授权本地备份文件夹”，允许访问后重试。",
+  NoModificationAllowedError: "目标文件夹不可写（只读、被系统保护，或同步盘临时锁定）。请换一个本地文件夹再试。",
+  QuotaExceededError: "磁盘空间不足，写不进去了。清出一些空间或换一个本地文件夹再试。",
+  InvalidModificationError: "目标文件夹不允许这样改动，请换一个本地文件夹再试。"
+});
+
+function describeFileSystemError(error) {
+  const name = String(error?.name || "");
+  const hint = FILE_SYSTEM_ERROR_HINTS[name];
+  if (!hint) return "";
+  const detail = String(error?.message || "").trim();
+  return detail ? `${hint}（${name}：${detail}）` : `${hint}（${name}）`;
+}
+
 async function ensureWritePermission(handle) {
-  const permission = await handle.queryPermission({ mode: "readwrite" });
+  let permission;
+  try {
+    permission = await handle.queryPermission({ mode: "readwrite" });
+  } catch (error) {
+    // 1.7.14（facet-compat C4）：句柄自己失效（目录被删/改名/换盘）时
+    // queryPermission 就会抛，以前这里直接冒泡英文原文。
+    throw new Error(describeFileSystemError(error) || `打不开所选文件夹（${error?.name || "未知错误"}），请重新选择本地备份文件夹。`);
+  }
   if (permission !== "granted") {
     throw new Error("所选文件夹的写入授权已失效。请点击插件图标中的“重新授权本地备份文件夹”，允许访问后重试。");
+  }
+  // 1.7.14（facet-compat C6）：授权还在，但目录本身可能已经被删 / 改名 / 换盘。
+  // 句柄存在不代表目标还在 —— 以前要等到很深的某一步才炸出一句英文异常名，
+  // 用户完全不知道是「目录没了」还是「插件坏了」。这里顺手探一次（只读一个条目）。
+  try {
+    for await (const _entry of handle.values()) break;
+  } catch (error) {
+    if (error?.name === "NotFoundError") {
+      throw new Error("上次选择的本地备份文件夹已经不在了（被删除、改名或换了盘符）。请重新选择本地备份文件夹。");
+    }
+    const friendly = describeFileSystemError(error);
+    if (friendly) throw new Error(friendly);
+    throw error;
   }
 }
 
@@ -365,12 +403,18 @@ async function writeFile(directory, name, content) {
      move() 在 service worker 里的真实行为还没在真机上验证过，等验证过再上原子写。
      代价（已知）：写到一半断电仍会留下半截正文 —— 这一条 P1 留到 1.7.2 再修。 */
   const file = await directory.getFileHandle(name, { create: true });
-  const writable = await file.createWritable();
+  // 1.7.14（facet-compat C4）：createWritable() 原来在 try 之外，所以只读目录
+  // （NoModificationAllowedError）、磁盘满（QuotaExceededError）、授权被半路撤销
+  // （NotAllowedError）三种最常见的环境问题全都冒泡成英文原文。
+  let writable;
   try {
+    writable = await file.createWritable();
     await writable.write(content);
     await writable.close();
   } catch (error) {
-    try { await writable.abort(); } catch (_) {}
+    try { await writable?.abort(); } catch (_) {}
+    const friendly = describeFileSystemError(error);
+    if (friendly) throw new Error(friendly);
     throw error;
   }
 }
@@ -725,6 +769,7 @@ function reportText(error, context = {}) {
     ERROR_REPORT_NOTICE,
     `发生时间：${formatChineseDateTime(now, true)}`,
     `错误：${error?.message || String(error)}`,
+    `错误类型：${error?.name || "未知"}`,
     `视频标题：${metadata.title || "未知"}`,
     `视频链接：${metadata.url || "未知"}`,
     `收藏夹：${(context.folders || []).map((folder) => folder.name || folder.id).join("、") || "未知"}`,

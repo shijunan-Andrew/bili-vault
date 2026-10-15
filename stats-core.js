@@ -751,6 +751,18 @@
     };
   }
 
+  /* 1.7.14（deadcode P2-1）：这份导出面以前给人「这就是统计页的聚合器」的错觉 ——
+     注释曾写着「界面照 RANGE_PRESETS 画下拉框」「柱状图用 seriesInRange」「大数字用
+     totalInRange」「饼图用 collectionBreakdown」，但 stats.js 从头到尾只读 5 个成员：
+     MAX_RANGE_DAYS / localDayKey / dayKeyToTime / rangeFor / RECENT_WINDOW_DAYS。
+     两张图和那三个大数字走的是 snapshot() 预先聚合好的 dailyRows / weekly / monthly /
+     yearly —— 因为数据源不一样：本模块的聚合函数从**原始数据库**算，逐日明细只有最近
+     180 天（DAILY_ROWS_DAYS），而统计页要画十年区间，只能靠快照里的周 / 月 / 年汇总。
+     合并两份实现会改变行为（180 天窗口），所以这里不改行为，只把话说准：
+     本模块 = 「自己的一套聚合 API（由 test/stats-core.test.cjs 覆盖）+ 生产在用的
+     工具函数」，不是「界面聚合器」。契约由 test/stability.test.cjs 的
+     「stats-core 的导出面与统计页的真实用法对得上」钉住：统计页一旦读第 6 个成员，
+     这条断言会红，提醒顺手更新本段。 */
   const api = {
     DATABASE_FOLDER_NAME,
     DATABASE_FILE_NAME,
@@ -761,11 +773,13 @@
     MAX_RANGE_DAYS,
     PET_LINE_COUNT,
     PET_DAILY_TOUCH_LIMIT,
-    // 区间选择：预设表 + 预设 → 毫秒边界。界面按 RANGE_PRESETS 的键渲染下拉框。
+    // 区间选择：预设表 + 预设 → 毫秒边界。生产代码只用 rangeFor；RANGE_PRESETS 与
+    // rangeFromDays 由 test/stats-core.test.cjs 覆盖（统计页自己按预设画下拉框）。
     RANGE_PRESETS,
     rangeFor,
     rangeFromDays,
-    // 区间聚合：柱状图（seriesInRange）、大数字（totalInRange）、饼图（collectionBreakdown）。
+    // 区间聚合：从原始数据库算（逐日明细只有 DAILY_ROWS_DAYS = 180 天）。
+    // 统计页不调用这三个 —— 见本文件顶部 1.7.14（deadcode P2-1）的说明。
     seriesInRange,
     totalInRange,
     collectionBreakdown,
