@@ -4387,7 +4387,16 @@ test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {
   assert.ok(background.includes("daily: BcaStatsCore.recentDays(database)"), "后台快照要带上每日明细");
   assert.ok(library.includes("daily: core.recentDays(database)"), "收藏库快照也要带每日明细");
   assert.ok(background.includes('message?.type === "bca-pet-touch"'), "宠物互动要有消息分支");
-  assert.ok(background.includes("BcaStatsCore.touchPet(database)"), "互动要落进数据库");
+  assert.ok(background.includes("BcaStatsCore.touchPet(read.database)"), "互动要落进数据库");
+  // 1.7.0（批次 A / P0）：读库读不出来（权限被撤、文件被锁、同步盘正在替换）时，
+  // 老代码会拿一份空库整份重写回去 —— 历史统计与宠物亲密度无声归零。现在两个写入口
+  // 共用同一道守卫，读不可信就一个字节都不写；三个不可恢复字段另留 storage 镜像；
+  // 每次成功写库之前把上一版原文轮转成 database.bak.json。
+  assert.ok(background.includes("function statsDatabaseWriteBlocked("), "要有「读不到库就不许写」的守卫");
+  assert.ok(background.includes("const blocked = statsDatabaseWriteBlocked(read);"), "两个写入口都要过这道守卫");
+  assert.ok(background.includes("return { ok: false, blocked: true, lineIndex: null };"), "摸头读不到库时不许写");
+  assert.ok(background.includes("STATS_MIRROR_KEY"), "三个不可恢复字段要有 storage 镜像");
+  assert.ok(background.includes("STATS_PREVIOUS_DATABASE_NAME"), "写库前要把上一版留成 database.bak.json");
   // service worker 里没有词典：后台只回下标，翻译留在界面侧
   assert.ok(background.includes("lineIndex"), "后台回的是台词下标");
   assert.ok(!/bca-pet-touch[\s\S]{0,600}?BcaI18n/.test(background), "后台不许翻译台词");

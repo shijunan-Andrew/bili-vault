@@ -222,6 +222,46 @@ $i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }
 if ($i18nOut -match '缺 [1-9]') { Say "    [$([char]0x2716)] 有词条缺翻译" $C_RED; $failed = $true }
 
+# 文档里写的词典条数也必须和词典实际条数一致。README 里那句「两本词典各 … 条」以前
+# 没人核对，加过词之后就停在旧数字上（847），而词典实际早就涨到 859 条了 —— 和下面
+# 的测试项数是同一类问题：数字写死在文档里，就一定会过期。
+# 条数直接从上面 i18n-extract --check 的输出里读；文档侧的锚点同样写成 HTML 注释。
+Say "  文档里的词典条数…" $C_DIM
+$dictCounts = @()
+foreach ($line in $i18nOut) {
+  if ("$line" -match '词条\s+(\d+)\s+条') { $dictCounts += [int]$Matches[1] }
+}
+$dictCounts = @($dictCounts | Select-Object -Unique)
+if ($dictCounts.Count -ne 1) {
+  Say "    [$([char]0x2716)] 没能从词典检查的输出里读出唯一的条数（读到 $($dictCounts.Count) 种）" $C_RED
+  $failed = $true
+} else {
+  $realDictCount = $dictCounts[0]
+  $dictMarkers = 0
+  $staleDict = @()
+  foreach ($doc in @('README.md', 'AI_HANDOFF.md', 'SMOKE_TEST.md')) {
+    $docPath = Join-Path $PSScriptRoot $doc
+    if (-not (Test-Path -LiteralPath $docPath)) { continue }
+    $docText = Get-Content -LiteralPath $docPath -Raw -Encoding UTF8
+    foreach ($m in [regex]::Matches($docText, '<!--\s*i18n-count:(\d+)\s*-->')) {
+      $dictMarkers++
+      if ([int]$m.Groups[1].Value -ne $realDictCount) {
+        $staleDict += "$doc 写的是 $($m.Groups[1].Value) 条，实际是 $realDictCount 条"
+      }
+    }
+  }
+  if ($dictMarkers -eq 0) {
+    Say "    [$([char]0x2716)] 三处文档里都找不到 <!-- i18n-count:N --> 标记" $C_RED
+    $failed = $true
+  } elseif ($staleDict.Count -gt 0) {
+    foreach ($line in $staleDict) { Say "    [$([char]0x2716)] $line" $C_RED }
+    Say "    改法：把上面这几个文件里的词典条数改成 $realDictCount（连同 i18n-count 标记一起改，只改数字）。" $C_YELLOW
+    $failed = $true
+  } else {
+    Say "    [$([char]0x2713)] 文档里的词典条数与词典一致（$realDictCount 条）" $C_GREEN
+  }
+}
+
 # 文档里写的测试项数必须和真实数量一致。这三处以前各写各的（141 / 141 / 127），
 # 实际早就涨到 163 了，读文档的人会以为测试规模还是原来那点 —— 和 README 版本历史
 # 是同一类问题：数字写死在文档里，就一定会过期。

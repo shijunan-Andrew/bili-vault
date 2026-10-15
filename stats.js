@@ -1642,7 +1642,12 @@
     }
   }
 
-  function monthText(time) {
+  /* 日历头部的「2026 年 8 月」（入参是**毫秒时间戳**）。
+     1.7.0（批次 B）：这里原来也叫 monthText，和上面那个按日键取月份的同名函数撞车 ——
+     同一个作用域里后声明的那个赢，于是 monthlyRows 的 label 实际走到这一支，
+     `new Date("2026-01")` 按 UTC 解析，UTC 以西的机器上月份标签会差一个月。
+     两个函数各自改名，别再撞。 */
+  function calendarMonthText(time) {
     const date = new Date(time);
     if (Number.isNaN(date.getTime())) return "";
     return date.getFullYear() + " 年 " + (date.getMonth() + 1) + " 月";
@@ -1675,7 +1680,7 @@
       const month = new Date(monthTime);
       const grid = index === 0 ? ui.calGridA : ui.calGridB;
       const label = index === 0 ? ui.calMonthA : ui.calMonthB;
-      setText(label, monthText(monthTime));
+      setText(label, calendarMonthText(monthTime));
       if (!grid) continue;
       grid.textContent = "";
       for (let weekday = 0; weekday < 7; weekday += 1) {
@@ -2118,7 +2123,11 @@
         if (!loaded || isEmptySnapshot(stats)) return;
         /* 只重画跟着宽度走的那几张 SVG：卡片的显示/隐藏和文案都不受窗口宽度影响 */
         const range = activeRange(Date.now());
-        renderChart(range);
+        /* 1.7.0（批次 B）：老快照（没有 dailyRows）走的是「逐日回退」那条路 ——
+           render() 传的是 renderChart(range, selectable ? null : rows)，这里原来只传了
+           range，于是老快照用户一改窗口大小主图就空了。口径与 render() 对齐。 */
+        const selectable = hasDayRows(stats);
+        renderChart(range, selectable ? null : dailySeries(stats));
         renderPie();
         renderYears();
       }, RESIZE_DELAY);

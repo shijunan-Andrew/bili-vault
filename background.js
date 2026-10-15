@@ -305,16 +305,58 @@ async function uniqueTimeFolder(parent, name) {
   }
 }
 
+/* 1.7.0（批次 B / P1）：归档正文（`视频信息.txt` 等）原来是 createWritable 就地截断写 ——
+   写一半被关页面 / 断电 / 磁盘满，留下的就是半截文本，而读侧把「读不到视频信息」当成
+   「这条记录没有视频」静默跳过（等于这条收藏凭空消失，用户只看到视频没了）。
+   database.json 在 1.5.9 已经改成「先写临时文件、再换名」，这里补齐同一条规矩：
+   临时文件写完整 → move 覆盖；move 不可用才退回就地写；换名**失败**（不是「不支持」）
+   原样抛出，绝不退回就地写（退回就地写就是把正式文件截成半截）。
+   失败且临时文件已经写完整时必须留着它 —— 那是唯一一份完整内容。 */
 async function writeFile(directory, name, content) {
-  const file = await directory.getFileHandle(name, { create: true });
-  const writable = await file.createWritable();
+  const tempName = `.${name}.${Date.now().toString(36)}.tmp`;
+  let tempReady = false;
   try {
-    await writable.write(content);
-    await writable.close();
+    const temp = await directory.getFileHandle(tempName, { create: true });
+    const tempWritable = await temp.createWritable();
+    await tempWritable.write(content);
+    await tempWritable.close();
+    tempReady = true;
+    if (typeof temp.move === "function") {
+      try {
+        await temp.move(directory, name);
+        return;
+      } catch (moveError) {
+        const unsupported = moveError && (moveError.name === "NotSupportedError" || moveError.name === "TypeError");
+        if (!unsupported) throw moveError;
+        console.warn("本机不支持 move()，归档正文退回就地写。", moveError);
+      }
+    }
+    const file = await directory.getFileHandle(name, { create: true });
+    const writable = await file.createWritable();
+    try {
+      await writable.write(content);
+      await writable.close();
+    } catch (error) {
+      try { await writable.abort(); } catch (_) {}
+      throw error;
+    }
   } catch (error) {
-    try { await writable.abort(); } catch (_) {}
+    if (tempReady) {
+      console.warn(`写 ${name} 失败，临时文件 ${tempName} 里留着一份完整内容，已保留。`, error);
+      // 1.7.0（批次 B）：留着临时文件却不说，用户只会看到文件夹里凭空多了个怪文件。
+      // 与 library.js 的 writeFileAtomically 保持一致，把这件事也写进弹窗「最近状态」。
+      chrome.storage.local.set({
+        lastResult: {
+          message: `写 ${name} 失败，已保留临时文件 ${tempName}（里面是完整内容，可手动恢复）。`,
+          createdAt: Date.now()
+        }
+      }).catch(() => {});
+    } else {
+      await directory.removeEntry(tempName).catch(() => {});
+    }
     throw error;
   }
+  await directory.removeEntry(tempName).catch(() => {});
 }
 
 // 按 CSS object-fit: cover 的语义取源图中心最大的 16:9 区域，避免拉伸变形
@@ -2072,15 +2114,25 @@ async function rollbackImport(journal) {
   let restoredFiles = 0;
   let removedCollections = 0;
   let removedFiles = 0;
+  /* 1.7.0（批次 B / P1）：四个还原循环原来全是 `catch (_) {}` —— 还原失败没有任何记录，
+     界面照旧宣告「导入前的本地内容没有被改动」。这里逐条记下来，交给调用方写进终态文案
+     （用户至少知道「有几项没还原回去、分别是哪些」）。 */
+  const failures = [];
+  const noteFailure = (what, error) => {
+    failures.push(`${what}：${(error && error.message) || error || "未知错误"}`);
+  };
   // 先删本次新建的记录目录，再把被改写的文件还原，最后清掉本次新建的空收藏夹
   for (const entry of [...journal.createdRecords].reverse()) {
-    try { await entry.collectionHandle.removeEntry(entry.name, { recursive: true }); removedRecords += 1; } catch (_) {}
+    try { await entry.collectionHandle.removeEntry(entry.name, { recursive: true }); removedRecords += 1; }
+    catch (error) { noteFailure(`撤回新建的 ${entry.name}`, error); }
   }
   for (const entry of [...journal.modifiedFiles].reverse()) {
-    try { await writeFile(entry.directoryHandle, entry.name, entry.text); restoredFiles += 1; } catch (_) {}
+    try { await writeFile(entry.directoryHandle, entry.name, entry.text); restoredFiles += 1; }
+    catch (error) { noteFailure(`还原 ${entry.name}`, error); }
   }
   for (const entry of [...journal.addedFiles].reverse()) {
-    try { await entry.directoryHandle.removeEntry(entry.name); removedFiles += 1; } catch (_) {}
+    try { await entry.directoryHandle.removeEntry(entry.name); removedFiles += 1; }
+    catch (error) { noteFailure(`删除新增的 ${entry.name}`, error); }
   }
   for (const entry of [...journal.createdCollections].reverse()) {
     try {
@@ -2089,9 +2141,9 @@ async function rollbackImport(journal) {
       if (!empty) continue;
       await entry.parentHandle.removeEntry(entry.name, { recursive: true });
       removedCollections += 1;
-    } catch (_) {}
+    } catch (error) { noteFailure(`删除空收藏夹 ${entry.name}`, error); }
   }
-  return { removedRecords, restoredFiles, removedCollections, removedFiles };
+  return { removedRecords, restoredFiles, removedCollections, removedFiles, failures };
 }
 
 /* V1.4.2：删掉了 rollbackInterruptedImport()。
@@ -2629,21 +2681,142 @@ async function archiveBrokenStatsDatabase(directory, text) {
   }
 }
 
+/* ---------- 1.7.0（批次 A / P0）：读不到库时绝不允许整份重写 ----------
+   1.5.1 只处理了「文件能读、JSON 坏」这一种：留档 → 删坏文件 → 重建空库。
+   另一种一直没管：getFile().text() 直接失败（权限刚被撤、文件被安全软件占着、
+   同步盘正在替换）。那时拿到的是一份**空库**，而调用方（writeStatsDatabase /
+   touchPetInDatabase）会在这份空库上追加本轮记录再整份写回去 —— 用户的历史统计与
+   宠物亲密度就这样无声归零，连留档都没有。现在：
+   1. readStatsDatabase 明确回报 canWrite（能不能安全落盘）；
+   2. 两个写入口共用 statsDatabaseWriteBlocked() 这道守卫，读不可信就一个字节都不写，
+      只把这件事写进弹窗状态与图标角标；
+   3. 三个不可恢复的字段（firstSeenAt / totals.savedTotal / pet 的两个计数器）在
+      chrome.storage.local 留一份镜像，读不到库时用它兜底，保证「陪伴天数」「累计保存」
+      「亲密度」不会因为一次读失败而清零；
+   4. 每次成功改写正文之前，把**上一版**原文轮转存成 database.bak.json。
+      File System Access 没有 rename，所以顺序是「先写副本、成功后再重写正文」——
+   副本永远比正文早一个版本，中间任何一步断电都不会把唯一一份数据弄丢。 */
+const STATS_MIRROR_KEY = "bcaStatsMirror";
+const STATS_PREVIOUS_DATABASE_NAME = "database.bak.json";
+
+function statsMirrorNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
+}
+
+function statsMirrorOf(database) {
+  const pet = (database && database.pet) || {};
+  const totals = (database && database.totals) || {};
+  return {
+    firstSeenAt: String((database && database.firstSeenAt) || ""),
+    savedTotal: statsMirrorNumber(totals.savedTotal),
+    affinity: statsMirrorNumber(pet.affinity),
+    totalTouch: statsMirrorNumber(pet.totalTouch)
+  };
+}
+
+// 读得到的镜像；读不到返回 null —— 不能把「storage 里还没有」当成「镜像是 0」，
+// 否则第一次读失败就会把刚起步的用户数据顶成 0（虽然 0 也顶不掉什么，但语义要分清）
+async function readStatsMirror() {
+  try {
+    const stored = await chrome.storage.local.get(STATS_MIRROR_KEY);
+    const mirror = stored && stored[STATS_MIRROR_KEY];
+    return mirror && typeof mirror === "object" ? mirror : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// 只在真的变了的时候才写 storage：读库比写库频繁（扫描、摸头、每次导入批次），
+// 镜像没变就不该多写一次
+async function syncStatsMirror(database) {
+  const next = statsMirrorOf(database);
+  const current = await readStatsMirror();
+  if (current && JSON.stringify(current) === JSON.stringify(next)) return next;
+  try {
+    await chrome.storage.local.set({ [STATS_MIRROR_KEY]: next });
+  } catch (_) {}
+  return next;
+}
+
+// 读不到库时用镜像把「只会往前走」的字段顶回来：宁可数字停在上一版，也不能归零
+function applyStatsMirror(database, mirror) {
+  if (!mirror) return database;
+  const next = database;
+  const mirroredSeen = Date.parse(String(mirror.firstSeenAt || ""));
+  const ownSeen = Date.parse(String(next.firstSeenAt || ""));
+  if (Number.isFinite(mirroredSeen) && (!Number.isFinite(ownSeen) || mirroredSeen < ownSeen)) {
+    next.firstSeenAt = new Date(mirroredSeen).toISOString();
+  }
+  if (!next.totals || typeof next.totals !== "object") next.totals = { savedTotal: 0 };
+  next.totals.savedTotal = Math.max(statsMirrorNumber(next.totals.savedTotal), statsMirrorNumber(mirror.savedTotal));
+  if (!next.pet || typeof next.pet !== "object") next.pet = {};
+  next.pet.affinity = Math.max(statsMirrorNumber(next.pet.affinity), statsMirrorNumber(mirror.affinity));
+  next.pet.totalTouch = Math.max(statsMirrorNumber(next.pet.totalTouch), statsMirrorNumber(mirror.totalTouch));
+  return next;
+}
+
+// 两个写入口共用：能写返回空串，不能写返回一句给用户看的话
+function statsDatabaseWriteBlocked(read) {
+  if (read && read.canWrite) return "";
+  return `本地数据库这次读不出来（${BcaStatsCore.DATABASE_FOLDER_NAME}/${BcaStatsCore.DATABASE_FILE_NAME}），`
+    + "已经跳过写入，避免覆盖你原来的记录；历史统计暂时按下限显示。";
+}
+
+function reportStatsWriteBlocked(message) {
+  paintActivityBadge(false);
+  chrome.storage.local.set({
+    lastResult: { message, createdAt: Date.now() }
+  }).catch(() => {});
+}
+
+/* 改写正文之前把上一版原文留一份 database.bak.json。只在原文读得出来且非空时做；
+   写不进去不拦正文 —— 备份是加分项，不是前置条件。 */
+async function archivePreviousStatsDatabase(read) {
+  if (!read || !read.directory || !read.text || !read.text.trim()) return "";
+  try {
+    const handle = await read.directory.getFileHandle(STATS_PREVIOUS_DATABASE_NAME, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(read.text);
+    await writable.close();
+    return STATS_PREVIOUS_DATABASE_NAME;
+  } catch (error) {
+    console.warn("上一版数据库备份写入失败（正文照写）。", error);
+    return "";
+  }
+}
+
 async function readStatsDatabase(root) {
   const directory = await root.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: true });
   let file = await directory.getFileHandle(BcaStatsCore.DATABASE_FILE_NAME, { create: true });
   let text = "";
+  const result = (database, canWrite, reason, raw) => ({
+    directory,
+    file,
+    database,
+    canWrite,
+    reason,
+    text: raw || ""
+  });
   try {
     text = await (await file.getFile()).text();
   } catch (error) {
-    // 读不出来（权限刚被撤、文件被别的程序占着）—— 按原样返回空库，交给调用方去整份重写
-    console.warn(`本地数据库读取失败（${BcaStatsCore.DATABASE_FOLDER_NAME}/${BcaStatsCore.DATABASE_FILE_NAME}），本次按空库处理。`, error);
-    return { file, database: BcaStatsCore.emptyDatabase() };
+    // 读不出来（权限刚被撤、文件被别的程序占着、同步盘正在替换）——**不能**当成空库交出去：
+    // 调用方会在这份空库上整份重写，历史统计与亲密度直接归零（批次 A 的 P0）。
+    // 这里用镜像兜住三个不可恢复的字段，并明确告诉调用方「这次不许写」。
+    console.warn(
+      `本地数据库读取失败（${BcaStatsCore.DATABASE_FOLDER_NAME}/${BcaStatsCore.DATABASE_FILE_NAME}），本次拒绝写入，只发布快照。`,
+      error
+    );
+    const mirror = await readStatsMirror();
+    return result(applyStatsMirror(BcaStatsCore.emptyDatabase(), mirror), false, "unreadable");
   }
-  // 空文件 = 还没写过的新库，不是损坏，不该触发留档
-  if (!text.trim()) return { file, database: BcaStatsCore.emptyDatabase() };
+  // 空文件 = 还没写过的新库，不是损坏，不该触发留档（能安全落盘）
+  if (!text.trim()) return result(BcaStatsCore.emptyDatabase(), true, "empty");
   try {
-    return { file, database: BcaStatsCore.normalizeDatabase(JSON.parse(text)) };
+    const database = BcaStatsCore.normalizeDatabase(JSON.parse(text));
+    await syncStatsMirror(database);
+    return result(database, true, "ok", text);
   } catch (error) {
     // 1.5.1（P1-12）：这里以前是个空 catch，坏库被下面整份重写成空库 —— 历史统计与宠物
     // 亲密度无声归零，用户只看到"数据没了"，事后连坏在哪都查不了（原文已经没了）。
@@ -2672,7 +2845,13 @@ async function readStatsDatabase(root) {
     chrome.storage.local.set({
       lastResult: { message: `本地数据库损坏：${trace}`, createdAt: Date.now() }
     }).catch(() => {});
-    return { file, database: BcaStatsCore.emptyDatabase() };
+    // 1.7.0：留档失败时连原文都没保住 —— 这一份空库绝不能落盘（canWrite=false），
+    // 否则就是把用户唯一的那份坏文件也覆盖掉，事后无从恢复
+    if (!backupName) {
+      const mirror = await readStatsMirror();
+      return result(applyStatsMirror(BcaStatsCore.emptyDatabase(), mirror), false, "corrupt-unarchived", text);
+    }
+    return result(BcaStatsCore.emptyDatabase(), true, "corrupt", "");
   }
 }
 
@@ -2689,12 +2868,23 @@ async function publishStatsSnapshot(database) {
 async function writeStatsDatabase(root, records) {
   if (!root || !records.length) return null;
   try {
-    const { file, database } = await readStatsDatabase(root);
-    let next = database;
+    const read = await readStatsDatabase(root);
+    const blocked = statsDatabaseWriteBlocked(read);
+    if (blocked) {
+      // 批次 A（P0）：读不到库就一个字节都不写 —— 宁可这一批统计不入库（归档本身不受影响），
+      // 也不能拿一份空库盖掉用户的历史。快照照发，至少让界面显示兜住下限的数字。
+      console.warn(blocked);
+      reportStatsWriteBlocked(blocked);
+      await publishStatsSnapshot(read.database);
+      return null;
+    }
+    let next = read.database;
     for (const record of records) next = BcaStatsCore.addRecord(next, record);
-    const writable = await file.createWritable();
+    await archivePreviousStatsDatabase(read);
+    const writable = await read.file.createWritable();
     await writable.write(JSON.stringify(next));
     await writable.close();
+    await syncStatsMirror(next);
     await publishStatsSnapshot(next);
     return next;
   } catch (error) {
@@ -2722,12 +2912,21 @@ async function touchPetInDatabase() {
   if (!root) return { ok: false };
   const permission = await root.queryPermission({ mode: "readwrite" }).catch(() => "denied");
   if (permission !== "granted") return { ok: false };
-  const { file, database } = await readStatsDatabase(root);
-  const touched = BcaStatsCore.touchPet(database);
-  const writable = await file.createWritable();
-  await writable.write(JSON.stringify(database));
+  const read = await readStatsDatabase(root);
+  const blocked = statsDatabaseWriteBlocked(read);
+  if (blocked) {
+    // 批次 A（P0）：宠物挂件点一下就能走到这条路径 —— 读不到库时绝不整份重写
+    console.warn(blocked);
+    reportStatsWriteBlocked(blocked);
+    return { ok: false, blocked: true, lineIndex: null };
+  }
+  const touched = BcaStatsCore.touchPet(read.database);
+  await archivePreviousStatsDatabase(read);
+  const writable = await read.file.createWritable();
+  await writable.write(JSON.stringify(read.database));
   await writable.close();
-  await publishStatsSnapshot(database);
+  await syncStatsMirror(read.database);
+  await publishStatsSnapshot(read.database);
   return {
     ok: true,
     lineIndex: touched.index,
@@ -3213,7 +3412,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
     }
   }
 
-  let rollback = { removedRecords: 0, restoredFiles: 0, removedCollections: 0, removedFiles: 0 };
+  let rollback = { removedRecords: 0, restoredFiles: 0, removedCollections: 0, removedFiles: 0, failures: [] };
   if (cancelled) {
     publishImportState({ text: "正在取消并回滚本次导入…" });
     rollback = await rollbackImport(journal);
@@ -3223,12 +3422,21 @@ async function importBiliFavoritesInner(data, tabId = null) {
 
   const finishedAt = Date.now();
   if (cancelled) {
+    // 1.7.0（批次 B）：回滚里任何一条失败都要说出来 —— 原来无论还原成没成都宣告
+    // 「导入前的本地内容没有被改动」，用户会以为回滚是干净的
+    const rollbackFailures = rollback.failures || [];
+    const rollbackNote = rollbackFailures.length
+      ? `有 ${rollbackFailures.length} 项没能还原：${rollbackFailures.slice(0, 5).join("；")}${rollbackFailures.length > 5 ? "；…" : ""}。`
+      : "导入前的本地内容没有被改动。";
     const summary = `导入已取消：已回滚本次新建的 ${rollback.removedRecords} 个视频目录`
       + `${rollback.removedCollections ? `、${rollback.removedCollections} 个新建收藏夹` : ""}`
-      + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。导入前的本地内容没有被改动。`;
+      + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。` + rollbackNote;
     await finishImportRunSnapshot();
     publishImportState({ running: false, paused: false, finishedAt, text: summary, summary }, true);
-    await chrome.storage.local.set({ lastResult: { message: summary, createdAt: finishedAt } });
+    // 有还原失败就带上 failed 标记：弹窗打开时会把「最近状态」展开，不让人漏看
+    await chrome.storage.local.set({
+      lastResult: { message: summary, createdAt: finishedAt, failed: rollbackFailures.length > 0 }
+    });
     return { ok: false, cancelled: true, message: summary, imported: 0, refreshed: 0, skipped, failed, total, reportPath: "" };
   }
 
@@ -3950,7 +4158,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const reportImportFailure = async (error) => {
       const folders = Array.isArray(message.folderIds) ? message.folderIds.map((id) => ({ id, name: id })) : [];
       const saved = await logError(error, { folders });
-      await chrome.storage.local.set({ lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
+      await chrome.storage.local.set({
+        // 1.7.0（批次 B / P1）：失败的终态要能被弹窗认出来并展开（见 popup.js 的 refreshStatus），
+        // 否则用户关掉弹窗就再也看不到「这一轮导入其实失败了」
+        lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now(), failed: true }
+      });
       sendResponse({ ok: false, message: error?.message || "导入失败。", reportPath: saved.reportPath });
     };
     // 4.9.x：连点第二次必须在**同步代码里**就挡掉。真正的任务要等 saveQueue 空了才跑，

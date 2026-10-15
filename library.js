@@ -2480,7 +2480,7 @@ function askToDeleteCollection(collection) {
   if (!collection) return;
   pendingDeleteAction = { type: "collection", collection };
   confirmTitle.textContent = BcaI18n.t("删除整个本地收藏夹？");
-  confirmMessage.textContent = BcaI18n.t("将永久删除本地收藏夹“{name}”及其全部文件（当前识别到 {count} 个视频）。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { name: collection.name, count: collection.videos.length });
+  confirmMessage.textContent = BcaI18n.t("将永久删除本地收藏夹“{name}”及其全部文件（当前识别到 {count} 个视频；目录里无法识别的文件、你自己放进去的东西也会一起删掉）。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { name: collection.name, count: collection.videos.length });
   confirmDeleteButton.textContent = BcaI18n.t("删除收藏夹");
   deleteDownloadsOption.hidden = !collection.videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
@@ -2572,13 +2572,56 @@ async function uniqueRecordFolderName(parent, originalName) {
   }
 }
 
+/* 1.7.0（批次 B / P1）：复制完必须复核一遍，再允许调用方删源。
+   copyDirectoryContents 是流式写，既不校验字节也不校验空间 —— 「写了一半就 close 成功」
+   这类坏法（磁盘满、配额、被安全软件打断）它自己看不出来，而调用方在全部目标都复制完
+   之后就会 removeMovedSource()：源目录没了、目标又是坏的，这条收藏是真没了。
+   只比对「名字 + 字节数」，不算哈希（几 MB 的视频文件哈希太贵，字节数已经能拦住截断）。 */
+async function diffCopiedDirectory(source, target, prefix = "") {
+  const problems = [];
+  for await (const [name, entry] of source.entries()) {
+    if (entry.kind === "directory") {
+      let child = null;
+      try {
+        child = await target.getDirectoryHandle(name);
+      } catch (_) {
+        problems.push(`${prefix}${name}/ 没复制过去`);
+        continue;
+      }
+      problems.push(...await diffCopiedDirectory(entry, child, `${prefix}${name}/`));
+      continue;
+    }
+    let sourceSize = -1;
+    let targetSize = -1;
+    try {
+      sourceSize = (await entry.getFile()).size;
+    } catch (_) {
+      problems.push(`${prefix}${name} 读不出来`);
+      continue;
+    }
+    try {
+      targetSize = (await (await target.getFileHandle(name)).getFile()).size;
+    } catch (_) {
+      problems.push(`${prefix}${name} 没复制过去`);
+      continue;
+    }
+    if (sourceSize !== targetSize) problems.push(`${prefix}${name}：源 ${sourceSize} 字节，目标 ${targetSize} 字节`);
+  }
+  return problems;
+}
+
 async function copyVideoRecord(video, targetName) {
   const sourceCollection = await rootHandle.getDirectoryHandle(video.collection);
+  const sourceRecord = await sourceCollection.getDirectoryHandle(video.directory);
   const targetCollection = await rootHandle.getDirectoryHandle(targetName);
   const targetRecordName = await uniqueRecordFolderName(targetCollection, video.directory);
   const targetRecord = await targetCollection.getDirectoryHandle(targetRecordName, { create: true });
   try {
-    await copyDirectoryContents(await sourceCollection.getDirectoryHandle(video.directory), targetRecord);
+    await copyDirectoryContents(sourceRecord, targetRecord);
+    // 复核要在 updateSavedFolderName 之前做：那一步会改写目标里的 视频信息.txt（改「所属收藏夹」
+    // 那一行），字节数本来就和源不同
+    const problems = await diffCopiedDirectory(sourceRecord, targetRecord);
+    if (problems.length) throw new Error(`复制校验没通过：${problems.slice(0, 3).join("；")}`);
     if (targetRecordName !== video.directory) await updateSavedFolderName(targetRecord, targetRecordName);
   } catch (error) {
     await targetCollection.removeEntry(targetRecordName, { recursive: true }).catch(() => {});
@@ -3097,14 +3140,31 @@ async function confirmPendingDelete() {
        catch 接住，弹出来的却是「删除失败」，用户只会再点一次「删除」再吃一次同样的错。 */
     const refreshError = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
     if (action.type === "collection") {
-      showResultDialog(BcaI18n.t("已删除本地收藏夹"), BcaI18n.t("“{name}”", { name: action.collection.name }) + downloadCleanupSuffix(downloadCleanupFailures.length) + refreshFailureSuffix(refreshError), "ok");
+      showResultDialog(BcaI18n.t("已删除本地收藏夹"), [BcaI18n.t("“{name}”", { name: action.collection.name }), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
-      showToast((batchResult.failures.length
-        ? BcaI18n.t("已删除 {deleted} 个，{failed} 个失败并保留选中。{first}", { deleted: batchResult.deleted, failed: batchResult.failures.length, first: batchResult.failures[0] })
-        : BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }) + downloadCleanupSuffix(downloadCleanupFailures.length)) + refreshFailureSuffix(refreshError));
+      // 1.7.0（批次 B / P1）：原来失败清单只把**第一条**塞进 3 秒就消失的 toast，
+      // 用户拿不到「哪些没删掉、为什么」，下载目录的失败更是只剩一个数字。
+      // 现在只要有任何一条失败就改用结果弹窗逐条列出来；全成功才继续用 toast。
+      const lines = [];
+      if (batchResult.failures.length) {
+        lines.push(BcaI18n.t("已删除 {deleted} 个，{failed} 个失败并保留选中。", { deleted: batchResult.deleted, failed: batchResult.failures.length }));
+        lines.push(...batchResult.failures);
+      } else {
+        lines.push(BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }));
+      }
+      if (downloadCleanupFailures.length) {
+        lines.push(BcaI18n.t("；{count} 个下载目录未能删除", { count: downloadCleanupFailures.length }));
+        lines.push(...downloadCleanupFailures);
+      }
+      const suffix = refreshFailureSuffix(refreshError);
+      if (batchResult.failures.length || downloadCleanupFailures.length) {
+        showResultDialog(BcaI18n.t("批量删除结果"), lines.join("；") + suffix, batchResult.failures.length ? "error" : "ok");
+      } else {
+        showToast(lines.join("；") + suffix);
+      }
     } else {
-      showResultDialog(BcaI18n.t("已删除本地归档"), BcaI18n.t("本地归档文件已删除。") + downloadCleanupSuffix(downloadCleanupFailures.length) + refreshFailureSuffix(refreshError), "ok");
+      showResultDialog(BcaI18n.t("已删除本地归档"), [BcaI18n.t("本地归档文件已删除。"), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     }
   } catch (error) {
     showResultDialog(BcaI18n.t("删除失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
@@ -3288,10 +3348,15 @@ videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) even
 async function writeFileAtomically(directory, file, text) {
   const tempName = `.${file.name}.${Date.now().toString(36)}.tmp`;
   const temp = await directory.getFileHandle(tempName, { create: true });
+  // 1.7.0（批次 B）：临时文件写成功之后，它就是**唯一完整副本** —— 后面任何一步失败
+  // 都不能再把它删掉（老代码在 catch 里无条件 removeEntry(tempName)，就地写失败时
+  // 正式文件已经被截断、临时文件是最后一份完整数据，却正好被删掉）。
+  let tempReady = false;
   try {
     const writable = await temp.createWritable();
     await writable.write(text);
     await writable.close();
+    tempReady = true;
     if (typeof temp.move === "function") {
       // 1.6.1 修：绝不先删原文件再换名。
       // 原写法是 removeEntry(file.name) → temp.move(file)，而 move() 要的是
@@ -3302,14 +3367,37 @@ async function writeFileAtomically(directory, file, text) {
       try {
         await temp.move(directory, file.name);
         return;
-      } catch (_) { /* 换名不被支持，退回就地写 */ }
+      } catch (moveError) {
+        // 1.7.0：分清「这台机器没有 move()」和「这次换名失败」。前者可以退回就地写，
+        // 后者（磁盘满、权限、文件被占用）退回就地写只会把正式文件截成半截 —— 原样抛出。
+        if (!isMoveUnsupportedError(moveError)) throw moveError;
+        console.warn("本机不支持 move()，退回就地写。", moveError);
+      }
     }
     await writeFileInPlace(file, text);
   } catch (error) {
-    await directory.removeEntry(tempName).catch(() => {});
+    if (!tempReady) {
+      // 临时文件自己就没写成功：里面是半截内容，留着只会让人误以为能恢复
+      await directory.removeEntry(tempName).catch(() => {});
+    } else {
+      console.warn(`写入 ${file.name} 失败，临时文件 ${tempName} 里留着一份完整内容，已保留。`, error);
+      chrome.storage.local.set({
+        lastResult: {
+          message: `写入 ${file.name} 失败，已保留临时文件 ${tempName}（里面是完整内容，可手动恢复）。`,
+          createdAt: Date.now()
+        }
+      }).catch(() => {});
+    }
     throw error;
   }
   await directory.removeEntry(tempName).catch(() => {});
+}
+
+/* move() 存在但抛错时要分清两种：NotSupportedError / TypeError 才算「这台机器不支持」，
+   其余（磁盘满、权限、被占用）必须原样抛出 —— 退回就地写会把正式文件截成半截。 */
+function isMoveUnsupportedError(error) {
+  const name = error && error.name;
+  return name === "NotSupportedError" || name === "TypeError";
 }
 
 // 退路专用：move() 不可用时的就地写。临时文件已经写完了，内容就在手上。
@@ -3928,7 +4016,23 @@ settingsFab.addEventListener("click", () => {
 // 开在新标签里，跟旁边的设置齿轮是同一个做法：收藏库这边正开着某个收藏夹、可能翻到第 N 页，
 // 用新页盖掉当前页会让人找不回来。
 retroEntryButton?.addEventListener("click", () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL("bili-old-2015/index.html") });
+  /* 1.7.0（批次 C / 打包分面 P1）：这一页**不随发行包装进去** —— pack.ps1 排除了
+     bili-old-2015/（那是带 build 工具链的 20MB 源码树，只有源码加载扩展的机器上才有），
+     可入口一直挂着。真实用户装的包里点这一行，只会开出浏览器自带的「找不到文件」空白页。
+     先探一下这个资源在不在包里：在就照旧开新标签；不在就给一句人话，别甩坏页面。 */
+  const retroUrl = chrome.runtime.getURL("bili-old-2015/index.html");
+  fetch(retroUrl, { cache: "force-cache" })
+    .then((response) => {
+      if (!response.ok) throw new Error(String(response.status));
+      chrome.tabs.create({ url: retroUrl });
+    })
+    .catch(() => {
+      showResultDialog(
+        BcaI18n.t("彩蛋页不在这份安装包里"),
+        BcaI18n.t("这一版没有打包 2015 年的怀旧首页；从源码目录加载扩展时才能打开。"),
+        "error"
+      );
+    });
 });
 
 // V1.4.1：齿轮上方那个「回到顶部」。收藏库是整页跟着窗口滚的（顶栏是 sticky，

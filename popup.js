@@ -58,6 +58,8 @@ const importPanelHeading = document.getElementById("importPanelHeading");
 const resultDetails = document.getElementById("resultDetails");
 const resultDetailsSummary = document.getElementById("resultDetailsSummary");
 const resultPath = document.getElementById("resultPath");
+// 1.7.0（批次 B）：失败结果要能在弹窗里被迫展开（见 refreshStatus）
+const statusCard = document.getElementById("statusCard");
 const popupVersion = document.getElementById("popupVersion");
 // 4.5.1：主题 / 语言改成分段控件，按钮直接写在 popup.html 里
 const localeButtons = [...document.querySelectorAll(".segmented button[data-locale]")];
@@ -645,6 +647,11 @@ async function refreshStatus() {
   folderName.textContent = folderLabel || BcaI18n.t("尚未选择文件夹");
   folderName.classList.toggle("unselected", !folderLabel);
   if (status.lastResult) {
+    /* 1.7.0（批次 B / P1）：失败结果不许默认折叠。活动角标在弹窗打开时就被清掉，
+       这张默认收起的卡片是唯一痕迹 —— 用户瞥一眼就关掉弹窗，等于什么都没看到
+       （导入跑了几分钟、一条都没归档，界面上却看不出任何异常）。background 在失败
+       路径上会带 failed: true。 */
+    if (status.lastResult.failed && statusCard) statusCard.open = true;
     // status.lastResult.message 来自 background：首行当摘要，其余行当路径
     const messageLines = String(status.lastResult.message || "").split(/\r?\n/).filter(Boolean);
     const firstLine = messageLines.shift();

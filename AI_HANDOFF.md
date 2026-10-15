@@ -76,6 +76,18 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.7.0：上线前审查的批次 A/B/C（两条 P0 + 数据面 P1 + 文档漂移）
+
+上线前全项目审查（P0=2、P1=24、P2≈55、P3≈50，10 个分面的原文报告在开发机的 `b_catch\bili-vault-1.7.0-审查报告.md`）。用户批了批次 A/B/C，本版只做这三批。
+
+1. **P0-1 读不到数据库时整份重写成空库**。`readStatsDatabase()`（background.js）在 `getFile().text()` 抛错时返回 `emptyDatabase()`，而 `writeStatsDatabase()` / `touchPetInDatabase()` 会在这份空库上追加本轮记录再整份写回 —— 历史统计与宠物亲密度无声归零。修法：读函数回报 `canWrite`/`reason`（`unreadable` / `empty` / `ok` / `corrupt` / `corrupt-unarchived`），两个写入口共用 `statsDatabaseWriteBlocked()` 守卫，读不可信就一个字节都不写，只把原因写进 `lastResult` 与角标。
+2. **P0-2 不可恢复字段没有兜底**。`firstSeenAt` / `totals.savedTotal` / `pet.affinity` / `pet.totalTouch` 在 `chrome.storage.local.bcaStatsMirror` 留镜像（`syncStatsMirror` 只在真的变了才写），读失败时 `applyStatsMirror` 用 `Math.max` 顶回来。另外每次改写正文前 `archivePreviousStatsDatabase()` 把上一版原文写进 `database.bak.json`（**副本比正文早一版**：先写副本、成功后再重写正文，File System Access 没有 rename）。
+3. **坏 JSON 且留档失败 = 也拒绝写**（`reason: "corrupt-unarchived"`）。1.5.1 只解决了「留档成功再重建」，留档失败那支还会整份重写 —— 等于把用户唯一一份坏文件也覆盖掉，事后无从恢复。
+4. **批次 B（数据面 P1）**：`writeFileAtomically()`（library.js）用 `isMoveUnsupportedError()` 分清「本机没有 move()」与「这次换名失败」，后者不再退回就地写（会把正文截成半截）；临时文件写成功后不再无条件删除（它是最后一份完整副本，删了才是真丢），并把文件名写进 `lastResult`；`writeFile()`（background.js）同样处理 + 补 `lastResult`；删收藏夹的确认文案改成说清「删的是整个目录」；批量删除改走 `showResultDialog` 并列出失败明细；复制记录改成校验复制件与源逐字节一致后再删源；`rollbackImport()` 的四个 `catch (_) {}` 收集成 `failures[]` 并写进取消导入的终态文案；导入失败写 `lastResult.failed = true`，`popup.js` 的 `refreshStatus()` 据此强制展开「最近状态」（角标在弹窗打开时就被清掉，折叠卡片是唯一痕迹）；`stats.js` 两处：`monthText` 重复声明互相覆盖 + `new Date("YYYY-MM")` 按 UTC 解析（UTC 以西差一个月）、`bindResize` 丢第二个参数导致旧快照 resize 后主图空白。
+5. **批次 C（一致性与文档漂移）**：彩蛋页入口先 `fetch(chrome.runtime.getURL("bili-old-2015/index.html"))` 探资源在不在包里，不在就给对话框（`pack.ps1` 排除该目录，真实安装包里点它只会开出「找不到文件」）；README / AI_HANDOFF / SMOKE_TEST 的漂移数字对齐实测（发行包 42 文件约 1.4 MB 解压后、词典 859 条、数据库纯函数 58 项、`retro.*` 早已删除）；`release.ps1` 新增「文档里的词典条数（`<!-- i18n-count:N -->`）必须和 `--check` 的实际条数一致」的闸门。
+6. **教训**：`test/stability.test.cjs` 全是文本级断言，看不见「读失败 → 空库 → 整份重写」这类跨函数后果。对这一档后果（丢数据）值得写一个**内存假 FSA + 假 chrome 的验证台**：`b_catch\_verify-170-p0.cjs` 用 `vm` 装载 `stats-core.js` + `background.js`（去掉第 5 行的副作用 `import`），覆盖读失败拒写、镜像兜底、`database.bak.json` 轮转、留档失败拒写、原子写的失败路径，9/9 通过。真机上这些失败路径没法安全复现，所以这份验证台是这一版的主要证据。
+7. **另一个坑**：`release.ps1` 是带 UTF-8 BOM 的 PowerShell 脚本，用 edit 工具改写会把 BOM 剥掉，PS 5.1 会按 GBK 解码整个文件（16 处语法错误）。改完必须确认 BOM 还在（`[System.IO.File]::ReadAllBytes(...)` 前 3 字节是 `EF BB BF`）。
+
 ## 1.6.5：首尾「整桶」的口径、饼图分块规则、图例滚动
 
 1. **首尾整桶要标出来**（用户报「首尾两根柱子跟区间天数对不上」）：`weeklyRows` / `monthlyRows` / `yearlyRows` 各自算一个 `partial`（这一桶跨出了区间：周 `week < bounds.from || end > bounds.to`，月用 `key`/`end`，年用 `year + "-01-01" < bounds.from || year + "-12-31" > bounds.to`）。`drawChart` 给这类柱子加 `stats-bar-partial`（`.stats-bar-partial`：虚线描边 + `fill-opacity: .42`，和「今天」那种空心是两套样式），`renderChart` 在 `#statsChartBoundaryNote` 里按粒度写「首尾两根是整周 / 整月 / 整年，条数包含区间外的记录。」。**别试图去「修正」这个数字**：`dailyRows` 只有 180 天，区间内的逐日明细根本不在这一页手里，能给的就是「整桶 + 说明」。
@@ -148,7 +160,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 - **`background.js`**：两处裸 `fetch` 改为 `biliImportApiGet`（view 15s / tag 10s）；硬编码并发 3 → `IMPORT_DETAIL_CONCURRENCY`；`importPending` 自愈（`settlePending` 只在「这一轮仍是队尾」时清账）；坏库留档 `database.bad.json`。
 - **`theme.js` / `theme.css` / `library.css`**：`guide.html` / `tutorial.html` 补引 `theme.js`（并给两页 `<html>` 加 `data-wallpaper-scope="popup"`，否则纸面规则会突然生效）；毛玻璃用新令牌槽 `--bca-card-state-shadow` 让位，卡片状态改写同特异性选择器；外观变化不再无条件重载背景图；`teardown()` + bitmap 出口回收 + storage 全部套 try。
 - **`pet.js` / `settings.*` / `stats.*`**：设置页开关改成整份合并写（`set({ interfacePet: next })`）；宠物气泡四句数据源换 `firstSeen` / `totals`。
-- **`pack.ps1`**：排除 `bili-old-2015` 与 `_ref`（发行包 672 文件 / 39 MB → **42 文件 / 500 KB**）。
+- **`pack.ps1`**：排除 `bili-old-2015` 与 `_ref`（发行包 672 文件 / 39 MB → **42 文件 / 约 1.4 MB**，解压后大小；准确值以 `pack.ps1` 的实际输出为准）。
 - **`test/stability.test.cjs`**：`stripComments` 由正则改为逐字符状态机（之前字符串里的 `/*` 与 `*/` 会把 `background.js` 九行整段吃掉，剥离后的断言对该区域全部失明）；页面清单扩到覆盖 `pet.css` / `stats.css` / `theme.js` / `pet.js` / `stats.js`；`[hidden]` 守卫收紧为只认独立成条的全局重定义；裸 `fetch` 白名单收成 `["biliImportApiGet", "loadCoverPng"]`；把「宠物开关要落盘」那条断言从钉死旧写法（等于测试在保护 bug）改成断言整份合并写 + 反向断言旧写法不许回来。
 
 ### 统计口径三条铁律
@@ -176,9 +188,9 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 - **踩过的坑（务必记住）**：那份页面有一个 **window 捕获阶段的 catch-all 链接处理器** —— 点页面上任何元素都会被当成跳转，真的打开 B 站新标签。所以弹层必须在**捕获阶段** `stopPropagation`，并用 `event.target.closest("#eggDialogOverlay")` 判定只拦弹层自身的点击；否则点「知道啦」、点遮罩、按 Esc 都会顺手多开一个标签。我们的验收里有 4 条「关闭动作没有多开标签」断言钉着这件事。
 - **有边界的例外**（用户查证后拍板，写在这里以免被当成通用许可）：只复刻 2015 年那一版首页、素材来自互联网档案馆的公开快照、唯一交互是跳回现在的 B 站主页、不作为项目宣传也不商用、仅作怀旧与欣赏 —— 因此不构成严重侵权。**这条只适用于这一个彩蛋页**；不要据此把官方素材用到别处（下载功能那套红线依旧：`bilivideo|akamaized` 永不加回）。
 
-## 1.5.8：怀旧页停机（retro.* 仍然留在仓库里）
+## 1.5.8：怀旧页停机（retro.* 当时保留在仓库里）
 
-- 现状：`library.js` 里 `#retroEntry` 的点击处理是 `chrome.tabs.create({ url: "https://www.bilibili.com" })`。`retro.html` / `retro.css` / `retro.js` 三个文件**保留但没有任何入口**（全仓提到 `retro.html` 的地方只剩注释）。
+- 当时的状态：`library.js` 里 `#retroEntry` 的点击处理是 `chrome.tabs.create({ url: "https://www.bilibili.com" })`。`retro.html` / `retro.css` / `retro.js` 三个文件**保留但没有任何入口**（全仓提到 `retro.html` 的地方只剩注释）。**这三个文件在 1.5.9 里已经删掉**，下面两条只描述 1.5.8 当时的状态。
 - 重新启用只要把那一行改回 `chrome.tabs.create({ url: chrome.runtime.getURL("retro.html") })` —— 三个文件是离线自包含的（零外部资源、DOM 里只有一处 http(s) 字面量），不需要配套改动。
 - 保留原因是用户明确要求「暂时留在项目里不要清理」。停机依据：自制怀旧页验收效果一般 —— 版式数值是按归档 CSS 量的，但头版那块小图网格在归档里是 IndexNavigator 现场生成的、快照只存到空容器，行列分法只能反推，首屏留下一块留白。
 - 教训：**归档里量不到依据的那一段，不要靠反推硬凑** —— 要么找到当年的渲染图，要么就别做那一块。
