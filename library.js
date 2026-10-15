@@ -908,6 +908,30 @@ function installCollectionDrag(wrapper, name) {
     reorderCollection(draggedCollectionName, name, after);
   });
   wrapper.addEventListener("dragend", clearCollectionDragStyles);
+  // 1.7.20（facet-ux P1-3）：窄窗口（≤760px）下 #sidebar 变成横向胶囊行，拖动把手被
+  // CSS 隐藏、拖动也没了可发现性 —— 排序在这个区间里对鼠标和键盘都不可达。这里补一条
+  // 不依赖拖动的入口：行上按 Alt+↑/↓ 把这一项往前/往后挪一格。判据用 collections
+  // （当前渲染顺序），和拖动走的是同一个 reorderCollection，所以「没读到顺序就不落盘」
+  // 那条保护同样生效。
+  wrapper.addEventListener("keydown", (event) => {
+    if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+    const order = collections.map((collection) => collection.name);
+    const from = order.indexOf(name);
+    if (from < 0) return;
+    const to = event.key === "ArrowUp" ? from - 1 : from + 1;
+    if (to < 0 || to >= order.length) return;
+    event.preventDefault();
+    // 往下挪 = 插到下一项的后面；往上挪 = 插到上一项的前面
+    reorderCollection(name, order[to], event.key === "ArrowDown");
+    focusCollectionRow(name);
+  });
+}
+
+/* 重画之后把焦点放回同一行 —— 否则按一次 Alt+↓ 焦点就丢了，连按第二下会落空 */
+function focusCollectionRow(name) {
+  const rows = collectionList ? [...collectionList.querySelectorAll(".collection-row")] : [];
+  const target = rows.find((row) => row.dataset.collectionName === name);
+  target?.querySelector(".collection-button")?.focus();
 }
 
 function isDroppedAfter(event, wrapper) {

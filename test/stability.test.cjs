@@ -4152,8 +4152,8 @@ test("完成提示弹窗不会因为两个来源抢着弹而丢掉一条（静�
   assert.match(popupJs, /const pendingDoneDialogs = \[\];/, "要有排队用的数组");
   assert.match(
     popupJs,
-    /if \(doneDialog\.open\) \{\s*pendingDoneDialogs\.push\(text\);\s*return;\s*\}/,
-    "已经开着时不许再 showModal()，要排队"
+    /if \(doneDialog\.open\) \{\s*pendingDoneDialogs\.push\(\{ text, failed: Boolean\(failed\) \}\);\s*return;\s*\}/,
+    "已经开着时不许再 showModal()，要排队（1.7.20 起队列里带着 failed 标记）"
   );
   assert.match(popupJs, /function showNextDoneDialog\(\)/, "要有弹出下一条的入口");
   assert.match(
@@ -5097,11 +5097,79 @@ test("导入途中关掉收藏夹页面时，弹窗不许报假失败、也不�
   // 后台自己跑完那一轮：结果只写在 importDone 里，storage 变更要接住
   assert.ok(/changes\.importDone && awaitingBackgroundImport/.test(popup), "要接住后台写完的结果");
   assert.ok(popup.includes("importStatus.textContent = done.text;"), "结果要写回状态行");
-  assert.ok(popup.includes("showDoneDialog(done.text);"), "也要弹完成提示");
+  assert.ok(popup.includes("showDoneDialog(done.text, done.failed);"), "也要弹完成提示（失败时带 failed）");
 
   // 两条老路径不许被改坏：页面还在时的直接响应、以及重开弹窗时补显示
   assert.ok(popup.includes("showDoneDialog(doneText);"), "页面还在时的老路径要留着");
   assert.ok(popup.includes('chrome.storage.local.get("importDone")'), "重开弹窗时仍要读上次结果");
+});
+
+// ---- V1.7.20（残留 P1：导入失败终态 / 角标时机 / 窄窗口排序 / 页面状态）----
+
+test("导入失败也要落一份 importDone，弹窗要按失败态弹（V1.7.20）", () => {
+  const bg = stripComments(readProjectFile("background.js"));
+  const popup = stripComments(readProjectFile("popup.js"));
+
+  // 成功写 importDone、失败不写 —— 这条不对称就是「关掉弹窗等结果」只对成功生效的原因
+  const failureAt = bg.indexOf("const reportImportFailure = async (error) => {");
+  assert.ok(failureAt > 0, "找不到导入失败的处理函数");
+  const failureBody = bg.slice(failureAt, bg.indexOf("sendResponse({ ok: false, message: error?.message", failureAt));
+  assert.match(failureBody, /importDone: \{ text: failureText, acknowledged: false, failed: true, at: Date\.now\(\) \}/,
+    "失败也要写 importDone，否则弹窗没有可补弹的终态");
+  assert.match(failureBody, /lastResult: \{ message: .*failed: true \}/, "失败的老路径（最近状态）也要留着");
+
+  // 弹窗侧：两条补弹路径都要把 failed 传下去，标题要换字
+  assert.ok(popup.includes("showDoneDialog(done.text, done.failed);"), "storage 变更路径要带 failed");
+  assert.equal([...popup.matchAll(/showDoneDialog\(done\.text, done\.failed\);/g)].length, 2,
+    "两条补弹路径（onChanged 与 boot 补弹）都要带 failed");
+  assert.ok(popup.includes('if (failed) doneDialogTitle.textContent = BcaI18n.t("导入没有完成");'),
+    "失败时标题要说「没跑完」，不能顶着「已完成」");
+});
+
+test("角标要等结果真的呈现出来才清，不许一打开弹窗就灭（V1.7.20）", () => {
+  const popup = stripComments(readProjectFile("popup.js"));
+
+  // boot 里不许再有无条件的清角标
+  const bootAt = popup.indexOf("async function boot() {");
+  assert.ok(bootAt > 0, "找不到 boot()");
+  const bootBody = popup.slice(bootAt);
+  assert.doesNotMatch(bootBody, /runtime\.sendMessage\(\{ type: "bca-badge-clear" \}\)/,
+    "boot 里不许再无条件清角标 —— 「打开了」不等于「看到了」");
+
+  // 收口在 clearBadgeIfSeen：还有没读过的 importDone 就不清
+  assert.ok(popup.includes("async function clearBadgeIfSeen()"), "要有「结果看到了吗」的判断");
+  assert.ok(popup.includes("if (done && !done.acknowledged && done.text) return;"),
+    "有未读结果时必须留着角标");
+  assert.ok(popup.indexOf("clearBadgeIfSeen();", bootAt) > bootAt, "boot 末尾要按未读结果决定");
+  const dismissAt = popup.indexOf("function dismissDoneDialog()");
+  const dismissBody = popup.slice(dismissAt, popup.indexOf("\n}", dismissAt));
+  assert.match(dismissBody, /clearBadge\(\);/, "用户真的读掉并关掉对话框之后才清角标");
+});
+
+test("窄窗口也要能排序：收藏夹行支持 Alt+↑/↓（V1.7.20）", () => {
+  const library = stripComments(readProjectFile("library.js"));
+  const html = readProjectFile("library.html");
+
+  // ≤760px 的胶囊布局把拖动把手 display:none 了，拖动本身也没了可发现性 ——
+  // 所以必须有一条不依赖拖动的入口
+  assert.ok(library.includes('if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;'),
+    "收藏夹行要接 Alt+↑/↓");
+  assert.ok(library.includes('reorderCollection(name, order[to], event.key === "ArrowDown");'),
+    "要走和拖动同一条 reorderCollection（「没读到顺序就不落盘」那条保护才生效）");
+  assert.ok(library.includes("function focusCollectionRow(name)"), "重画之后要把焦点放回同一行，否则连按第二下会落空");
+  assert.ok(library.includes("focusCollectionRow(name);"), "键盘排序之后要还原焦点");
+  assert.ok(html.includes("Alt+↑/↓"), "侧栏的排序提示要写出这条键盘入口");
+});
+
+test("content.js 不许再假装读得到页面的全局状态（V1.7.20）", () => {
+  const content = stripComments(readProjectFile("content.js"));
+  // 内容脚本跑在隔离世界，window.__INITIAL_STATE__ 恒为 undefined
+  assert.doesNotMatch(content, /__INITIAL_STATE__|__initialState__/,
+    "隔离世界读不到页面全局变量，这条通道根本不存在，别留着误导人");
+  assert.ok(content.includes("const state = {};"), "把结论写清楚：页面状态这条来源不存在");
+  // DOM 兜底必须还在（删掉页面状态之后，bvid/aid/标签/UID 全靠它）
+  assert.ok(content.includes(String.raw`url.match(/\bBV[\w]+/i)`), "bvid 仍要从地址栏兜底");
+  assert.match(content, /document\.querySelectorAll\('\.video-tag-container a/, "标签仍要从 DOM 取");
 });
 
 test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {

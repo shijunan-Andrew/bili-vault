@@ -933,5 +933,7 @@
   "复制清理命令": "Copy the clean-up command",
   "已复制。粘到 PowerShell 里回车即可完成清理。": "Copied. Paste it into PowerShell and press Enter to finish.",
   "只导外观与档位": "Appearance and layout only",
-  "自动复制没成功，手动复制下面这条命令：": "Copying failed. Copy this command manually:"
+  "自动复制没成功，手动复制下面这条命令：": "Copying failed. Copy this command manually:",
+  "导入没有完成": "Import did not finish",
+  "拖动排序，或 Alt+↑/↓": "Drag to sort, or press Alt+Up / Alt+Down"
 }

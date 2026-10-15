@@ -196,6 +196,8 @@ button:disabled { cursor: wait; opacity: .6; }
 .import-status { min-height: 18px; margin-top: var(--sp-2); overflow-wrap: anywhere; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
 .import-status:empty { display: none; }
 .import-status.error { color: var(--danger); }
+/* 1.7.20：完成对话框也会用来报「没跑完」，标题换了字还不够，正文也要能一眼看出是坏消息 */
+#doneDialogText.error { color: var(--danger); }
 
 .import-progress-view { display: flex; align-items: center; gap: var(--sp-3); min-height: 78px; margin-top: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); }
 .import-progress-view strong { display: block; color: var(--ink); font-size: var(--fs-base); }

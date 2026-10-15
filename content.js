@@ -154,10 +154,15 @@
   }
 
   function getVideoMetadata() {
-    let state = {};
-    try { state = window.__INITIAL_STATE__ || window.__initialState__ || {}; } catch (_) {}
-    const video = state.videoData || state.videoDataV2 || state.videoInfo || {};
-    const owner = video.owner || state.upInfo || {};
+    /* 1.7.20（主报告 §六 ⑪）：内容脚本跑在隔离世界，看不到页面的全局变量 ——
+       这里原本读的 window.__INITIAL_STATE__ / __initialState__ **恒为 undefined**，
+       等于一条根本不存在的「页面状态优先」通道。删掉它，结论交给下面那套 DOM 选择器：
+       bvid/aid 从地址栏与 meta 取，标签从 DOM 取，UP 主 UID 从 UP 主信息容器里的
+       space 链接取（1.7.11 已收紧），抓不到时 buildInfo 用「未知」占位。
+       要真的读到页面状态只能再注入一个 MAIN 世界的脚本，那会扩大可注入面，不在本版。 */
+    const state = {};
+    const video = {};
+    const owner = {};
     const url = location.href.split("#")[0];
     const meta = (selector) => document.querySelector(selector)?.content || "";
     const bvid = video.bvid || url.match(/\bBV[\w]+/i)?.[0] || "";

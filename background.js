@@ -4642,10 +4642,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const reportImportFailure = async (error) => {
       const folders = Array.isArray(message.folderIds) ? message.folderIds.map((id) => ({ id, name: id })) : [];
       const saved = await logError(error, { folders });
+      const failureText = `导入失败：${error?.message || "未知错误"}。打开插件可以看「最近状态」与错误报告。`;
       await chrome.storage.local.set({
         // 1.7.0（批次 B / P1）：失败的终态要能被弹窗认出来并展开（见 popup.js 的 refreshStatus），
         // 否则用户关掉弹窗就再也看不到「这一轮导入其实失败了」
-        lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now(), failed: true }
+        lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now(), failed: true },
+        // 1.7.20（facet-ux P1-1）：成功有 importDone、失败没有 —— 这条不对称让「关掉弹窗
+        // 等结果」那条路只会对成功生效。失败时用户既没有完成对话框，也没有 importDone
+        // 可补弹，只剩工具栏上一个红色 !（对读屏完全不可达）。这里补成对称的。
+        importDone: { text: failureText, acknowledged: false, failed: true, at: Date.now() }
       });
       notifyImportOutcome("导入失败", `这一轮没有跑完：${error?.message || "未知错误"}。打开插件可以看「最近状态」与错误报告。`);
       sendResponse({ ok: false, message: error?.message || "导入失败。", reportPath: saved.reportPath });

@@ -29,6 +29,7 @@ const riskyWarnDialog = document.getElementById("riskyWarnDialog");
 const riskyWarnText = document.getElementById("riskyWarnText");
 const doneDialog = document.getElementById("doneDialog");
 const doneDialogText = document.getElementById("doneDialogText");
+const doneDialogTitle = document.getElementById("doneDialogTitle");
 const diffStartConfirm = document.getElementById("diffStartConfirm");
 const diffStartDetail = document.getElementById("diffStartDetail");
 const lastError = document.getElementById("lastError");
@@ -462,12 +463,19 @@ function confirmRiskySpeed() {
    InvalidStateError，而调用点的 .catch(() => {}) 会把它吞掉 —— 用户就永远看不到第二条。
    所以这里排队：开着就先存起来，点掉「知道了」之后接着弹下一条。 */
 const pendingDoneDialogs = [];
-function showDoneDialog(text) {
+function showDoneDialog(text, failed = false) {
   if (!doneDialog || !text) return;
   if (doneDialog.open) {
-    pendingDoneDialogs.push(text);
+    pendingDoneDialogs.push({ text, failed: Boolean(failed) });
     return;
   }
+  // 1.7.20（facet-ux P1-1）：失败也走这条补弹路径，标题得说清「没跑完」，
+  // 别让它顶着「已完成」四个字出现。
+  if (doneDialogTitle) {
+    if (failed) doneDialogTitle.textContent = BcaI18n.t("导入没有完成");
+    else doneDialogTitle.textContent = BcaI18n.t("已完成");
+  }
+  doneDialogText.classList.toggle("error", Boolean(failed));
   doneDialogText.textContent = text;
   doneDialog.showModal();
 }
@@ -476,8 +484,7 @@ function showNextDoneDialog() {
   if (doneDialog?.open) return;
   const next = pendingDoneDialogs.shift();
   if (!next) return;
-  doneDialogText.textContent = next;
-  doneDialog.showModal();
+  showDoneDialog(next.text, next.failed);
 }
 
 function requestEstimateText() {
@@ -876,6 +883,8 @@ function dismissDoneDialog() {
       diffState: { ...state, summary: { ...state.summary, acknowledged: true } }
     });
   }).catch(() => {});
+  // 1.7.20（facet-ux P1-2）：用户真的把结果读掉并关掉了对话框 —— 到这一步才灭角标
+  clearBadge();
   // 排队等着的那条（如果有）接着弹
   showNextDoneDialog();
 }
@@ -965,8 +974,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       disarmCancel();
       updateImportSelection();
       importStatus.classList.remove("error");
+      if (done.failed) importStatus.classList.add("error");
       importStatus.textContent = done.text;
-      showDoneDialog(done.text);
+      showDoneDialog(done.text, done.failed);
     }
   }
   if (areaName === "local" && changes.importState) {
@@ -1016,10 +1026,29 @@ async function applyLocale(locale) {
   await refreshStatus().catch(() => {});
 }
 
-async function boot() {
-  // 打开弹窗就把角标灭掉（连底色一起复位）—— 结果已经摆在他眼前，这条提醒就完成使命了。
-  // 由后台统一写角标（那里是唯一写入口），这里不等应答；连同步抛错也不许挡住下面的初始化。
+/* 1.7.20（facet-ux P1-2）：角标只有一个写入口（后台的 clearActivityBadge），弹窗只能请求它清。
+   收口在这里：只有「结果真的呈现出来了」才清 —— 打开了弹窗不等于看到了结果，
+   结果可能还没落地（后台还在跑），也可能藏在默认收起的「最近状态」里。 */
+function clearBadge() {
   try { chrome.runtime.sendMessage({ type: "bca-badge-clear" }).catch(() => {}); } catch (_) {}
+}
+
+async function clearBadgeIfSeen() {
+  try {
+    const saved = await chrome.storage.local.get("importDone");
+    const done = saved?.importDone;
+    // 还有一条没读过的完成/失败提示：角标留着，直到用户在对话框上点掉（见 dismissDoneDialog）
+    if (done && !done.acknowledged && done.text) return;
+  } catch (_) {
+    return;
+  }
+  clearBadge();
+}
+
+async function boot() {
+  // 1.7.20（facet-ux P1-2）：这里原来一打开弹窗就把角标灭掉，等于假定「打开了 = 看到了」。
+  // 结果可能还没落地，也可能藏在默认收起的「最近状态」里 —— 灭掉之后用户既没提示、
+  // 也没徽章，结果就进了无痕终态。改成在 boot 末尾按「是否还有未读结果」决定（clearBadgeIfSeen）。
   // 第一次渲染之前初始化，避免先闪一下中文
   await BcaI18n.init();
   // 主题已经在 head 里由 theme.js 定好（弹窗不再提供主题切换，外观统一在设置页改）；
@@ -1042,7 +1071,7 @@ async function boot() {
     if (!done || done.acknowledged || !done.text) return;
     // 直接显示：这段文案在后台写入时就已经是最终文字（后台没有 i18n），
     // 而且 BcaI18n.t() 的键必须是字面量 —— 传变量会让"键必须是字面量"那条测试失败（已踩过四次）
-    showDoneDialog(done.text);
+    showDoneDialog(done.text, done.failed);
   }).catch(() => {});
   // 差异对比的结果存在 storage 里 —— 上次切走弹窗、这次回来要能接着看到
   chrome.storage.local.get("diffState").then((saved) => {
@@ -1101,6 +1130,8 @@ if (popupVersion) popupVersion.textContent = BcaI18n.t("版本 {version}", { ver
   // 4.8：顶部开源横幅（关闭状态记在 chrome.storage，下次不再出现）
   restoreGithubBanner();
   document.getElementById("dismissGithubBanner")?.addEventListener("click", dismissGithubBanner);
+  // 1.7.20（facet-ux P1-2）：所有补弹都排完队了，这时才知道结果到底呈现出来没有
+  clearBadgeIfSeen();
 }
 
 boot().catch(() => {});
