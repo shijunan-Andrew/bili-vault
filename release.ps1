@@ -218,6 +218,15 @@ Say "  纯函数单元测试（真执行 stats-core.js）…" $C_DIM
 Invoke-Native $Node @('test/stats-core.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
 if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 数据库单元测试未全过" $C_RED; $failed = $true }
 
+# 1.7.22：这一套把 background.js 整份丢进 vm 跑起来（配上内存版 chrome.storage 与内存版
+# 目录树），真调 readStatsDatabase / writeStatsDatabase / flushStatsPendingRecords /
+# rollbackStatsRecords / 三个写入口的互斥链 / 归档写锁，外加从 library.js 抠出来的
+# nativeHostRequest。以前这一整块只有静态断言盖着 —— 静态断言能证明「写着 canWrite=false」，
+# 证明不了「读不出来的时候真的一字节都没写」，1.7.0 的 P0 就是这么漏过去的。
+Say "  浏览器环境单元测试（真执行 background.js 与 library.js 的原生消息）…" $C_DIM
+Invoke-Native $Node @('test/background.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
+if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 浏览器环境单元测试未全过" $C_RED; $failed = $true }
+
 Say "  词典覆盖…" $C_DIM
 $i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }

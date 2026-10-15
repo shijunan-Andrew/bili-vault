@@ -462,8 +462,10 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
 │   ├── stability.test.cjs        # Node 内置测试（项数以 `node test/stability.test.cjs` 的实际输出为准）：静态回归断言 + 并进来的单元测试
-│   ├── archive-core.test.cjs     # 59 项真执行单元测试：require archive-core.js 真的调用它
-│   ├── stats-core.test.cjs       # 1.5.0：31 项真执行单元测试：require stats-core.js（固定时间戳，绝不用真实 Date.now）
+│   ├── archive-core.test.cjs     # 68 项真执行单元测试：require archive-core.js 真的调用它
+│   ├── stats-core.test.cjs       # 61 项真执行单元测试：require stats-core.js（固定时间戳，绝不用真实 Date.now）
+│   ├── harness.cjs               # 1.7.22：执行级测试的壳：内存版 chrome.storage + 内存版 FileSystem 目录树 + 把 background.js 丢进 vm
+│   ├── background.test.cjs       # 1.7.22：24 项真执行单元测试：真调 readStatsDatabase / writeStatsDatabase / 三个写入口互斥链 / 归档写锁 / nativeHostRequest
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
 │   ├── archive-audit.cjs         # 本地归档的标签/简介覆盖情况体检
@@ -904,7 +906,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:238 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:240 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

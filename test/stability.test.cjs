@@ -5328,3 +5328,58 @@ test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {
   assert.ok(extractor.includes('"pet.js"'), "pet.js 要进 i18n 的扫描清单");
   assert.ok(extractor.includes("|translate)"), "抽取器要认得 translate() 这层包装");
 });
+
+/* ---- 1.7.22：执行级测试覆盖（background.js / 原生消息）---- */
+
+// 这一套的新意：前面 238 条都是「读文件 + 正则」，证明源码里写着某行字；
+// test/background.test.cjs 把 background.js 整份丢进 vm 跑起来，配内存版
+// chrome.storage 与内存版目录树，真调那些函数。壳是 test/harness.cjs。
+// 壳一旦坏掉（名字改了、vm 跑不起来），那 24 条会**静默空转**，所以在这里钉住。
+test("执行级测试的壳真能跑起来，导出的名字一个都不能少（V1.7.22）", () => {
+  const harness = require("./harness.cjs");
+  const bg = harness.loadBackground();
+  assert.deepEqual(bg.__missing, [], "BACKGROUND_EXPORTS 里导不出来的名字 = 对应的测试在空转");
+  const exported = Object.keys(bg.__test);
+  assert.ok(exported.length >= 25, "导出太少（" + exported.length + " 个），多半是壳坏了");
+  for (const name of ["readStatsDatabase", "writeStatsDatabase", "flushStatsPendingRecords", "rollbackStatsRecords"]) {
+    assert.equal(typeof bg.__test[name], "function", name + " 必须真的掏得出来");
+  }
+  // vm 里必须拿到一份能用的 chrome.storage，否则上面几个函数一进去就炸
+  assert.equal(typeof bg.chrome.storage.local.get, "function");
+  assert.equal(typeof bg.chrome.storage.local.set, "function");
+});
+
+test("新的执行级测试不许重写一份被测实现，且必须接进发版流程（V1.7.22）", () => {
+  const testSrc = readProjectFile("test/background.test.cjs");
+  // 抄一份实现来测，测的就是抄本 —— 磁盘上那份改坏了照样绿
+  for (const name of ["readStatsDatabase", "writeStatsDatabase", "flushStatsPendingRecords",
+                      "rollbackStatsRecords", "nativeHostRequest", "maskLocalUserPaths"]) {
+    assert.doesNotMatch(testSrc, new RegExp("function\\s+" + name + "\\s*\\("), name + " 不许在测试里重写一份");
+  }
+  // 从 library.js 抠函数是允许的，但必须抠的是磁盘上那份
+  assert.match(testSrc, /readSource\("library\.js"\)/, "原生消息那条要从 library.js 现读");
+  assert.match(testSrc, /carveFunction\(source, "nativeHostRequest"\)/);
+
+  const release = readProjectFile("release.ps1");
+  assert.match(release, /test\/background\.test\.cjs/, "发版第 4 步要真的跑它，否则这套测试是摆设");
+  assert.ok(fs.existsSync(path.join(projectRoot, "test", "harness.cjs")), "test/harness.cjs 要在包里");
+
+  // 变异测试打的那几行必须是可执行语句，不是注释 —— 打在注释上会得出"守卫有效"的错误结论（1.7.16 踩过）
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+  for (const anchor of [
+    [background, "const blocked = statsDatabaseWriteBlocked(read);", "P0 红线"],
+    [background, "statsPendingRecords.unshift(...batch);", "写失败回队"],
+    [background, "const run = statsWriteChain.then(task, task);", "写入口互斥"],
+    [library, "if (protocol !== NATIVE_PROTOCOL_VERSION) {", "协议号校验"]
+  ]) {
+    const source = anchor[0];
+    const needle = anchor[1];
+    const label = anchor[2];
+    const lines = source.split("\n").filter((line) => line.includes(needle));
+    assert.ok(lines.length >= 1, "变异锚点不见了：" + label + "（" + needle + "）");
+    for (const line of lines) {
+      assert.doesNotMatch(line.trim(), /^(\/\/|\*|\/\*)/, "变异锚点落在注释里了：" + label + " —— 变异会变成假绿");
+    }
+  }
+});
