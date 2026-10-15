@@ -2832,6 +2832,46 @@ test("删除下载的提示数组必须先声明再 push（V1.7.15）", () => {
   assert.ok(declared < pushed, "downloadCleanupNotes 必须先声明再 push，否则就是 TDZ ReferenceError");
 });
 
+// ---- V1.7.16（destructive P1-1：归档原子写重上 + 写失败不再删记录）----
+
+test("换名失败一律退回就地写，不许再按错误名挑名单（V1.7.16）", () => {
+  const bg = readProjectFile("background.js");
+  const start = bg.indexOf("async function writeFile(directory, name, content) {");
+  assert.ok(start > 0, "找不到 background.js 的 writeFile");
+  // 注释里引用了旧代码的那一行（`unsupported`），比对前必须剥掉注释，否则误报。
+  const body = stripComments(bg.slice(start, bg.indexOf("\n}\n", start)));
+  // 1.7.0 的兜底只认 NotSupportedError / TypeError，而真机上报的是 NoModificationAllowedError
+  // （目标被别的进程或另一个 writable 占用）—— 不在名单里，于是它没退回就地写、直接把异常
+  // 抛给了「失败就删整条记录」的调用方。这份名单和那句 throw 都不许再回来。
+  assert.doesNotMatch(body, /unsupported/, "换名失败不许再按错误名挑名单");
+  assert.doesNotMatch(body, /throw moveError/, "换名失败必须退回就地写，不许原样抛出");
+  assert.match(body, /await temp\.move\(directory, name\);/, "要真的试过换名覆盖");
+  assert.match(body, /renameNote = renameFailureNote\(error\);/, "换名失败要把错误名记下来");
+  // library.js 那一份同样要能报出原因（两份必须行为一致）
+  const lib = readProjectFile("library.js");
+  assert.match(lib, /function renameFailureNote\(error\) \{/);
+  assert.match(lib, /renameNote = renameFailureNote\(moveError\);/);
+  // 「最近状态」与错误报告都要带上这条签名，否则真机再出问题还是只能靠猜
+  assert.match(bg, /换名失败的原因：\$\{renameNote \|\| "未知"\}/);
+  assert.match(bg, /最近一次换名覆盖失败：\$\{lastRenameFailureNote\}/);
+});
+
+test("写失败不再无条件删记录：有内容就留、空的才删（V1.7.16）", () => {
+  const bg = readProjectFile("background.js");
+  assert.match(bg, /async function discardFailedRecord\(parent, name, error\) \{/);
+  assert.match(bg, /for await \(const _entry of record\.values\(\)\) \{ kept = true; break; \}/);
+  assert.match(bg, /已经写进去的内容留在「\$\{name\}」里，没有删/);
+  // 三处「写失败 → 删掉刚建的整条记录」全部改走它
+  assert.equal((bg.match(/await discardFailedRecord\(/g) || []).length, 3, "三处写失败都要走 discardFailedRecord");
+  assert.doesNotMatch(bg, /removeEntry\(record\.name, \{ recursive: true \}\)\.catch/, "写失败不许再无条件删记录");
+  assert.doesNotMatch(bg, /removeEntry\(recordFolder\.name, \{ recursive: true \}\)\.catch/, "写失败不许再无条件删记录");
+  // 复制 / 搬运那一处**故意**保留删除（半份副本会被扫描当成记录，而源目录还在），但必须写明理由
+  const lib = readProjectFile("library.js");
+  const copyCatch = lib.indexOf("await targetCollection.removeEntry(targetRecordName, { recursive: true })");
+  assert.ok(copyCatch > 0, "复制回滚的删除应该保留");
+  assert.match(lib.slice(Math.max(0, copyCatch - 500), copyCatch), /这里的回滚\*\*故意保留\*\*/);
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

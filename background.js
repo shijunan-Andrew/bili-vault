@@ -390,33 +390,116 @@ async function uniqueTimeFolder(parent, name) {
    写一半被关页面 / 断电 / 磁盘满，留下的就是半截文本，而读侧把「读不到视频信息」当成
    「这条记录没有视频」静默跳过（等于这条收藏凭空消失，用户只看到视频没了）。
    database.json 在 1.5.9 已经改成「先写临时文件、再换名」，这里补齐同一条规矩：
-   临时文件写完整 → move 覆盖；move 不可用才退回就地写；换名**失败**（不是「不支持」）
-   原样抛出，绝不退回就地写（退回就地写就是把正式文件截成半截）。
-   失败且临时文件已经写完整时必须留着它 —— 那是唯一一份完整内容。 */
+   临时文件写完整 → move 覆盖；move 不可用才退回就地写；失败且临时文件已经写完整时必须
+   留着它 —— 那是唯一一份完整内容。 */
+// 1.7.16：最近一次「换名覆盖」失败的签名（错误名 + 消息），只用于诊断，不参与控制流。
+// 1.7.0 栽的那一跤，根子就是失败原因没人记下来 —— 事后只能靠猜。
+let lastRenameFailureNote = "";
+function renameFailureNote(error) {
+  const name = error?.name || "未知错误";
+  const message = String(error?.message || "").slice(0, 200);
+  lastRenameFailureNote = `${name}：${message}`;
+  return lastRenameFailureNote;
+}
+
+/* 1.7.16（destructive P1-1）：写失败时要不要把这个刚建出来的目录删掉。
+   这个目录是本次调用刚建的，回滚它本身没错 —— 但里面很可能已经落了东西（封面先写成功、
+   正文写失败是最常见的一种），删掉就等于把现场和已经下载好的封面一起抹掉，用户既看不到
+   出了什么事、也没法重试。所以：里面有内容就留着（收藏库的「另有 N 个目录没写完」会把
+   它报出来，用户能自己去清理），完全是空的才删 —— 空目录没有任何信息量，只会堆垃圾。
+   保留时顺手把这件事写进错误消息，否则用户只会看到一句「保存失败」，不知道东西还在。 */
+async function discardFailedRecord(parent, name, error) {
+  let kept = false;
+  try {
+    const record = await parent.getDirectoryHandle(name);
+    for await (const _entry of record.values()) { kept = true; break; }
+    if (!kept) await parent.removeEntry(name, { recursive: true }).catch(() => {});
+  } catch (_) {
+    kept = false;
+  }
+  if (kept && error && typeof error === "object") {
+    try {
+      error.message = `${error.message}（已经写进去的内容留在「${name}」里，没有删，可以重试或自己清理）`;
+    } catch (_) {}
+  }
+  return kept;
+}
+
 async function writeFile(directory, name, content) {
-  /* 1.7.1：这里**完整退回** 1.7.0 之前的就地写。
-     1.7.0（批次 B）曾把它改成「临时文件 + move() 覆盖」，真机反馈是「手动收藏和导入
-     视频时无法把视频导入到本地归档」：`addManualVideo`（background.js:596-608）与
-     `saveImportedItem`（background.js:2960-2975）在 writeFile 抛错时都会把整条记录目录
-     删掉，所以这一步一旦失败，用户看到的就是「提示正在保存、但本地归档里什么都没有」。
-     归档链路上 1.7.0 只改过这一个函数，两条链路又都失败，所以先把它退回原样；
-     move() 在 service worker 里的真实行为还没在真机上验证过，等验证过再上原子写。
-     代价（已知）：写到一半断电仍会留下半截正文 —— 这一条 P1 留到 1.7.2 再修。 */
-  const file = await directory.getFileHandle(name, { create: true });
+  /* 1.7.1 曾在这里**完整退回** 1.7.0 之前的就地写，理由是「1.7.0 一上原子写，手动收藏和
+     导入就都存不进本地」。1.7.16 重新上原子写，因为那条理由已经被真机探针推翻：
+     在 service worker 里 `temp.move(directory, name)` 是**能用**的，连覆盖一个已存在的
+     文件也能用（探针见 b_catch/move-probe.js 与 move-probe2.js）。
+     真正压垮 1.7.0 的是它的兜底条件：
+       const unsupported = moveError && (moveError.name === "NotSupportedError" || moveError.name === "TypeError");
+       if (!unsupported) throw moveError;
+     「换名被拒」在真机上报的是 NoModificationAllowedError（目标正被别的进程或另一个
+     writable 占用；Windows 上重命名覆盖一个被打开的文件本来就会失败，同步盘 / 杀毒 /
+     索引器都会造成这种情况，所以它是间歇性的），不在那份名单里，于是它**没有**退回就地写、
+     直接把异常抛给了调用方，调用方又把整条记录目录删掉 —— 用户看到的就是
+     「提示正在保存，然后本地归档里什么都没有」。
+     现在：换名失败一律退回就地写，只把错误名记下来备查；就地写也失败时，临时文件
+     （完整内容）保留并把两条原因一起报出去。 */
+  const tempName = `.${name}.${Date.now().toString(36)}.tmp`;
+  let temp = null;
+  let tempReady = false;
+  let renameNote = "";
+  try {
+    temp = await directory.getFileHandle(tempName, { create: true });
+    const writable = await temp.createWritable();
+    await writable.write(content);
+    await writable.close();
+    tempReady = true;
+  } catch (error) {
+    // 临时文件自己都没写成功：正式文件一个字节都没动过，直接把原因抛上去
+    const friendly = describeFileSystemError(error);
+    if (friendly) throw new Error(friendly);
+    throw error;
+  }
+
+  if (typeof temp.move === "function") {
+    try {
+      await temp.move(directory, name);
+      lastRenameFailureNote = "";
+      return; // 换名成功：正式文件是原子替换过来的，不存在写一半的中间态
+    } catch (error) {
+      renameNote = renameFailureNote(error);
+      console.warn(`换名覆盖 ${name} 失败，退回就地写。`, error);
+    }
+  } else {
+    renameNote = renameFailureNote(new Error("本机没有 FileSystemFileHandle.move()"));
+  }
+
+  // 退回就地写
   // 1.7.14（facet-compat C4）：createWritable() 原来在 try 之外，所以只读目录
   // （NoModificationAllowedError）、磁盘满（QuotaExceededError）、授权被半路撤销
   // （NotAllowedError）三种最常见的环境问题全都冒泡成英文原文。
   let writable;
   try {
+    const file = await directory.getFileHandle(name, { create: true });
     writable = await file.createWritable();
     await writable.write(content);
     await writable.close();
   } catch (error) {
     try { await writable?.abort(); } catch (_) {}
+    if (tempReady) {
+      // 就地写也失败：临时文件是最后一份完整内容，必须留着并说出来
+      console.warn(`写 ${name} 失败，临时文件 ${tempName} 里留着一份完整内容，已保留。`, error);
+      chrome.storage.local.set({
+        lastResult: {
+          message: `写 ${name} 失败，已保留临时文件 ${tempName}（里面是完整内容，可手动恢复）。换名失败的原因：${renameNote || "未知"}`,
+          createdAt: Date.now()
+        }
+      }).catch(() => {});
+    } else {
+      await directory.removeEntry(tempName).catch(() => {});
+    }
     const friendly = describeFileSystemError(error);
-    if (friendly) throw new Error(friendly);
-    throw error;
+    const reason = friendly || error?.message || "写入失败";
+    throw new Error(renameNote ? `${reason}（换名覆盖也没成功：${renameNote}）` : reason);
   }
+  // 就地写成功：临时文件没用了
+  await directory.removeEntry(tempName).catch(() => {});
 }
 
 // 按 CSS object-fit: cover 的语义取源图中心最大的 16:9 区域，避免拉伸变形
@@ -676,7 +759,7 @@ async function addManualVideo(data) {
           savedCollections.push(target.name);
           savedPaths.push(`${root.name}/${target.name}/${record.name}`);
         } catch (error) {
-          await target.collection.removeEntry(record.name, { recursive: true }).catch(() => {});
+          await discardFailedRecord(target.collection, record.name, error);
           failures.push({ name: target.name, message: error?.message || "保存视频信息失败。" });
         }
       }
@@ -770,6 +853,7 @@ function reportText(error, context = {}) {
     `发生时间：${formatChineseDateTime(now, true)}`,
     `错误：${error?.message || String(error)}`,
     `错误类型：${error?.name || "未知"}`,
+    ...(lastRenameFailureNote ? [`最近一次换名覆盖失败：${lastRenameFailureNote}`] : []),
     `视频标题：${metadata.title || "未知"}`,
     `视频链接：${metadata.url || "未知"}`,
     `收藏夹：${(context.folders || []).map((folder) => folder.name || folder.id).join("、") || "未知"}`,
@@ -882,8 +966,8 @@ async function saveFavorite(data) {
         await writeFile(recordFolder, "视频信息.txt", buildInfo({ ...data, metadata }, recordFolder.name, savedAt));
       } catch (error) {
         // 4.9.x：目录是上面 getDirectoryHandle(create:true) 刚建出来的，buildInfo 抛错时它已经在磁盘上了。
-        // 同样要回滚清理（和 addManualVideo / saveImportedItem 一致），否则每失败一次就留一个空目录。
-        await collectionFolder.removeEntry(recordFolder.name, { recursive: true }).catch(() => {});
+        // 1.7.16（destructive P1-1）：改成「有内容就留、空目录才删」—— 见 discardFailedRecord。
+        await discardFailedRecord(collectionFolder, recordFolder.name, error);
         throw error;
       }
       savedFolders.push(`${root.name}/${safeSegment(folder.name)}/${recordFolder.name}`);
@@ -3253,7 +3337,8 @@ async function saveImportedItem(root, folder, item, journal = null) {
     await writeFile(record, COVER_FILE_NAME, cover.blob);
     await writeFile(record, "视频信息.txt", buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.name, new Date()));
   } catch (error) {
-    await collection.removeEntry(record.name, { recursive: true }).catch(() => {});
+    // 1.7.16（destructive P1-1）：不无条件删 —— 见 discardFailedRecord。
+    await discardFailedRecord(collection, record.name, error);
     throw error;
   }
   // 1.5.0：把「这条记录写在目录名/视频信息.txt 里的收藏时间」一并交回去，

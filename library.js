@@ -2993,6 +2993,9 @@ async function copyVideoRecord(video, targetName) {
     if (problems.length) throw new Error(`复制校验没通过：${problems.slice(0, 3).join("；")}`);
     if (targetRecordName !== video.directory) await updateSavedFolderName(targetRecord, targetRecordName);
   } catch (error) {
+    // 1.7.16：这里的回滚**故意保留**（和 background.js 的 discardFailedRecord 不同）：
+    // 这是「复制 / 搬运」刚建出来的目标目录，留下的半份副本会被扫描当成一条记录，
+    // 而源目录还在、重试一次就能拿到完整副本，所以半份副本没有任何保留价值。
     await targetCollection.removeEntry(targetRecordName, { recursive: true }).catch(() => {});
     throw error;
   }
@@ -3782,6 +3785,15 @@ videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) even
    拿去 try 一下：不可用就退回「把临时文件内容写进正式文件再删掉临时文件」。
    退路版本完成不了原子性（copy 本身仍要就地写一次），但至少临时文件里还留着
    一份完整内容可供人工恢复，比原来的半截 JSON 强。 */
+// 1.7.16：最近一次「换名覆盖」失败的签名，只用于诊断（与 background.js 同款）。
+let lastRenameFailureNote = "";
+function renameFailureNote(error) {
+  const name = error?.name || "未知错误";
+  const message = String(error?.message || "").slice(0, 200);
+  lastRenameFailureNote = `${name}：${message}`;
+  return lastRenameFailureNote;
+}
+
 async function writeFileAtomically(directory, file, text) {
   const tempName = `.${file.name}.${Date.now().toString(36)}.tmp`;
   const temp = await directory.getFileHandle(tempName, { create: true });
@@ -3789,6 +3801,7 @@ async function writeFileAtomically(directory, file, text) {
   // 都不能再把它删掉（老代码在 catch 里无条件 removeEntry(tempName)，就地写失败时
   // 正式文件已经被截断、临时文件是最后一份完整数据，却正好被删掉）。
   let tempReady = false;
+  let renameNote = "";
   try {
     const writable = await temp.createWritable();
     await writable.write(text);
@@ -3803,12 +3816,14 @@ async function writeFileAtomically(directory, file, text) {
       // 就是这条）。现在先按规范换名覆盖，失败才退回就地写；任何一步失败原文件都还在。
       try {
         await temp.move(directory, file.name);
+        lastRenameFailureNote = "";
         return;
       } catch (moveError) {
         // 1.7.1：换名失败一律退回就地写（与 1.7.0 之前一致）。1.7.0 曾按「不支持 / 其它失败」
         // 分流、把其它失败原样抛出 —— 那会把「原本能写成功的一次写入」变成硬失败（数据库停更、
         // 归档记录被调用方删掉）。现在临时文件在就地写失败时会被保留并写进弹窗状态，
         // 所以「退回就地写」不再等于静默丢数据。
+        renameNote = renameFailureNote(moveError);
         console.warn("换名失败，退回就地写。", moveError);
       }
     }
@@ -3825,7 +3840,7 @@ async function writeFileAtomically(directory, file, text) {
       console.warn(`写入 ${file.name} 失败，临时文件 ${tempName} 里留着一份完整内容，已保留。`, error);
       chrome.storage.local.set({
         lastResult: {
-          message: `写入 ${file.name} 失败，已保留临时文件 ${tempName}（里面是完整内容，可手动恢复）。`,
+          message: `写入 ${file.name} 失败，已保留临时文件 ${tempName}（里面是完整内容，可手动恢复）。换名失败的原因：${renameNote || "未知"}`,
           createdAt: Date.now()
         }
       }).catch(() => {});

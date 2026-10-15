@@ -135,9 +135,9 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 **定位**：`git diff c6a2cbd e1dbd49` 里，归档链路（`addManualVideo`、`saveImportedItem`）只被改过一个函数 —— `background.js` 的 `writeFile`（1.7.0 改成「临时文件 + `temp.move(directory, name)` 覆盖」，非 `NotSupportedError`/`TypeError` 的错误原样抛出）。而两条链路都在 `writeFile` 抛错时执行 `removeEntry(record.name, { recursive: true })` 删掉整条记录，于是「更安全的写盘」直接变成「功能坏掉」。
 
-**修法**：`writeFile` 完整退回 1.7.0 之前的就地写（不留临时文件）；`library.js` 的 `writeFileAtomically` 把「换名失败按错误类型分流」改成「一律退回就地写」（临时文件保留 + `lastResult` 写明这一点仍保留）。数据库那一侧的原子写不动 —— 页面里从 1.6.1 用到 1.6.5、有真机证据。验证台 `b_catch\_verify-170-p0.cjs` 的 T8 改成守「失败必须抛错、且不新增文件」（9/9 通过）。
+**修法**：`writeFile` 完整退回 1.7.0 之前的就地写（不留临时文件）；`library.js` 的 `writeFileAtomically` 把「换名失败按错误类型分流」改成「一律退回就地写」（临时文件保留 + `lastResult` 写明这一点仍保留）。数据库那一侧的原子写不动。（1.7.16 更正：「页面里从 1.6.1 用到 1.6.5」不是 `move()` 可用的证据 —— `writeFileAtomically` 换名失败会静默退回就地写，成功失败都看不出来。真机探针见 `b_catch/move-probe.js` 与 `move-probe2.js`。）验证台 `b_catch\_verify-170-p0.cjs` 的 T8 改成守「失败必须抛错、且不新增文件」（9/9 通过）。
 
-**教训（下次别再犯）**：① 在 service worker 里用 FSA 的 `move()` 之前，必须先在真机上确认它存在、以及换名失败时抛什么错 —— 页面里的经验（`writeFileAtomically` 从 1.6.1 起就在用）不能直接搬到 SW；② 改「写盘」这类基础函数前，先把**所有调用方在失败时的行为**列出来 —— 这次的调用方是「失败就把整条记录删掉」，后果被它放大成了「用户以为没收藏成功」；③ 一个「看起来更安全」的改造，只要让原本能成功的路径变成失败路径，就是净损失。
+**教训（下次别再犯）**：① 在 service worker 里用 FSA 的 `move()` 之前，必须先在真机上确认它存在、以及换名失败时抛什么错 —— 页面里的经验（`writeFileAtomically` 从 1.6.1 起就在用）不能直接搬到 SW。（**1.7.16 实测结论**：SW 里 `move()` 存在且能用、覆盖已存在文件也能用；真正的坑是兜底只认 `NotSupportedError`/`TypeError`，而真机上报的是 `NoModificationAllowedError`（目标被占用），于是它没退回就地写、直接把异常交给了「失败就删整条记录」的调用方。教训本身仍然成立 —— 但「怎么验」有了现成的探针。）② 改「写盘」这类基础函数前，先把**所有调用方在失败时的行为**列出来 —— 这次的调用方是「失败就把整条记录删掉」，后果被它放大成了「用户以为没收藏成功」；③ 一个「看起来更安全」的改造，只要让原本能成功的路径变成失败路径，就是净损失。
 
 ## 1.7.0：上线前审查的批次 A/B/C（两条 P0 + 数据面 P1 + 文档漂移）
 
@@ -904,7 +904,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:222 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:224 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
