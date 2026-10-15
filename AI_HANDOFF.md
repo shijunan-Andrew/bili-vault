@@ -76,6 +76,15 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.7.3：导入终态要出插件、导入期间不排收藏、自动刷新别刷屏
+
+真机复测（1.7.2）三条反馈与修法：
+1. 「导入结束后不显示已完成的弹窗，要点开插件才看到」→ `importDone` 只写 storage，用户关掉弹窗就没有终态。修法：后台在 `importDone` 写入处与 `reportImportFailure` 里各调一次 `notifyImportOutcome()`（`chrome.notifications.create`，图标 `icon-128.png`）。manifest 因此新增 `notifications` 权限 —— `test/stability.test.cjs` 的权限白名单同步加这一项，其余权限仍然一个不收；`notifyImportOutcome` 也会被测试的 `makeHarness` 一起 `grabFunction` 进去（它只用 `chrome.notifications`，stub 里没有就静默返回）。
+2. 「导入进行中手动收藏会卡在『正在归档视频』」→ `save-favorite` 在 `runInSaveQueueWithDeadline` 里排队等，一直等满时限。用户要的是说清楚，不是等。修法：`importRun.active || importPending > 0` 时**立刻**回 `{ ok: false, busyImport: true }`，内容脚本按 `busyImport` 显示「导入进行中 / 目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。」（两本词典各加 2 条）。`withKeepAlive` 保留，用来兜住其它排队路径（添加视频 / 补存）。
+3. 「收藏库每隔几秒就提示一次『已读取 N 个视频』」→ 1.7.2 加的 `scheduleArchiveRefresh()` 每次都走 `displayRoot` 的正常提示，而导入期间 `bcaStats` 一批批地写。修法：`displayRoot` 新增 `silentToast` 选项（自动刷新时静音，手动刷新照旧提示），`applyImportState` 记一个 `importIsRunning`，导入期间防抖从 900ms 放宽到 4 秒。
+
+**教训**：「结果只写进 storage」不等于「用户看得到」。凡是可能跑几分钟、而用户会关掉界面的流程，终态都要有一条出插件的通道（系统通知 / 徽章 / 系统层面），这条以后写新流程时照做。
+
 ## 1.7.2：归档卡在「正在保存」＝ SW 被回收；收藏库不会自动刷新
 
 **现象**（用户真机复测，1.7.1）：① 手动收藏卡在「正在归档视频…」，文件没落盘；② 导入显示成功、文件也落盘了（`辐射\…\视频信息.txt` + `封面.webp` 都在，导入报告写「读取 3 / 新导入 3 / 失败 0」），但收藏库页面看不到。

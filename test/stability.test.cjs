@@ -336,7 +336,9 @@ test("the extension never exposes its pages to web origins", () => {
   assert.equal(manifest.version, "1.7.2");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
-  assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "storage"]);
+  // notifications 是 1.7.3 加的：导入要跑几分钟，用户多半已经关掉弹窗，只把结果写进
+  // storage 等于没有终态提示（store 审核与真机反馈都指向这一点）。不接受其它任何权限。
+  assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "notifications", "storage"]);
   // 打开本地收藏库改由后台 chrome.tabs.create 完成
   const background = readProjectFile("background.js");
   const content = readProjectFile("content.js");
@@ -3722,6 +3724,7 @@ test("导入占位：一轮导入不会把自己判成「已经有一轮在进�
     let importPending = 0;
     let saveQueue = Promise.resolve();
     let hold = null;
+    ${grabFunction("notifyImportOutcome")}
     ${grabFunction("claimImportRun")}
     ${grabFunction("importBiliFavoritesInOrder")}
     function importBiliFavorites() {

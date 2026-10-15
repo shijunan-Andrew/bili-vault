@@ -1890,7 +1890,12 @@ function dismissImportHint() {
 let lastImportState = null;
 let importWasRunning = false;
 
+/* 1.7.3：导入在不在跑。导入期间每写一批快照都会触发 bcaStats 变化，自动刷新要知道
+   这件事，才能把节奏放慢（见 scheduleArchiveRefresh）。 */
+let importIsRunning = false;
+
 function applyImportState(state) {
+  importIsRunning = state?.running === true;
   if (!importRunningNotice) return;
   lastImportState = state || null;
   const running = state?.running === true;
@@ -3503,7 +3508,9 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   refreshVideoFilterOptions();
   renderVideos();
   syncDetailDownloadAction();
-  showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: allVideos().length }));
+  // 1.7.3：自动刷新（导入落盘后自己重画列表）不弹「已读取 N 个视频」——
+  // 真机上导入期间每写一批就弹一次，很吵。手动刷新照旧提示。
+  if (options.silentToast !== true) showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: allVideos().length }));
   // 大目录的递归体积统计很慢，放在渲染之后异步跑，不阻塞界面
   updateStorageUsage(handle);
   // 1.5.0：数据库同步也放在渲染之后，同样是「慢活不挡界面」
@@ -4180,15 +4187,19 @@ window.addEventListener("beforeunload", () => {
 let archiveRefreshTimer = 0;
 function scheduleArchiveRefresh() {
   if (archiveRefreshTimer) window.clearTimeout(archiveRefreshTimer);
+  // 1.7.3：导入期间快照一批批地写，节流到 4 秒一次并**不弹提示**——真机反馈是
+  // 「每隔几秒就提示一次『已读取 N 个视频』」，列表自己更新就够了，不必每次都报。
+  const delay = importIsRunning ? 4000 : 900;
   archiveRefreshTimer = window.setTimeout(async () => {
     archiveRefreshTimer = 0;
     if (!rootHandle) return;
     if (document.visibilityState !== "visible") return;
     if (selectionMode || videoAddInProgress) return;
     if (document.querySelector("dialog[open]")) return;
-    const error = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
+    const error = await refreshAfterLocalChange(() =>
+      displayRoot(rootHandle, selectedCollection, BcaI18n.t("已读取"), { silentToast: true }));
     if (error) console.warn("收藏库自动刷新失败（下次写入时还会再试）", error);
-  }, 900);
+  }, delay);
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

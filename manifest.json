@@ -13,7 +13,8 @@
   "permissions": [
     "storage",
     "nativeMessaging",
-    "clipboardWrite"
+    "clipboardWrite",
+    "notifications"
   ],
   "host_permissions": [
     "https://*.hdslb.com/*",

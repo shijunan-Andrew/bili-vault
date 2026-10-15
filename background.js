@@ -813,6 +813,25 @@ async function withQueueDeadline(queue, timeoutMs, label) {
 // 「这次收藏」「手动添加」「补存」会一直等到导入结束，界面就永久停在「保存中」。
 // 给它们同一套上限：超时如实回 busy，让界面当场讲清楚"现在没做、等导入结束后重试"。
 // 注意队列里那一份仍然会照常跑完（withQueueDeadline 只放弃等待，不取消任务）。
+/* 1.7.3：导入要跑几分钟，用户多半已经切走页面、弹窗也关了 —— 只把结果写进 storage
+   等于没有提示（真机反馈：「导入结束后不显示已完成的弹窗，要点开插件才看到」）。
+   这里补一条系统通知：成功、失败各一条。通知失败不影响导入结果，所以整段都吞异常。 */
+function notifyImportOutcome(title, message) {
+  try {
+    if (!chrome.notifications || typeof chrome.notifications.create !== "function") return;
+    const pending = chrome.notifications.create("", {
+      type: "basic",
+      iconUrl: "icon-128.png",
+      title,
+      message: String(message || "").slice(0, 300),
+      silent: false
+    });
+    if (pending && typeof pending.catch === "function") pending.catch(() => {});
+  } catch (error) {
+    console.warn("系统通知发送失败（不影响导入结果）", error);
+  }
+}
+
 async function runInSaveQueueWithDeadline(task, label) {
   const result = await withQueueDeadline(task, IMPORT_QUEUE_WAIT_TIMEOUT_MS, label);
   if (result === WITH_QUEUE_DEADLINE_EXPIRED) {
@@ -4160,6 +4179,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 否则用户关掉弹窗就再也看不到「这一轮导入其实失败了」
         lastResult: { message: `导入失败：${error?.message || "未知错误"}`, createdAt: Date.now(), failed: true }
       });
+      notifyImportOutcome("导入失败", `这一轮没有跑完：${error?.message || "未知错误"}。打开插件可以看「最近状态」与错误报告。`);
       sendResponse({ ok: false, message: error?.message || "导入失败。", reportPath: saved.reportPath });
     };
     // 4.9.x：连点第二次必须在**同步代码里**就挡掉。真正的任务要等 saveQueue 空了才跑，
@@ -4195,12 +4215,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (result?.ok !== false) {
         const text = result?.message || `导入/更新完成：新导入 ${result?.imported || 0} 个，更新 ${result?.refreshed || 0} 个。`;
         chrome.storage.local.set({ importDone: { text, acknowledged: false, at: Date.now() } }).catch(() => {});
+        // 1.7.3：弹窗多半已经关了，补一条系统通知（见 notifyImportOutcome）
+        notifyImportOutcome("导入完成", text);
       }
       sendResponse(result);
     }).catch(reportImportFailure);
     return true;
   }
   if (message?.type === "save-favorite") {
+    // 1.7.3：导入正在跑（或已有一轮导入在排队）时不再让这次收藏干等 —— 等下去既可能碰上
+    // service worker 被回收，用户也只能看着「正在归档视频…」。直接回一句能照做的话：
+    // 「目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。」
+    if (importRun.active || importPending > 0) {
+      sendResponse({ ok: false, busyImport: true });
+      return true;
+    }
     // 兜底文案不能省：抛出来的不一定是 Error（比如 reject 一个字符串），
     // 那时 error.message 是 undefined，前端的 BcaI18n.t(undefined) 会显示成一片空白。
     // 1.4.2（P1-3）：导入占着串行队列时这次收藏会一直等下去，所以给它加等待上限；超时就把

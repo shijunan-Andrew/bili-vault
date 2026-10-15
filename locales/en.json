@@ -705,6 +705,8 @@
   "正在更新视频状态 {counter}…": "Refreshing stats {counter}…",
   "正在更新收藏夹": "Updating collections",
   "正在归档视频…": "Archiving the video…",
+  "导入进行中": "Import in progress",
+  "目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。": "A favorites import is running, so this video was not archived. Please try saving again after the import finishes.",
   "正在计算…": "Calculating…",
   "正在建立文件夹…": "Creating the folder…",
   "正在解析并保存…": "Parsing and saving…",

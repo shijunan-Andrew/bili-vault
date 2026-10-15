@@ -342,6 +342,10 @@
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
         showNotice(BcaI18n.t("归档失败"), BcaI18n.t("插件后台暂时无法处理这次收藏。"), runtimeError.message, true);
+      } else if (result?.busyImport) {
+        // 1.7.3：队列里正在导入时后台会立刻回 busyImport（不再让这次收藏干等），
+        // 这里给一句用户能照做的话，而不是笼统的「归档失败」。
+        showNotice(BcaI18n.t("导入进行中"), BcaI18n.t("目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。"), "", true);
       } else if (!result?.ok) {
         // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
         showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);
