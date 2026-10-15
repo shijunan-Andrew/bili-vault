@@ -2509,7 +2509,7 @@ test("归档目录名的 200 字节闸、坏库留档、半截目录都钉住（
   assert.match(background, /const STATS_DATABASE_BACKUP_PREFIX = "database\.bad\.";/);
   assert.match(background, /const STATS_DATABASE_KEEP_BACKUPS = 5;/);
   // 统计写入失败要把这批记录放回队首，不能先清队再写、失败即丢整批
-  assert.match(background, /async function flushStatsPendingRecords\(root\) \{/);
+  assert.match(background, /async function flushStatsPendingRecords\(root, insertedKeys = null\) \{/);
   assert.match(background, /statsPendingRecords\.unshift\(\.\.\.batch\);/);
   assert.match(background, /const STATS_PENDING_MAX_RECORDS = 20000;/);
   // 复制原语不许覆盖已存在的目标文件
@@ -2910,6 +2910,55 @@ test("原生宿主的浏览器清单三处一致（V1.7.17）", () => {
   assert.deepEqual(cleanup, install, "设置页复制的清理命令要覆盖同一批浏览器，不能只清 Chrome");
   const script = readProjectFile("settings.js");
   assert.match(script, /LOCALAPPDATA\\\\BcaFolderOpener/, "残留文件夹（里面有扩展 ID 与下载目录路径）也要一起清掉");
+});
+
+// ---- V1.7.18（P1 第三批：取消导入的统计回滚 + 下载目录复制的字节校验）------------
+
+test("取消导入会把已落盘的统计行一起撤掉（V1.7.18）", () => {
+  const background = readProjectFile("background.js");
+  const core = readProjectFile("stats-core.js");
+
+  // 统计侧的减法只给回滚用，且导出了才能被 background.js 调到
+  assert.match(core, /function removeRecords\(database, keys\) \{/);
+  assert.match(core, /\n    removeRecords,\n/);
+  // 「新增的行」必须在 addRecord 之前判定 —— 加完就分不出新旧了
+  assert.match(background, /async function writeStatsDatabase\(root, records, insertedKeys = null\) \{/);
+  assert.match(background,
+    /if \(key && !\(next\.videos && Object\.prototype\.hasOwnProperty\.call\(next\.videos, key\)\)\) insertedKeys\.push\(key\);/,
+    "新建判定要在 addRecord 之前");
+  assert.match(background, /async function flushStatsPendingRecords\(root, insertedKeys = null\) \{/);
+  assert.match(background, /await writeStatsDatabase\(root, batch, insertedKeys\);/);
+  assert.match(background, /const importStatsKeys = \[\];/);
+  assert.match(background, /await flushStatsPendingRecords\(root, importStatsKeys\);/);
+
+  // 回滚要有实现，而且顺序不能反：先文件、后统计
+  assert.match(background, /async function rollbackStatsRecords\(root, keys\) \{/);
+  assert.match(background, /const removed = BcaStatsCore\.removeRecords\(read\.database, keys\);/);
+  const fileFirst = background.indexOf("rollback = await rollbackImport(journal);");
+  const statsThen = background.indexOf("statsRollback = await rollbackStatsRecords(root, importStatsKeys);");
+  assert.ok(fileFirst > 0, "取消路径要先回滚文件");
+  assert.ok(statsThen > fileFirst, "统计回滚必须排在文件回滚之后");
+
+  // 对用户的说法要包含统计那一半，不能再只说「导入前的本地内容没有被改动」
+  assert.match(background, /并从统计库里撤掉了对应的 \$\{statsRollback\.removed\} 行。/);
+  assert.match(background, /统计库里对应的一行这次没能撤掉，下次打开收藏库重新扫描会纠正。/);
+});
+
+test("下载目录的复制也要逐文件比字节，再允许删源（V1.7.18）", () => {
+  const library = readProjectFile("library.js");
+
+  // 归档记录目录那条路 1.7.0 就有复核；下载目录那条路以前没有 —— 这里钉住它
+  assert.match(library, /const problems = await diffCopiedDirectory\(source\.directory, targetDirectory\);/,
+    "下载目录复制完要比对字节数");
+  assert.match(library, /下载文件复制校验没通过：\$\{problems\.slice\(0, 3\)\.join\("；"\)\}/);
+  // 不通过要抛错 → 调用方删掉刚建的目标目录、保留源目录
+  const verifyAt = library.indexOf("const problems = await diffCopiedDirectory(source.directory, targetDirectory);");
+  const throwAt = library.indexOf("下载文件复制校验没通过", verifyAt);
+  const rollbackAt = library.indexOf("await targetCollection.removeEntry(targetNameOnDisk, { recursive: true }).catch(() => {});", verifyAt);
+  assert.ok(throwAt > verifyAt && rollbackAt > throwAt, "校验失败要抛错，交给调用方的回滚分支处理");
+  // 清理失败不能只报个数
+  assert.match(library, /下载文件已复制，但有 \{count\} 个旧目录未能清理：\{first\}/);
+  assert.match(library, /first: downloadCleanupWarnings\[0\]/);
 });
 
 test("the extractor also picks up strings passed as arguments", () => {

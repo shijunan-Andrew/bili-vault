@@ -896,6 +896,53 @@ test("normalizeDatabase 只认 day 没有 at 的条目也能救回来", () => {
 
 /* ───────────────────────── 汇总 ───────────────────────── */
 
+// ---- 1.7.18（destructive P1-3）：回滚用的减法 ---------------------------------
+
+test("removeRecords 只删名单里的行，并把累计数一起退回去", () => {
+  let db = core.emptyDatabase(1000);
+  db = core.addRecord(db, { bvid: "BV1xx411c7mD", title: "甲", collection: "收藏夹A", at: 1000 }, 1000);
+  db = core.addRecord(db, { bvid: "BV1xx411c7mE", title: "乙", collection: "收藏夹A", at: 2000 }, 2000);
+  assert.equal(Object.keys(db.videos).length, 2);
+  assert.equal(db.totals.savedTotal, 2);
+
+  const removed = core.removeRecords(db, ["bvid:BV1xx411c7mD"]);
+  assert.equal(removed, 1, "撤掉一行");
+  assert.equal(Object.keys(db.videos).length, 1);
+  assert.equal(db.totals.savedTotal, 1, "累计数要跟着退回去，否则弹窗与宠物挂件一直报高");
+  assert.equal(db.videos["bvid:BV1xx411c7mE"].title, "乙", "名单外的行不许动");
+});
+
+test("removeRecords 对不存在的 key 与脏输入都不炸、也不会把累计数减成负数", () => {
+  let db = core.emptyDatabase(1000);
+  db = core.addRecord(db, { bvid: "BV1xx411c7mD", title: "甲", collection: "C", at: 1000 }, 1000);
+  assert.equal(core.removeRecords(db, ["bvid:不存在", "", null, 42]), 0);
+  assert.equal(db.totals.savedTotal, 1);
+
+  // 同一条撤两次：第二次什么都不做，累计数不许变负
+  assert.equal(core.removeRecords(db, ["bvid:BV1xx411c7mD"]), 1);
+  assert.equal(core.removeRecords(db, ["bvid:BV1xx411c7mD"]), 0);
+  assert.equal(db.totals.savedTotal, 0);
+
+  assert.equal(core.removeRecords(null, ["bvid:x"]), 0);
+  assert.equal(core.removeRecords({}, ["bvid:x"]), 0);
+  assert.equal(core.removeRecords(db, null), 0);
+});
+
+test("removeRecords 认得 addRecord 用过的三种 key（BV / av / 标题+收藏夹）", () => {
+  let db = core.emptyDatabase(1000);
+  db = core.addRecord(db, { bvid: "BV1xx411c7mD", title: "甲", collection: "C", at: 1000 }, 1000);
+  db = core.addRecord(db, { aid: "av12345", title: "乙", collection: "C", at: 1000 }, 1000);
+  db = core.addRecord(db, { title: "丙", collection: "C", at: 1000 }, 1000);
+  assert.equal(Object.keys(db.videos).length, 3);
+  assert.equal(core.videoKey({ bvid: "BV1xx411c7mD" }), "bvid:BV1xx411c7mD");
+  assert.equal(core.videoKey({ aid: "av12345" }), "aid:12345");
+  assert.equal(core.videoKey({ title: "丙", collection: "C" }), "title:C\u0000丙");
+  const keys = Object.keys(db.videos);
+  assert.equal(core.removeRecords(db, keys), 3);
+  assert.equal(Object.keys(db.videos).length, 0);
+  assert.equal(db.totals.savedTotal, 0);
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

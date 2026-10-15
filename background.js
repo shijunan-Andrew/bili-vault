@@ -3186,7 +3186,10 @@ async function publishStatsSnapshot(database) {
   return stats;
 }
 
-async function writeStatsDatabase(root, records) {
+/* 1.7.18（destructive P1-3）：insertedKeys 传进来时，顺手记下「这一批里哪些行是新建的」。
+   取消导入的回滚只该撤掉这些行 —— 本轮之前就在库里的行是本轮之前的数据，
+   撤掉它等于替用户删了旧记录。判定必须在 addRecord **之前**做，加完就分不出新旧了。 */
+async function writeStatsDatabase(root, records, insertedKeys = null) {
   if (!root || !records.length) return null;
   try {
     const read = await readStatsDatabase(root);
@@ -3200,7 +3203,13 @@ async function writeStatsDatabase(root, records) {
       return null;
     }
     let next = read.database;
-    for (const record of records) next = BcaStatsCore.addRecord(next, record);
+    for (const record of records) {
+      if (insertedKeys) {
+        const key = record?.key || BcaStatsCore.videoKey(record);
+        if (key && !(next.videos && Object.prototype.hasOwnProperty.call(next.videos, key))) insertedKeys.push(key);
+      }
+      next = BcaStatsCore.addRecord(next, record);
+    }
     await archivePreviousStatsDatabase(read);
     const writable = await read.file.createWritable();
     await writable.write(JSON.stringify(next));
@@ -3236,10 +3245,10 @@ function reportStatsWriteFailure() {
 }
 
 // 把待写队列落一次盘。成功返回新库，失败返回 null（且队列原样留着）。
-async function flushStatsPendingRecords(root) {
+async function flushStatsPendingRecords(root, insertedKeys = null) {
   if (!statsPendingRecords.length) return null;
   const batch = statsPendingRecords.splice(0, statsPendingRecords.length);
-  const database = await writeStatsDatabase(root, batch);
+  const database = await writeStatsDatabase(root, batch, insertedKeys);
   if (database) {
     statsWriteFailureStreak = 0;
     return database;
@@ -3261,6 +3270,34 @@ async function flushStatsPendingRecords(root) {
     );
   }
   return null;
+}
+
+/* 1.7.18（destructive P1-3）：取消导入时，统计行必须跟着文件一起回滚。
+   每个收藏夹收尾都会把统计落一次盘（见 importBiliFavoritesInner 里的 flushStatsPendingRecords），
+   而取消可能发生在**下一个**收藏夹中途 —— 那时库里已经有本次导入新建的那几百行，
+   而 rollbackImport 只删目录、一行统计都不动（writeStatsDatabase 只有加法，没有减法）。
+   留着的话，弹窗与宠物挂件会一直报一个磁盘上并不存在的「已归档总数」，
+   用户要等到打开收藏库页触发一次全量扫描才会被纠正。
+   返回 { removed, failed }：removed 是真正撤掉的行数，failed 表示「该撤但没撤成」。 */
+async function rollbackStatsRecords(root, keys) {
+  if (!root || !keys.length) return { removed: 0, failed: false };
+  try {
+    const read = await readStatsDatabase(root);
+    // 库读不出来时一个字节都别写 —— 和 writeStatsDatabase 同一条红线
+    if (statsDatabaseWriteBlocked(read)) return { removed: 0, failed: true };
+    const removed = BcaStatsCore.removeRecords(read.database, keys);
+    if (!removed) return { removed: 0, failed: false };
+    await archivePreviousStatsDatabase(read);
+    const writable = await read.file.createWritable();
+    await writable.write(JSON.stringify(read.database));
+    await writable.close();
+    await syncStatsMirror(read.database);
+    await publishStatsSnapshot(read.database);
+    return { removed, failed: false };
+  } catch (error) {
+    console.warn("回滚统计行失败（归档已回滚，统计会由下次全量扫描纠正）", error);
+    return { removed: 0, failed: true };
+  }
 }
 
 /* 一条刚存好的归档记录 → 数据库里的一行。时间用的就是写进 视频信息.txt 的那一串
@@ -3438,6 +3475,8 @@ async function importBiliFavoritesInner(data, tabId = null) {
   // 必须与 popup.js 的默认值保持一致，否则界面显示与实际行为会不一致。
   const recoverInvalidVideos = settings?.recoverInvalidVideos !== false;
   const journal = createImportJournal();
+  // 1.7.18（destructive P1-3）：本轮导入真正**新建**的统计行 key。取消时按这份名单做减法。
+  const importStatsKeys = [];
   importRateLimitStreak = 0;
   publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "", interrupted: false, rateLimited: false }, true);
   // 断点落盘：ImportRun 的关键字段（active/paused/cancelled/游标/计数）与回滚日志
@@ -3780,7 +3819,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       // 1.5.0：一个收藏夹跑完就把数据库落一次盘（中途被取消也只丢最后这一小段）
       // 1.7.10（P2-4）：改走 flushStatsPendingRecords —— 写失败会把整批放回队列重试
       if (statsPendingRecords.length) {
-        await flushStatsPendingRecords(root);
+        await flushStatsPendingRecords(root, importStatsKeys);
       }
     }
   } catch (error) {
@@ -3799,9 +3838,13 @@ async function importBiliFavoritesInner(data, tabId = null) {
   }
 
   let rollback = { removedRecords: 0, restoredFiles: 0, removedCollections: 0, removedFiles: 0, failures: [] };
+  let statsRollback = { removed: 0, failed: false };
   if (cancelled) {
     publishImportState({ text: "正在取消并回滚本次导入…" });
     rollback = await rollbackImport(journal);
+    // 1.7.18（destructive P1-3）：文件回滚完再回滚统计 —— 顺序不能反，
+    // 否则统计行先没了、目录却因为回滚失败还留着，就成了「磁盘上有、统计里没有」。
+    statsRollback = await rollbackStatsRecords(root, importStatsKeys);
   }
   importRun.active = false;
   importRun.paused = false;
@@ -3814,9 +3857,17 @@ async function importBiliFavoritesInner(data, tabId = null) {
     const rollbackNote = rollbackFailures.length
       ? `有 ${rollbackFailures.length} 项没能还原：${rollbackFailures.slice(0, 5).join("；")}${rollbackFailures.length > 5 ? "；…" : ""}。`
       : "导入前的本地内容没有被改动。";
+    /* 1.7.18（destructive P1-3）：原来这里只说文件 —— 统计库其实被留高了一块，
+       而这句话让人以为「取消 = 一切复原」。现在把统计那一半也如实写出来。 */
+    const statsNote = statsRollback.failed
+      ? "统计库里对应的一行这次没能撤掉，下次打开收藏库重新扫描会纠正。"
+      : statsRollback.removed
+        ? `并从统计库里撤掉了对应的 ${statsRollback.removed} 行。`
+        : "";
     const summary = `导入已取消：已回滚本次新建的 ${rollback.removedRecords} 个视频目录`
       + `${rollback.removedCollections ? `、${rollback.removedCollections} 个新建收藏夹` : ""}`
-      + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。` + rollbackNote;
+      + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。`
+      + statsNote + rollbackNote;
     await finishImportRunSnapshot();
     publishImportState({ running: false, paused: false, finishedAt, text: summary, summary }, true);
     // 有还原失败就带上 failed 标记：弹窗打开时会把「最近状态」展开，不让人漏看

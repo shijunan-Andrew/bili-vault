@@ -232,6 +232,30 @@
     };
   }
 
+  /* 1.7.18（destructive P1-3）：把指定 key 的行从库里撤掉，返回真正撤掉的行数。
+     这个函数只给「取消导入的回滚」用 —— 那些行对应的记录目录刚被 rollbackImport 删掉，
+     它们从一开始就不该被计数，所以 totals.savedTotal 也要跟着减。
+     用户主动删视频**不走这里**：那个计数按设计只增不减（见 addRecord 里的注释）。
+     传进来的 key 用 videoKey() 算，调用方负责保证那是本次导入新建的行；
+     已经不在库里的 key 直接跳过，不会把别人的行算掉。 */
+  function removeRecords(database, keys) {
+    if (!database || typeof database !== "object" || !database.videos) return 0;
+    const list = Array.isArray(keys) ? keys : [];
+    let removed = 0;
+    for (const key of list) {
+      if (typeof key !== "string" || !key) continue;
+      if (!Object.prototype.hasOwnProperty.call(database.videos, key)) continue;
+      delete database.videos[key];
+      removed += 1;
+    }
+    if (removed) {
+      if (!database.totals || typeof database.totals !== "object") database.totals = { savedTotal: 0 };
+      database.totals.savedTotal = Math.max(0, numberOr(database.totals.savedTotal, 0) - removed);
+      database.updatedAt = new Date().toISOString();
+    }
+    return removed;
+  }
+
   // 用一次完整扫描重建数据库。previous 传进来时保留它的 createdAt 与宠物状态
   // —— 重建的是「视频明细」，不该把亲密度清掉。
   function databaseFromVideos(videos = [], options = {}) {
@@ -799,6 +823,7 @@
     emptyDatabase,
     normalizeDatabase,
     addRecord,
+    removeRecords,
     recordFromVideo,
     databaseFromVideos,
     needsRebuild,

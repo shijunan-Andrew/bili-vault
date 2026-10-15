@@ -3213,6 +3213,15 @@ async function copyDownloadDirectories(downloadParent, video, targetNames) {
         if (copyResult.skipped.length) {
           throw new Error(`目标目录里已经有同名文件，没有覆盖：${copyResult.skipped.slice(0, 3).join("、")}`);
         }
+        /* 1.7.18（destructive P1-4）：**这一步以前只对归档记录目录做，下载目录没做**。
+           copyDirectoryContents 是流式写，既不校验字节也不读回 —— 磁盘满、配额、被安全软件
+           或同步盘打断时 write() 照样正常 resolve，于是「复制成功」，而调用方在全部目标复制完
+           之后就会把源目录删掉（moveVideoRecordToTargets 里那一轮 removeEntry）。
+           下载目录里装的常常是用户自己下载的视频文件，源一删就没有第二份了。
+           这里逐文件比字节数（只读元数据，很便宜），不通过就抛错 —— 调用方会删掉刚建的目标目录、
+           保留源目录，宁可搬运失败也不能拿坏副本换掉好原件。 */
+        const problems = await diffCopiedDirectory(source.directory, targetDirectory);
+        if (problems.length) throw new Error(`下载文件复制校验没通过：${problems.slice(0, 3).join("；")}`);
       }
       catch (error) {
         await targetCollection.removeEntry(targetNameOnDisk, { recursive: true }).catch(() => {});
@@ -3494,7 +3503,10 @@ async function confirmCollectionAction() {
     if (copied) messages.push(BcaI18n.t("已复制 {count} 个视频", { count: copied }));
     if (duplicates) messages.push(BcaI18n.t("重复项 {count} 个，已跳过", { count: duplicates }));
     if (alreadyThere) messages.push(BcaI18n.t("{count} 个视频已在所选收藏夹中", { count: alreadyThere }));
-    if (downloadCleanupWarnings.length) messages.push(BcaI18n.t("下载文件已复制，但有 {count} 个旧目录未能清理", { count: downloadCleanupWarnings.length }));
+    // 1.7.18（destructive P1-4）：原来只报个数，用户拿不到是哪个目录，也没法自己去删
+    if (downloadCleanupWarnings.length) {
+      messages.push(BcaI18n.t("下载文件已复制，但有 {count} 个旧目录未能清理：{first}", { count: downloadCleanupWarnings.length, first: downloadCleanupWarnings[0] }));
+    }
     if (failures.length) messages.push(BcaI18n.t("{count} 个失败，仍保留选中：{first}", { count: failures.length, first: failures[0] }));
     const summary = messages.join("；") || BcaI18n.t("没有需要整理的视频。原视频已保留。");
     showResultDialog(failures.length ? BcaI18n.t("移动或复制部分完成") : BcaI18n.t("移动或复制完成"), summary,

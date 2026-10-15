@@ -649,7 +649,7 @@
   "下载错误报告": "Download error report",
   "下载根目录": "Download root",
   "下载视频": "Download video",
-  "下载文件已复制，但有 {count} 个旧目录未能清理": "Download files were copied, but {count} old folders could not be cleaned up",
+  "下载文件已复制，但有 {count} 个旧目录未能清理：{first}": "Download files were copied, but {count} old folders could not be cleaned up: {first}",
   "先把两个概念分开，它们经常被混为一谈": "First, two ideas that often get mixed up",
   "先看差异": "Check differences",
   "先看差异（{count} 个）": "Check differences ({count})",
