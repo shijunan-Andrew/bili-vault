@@ -935,5 +935,12 @@
   "只导外观与档位": "Appearance and layout only",
   "自动复制没成功，手动复制下面这条命令：": "Copying failed. Copy this command manually:",
   "导入没有完成": "Import did not finish",
-  "拖动排序，或 Alt+↑/↓": "Drag to sort, or press Alt+Up / Alt+Down"
+  "拖动排序，或 Alt+↑/↓": "Drag to sort, or press Alt+Up / Alt+Down",
+  "中止整理": "Stop organizing",
+  "准备开始…": "Getting ready…",
+  "正在处理 {done}/{total}：{name}": "Working on {done}/{total}: {name}",
+  "正在停下…": "Stopping…",
+  "正在停下，等当前这个视频收尾…": "Stopping — letting the current video finish…",
+  "移动或复制已中止": "Move or copy stopped",
+  "已中止，剩下 {count} 个没有处理": "{count} left untouched because you stopped it"
 }

@@ -102,6 +102,7 @@ const collectionActionSummary = document.getElementById("collectionActionSummary
 const collectionActionList = document.getElementById("collectionActionList");
 const collectionActionCount = document.getElementById("collectionActionCount");
 const cancelCollectionActionButton = document.getElementById("cancelCollectionAction");
+const collectionActionProgress = document.getElementById("collectionActionProgress");
 const confirmCollectionActionButton = document.getElementById("confirmCollectionAction");
 const selectAllActionTargetsButton = document.getElementById("selectAllActionTargets");
 const clearActionTargetsButton = document.getElementById("clearActionTargets");
@@ -185,6 +186,29 @@ let tagFilter = "all";
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
 let pendingCollectionAction = null;
+/* 1.7.21（收尾）：批量搬运要有进度与中止。搬运一个视频 = 复制整目录 + 删源，
+   几十个能跑上一分钟，原来除了按钮上四个字没有任何反馈，也停不下来。 */
+let collectionActionAbort = false;
+let collectionActionShownAt = 0;
+const COLLECTION_ACTION_PROGRESS_MS = 400;
+
+function showCollectionActionProgress(text, force = false) {
+  if (!collectionActionProgress) return;
+  const now = Date.now();
+  // 和导入进度同一条规矩：播报太快会刷屏读屏软件，400ms 之内的更新丢掉，
+  // force 留给「开始」「停下」这类必须立刻看到的节点。
+  if (!force && now - collectionActionShownAt < COLLECTION_ACTION_PROGRESS_MS) return;
+  collectionActionShownAt = now;
+  collectionActionProgress.hidden = false;
+  collectionActionProgress.textContent = text;
+}
+
+function hideCollectionActionProgress() {
+  if (!collectionActionProgress) return;
+  collectionActionProgress.hidden = true;
+  collectionActionProgress.textContent = "";
+  collectionActionShownAt = 0;
+}
 let collectionOrder = [];
 // 1.7.10（facet-storage P2-1）：「确实没保存过顺序」和「这次没读出来」必须分开。
 // 旧代码把两者都当成空数组，一次 storage 读失败就静默丢掉用户排好的顺序，
@@ -3473,7 +3497,11 @@ async function confirmCollectionAction() {
   setArchiveWriteLock("library");
   confirmCollectionActionButton.disabled = true;
   confirmCollectionActionButton.textContent = BcaI18n.t("正在整理…");
-  cancelCollectionActionButton.disabled = true;
+  // 1.7.21：跑批期间这个按钮不再禁用 —— 它变成「中止整理」。
+  collectionActionAbort = false;
+  cancelCollectionActionButton.disabled = false;
+  cancelCollectionActionButton.textContent = BcaI18n.t("中止整理");
+  showCollectionActionProgress(BcaI18n.t("准备开始…"), true);
   selectAllActionTargetsButton.disabled = true;
   clearActionTargetsButton.disabled = true;
   collectionActionList.querySelectorAll("input").forEach((input) => { input.disabled = true; });
@@ -3497,7 +3525,12 @@ async function confirmCollectionAction() {
     const downloadCleanupWarnings = [];
     const failures = [];
     const remainingIds = new Set();
+    let handled = 0;
     for (const video of action.videos) {
+      if (collectionActionAbort) break;
+      showCollectionActionProgress(BcaI18n.t("正在处理 {done}/{total}：{name}", {
+        done: handled + 1, total: action.videos.length, name: video.title
+      }));
       try {
         const result = await moveVideoRecordToTargets(video, targetNames, duplicateSets, downloadParent);
         duplicates += result.duplicateTargets?.length || 0;
@@ -3511,7 +3544,10 @@ async function confirmCollectionAction() {
         failures.push(BcaI18n.t("{name}：{message}", { name: video.title, message: error?.message || BcaI18n.t("本地文件操作失败") }));
         remainingIds.add(video.id);
       }
+      handled += 1;
     }
+    const skippedCount = action.videos.length - handled;
+    hideCollectionActionProgress();
     pendingCollectionAction = null;
     collectionActionDialog.close();
     if (moved || copied) {
@@ -3532,16 +3568,22 @@ async function confirmCollectionAction() {
       messages.push(BcaI18n.t("下载文件已复制，但有 {count} 个旧目录未能清理：{first}", { count: downloadCleanupWarnings.length, first: downloadCleanupWarnings[0] }));
     }
     if (failures.length) messages.push(BcaI18n.t("{count} 个失败，仍保留选中：{first}", { count: failures.length, first: failures[0] }));
+    if (skippedCount) messages.push(BcaI18n.t("已中止，剩下 {count} 个没有处理", { count: skippedCount }));
     const summary = messages.join("；") || BcaI18n.t("没有需要整理的视频。原视频已保留。");
-    showResultDialog(failures.length ? BcaI18n.t("移动或复制部分完成") : BcaI18n.t("移动或复制完成"), summary,
-      failures.length ? "error" : "ok");
+    const resultTitle = skippedCount
+      ? BcaI18n.t("移动或复制已中止")
+      : failures.length ? BcaI18n.t("移动或复制部分完成") : BcaI18n.t("移动或复制完成");
+    showResultDialog(resultTitle, summary, failures.length ? "error" : "ok");
   } catch (error) {
     showResultDialog(BcaI18n.t("整理失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
   } finally {
     clearArchiveWriteLock("library");
     confirmCollectionActionButton.dataset.busy = "false";
     confirmCollectionActionButton.textContent = BcaI18n.t("确认");
+    hideCollectionActionProgress();
+    collectionActionAbort = false;
     cancelCollectionActionButton.disabled = false;
+    cancelCollectionActionButton.textContent = BcaI18n.t("取消");
     selectAllActionTargetsButton.disabled = false;
     clearActionTargetsButton.disabled = false;
     collectionActionList.querySelectorAll("input").forEach((input) => { input.disabled = false; });
@@ -4753,10 +4795,17 @@ confirmDeleteButton.addEventListener("click", confirmPendingDelete);
 cancelCreateCollectionButton.addEventListener("click", () => collectionDialog.close());
 cancelAddVideoButton.addEventListener("click", () => videoDialog.close());
 cancelCollectionActionButton.addEventListener("click", () => {
-  if (confirmCollectionActionButton.dataset.busy !== "true") {
-    pendingCollectionAction = null;
-    collectionActionDialog.close();
+  if (confirmCollectionActionButton.dataset.busy === "true") {
+    // 1.7.21：跑批期间这个按钮是「中止整理」。不打断当前那一个视频 ——
+    // 复制到一半的目录由 moveVideoRecordToTargets 自己收尾，这里只让循环别再往下走。
+    collectionActionAbort = true;
+    cancelCollectionActionButton.disabled = true;
+    cancelCollectionActionButton.textContent = BcaI18n.t("正在停下…");
+    showCollectionActionProgress(BcaI18n.t("正在停下，等当前这个视频收尾…"), true);
+    return;
   }
+  pendingCollectionAction = null;
+  collectionActionDialog.close();
 });
 collectionActionDialog.addEventListener("cancel", (event) => {
   if (confirmCollectionActionButton.dataset.busy === "true") {

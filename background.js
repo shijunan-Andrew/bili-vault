@@ -3201,7 +3201,24 @@ async function publishStatsSnapshot(database) {
 /* 1.7.18（destructive P1-3）：insertedKeys 传进来时，顺手记下「这一批里哪些行是新建的」。
    取消导入的回滚只该撤掉这些行 —— 本轮之前就在库里的行是本轮之前的数据，
    撤掉它等于替用户删了旧记录。判定必须在 addRecord **之前**做，加完就分不出新旧了。 */
+/* 1.7.21（收尾）：统计库的三个写入口都是「读 → 改 → 整份写回」。
+   service worker 是单线程，但每个 await 之间都会让出控制权 —— 宠物挂件点一下可能
+   正好落在导入收尾的「读」与「写」之间，后写的那个就把前一个的改动整份盖掉了。
+   这里用一条 promise 链把三个入口串起来：谁先拿到槽谁先跑完，其余排队。
+   链只包真正读写的三个函数，调用方（flushStatsPendingRecords / rollbackImport
+   / 消息处理）不包 —— 槽里再进槽会自己等自己。 */
+let statsWriteChain = Promise.resolve();
+function withStatsWriteSlot(task) {
+  const run = statsWriteChain.then(task, task);
+  statsWriteChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 async function writeStatsDatabase(root, records, insertedKeys = null) {
+  return withStatsWriteSlot(() => writeStatsDatabaseInner(root, records, insertedKeys));
+}
+
+async function writeStatsDatabaseInner(root, records, insertedKeys = null) {
   if (!root || !records.length) return null;
   try {
     const read = await readStatsDatabase(root);
@@ -3292,6 +3309,10 @@ async function flushStatsPendingRecords(root, insertedKeys = null) {
    用户要等到打开收藏库页触发一次全量扫描才会被纠正。
    返回 { removed, failed }：removed 是真正撤掉的行数，failed 表示「该撤但没撤成」。 */
 async function rollbackStatsRecords(root, keys) {
+  return withStatsWriteSlot(() => rollbackStatsRecordsInner(root, keys));
+}
+
+async function rollbackStatsRecordsInner(root, keys) {
   if (!root || !keys.length) return { removed: 0, failed: false };
   try {
     const read = await readStatsDatabase(root);
@@ -3327,6 +3348,10 @@ function statsRecordForItem(item, collectionName, favoriteAtText) {
 /* 宠物被摸一下：亲密度 +1（同一天有上限），写回数据库，再把新快照发出去。
    台词不在这里 —— service worker 里没有词典，只回一个下标，由界面侧翻译。 */
 async function touchPetInDatabase() {
+  return withStatsWriteSlot(() => touchPetInDatabaseInner());
+}
+
+async function touchPetInDatabaseInner() {
   const root = await getRootHandle().catch(() => null);
   if (!root) return { ok: false };
   const permission = await root.queryPermission({ mode: "readwrite" }).catch(() => "denied");

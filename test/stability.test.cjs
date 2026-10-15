@@ -2961,6 +2961,72 @@ test("下载目录的复制也要逐文件比字节，再允许删源（V1.7.18�
   assert.match(library, /first: downloadCleanupWarnings\[0\]/);
 });
 
+// ---- V1.7.21（收尾：统计库写入口互斥 / 批量搬运进度与中止 / 词典闸门报多余）----
+
+test("统计库的三个写入口共用一条链，不再互相盖掉（V1.7.21）", async () => {
+  const bg = readProjectFile("background.js");
+  assert.match(bg, /function withStatsWriteSlot\(task\) \{/, "要有串行化助手");
+  for (const [pub, inner] of [
+    ["writeStatsDatabase", "writeStatsDatabaseInner"],
+    ["rollbackStatsRecords", "rollbackStatsRecordsInner"],
+    ["touchPetInDatabase", "touchPetInDatabaseInner"]
+  ]) {
+    assert.match(bg, new RegExp("async function " + pub + "\\([^)]*\\) \\{\\s*\\r?\\n\\s*return withStatsWriteSlot\\(\\(\\) => " + inner + "\\("), pub + " 必须过槽");
+    assert.match(bg, new RegExp("async function " + inner + "\\("), inner + " 必须存在");
+  }
+  // 调用方不许再包一层：槽里进槽会自己等自己，整条链直接死锁。
+  assert.doesNotMatch(bg, /flushStatsPendingRecords\([^)]*\) \{\s*\r?\n\s*return withStatsWriteSlot/, "调用方不许包槽");
+
+  // 行为：把助手抠出来真跑一遍。没有串行化时顺序是 a1 b1 a2 b2 —— 那正是「宠物挂件
+  // 点一下正好落在导入收尾的读与写之间，后写的把前一个的改动整份盖掉」。
+  const start = bg.indexOf("let statsWriteChain = Promise.resolve();");
+  assert.ok(start > 0, "抠不出串行化助手源码");
+  const end = bg.indexOf("\n}", bg.indexOf("statsWriteChain = run.then(", start));
+  assert.ok(end > start, "抠不出串行化助手源码的结尾");
+  const withStatsWriteSlot = new Function(bg.slice(start, end + 2) + "\nreturn withStatsWriteSlot;")();
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const order = [];
+  await Promise.all([
+    withStatsWriteSlot(async () => { order.push("a1"); await wait(20); order.push("a2"); }),
+    withStatsWriteSlot(async () => { order.push("b1"); await wait(1); order.push("b2"); })
+  ]);
+  assert.deepEqual(order, ["a1", "a2", "b1", "b2"], "第二个任务必须等第一个跑完");
+
+  // 一个任务抛错不许把后面的卡死（链上挂了失败也要放行）。
+  const settled = await Promise.allSettled([
+    withStatsWriteSlot(async () => { throw new Error("boom"); }),
+    withStatsWriteSlot(async () => "ok")
+  ]);
+  assert.equal(settled[0].status, "rejected");
+  assert.equal(settled[1].value, "ok", "前一个任务失败也要放行下一个");
+});
+
+test("批量搬运有进度也能中止，中止后不许再往下搬（V1.7.21）", () => {
+  const html = readProjectFile("library.html");
+  const lib = readProjectFile("library.js");
+  assert.match(html, /id="collectionActionProgress"[^>]*role="status"/, "搬运对话框里要有进度行");
+  assert.match(lib, /COLLECTION_ACTION_PROGRESS_MS = 400/, "进度播报要节流，别刷屏读屏软件");
+  // 中止判断必须落在搬运循环体里，挪到循环外就等于没有。
+  const loopAt = lib.indexOf("for (const video of action.videos) {");
+  const breakAt = lib.indexOf("if (collectionActionAbort) break;");
+  assert.ok(loopAt > 0 && breakAt > loopAt, "中止判断要落在搬运循环里");
+  assert.match(lib, /collectionActionAbort = true;/, "取消按钮要能立起中止标志");
+  assert.match(lib, /hideCollectionActionProgress\(\);\s*\r?\n\s*collectionActionAbort = false;/, "finally 要复位进度与标志");
+  assert.match(lib, /BcaI18n\.t\("已中止，剩下 \{count\} 个没有处理"/, "结果要说清还剩几个没处理");
+  assert.match(lib, /BcaI18n\.t\("移动或复制已中止"\)/, "标题要区分「中止」与「部分完成」");
+});
+
+test("release.ps1 每次发版都要把「多余词条」的条数打出来（V1.7.21）", () => {
+  const script = readProjectFile("release.ps1");
+  assert.match(script, /多余\\s\+\(\\d\+\)/, "要从 i18n 输出里读出多余条数");
+  assert.match(script, /作者已删的旧词条（不影响界面）：/, "要把条数打给发版的人看");
+  const at = script.indexOf("$orphanCounts = @()");
+  assert.ok(at > 0, "找不到多余条数那一段");
+  const block = script.slice(at, script.indexOf("# 文档里写的词典条数", at));
+  assert.ok(block.length > 0, "多余条数那一段要落在文档条数检查之前");
+  assert.doesNotMatch(block, /\$failed = \$true/, "多余只播报，不做闸门");
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

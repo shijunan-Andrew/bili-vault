@@ -223,6 +223,20 @@ $i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }
 if ($i18nOut -match '缺 [1-9]') { Say "    [$([char]0x2716)] 有词条缺翻译" $C_RED; $failed = $true }
 
+# 1.7.21：上面只拦「缺」不拦「多余」，结果就是一个数字都不报 —— 作者删掉的旧词条
+# 会一直留在两本词典里没人知道（当前各 52 条）。它不影响用户看到什么，所以仍然不
+# 拦发布，但每次发版把它打出来，涨了看得见；两本不一致才说明是真的记账出错。
+$orphanCounts = @()
+foreach ($line in $i18nOut) {
+  if ("$line" -match '多余\s+(\d+)') { $orphanCounts += [int]$Matches[1] }
+}
+$orphanCounts = @($orphanCounts | Select-Object -Unique | Sort-Object)
+if ($orphanCounts.Count -eq 1) {
+  Say "    作者已删的旧词条（不影响界面）：$($orphanCounts[0]) 条" $C_DIM
+} elseif ($orphanCounts.Count -gt 1) {
+  Say "    [$([char]0x2716)] 两本词典的多余条数不一致：$($orphanCounts -join ' / ')" $C_YELLOW
+}
+
 # 文档里写的词典条数也必须和词典实际条数一致。README 里那句「两本词典各 … 条」以前
 # 没人核对，加过词之后就停在旧数字上（847），而词典实际早就涨到 859 条了 —— 和下面
 # 的测试项数是同一类问题：数字写死在文档里，就一定会过期。
