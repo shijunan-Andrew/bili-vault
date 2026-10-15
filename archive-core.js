@@ -226,6 +226,9 @@
      「更新视频状态」只覆盖会变化的数值（UP主粉丝数、互动数据、缺失的发布时间）
      与失效标记，其余内容逐字不动。做成长度可控的纯函数便于单元测试。 */
 
+  // 互动数据的六个键与六个中文标签。**全仓唯一一份**，出处就是这里：
+  // 上面 statsSectionLines() 用它拼【互动数据】段，下面 api 把它导出给
+  // background.js（更新视频状态）与 library.js（详情卡片）引用。
   const STAT_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
   const STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" };
   const SECTION_HEADING_PATTERN = /^【.+?】\s*$/;
@@ -299,6 +302,10 @@
     downloadPathLabel,
     joinDownloadPath,
     isPlaceholderValue,
+    // 互动数据六键与六个中文标签：全仓唯一一份。写归档的 statsSectionLines /
+    // patchVolatileFields 与界面侧的 library.js 都引用这里，不再各自复制字面量。
+    STAT_KEYS,
+    STAT_LABELS,
     parseInfoFile,
     descriptionFromInfo,
     tagsFromInfo,

@@ -254,7 +254,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 ## 1.5.8：怀旧页停机（retro.* 当时保留在仓库里）
 
 - 当时的状态：`library.js` 里 `#retroEntry` 的点击处理是 `chrome.tabs.create({ url: "https://www.bilibili.com" })`。`retro.html` / `retro.css` / `retro.js` 三个文件**保留但没有任何入口**（全仓提到 `retro.html` 的地方只剩注释）。**这三个文件在 1.5.9 里已经删掉**，下面两条只描述 1.5.8 当时的状态。
-- 重新启用只要把那一行改回 `chrome.tabs.create({ url: chrome.runtime.getURL("retro.html") })` —— 三个文件是离线自包含的（零外部资源、DOM 里只有一处 http(s) 字面量），不需要配套改动。
+- 重新启用**不是**把那一行改回 `chrome.runtime.getURL("retro.html")` —— 那三个文件已在 1.5.9 删掉，照抄只会得到一个打不开的页面。现在真正在跑的怀旧入口是自包含的 `bili-old-2015/index.html`（`library.js` 里 `retroEntryButton` 的点击处理打开的就是它）。1.5.8 当时那三个文件也是离线自包含的（零外部资源、DOM 里只有一处 http(s) 字面量），不需要配套改动。
 - 保留原因是用户明确要求「暂时留在项目里不要清理」。停机依据：自制怀旧页验收效果一般 —— 版式数值是按归档 CSS 量的，但头版那块小图网格在归档里是 IndexNavigator 现场生成的、快照只存到空容器，行列分法只能反推，首屏留下一块留白。
 - 教训：**归档里量不到依据的那一段，不要靠反推硬凑** —— 要么找到当年的渲染图，要么就别做那一块。
 
@@ -904,7 +904,7 @@ node test/stability.test.cjs
 ```
 
 检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:196 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:198 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

@@ -9,8 +9,9 @@ const DB_STORE = "settings";
 const BcaStatsCore = globalThis.BcaStatsCore;
 let saveQueue = Promise.resolve();
 
-// 4.9：background.js 是模块化 service worker，加载不了 i18n.js（红线第 5 条：不引远程代码，
-// 也没有 web_accessible_resources），所以后台进程里本来没有 BcaI18n。这里做一次存在性兜底：
+// 4.9：后台是模块化 service worker。i18n.js 虽然是经典脚本、静态 import 得了，但它的词条是
+// 异步取的（i18n.js 自己走 chrome.runtime 向 SW 要词典，后台里那条路是循环），所以后台进程里
+// 拿不到同步词典。这里做一次存在性兜底：
 // 将来后台若真能拿到词典就自动生效，拿不到就原样返回中文（界面侧按原文显示，见 AI_HANDOFF
 // 的「已知限制」）。占位符替换与 i18n.js 的 t() 完全一致，否则形如「请在约 {minutes} 分钟后重试」
 // 的文案会把 {minutes} 原样显示给用户。新增的界面文案一律写成 BcaI18n.t("字面量")，
@@ -415,7 +416,7 @@ function buildInfo(data, folderName, savedAt) {
   const upHome = metadata.upMid ? `https://space.bilibili.com/${metadata.upMid}` : "未知";
   const description = String(metadata.description || "未知").replace(/\r\n/g, "\n");
   const stats = metadata.stats || {};
-  const hasStats = IMPORT_STAT_KEYS.some((key) => !importIsPlaceholder(stats[key]));
+  const hasStats = STAT_KEYS.some((key) => !importIsPlaceholder(stats[key]));
   const fansText = importIsPlaceholder(metadata.upFans) ? "未知" : String(metadata.upFans);
   const lines = [
     "【基本信息】",
@@ -442,9 +443,9 @@ function buildInfo(data, folderName, savedAt) {
   // 互动数据单独成段，不再和简介挤在一起（只有确实抓到时才写）
   if (hasStats) {
     lines.push("【互动数据】");
-    for (const key of IMPORT_STAT_KEYS) {
+    for (const key of STAT_KEYS) {
       const value = stats[key];
-      lines.push(`${IMPORT_STAT_LABELS[key]}：${importIsPlaceholder(value) ? "未知" : String(value)}`);
+      lines.push(`${STAT_LABELS[key]}：${importIsPlaceholder(value) ? "未知" : String(value)}`);
     }
     lines.push("");
   }
@@ -555,7 +556,7 @@ async function addManualVideo(data) {
       try {
         const collection = await root.getDirectoryHandle(name);
         const existing = await readExistingImportIdentifiers(collection);
-        if (identifiersIntersect(existing, keys)) duplicates.push(name);
+        if (identifiersOverlap(existing, keys)) duplicates.push(name);
         else pending.push({ name, collection });
       } catch (error) {
         failures.push({ name, message: error?.message || "无法读取目标收藏夹。" });
@@ -618,7 +619,10 @@ async function addManualVideo(data) {
   }
 }
 
-function identifiersIntersect(left, right) {
+// 判断两组标识符（BV 号 / av 号）有没有交集。library.js 有一份同名同体的副本
+// —— 页面与 service worker 拿不到彼此的脚本（SW 是 ES module，import 不了经典脚本）——
+// 两处的**名字与函数体**由 stability.test.cjs 逐字守着，改一边必须同时改另一边。
+function identifiersOverlap(left, right) {
   for (const key of right) if (left.has(key)) return true;
   return false;
 }
@@ -1460,8 +1464,8 @@ const IMPORT_PLACEHOLDER_VALUES = new Set(["", "无", "未知", "-", "--", "—"
 // 仍旧用 importIsPlaceholder 全量判断 —— 写文件、判收藏时间那些地方要的就是原来的含义。
 const IMPORT_SYMBOL_PLACEHOLDER_VALUES = new Set(["-", "--", "—", "/"]);
 
-const IMPORT_STAT_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
-const IMPORT_STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" };
+const STAT_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
+const STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" };
 // 4.3 安全加固：把导入的请求密度降到保守档。
 // 之前是并发 2、间隔 350ms（约 5.7 请求/秒），对 B 站接口偏激进，也更容易触发风控。
 // 现在并发 1、间隔 800ms（约 1.2 请求/秒）。嫌慢可以调这两个值，但不要调回 350ms。
@@ -1553,7 +1557,7 @@ function splitShareText(text) {
 const SECTION_HEADING_PATTERN = /^【.+?】\s*$/;
 
 function statsSectionLines(stats) {
-  return ["【互动数据】", ...IMPORT_STAT_KEYS.map((key) => `${IMPORT_STAT_LABELS[key]}：${importIsPlaceholder(stats?.[key]) ? "未知" : String(stats[key])}`)];
+  return ["【互动数据】", ...STAT_KEYS.map((key) => `${STAT_LABELS[key]}：${importIsPlaceholder(stats?.[key]) ? "未知" : String(stats[key])}`)];
 }
 
 function patchVolatileFields(text, options = {}) {
@@ -1651,7 +1655,7 @@ async function refreshOneArchiveStatus(root, target, tabId) {
 
   const stats = {};
   const stat = view?.stat || {};
-  for (const key of IMPORT_STAT_KEYS) {
+  for (const key of STAT_KEYS) {
     if (stat[key] !== undefined && stat[key] !== null) stats[key] = stat[key];
   }
   const mid = String(view?.owner?.mid || "");
@@ -2369,7 +2373,7 @@ async function fetchVideoDetail(item, tabId = null) {
         if (data.owner?.name) detail.upName = importClean(data.owner.name);
         if (data.owner?.mid) detail.upMid = String(data.owner.mid);
         const stat = data.stat || {};
-        for (const key of IMPORT_STAT_KEYS) {
+        for (const key of STAT_KEYS) {
           if (stat[key] !== undefined && stat[key] !== null) detail.stats[key] = stat[key];
         }
       }

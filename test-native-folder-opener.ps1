@@ -19,9 +19,15 @@ $manifestPath = Join-Path $HostRoot "$hostName.json"
 $registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
 $problems = 0
 
+# 失败必须由这里自己计数：以前它只打印不累加 $problems，调用方又忘了自己加，
+# 于是「清单 path 不对」「allowed_origins 为空」都会照常打印，最后仍然说「自检通过」——
+# 结构性假绿。现在只有这一处负责计数，调用方一律不要再手动 +1。
 function Write-Check([bool]$Passed, [string]$Label, [string]$Detail) {
   if ($Passed) { Write-Host ("  [OK]   {0}{1}" -f $Label, $(if ($Detail) { "：$Detail" } else { "" })) -ForegroundColor Green }
-  else { Write-Host ("  [缺失] {0}{1}" -f $Label, $(if ($Detail) { "：$Detail" } else { "" })) -ForegroundColor Red }
+  else {
+    Write-Host ("  [缺失] {0}{1}" -f $Label, $(if ($Detail) { "：$Detail" } else { "" })) -ForegroundColor Red
+    $script:problems += 1
+  }
 }
 
 Write-Host "=== 原生目录助手自检 ===" -ForegroundColor Cyan
@@ -35,16 +41,18 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
   $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $hasArgs = $manifest.PSObject.Properties.Name -contains "args"
   Write-Check (-not $hasArgs) "清单不含 Chrome 不支持的 args 字段" $(if ($hasArgs) { "存在 args，Chrome 会忽略它并导致启动失败" } else { "" })
-  if ($hasArgs) { $problems += 1 }
   Write-Check ($manifest.path -eq $launcherPath) "清单 path 指向宿主启动器" ([string]$manifest.path)
-  Write-Check ([bool]$manifest.allowed_origins) "清单 allowed_origins" ([string]::Join(", ", @($manifest.allowed_origins)))
+  Write-Check (@($manifest.allowed_origins).Count -gt 0) "清单 allowed_origins" ([string]::Join(", ", @($manifest.allowed_origins)))
 }
 
 if (Test-Path -LiteralPath $registryPath) {
-  Write-Check $true "注册表项" ([string](Get-ItemProperty -Path $registryPath).'(default)')
+  # 光是「键在」不能算通过：Chrome 读的是默认值，默认值必须非空、而且指向一个真实
+  # 存在的清单文件，否则启动宿主时照样失败，而自检是绿的。
+  $registeredManifest = [string](Get-ItemProperty -Path $registryPath).'(default)'
+  $registeredOk = $registeredManifest -and (Test-Path -LiteralPath $registeredManifest -PathType Leaf)
+  Write-Check $registeredOk "注册表项" $(if ($registeredManifest) { $registeredManifest } else { "默认值为空" })
 } else {
   Write-Check $false "注册表项" $registryPath
-  $problems += 1
 }
 
 function Send-NativeRequest([hashtable]$Payload) {

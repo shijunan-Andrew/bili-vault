@@ -418,9 +418,9 @@ test("archive files are rewritten as a whole and keep the parsed section contrac
   for (const heading of ["【基本信息】", "【UP主】", "【互动数据】", "【标签】", "【视频简介】"]) {
     assert.ok(source.includes(`"${heading}"`), `buildInfo 缺少区块 ${heading}`);
   }
-  // 收藏库 scanRoot() 按 background.js 的 IMPORT_STAT_LABELS 里这些字段名取统计
-  const labels = source.match(/const IMPORT_STAT_LABELS = \{([^}]*)\}/);
-  assert.ok(labels, "background.js 缺少 IMPORT_STAT_LABELS");
+  // 收藏库 scanRoot() 按 background.js 的 STAT_LABELS 里这些字段名取统计
+  const labels = source.match(/const STAT_LABELS = \{([^}]*)\}/);
+  assert.ok(labels, "background.js 缺少 STAT_LABELS");
   for (const label of ["播放量", "弹幕量", "点赞数", "投硬币枚数", "收藏人数", "转发人数"]) {
     assert.ok(labels[1].includes(`"${label}"`), `统计字段缺少 ${label}`);
   }
@@ -643,9 +643,9 @@ test("the new info layout carries the followers count and a separate stats block
   const source = readProjectFile("background.js");
   assert.match(source, /UP主粉丝数：\$\{fansText\}/);
   assert.match(source, /lines\.push\("【互动数据】"\)/);
-  assert.match(source, /const IMPORT_STAT_LABELS = \{ view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" \}/);
+  assert.match(source, /const STAT_LABELS = \{ view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" \}/);
   // 只有真的抓到互动数据时才写这一区块，自动归档的老格式不受影响
-  assert.match(source, /const hasStats = IMPORT_STAT_KEYS\.some\(\(key\) => !importIsPlaceholder\(stats\[key\]\)\)/);
+  assert.match(source, /const hasStats = STAT_KEYS\.some\(\(key\) => !importIsPlaceholder\(stats\[key\]\)\)/);
 });
 
 test("the 4.2 layout round-trips through the archive parser", () => {
@@ -825,7 +825,7 @@ test("the volatile-field patcher in background.js matches the shared implementat
   // background.js 是模块化 service worker，不能 require archive-core.js，所以有两份等价实现
   const local = loadBackgroundFunctions(
     ["importClean", "importIsPlaceholder", "statsSectionLines", "patchVolatileFields"],
-    ["IMPORT_PLACEHOLDER_VALUES", "IMPORT_STAT_KEYS", "IMPORT_STAT_LABELS", "SECTION_HEADING_PATTERN"]
+    ["IMPORT_PLACEHOLDER_VALUES", "STAT_KEYS", "STAT_LABELS", "SECTION_HEADING_PATTERN"]
   );
   const optionsList = [
     { upFans: "999", stats: { view: 10, danmaku: 20, like: 30, coin: 40, favorite: 50, share: 60 }, pubdateText: "2026-08-14 06:00:00 星期五" },
@@ -2722,7 +2722,7 @@ test("失效原因写进 视频信息.txt：失效才写，有效一个字都不
   const { buildInfo } = loadBackgroundFunctions(
     ["buildInfo", "importIsPlaceholder", "importClean", "importAttrReason",
       "formatDateTime", "formatChineseDateTime", "formatDuration", "formatPublishDate", "localDateParts"],
-    ["IMPORT_STAT_KEYS", "IMPORT_STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES", "IMPORT_ATTR_LABELS"]
+    ["STAT_KEYS", "STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES", "IMPORT_ATTR_LABELS"]
   );
   const savedAt = new Date("2026-10-10T12:00:00");
   const metadata = {
@@ -2759,7 +2759,7 @@ test("失效原因的全链路：接口 attr → importMetadata → 视频信息
     ["importMetadata", "buildInfo", "importUsefulTitle", "importIsInvalidTitle", "importClean",
       "importBvToAid", "importAidToBv", "importAttrReason", "importIsPlaceholder",
       "formatDateTime", "formatChineseDateTime", "formatDuration", "formatPublishDate", "localDateParts"],
-    ["IMPORT_INVALID_TITLES", "IMPORT_BV_TABLE", "IMPORT_ATTR_LABELS", "IMPORT_STAT_KEYS", "IMPORT_STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES"]
+    ["IMPORT_INVALID_TITLES", "IMPORT_BV_TABLE", "IMPORT_ATTR_LABELS", "STAT_KEYS", "STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES"]
   );
   const item = {
     title: "已失效视频", bvid: "", aid: "", cover: "", description: "未知", author: "账号已注销",
@@ -3445,6 +3445,51 @@ test("改收藏夹归属时，新旧两种磁盘标签都要认（静态回归�
   );
   // 不许退回只认旧标签
   assert.doesNotMatch(library, /\/\^保存文件夹\[：:\]\.\*\$\/m/);
+});
+
+test("互动数据的六键与六个标签全仓只有一份（V1.7.8）", () => {
+  // 这三个文件以前各抄一份字面量、用了四个不同的名字（library.js 的 STAT_FIELDS /
+  // STAT_LABEL_KEYS、background.js 的 IMPORT_STAT_KEYS / STAT_KEYS），改一处口径要改
+  // 四处，漏一处就是「详情卡片显示的数值和归档文件里写的不一致」。
+  // 现在出处只有一个：archive-core.js 的冻结 api，library.js 直接引用。
+  // background.js 是 ES module、import 不了经典脚本，只能各留一份 —— 所以这里逐字比对。
+  const core = readProjectFile("archive-core.js");
+  const background = readProjectFile("background.js");
+  const literal = (code, name) => {
+    const found = code.match(new RegExp(`const ${name} = (\\[[^\\]]*\\]|\\{[^}]*\\});`));
+    return found ? found[1].replace(/\s+/g, " ") : "";
+  };
+  for (const name of ["STAT_KEYS", "STAT_LABELS"]) {
+    assert.ok(literal(core, name), `archive-core.js 里要有 const ${name} = …`);
+    assert.equal(literal(background, name), literal(core, name),
+      `background.js 的 ${name} 必须和 archive-core.js 逐字一致（SW import 不了经典脚本，只能靠这条断言守着）`);
+  }
+  const library = readProjectFile("library.js");
+  assert.match(library, /const STAT_KEYS = BcaArchiveCore\.STAT_KEYS;/);
+  assert.match(library, /const STAT_LABELS = BcaArchiveCore\.STAT_LABELS;/);
+  // 四个旧名字在**代码**里一个都不许再有（注释里写历史沿革不算）
+  const withoutComments = (text) => text.split("\n").filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join("\n");
+  for (const gone of ["STAT_FIELDS", "STAT_LABEL_KEYS", "IMPORT_STAT_KEYS", "IMPORT_STAT_LABELS"]) {
+    for (const [file, text] of [["library.js", library], ["background.js", background], ["archive-core.js", core]]) {
+      assert.equal(withoutComments(text).includes(gone), false, `${file} 里不该再有 ${gone} 这个名字`);
+    }
+  }
+});
+
+test("判断标识符交集的两份副本必须同名同体（V1.7.8）", () => {
+  // P2-9：同一个「两组 BV/av 标识符有没有交集」的函数，background.js 叫 identifiersIntersect、
+  // library.js 叫 identifiersOverlap，函数体逐字相同。名字不同 → 搜索只能搜到一半、
+  // 改一处漏一处。现在统一叫 identifiersOverlap，两处名字与函数体由这条断言守着。
+  const body = (code) => {
+    const found = code.match(/function identifiersOverlap\(left, right\) \{\r?\n([\s\S]*?)\r?\n\}/);
+    return found ? found[1].replace(/\s+/g, " ").trim() : "";
+  };
+  const library = readProjectFile("library.js");
+  const background = readProjectFile("background.js");
+  assert.equal(body(library), "for (const key of right) if (left.has(key)) return true; return false;");
+  assert.equal(body(background), body(library), "两份副本必须逐字一致，改一边必须同时改另一边");
+  assert.equal(/identifiersIntersect/.test(library + background), false,
+    "identifiersIntersect 这个旧名字应该已经统一成 identifiersOverlap");
 });
 
 test("示意图里的版本号从 manifest 现读，不许写死（静态回归）", () => {

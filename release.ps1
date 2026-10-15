@@ -110,8 +110,9 @@ Say "  [$([char]0x2713)] 干净" $C_GREEN
 # 排查用的临时脚本如果留在扩展根目录，插件就直接加载不了 —— 真机上发生过一次。
 # 更麻烦的是 .gitignore 里有 _*.cjs，git status 看不见它，上面那个净树检查会漏掉，
 # 所以这里用文件系统直接查，不看 git。
-# 每个 tag 都要有 README 小节 —— 以前靠人记，结果 V1.1.4 到 V1.1.13 之间漏了 9 个版本，
-# git tag 有 16 个而 README 只有 5 个，读文档的人直接失去时间线。
+# 每个 tag 都要有 README 小节 —— 以前靠人记，V1.x 时期（V1.1.4 到 V1.1.13）漏过 9 个版本，
+# 当时 git tag 有 16 个而 README 只有 5 个，读文档的人直接失去时间线。
+# （这几个数字是当年的现场记录，当前仓库已无法自证，留着只为说明这道闸门为什么存在。）
 # 所以让脚本强制：没有 "## V<版本>" 这一节就不许发布。
 $readme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw -Encoding UTF8
 if ($readme -notmatch "(?m)^## V$([regex]::Escape($版本))[：:]") {
@@ -122,7 +123,7 @@ if ($readme -notmatch "(?m)^## V$([regex]::Escape($版本))[：:]") {
   Die "发布中止：先在 README.md 里补上 V$版本 的小节。"
 }
 
-# 只查「这次要发的版本」还不够 —— V1.4.0 的 README 小节标题曾被一次编辑误删，
+# 只查「这次要发的版本」还不够 —— V1.x 时期 V1.4.0 的 README 小节标题曾被一次编辑误删，
 # 而当时发的是 V1.4.1，那一节整整缺了一版都没人发现（发现时已经隔了两个版本）。
 # 所以这里把 git tag 全量过一遍：任何一个 V 开头的 tag 在 README.md 里找不到
 # "## V<版本>" 这一节，就不许发布。

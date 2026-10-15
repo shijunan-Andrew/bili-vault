@@ -169,7 +169,11 @@
       ...stateTags.map((tag) => typeof tag === "string" ? tag : tag?.tag_name || tag?.name || ""),
       ...domTags
     ].filter(Boolean))];
-    const upLink = document.querySelector('a[href*="space.bilibili.com/"]');
+    /* 审查 P2：整页第一个 space 链接可能落在顶栏（那是用户自己的空间），
+       先在 UP 主信息容器里找，找不到再退回整页 —— 状态字段（owner.mid）仍然优先。 */
+    const upLink = document.querySelector(
+      '#v_upinfo a[href*="space.bilibili.com/"], .up-info a[href*="space.bilibili.com/"], .upname a[href*="space.bilibili.com/"]'
+    ) || document.querySelector('a[href*="space.bilibili.com/"]');
     const upUrl = upLink?.href || "";
     const upMid = owner.mid || owner.uid || upUrl.match(/space\.bilibili\.com\/(\d+)/)?.[1] || "";
     const title = video.title || document.querySelector("h1")?.textContent?.trim() || document.title.replace(/_哔哩哔哩.*$/i, "").trim();

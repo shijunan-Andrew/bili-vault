@@ -304,19 +304,15 @@ function invalidReasonText(reason) {
 
 /* ---------------- 4.2：互动数据与分享文案 ---------------- */
 
-// 「【互动数据】播放量：73798」这类字段名 → video.stats 的键
-const STAT_FIELDS = {
-  view: "播放量",
-  danmaku: "弹幕量",
-  like: "点赞数",
-  coin: "投硬币枚数",
-  favorite: "收藏人数",
-  share: "转发人数"
-};
-
-// 详情卡片上短标签的键顺序，与 STAT_FIELDS 一致。
-// 文案本体写在 detailStatsHtml() 的 t("...") 里：key 必须是字面量，词条工具才扫得到。
-const STAT_LABEL_KEYS = ["view", "danmaku", "like", "coin", "favorite", "share"];
+// 「【互动数据】播放量：73798」这类字段名 → video.stats 的键，以及六个中文标签。
+// 键清单与标签表全仓只有一份，住在写归档的那一侧（archive-core.js 的冻结 api），
+// 这里只引用 —— 以前三个文件各存一份字面量、用了四个名字（library.js 的
+// STAT_FIELDS / STAT_LABEL_KEYS、background.js 的 IMPORT_STAT_KEYS / STAT_KEYS），
+// 改一处口径要改四处。
+const STAT_KEYS = BcaArchiveCore.STAT_KEYS;
+const STAT_LABELS = BcaArchiveCore.STAT_LABELS;
+// 详情卡片上短标签的键顺序就是 STAT_KEYS 的顺序；文案本体写在 detailStatsHtml()
+// 的 t("...") 里：key 必须是字面量，词条工具才扫得到。
 
 // 老档案的简介里混着 B 站分享文案（“<简介>, 视频播放量 71953、弹幕量 82、…, 相关视频：…”）。
 // 展示前交给 archive-core.js 砍掉分享文案，顺便用它解析出的统计给老档案兜底；
@@ -329,7 +325,7 @@ function splitInfoDescription(info) {
 
 function statsFromInfo(info, fallbackStats = {}) {
   const stats = {};
-  for (const [key, label] of Object.entries(STAT_FIELDS)) {
+  for (const [key, label] of Object.entries(STAT_LABELS)) {
     const value = realField(info, label) || String(fallbackStats[key] || "");
     if (value) stats[key] = value;
   }
@@ -745,6 +741,9 @@ function videoIdentifierKeys(video) {
   return new Set([bvid && bvid !== "未知" ? `bvid:${bvid}` : "", aid && aid !== "未知" ? `aid:${aid}` : ""].filter(Boolean));
 }
 
+// 判断两组标识符（BV 号 / av 号）有没有交集。background.js 有一份同名同体的副本
+// —— service worker 是 ES module，import 不了经典脚本 —— 所以两处的**名字与函数体**
+// 由 stability.test.cjs 逐字守着：改一边不改另一边会红。
 function identifiersOverlap(left, right) {
   for (const key of right) if (left.has(key)) return true;
   return false;
@@ -2011,7 +2010,7 @@ function detailStatsHtml(stats) {
     favorite: BcaI18n.t("收藏"),
     share: BcaI18n.t("转发")
   };
-  const cards = STAT_LABEL_KEYS
+  const cards = STAT_KEYS
     .map((key) => ({ label: labels[key], value: formatCount(stats?.[key]) }))
     .filter((item) => item.value)
     .map((item) => `<div class="detail-stat"><span class="detail-stat-value tnum">${escapeHtml(item.value)}</span><span class="detail-stat-label">${escapeHtml(item.label)}</span></div>`);
@@ -2548,10 +2547,11 @@ async function updateSavedFolderName(directory, folderName) {
   // 这一行记录的是「这条视频属于哪个 B 站收藏夹」。字段名以前叫「保存文件夹：」，
   // 和用户选的根目录撞名（同一个词指两个完全不同的东西），V1.2.0 起写入方
   // （background.js 的 buildInfo）改成「所属收藏夹：」。
-  // 这里必须同时认两种标签，而且写回要用新标签：
-  //   ① 老归档里还是旧标签，正则不认识就 updated === text，直接 return —— 改了收藏夹
-  //      归属却什么都没发生，而且没有任何报错；
-  //   ② 认出来之后写回新标签，顺手把老文件迁移掉。
+  // 下面的正则是**两种标签都认**、写回一律用新标签：老归档第一次改归属时顺手
+  // 迁移掉，不需要单独的迁移脚本。（V1.7.0 之前这里只认旧标签，新文件匹配不到，
+  // updated === text 直接 return —— 改了归属却什么都没发生，而且不报错。）
+  // 两种标签都不在时（半截文件、或用户手工删过这一行）同样 updated === text → return：
+  // 归属没改成，但也不会去重写一个我们没看懂的文件，宁可什么都不做。
   const updated = text.replace(/^(?:保存文件夹|所属收藏夹)[：:].*$/m, `所属收藏夹：${folderName}`);
   if (updated === text) return;
   const writable = await infoHandle.createWritable();
