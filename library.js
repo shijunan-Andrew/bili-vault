@@ -3514,12 +3514,16 @@ async function confirmPendingDelete() {
        不说」—— 用户明明勾了「同时删除关联下载」，下载文件一个都没动，结果对话框里没有
        任何交代。下载根目录被改名/移走、或改用自选目录后旧目录留在别处时都会走到这里。
        这不是「确实没有下载文件」，是「这次没法确认」，必须说出来。 */
+    const downloadCleanupFailures = [];
+    // 1.7.10（facet-destructive P2-3）：「这次没法确认」和「确实没有」要分开说。
+    // 1.7.15：这两个数组必须**先声明、再 push**。1.7.10 原先把声明放在下面几行，
+    // 于是「勾了同时删除关联下载、但 000视频下载 不在」这条分支一进去就撞 TDZ：
+    // ReferenceError: Cannot access 'downloadCleanupNotes' before initialization。
+    // 它被下面的 catch 接住，用户看到「删除失败」——而文件其实已经删掉了（更吓人）。
+    const downloadCleanupNotes = [];
     if (deleteDownloads && !downloadParent) {
       downloadCleanupNotes.push(BcaI18n.t("没找到下载文件夹（000视频下载），关联的下载文件这次一个都没动。"));
     }
-    const downloadCleanupFailures = [];
-    // 1.7.10（facet-destructive P2-3）：「这次没法确认」和「确实没有」要分开说。
-    const downloadCleanupNotes = [];
     let batchResult = null;
     if (action.type === "collection") {
       await rootHandle.removeEntry(action.collection.name, { recursive: true });

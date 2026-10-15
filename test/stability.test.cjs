@@ -2791,6 +2791,47 @@ test("stats-core 的导出面与统计页的真实用法对得上（V1.7.14）",
   assert.match(core, /1\.7\.14（deadcode P2-1）/, "stats-core.js 顶部要写明导出面与真实用法的差距");
 });
 
+// ---- V1.7.15（审计复核补漏：两处「说了没做」）----
+test("文件系统错误的分类表与处理函数，两份必须逐字相同（V1.7.15）", () => {
+  // 1.7.14（facet-compat C4）：archive-core.js 是权威出处，background.js 里有一份
+  // 逐字副本（service worker 是 ES module，拿不到经典脚本）。两边的注释都写着
+  // 「由守卫断言逐项比对」—— 可 1.7.14 只写了这句承诺，断言根本没落地
+  // （审计复核时在 test/ 里搜 FILE_SYSTEM_ERROR_HINTS / describeFileSystemError /
+  // NotAllowedError 全部零命中）。这条断言就是那句承诺本身。
+  const core = readProjectFile("archive-core.js");
+  const background = readProjectFile("background.js");
+  const normalize = (text) => text.replace(/\s+/g, " ").trim();
+  const grab = (source, pattern, label) => {
+    const match = source.match(pattern);
+    assert.ok(match, `${label} 必须写出来`);
+    return normalize(match[1]);
+  };
+  const tablePattern = /const FILE_SYSTEM_ERROR_HINTS = Object\.freeze\(\{([\s\S]*?)\}\);/;
+  const fnPattern = /function describeFileSystemError\(error\) \{([\s\S]*?)\n\s*\}/;
+  const coreTable = grab(core, tablePattern, "archive-core.js 的 FILE_SYSTEM_ERROR_HINTS");
+  assert.equal(coreTable, grab(background, tablePattern, "background.js 的 FILE_SYSTEM_ERROR_HINTS"),
+    "两处错误分类表不一致：改一处就要改另一处");
+  assert.equal(grab(core, fnPattern, "archive-core.js 的 describeFileSystemError"),
+    grab(background, fnPattern, "background.js 的 describeFileSystemError"),
+    "两处 describeFileSystemError 不一致");
+  for (const name of ["NotAllowedError", "NoModificationAllowedError", "QuotaExceededError", "InvalidModificationError"]) {
+    assert.ok(coreTable.includes(name), `错误分类表里少了 ${name}`);
+  }
+});
+
+test("删除下载的提示数组必须先声明再 push（V1.7.15）", () => {
+  // 1.7.10 把 const downloadCleanupNotes = [] 写在第一次 push 的后面几行，撞上 TDZ：
+  // ReferenceError: Cannot access 'downloadCleanupNotes' before initialization。
+  // 触发条件正是它想覆盖的那个场景 —— 勾了「同时删除关联下载」而 000视频下载 不在。
+  // 异常被外层 catch 接住，用户看到「删除失败」，可文件其实已经删掉了。
+  const library = readProjectFile("library.js");
+  const declared = library.indexOf("const downloadCleanupNotes = [];");
+  const pushed = library.indexOf("downloadCleanupNotes.push(");
+  assert.ok(declared > 0, "downloadCleanupNotes 要用 const 字面量声明");
+  assert.ok(pushed > 0, "downloadCleanupNotes 至少要被 push 一次");
+  assert.ok(declared < pushed, "downloadCleanupNotes 必须先声明再 push，否则就是 TDZ ReferenceError");
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
