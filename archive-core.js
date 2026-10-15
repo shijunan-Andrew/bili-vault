@@ -12,6 +12,38 @@
      留 200 而不是 255：后面 uniqueRecordFolderName 还可能追加「 (1)」。 */
   const MAX_SEGMENT_BYTES = 200;
 
+  /* 1.7.24（facet-compat §3.2）：Windows 的经典路径上限是 260 个字符，File System
+     Access API 又拿不到「\\?\」长路径前缀 —— 拼出来的绝对路径一旦越过，createWritable() /
+     getDirectoryHandle() 只会抛一个 NotFoundError，看起来跟「这个名字不存在」一模一样，
+     调用方于是当成「可以继续建」，最后在很深的一步炸出一句英文异常名。
+
+     为什么不把单段上限从 120 / 100 直接砍到 60 / 80：磁盘上**已经存在**的收藏夹目录名
+     要能原样读回来。收藏夹段是 round-trip 的（扫描拿到目录名 → 写回时再拼一次），
+     砍上限会让 61〜120 字符的老收藏夹在写回时被当成「另一个收藏夹」，凭空多出一份。
+     所以改成「两段共用一个预算」：知道收藏夹名时，视频目录段按剩下的额度算
+     （recordSegmentMax），不知道时保持原来的 100，不猜。
+
+     预算的算法：260（上限） − 60（典型根目录预留） − 32（"\视频信息.txt" / "\封面.png"
+     等文件名与分隔符）= 168 个字符留给「收藏夹段 + 分隔符 + 视频目录段」。 */
+  const WINDOWS_PATH_LIMIT_CHARS = 260;
+  const PATH_ROOT_ALLOWANCE_CHARS = 60;
+  const PATH_RESERVED_CHARS = 32;
+  const PATH_SEGMENT_BUDGET_CHARS = WINDOWS_PATH_LIMIT_CHARS - PATH_ROOT_ALLOWANCE_CHARS - PATH_RESERVED_CHARS;
+  const COLLECTION_NAME_MAX_CHARS = 120;
+  const RECORD_NAME_MAX_CHARS = 100;
+  // 收藏夹名特别长时也不能把标题段压没：留够「标题 + " - BV号"」的最小可读长度。
+  const RECORD_NAME_MIN_CHARS = 24;
+
+  // 知道收藏夹段多长时，视频目录段能用多少字符。不知道就返回原来的 100。
+  function recordSegmentMax(collectionName) {
+    const known = String(collectionName == null ? "" : collectionName);
+    if (!known) return RECORD_NAME_MAX_CHARS;
+    return Math.max(
+      RECORD_NAME_MIN_CHARS,
+      Math.min(RECORD_NAME_MAX_CHARS, PATH_SEGMENT_BUDGET_CHARS - known.length - 1)
+    );
+  }
+
   function utf8ByteLength(text) {
     let bytes = 0;
     for (const char of String(text || "")) {
@@ -40,7 +72,7 @@
     let name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
     if (!name || name === "." || name === "..") name = fallback;
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) name = `_${name}`;
-    return truncateToBytes(name.slice(0, 120), MAX_SEGMENT_BYTES) || fallback;
+    return truncateToBytes(name.slice(0, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES) || fallback;
   }
 
   /* 1.7.11（facet-security P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
@@ -73,7 +105,7 @@
   // 4.8：视频目录命名原本只写在下载页里（那张页面 1.3.0 已删除）。收藏库的
   // 「将下载到本地的视频放入收藏夹中」也必须用同一套规则建目录 —— 用户用别的工具
   // 下好的文件要能凭 BV 号认出这个目录并对上号，所以提到这里共享，全项目只此一份实现。
-  function safeName(value, fallback = "未知", maxLength = 100) {
+  function safeName(value, fallback = "未知", maxLength = RECORD_NAME_MAX_CHARS) {
     const name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
     if (!name || name === "." || name === "..") return truncateToBytes(fallback.slice(0, maxLength), MAX_SEGMENT_BYTES);
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return truncateToBytes(`_${name}`.slice(0, maxLength), MAX_SEGMENT_BYTES);
@@ -81,15 +113,63 @@
   }
 
   // 目录名以 " - BV号"（或 av 号）结尾，identifiersFromDirectoryName 靠这个后缀认人。
-  function videoDirectoryLabel(video, index = 0) {
+  function videoDirectoryLabel(video, index = 0, options = {}) {
     const rawBvid = String(video?.bvid || "").trim();
     const rawAid = String(video?.aid || "").trim().replace(/^av/i, "");
     const suffix = /^BV[0-9A-Za-z]{10}$/.test(rawBvid) ? rawBvid : /^\d+$/.test(rawAid) ? `av${rawAid}` : `视频${index + 1}`;
     const tail = ` - ${suffix}`;
     // 后缀（BV/av 号）是认人的依据，必须整段留住：字节预算先扣掉它，剩下的给标题。
     const titleBudget = Math.max(1, MAX_SEGMENT_BYTES - utf8ByteLength(tail));
-    const title = truncateToBytes(safeName(video?.title, "未知").slice(0, Math.max(1, 100 - tail.length)), titleBudget);
+    // 1.7.24（§3.2）：知道收藏夹段多长时，标题段按「两段合起来的预算」收 ——
+    // 固定 100 的话，120 + 100 = 220 再加上根目录与记录目录里的文件名就贴着 260 了。
+    const segmentMax = recordSegmentMax(options.collectionName);
+    const title = truncateToBytes(safeName(video?.title, "未知").slice(0, Math.max(1, segmentMax - tail.length)), titleBudget);
     return `${title}${tail}`;
+  }
+
+  /* 1.7.24（facet-compat §3.2）：度量。知道根目录真实路径时算真实占用；不知道就按
+     PATH_ROOT_ALLOWANCE_CHARS 保守估（assumedRoot 标出来）。返回的对象给界面与测试用，
+     不参与截断决策 —— 截断用的是 recordSegmentMax。 */
+  function pathBudgetReport(options = {}) {
+    const root = String(options.rootPath || "").replace(/[\\/]+$/, "");
+    const rootChars = root ? root.length : PATH_ROOT_ALLOWANCE_CHARS;
+    const collectionName = String(options.collectionName || "");
+    const recordName = String(options.recordName || "");
+    const used = rootChars
+      + (collectionName ? collectionName.length + 1 : 0)
+      + (recordName ? recordName.length + 1 : 0)
+      + PATH_RESERVED_CHARS;
+    const over = used - WINDOWS_PATH_LIMIT_CHARS;
+    return {
+      limit: WINDOWS_PATH_LIMIT_CHARS,
+      budget: PATH_SEGMENT_BUDGET_CHARS,
+      rootChars,
+      assumedRoot: !root,
+      collectionMax: COLLECTION_NAME_MAX_CHARS,
+      recordMax: RECORD_NAME_MAX_CHARS,
+      used,
+      over: Math.max(0, over),
+      ok: over <= 0
+    };
+  }
+
+  function pathBudgetText(report) {
+    const detail = report || pathBudgetReport();
+    if (detail.ok) return "";
+    return "这条路径大约 " + detail.used + " 个字符，超过 Windows 的 " + detail.limit
+      + " 个字符上限（多出约 " + detail.over + " 个）。把本地备份文件夹挪到更浅的位置"
+      + "（例如 D:\\备份），或把收藏夹名 / 视频标题改短。";
+  }
+
+  /* 1.7.24（facet-compat §3.2）：create:true 的 getDirectoryHandle 抛 NotFoundError 时，
+     「父目录没了」和「完整路径太长，Windows 建不出来」是同一个错误名。这句把两种可能都讲
+     清楚并给出可执行的下一步 —— 比冒出去的一句英文异常名有用得多。不是 NotFoundError 时
+     返回空串，调用方照旧按 describeFileSystemError 处理。 */
+  function describeDirectoryCreateError(error, name) {
+    if (error?.name !== "NotFoundError") return "";
+    return "建不出「" + name + "」这个目录：要么上级目录已经不在了，要么拼出来的完整路径超过了"
+      + " Windows 的 " + WINDOWS_PATH_LIMIT_CHARS + " 个字符上限。把本地备份文件夹挪到更浅的"
+      + "位置（例如 D:\\备份），或把收藏夹名 / 视频标题改短，再试一次。";
   }
 
   function identifiersFromDirectoryName(name) {
@@ -511,6 +591,17 @@
     downloadMatchIsDownloaded,
     safeName,
     videoDirectoryLabel,
+    recordSegmentMax,
+    COLLECTION_NAME_MAX_CHARS,
+    RECORD_NAME_MAX_CHARS,
+    RECORD_NAME_MIN_CHARS,
+    WINDOWS_PATH_LIMIT_CHARS,
+    PATH_SEGMENT_BUDGET_CHARS,
+    PATH_ROOT_ALLOWANCE_CHARS,
+    PATH_RESERVED_CHARS,
+    pathBudgetReport,
+    pathBudgetText,
+    describeDirectoryCreateError,
     findDownloadMatch,
     downloadStateFromIndex,
     isMediaFileName,

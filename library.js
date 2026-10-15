@@ -764,6 +764,15 @@ function refreshScanNotice() {
   }
   // 1.7.10（facet-destructive P2-6）：被打断的导入留下的半截目录原来是静默跳过的 ——
   // 它永远躺在磁盘上，收藏库里一个字都不提，用户既不知道它存在，也无从判断该不该删。
+  // 1.7.24（facet-compat §3.2）：路径长度以前是「无度量、无提示」，只有真的建不出文件时
+  // 才炸出一句英文异常名。这里按「收藏夹段 + 视频目录段」的相对长度报一次。
+  if (info.longNames?.length) {
+    lines.push(BcaI18n.t("有 {count} 个目录名太长了（收藏夹名加视频目录名超过 {budget} 个字符），拼上本地备份文件夹的路径就可能越过 Windows 的 260 字符上限：{list}", {
+      count: info.longNames.length,
+      budget: BcaArchiveCore.PATH_SEGMENT_BUDGET_CHARS,
+      list: `${info.longNames.slice(0, 3).join("；")}${info.longNames.length > 3 ? "；…" : ""}`
+    }));
+  }
   if (info.unfinished?.length) {
     lines.push(BcaI18n.t("另有 {count} 个目录没写完（没有 视频信息.txt，多半是上次导入被打断）：{list}", {
       count: info.unfinished.length,
@@ -790,6 +799,9 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   const scanned = [];
   const issues = [];
   const unfinished = [];
+  // 1.7.24（facet-compat §3.2）：度量。收藏夹段 + 视频目录段合起来超过预算的目录，
+  // 拼上根目录与记录目录里的文件名就贴着 Windows 的 260 字符上限了 —— 以前没人提。
+  const longNames = [];
   const downloadIndex = await scanDownloadedDirectories(handle);
   const previousVideos = new Map(preserveDownloadStatuses ? allVideos().map((video) => [video.id, video]) : []);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
@@ -807,7 +819,10 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   for (const collectionEntry of collections) {
     const records = [];
     for await (const recordEntry of collectionEntry.values()) {
-      if (recordEntry.kind === "directory" && timestampPattern.test(recordEntry.name)) records.push(recordEntry);
+      if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
+      records.push(recordEntry);
+      const relative = collectionEntry.name.length + 1 + recordEntry.name.length;
+      if (relative > BcaArchiveCore.PATH_SEGMENT_BUDGET_CHARS) longNames.push(`${collectionEntry.name}/${recordEntry.name}`);
     }
     stats.total += records.length;
   }
@@ -3052,7 +3067,14 @@ async function copyVideoRecord(video, targetName) {
   const sourceRecord = await sourceCollection.getDirectoryHandle(video.directory);
   const targetCollection = await rootHandle.getDirectoryHandle(targetName);
   const targetRecordName = await uniqueRecordFolderName(targetCollection, video.directory);
-  const targetRecord = await targetCollection.getDirectoryHandle(targetRecordName, { create: true });
+  let targetRecord;
+  try {
+    targetRecord = await targetCollection.getDirectoryHandle(targetRecordName, { create: true });
+  } catch (error) {
+    const explained = BcaArchiveCore.describeDirectoryCreateError(error, targetRecordName);
+    if (explained) throw new Error(explained);
+    throw error;
+  }
   try {
     const copyResult = await copyDirectoryContents(sourceRecord, targetRecord);
     // 1.7.10（P2-1）：目标里本来就有同名文件时复制会跳过它们 —— 这绝不能算复制成功
@@ -3099,9 +3121,20 @@ async function markVideoDownloaded(video) {
   if (BcaArchiveCore.isReservedCollectionName(collectionName)) {
     throw new Error(BcaI18n.t("收藏夹名「{name}」和插件自己用的目录重名，为免写乱本地文件，这次没有保存到本地。", { name: collectionName }));
   }
-  const directoryName = BcaArchiveCore.videoDirectoryLabel(video, 0);
-  const collectionHandle = await parent.getDirectoryHandle(collectionName, { create: true });
-  const directoryHandle = await collectionHandle.getDirectoryHandle(directoryName, { create: true });
+  // 1.7.24（§3.2）：两段共用一个预算 —— 收藏夹名长的时候，视频目录段自动收窄。
+  const directoryName = BcaArchiveCore.videoDirectoryLabel(video, 0, { collectionName });
+  // 路径太长时 create:true 抛的是 NotFoundError，跟「父目录没了」同名。
+  // describeDirectoryCreateError 把这两种可能讲清楚，并给出「把根目录挪浅」的下一步。
+  let collectionHandle;
+  let directoryHandle;
+  try {
+    collectionHandle = await parent.getDirectoryHandle(collectionName, { create: true });
+    directoryHandle = await collectionHandle.getDirectoryHandle(directoryName, { create: true });
+  } catch (error) {
+    const explained = BcaArchiveCore.describeDirectoryCreateError(error, collectionName + "\\" + directoryName);
+    if (explained) throw new Error(explained);
+    throw error;
+  }
   const markerHandle = await directoryHandle.getFileHandle(DOWNLOAD_MARKER_FILE, { create: true });
   const writable = await markerHandle.createWritable();
   await writable.write(DOWNLOAD_MARKER_TEXT);
@@ -3122,7 +3155,7 @@ function openMarkDownloadedDialog(video) {
   markDownloadedVideo = video;
   markDownloadedPath.textContent = BcaArchiveCore.downloadPathLabel(
     BcaArchiveCore.safeName(video.collection || "未分类收藏", "未分类收藏", 120),
-    BcaArchiveCore.videoDirectoryLabel(video, 0)
+    BcaArchiveCore.videoDirectoryLabel(video, 0, { collectionName: BcaArchiveCore.safeName(video.collection || "未分类收藏", "未分类收藏", BcaArchiveCore.COLLECTION_NAME_MAX_CHARS) })
   );
   markDownloadedStatus.hidden = true;
   markDownloadedStatus.textContent = "";

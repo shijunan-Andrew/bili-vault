@@ -1520,12 +1520,12 @@ test("the Github mark is filled, unlike the line icon set", () => {
 test("the download-directory naming lives in one place", () => {
   const core = readProjectFile("archive-core.js");
   const library = readProjectFile("library.js");
-  assert.match(core, /function videoDirectoryLabel\(video, index = 0\)/);
-  assert.match(core, /function safeName\(value, fallback = "未知", maxLength = 100\)/);
+  assert.match(core, /function videoDirectoryLabel\(video, index = 0, options = \{\}\)/);
+  assert.match(core, /function safeName\(value, fallback = "未知", maxLength = RECORD_NAME_MAX_CHARS\)/);
   // 共享实现只有 archive-core.js 一份。1.3.0 删掉 download.js 之后仓库里只剩收藏库
   // 一个调用方，它必须继续调共享实现 —— 否则「手动标记」建的目录换个入口就认不出来，
   // 又会建一个副本。
-  assert.match(library, /BcaArchiveCore\.videoDirectoryLabel\(video, 0\)/);
+  assert.match(library, /BcaArchiveCore\.videoDirectoryLabel\(video, 0, \{ collectionName/);
   assert.equal(/function videoDirectoryLabel\(/.test(library), false, "library.js 里不该再留一份命名实现");
   assert.equal(/safeName\(video\.title/.test(library), false, "library.js 里不该自己拼目录名");
 });
@@ -2502,8 +2502,8 @@ test("归档目录名的 200 字节闸、坏库留档、半截目录都钉住（
   assert.match(core, /const MAX_SEGMENT_BYTES = 200;/);
   assert.match(core, /function truncateToBytes\(text, maxBytes\) \{/);
   assert.match(background, /function truncateToBytes\(text, maxBytes\) \{/);
-  assert.match(core, /truncateToBytes\(name\.slice\(0, 120\), MAX_SEGMENT_BYTES\) \|\| fallback/);
-  assert.match(background, /return truncateToBytes\(value\.slice\(0, 120\), MAX_SEGMENT_BYTES\);/);
+  assert.match(core, /truncateToBytes\(name\.slice\(0, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\) \|\| fallback/);
+  assert.match(background, /return truncateToBytes\(value\.slice\(0, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\);/);
   // 坏库改带时间戳，且只留最近几份
   assert.equal(/STATS_DATABASE_BACKUP_NAME/.test(background), false, "固定的 database.bad.json 会被第二次损坏覆盖");
   assert.match(background, /const STATS_DATABASE_BACKUP_PREFIX = "database\.bad\.";/);
@@ -3025,6 +3025,70 @@ test("release.ps1 每次发版都要把「多余词条」的条数打出来（V1
   const block = script.slice(at, script.indexOf("# 文档里写的词典条数", at));
   assert.ok(block.length > 0, "多余条数那一段要落在文档条数检查之前");
   assert.doesNotMatch(block, /\$failed = \$true/, "多余只播报，不做闸门");
+});
+
+// ---- V1.7.24（facet-compat §3.2：Windows 260 字符路径上限的度量与报错分类）----
+
+test("路径预算的常量与报错文案在 archive-core.js / background.js 两份逐字相同（V1.7.24）", () => {
+  const core = readProjectFile("archive-core.js");
+  const bg = readProjectFile("background.js");
+  for (const line of [
+    "const WINDOWS_PATH_LIMIT_CHARS = 260;",
+    "const COLLECTION_NAME_MAX_CHARS = 120;",
+    "const RECORD_NAME_MAX_CHARS = 100;"
+  ]) {
+    assert.ok(core.includes(line), `archive-core.js 少了 ${line}`);
+    assert.ok(bg.includes(line), `background.js 少了 ${line}`);
+  }
+  assert.match(core, /const PATH_SEGMENT_BUDGET_CHARS = WINDOWS_PATH_LIMIT_CHARS - PATH_ROOT_ALLOWANCE_CHARS - PATH_RESERVED_CHARS;/);
+  assert.ok(bg.includes("const PATH_SEGMENT_BUDGET_CHARS = 168;"), "SW 那份要写死算好的 168");
+  // 报错文案：两处函数体必须一模一样（只比函数体，注释各自写给自己的读者）
+  const body = (source, name) => {
+    const start = source.indexOf(`function ${name}(`);
+    assert.ok(start > 0, `${name} 不见了`);
+    const open = source.indexOf("{", start);
+    let depth = 0;
+    let end = open;
+    for (let index = open; index < source.length; index += 1) {
+      const char = source[index];
+      if (char === "{") depth += 1;
+      else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = index + 1;
+          break;
+        }
+      }
+    }
+    return stripComments(source.slice(open, end)).replace(/\s+/g, " ");
+  };
+  assert.equal(body(core, "describeDirectoryCreateError"), body(bg, "describeDirectoryCreateError"), "两份文案必须逐字相同");
+  // 常量名不许退回魔法数字
+  assert.ok(!/truncateToBytes\(name\.slice\(0, 120\)/.test(core), "safeCollectionName 要用常量");
+  assert.ok(!/truncateToBytes\(value\.slice\(0, 120\)/.test(bg), "safeSegment 要用常量");
+  assert.ok(!/maxLength = 100\)/.test(core), "safeName 的默认上限要用常量");
+});
+
+test("路径太长的报错真的接在建目录的那几条链路上（V1.7.24）", () => {
+  const core = readProjectFile("archive-core.js");
+  const bg = readProjectFile("background.js");
+  const lib = readProjectFile("library.js");
+  // background.js：create:true 失败时先问 describeDirectoryCreateError，再决定抛什么
+  assert.match(bg, /async function createDirectoryOrExplain\(parent, name\)/);
+  assert.ok(bg.includes("const explained = describeDirectoryCreateError(inner, candidate);"), "uniqueTimeFolder 的 create 分支要转译");
+  assert.ok(bg.includes("const collectionFolder = await createDirectoryOrExplain(root, folderName);"), "自动归档那条链路要转译");
+  assert.ok(bg.includes("collection = await createDirectoryOrExplain(root, collectionName);"), "导入那条链路要转译");
+  // library.js：两处建目录 + 标题段按预算收
+  assert.ok(lib.includes("BcaArchiveCore.describeDirectoryCreateError(error, collectionName") || lib.includes("BcaArchiveCore.describeDirectoryCreateError(error, collectionName +"), "标记已下载那条要转译");
+  assert.ok(lib.includes("BcaArchiveCore.describeDirectoryCreateError(error, targetRecordName)"), "搬运那条要转译");
+  assert.ok(lib.includes("BcaArchiveCore.videoDirectoryLabel(video, 0, { collectionName })"), "知道收藏夹名就要把预算传下去");
+  // 度量：扫描时按「两段合起来」的相对长度收，并报出来
+  assert.match(lib, /const longNames = \[\];/);
+  assert.ok(lib.includes("> BcaArchiveCore.PATH_SEGMENT_BUDGET_CHARS) longNames.push("), "扫描要有度量");
+  assert.ok(lib.includes("info.longNames?.length"), "度量要出现在扫描提示里");
+  // 收藏夹段的 120 不许被偷偷改小：磁盘上已有的目录名要能原样读回来
+  assert.equal(core.match(/const COLLECTION_NAME_MAX_CHARS = 120;/g).length, 1);
+  assert.match(core, /收藏夹段是 round-trip 的/);
 });
 
 test("the extractor also picks up strings passed as arguments", () => {

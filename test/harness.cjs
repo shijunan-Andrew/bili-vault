@@ -356,7 +356,8 @@ const BACKGROUND_EXPORTS = [
   "statsRecordForItem", "maskLocalUserPaths", "storageReportLabel",
   "discardFailedRecord", "renameFailureNote", "statsPendingRecords",
   "readStatsMirror", "applyStatsMirror", "syncStatsMirror", "publishStatsSnapshot",
-  "archiveBrokenStatsDatabase", "statsSectionLines"
+  "archiveBrokenStatsDatabase", "statsSectionLines",
+  "createDirectoryOrExplain", "describeDirectoryCreateError"
 ];
 
 function loadBackground(options = {}) {

@@ -942,5 +942,6 @@
   "正在停下…": "Stopping…",
   "正在停下，等当前这个视频收尾…": "Stopping — letting the current video finish…",
   "移动或复制已中止": "Move or copy stopped",
-  "已中止，剩下 {count} 个没有处理": "{count} left untouched because you stopped it"
+  "已中止，剩下 {count} 个没有处理": "{count} left untouched because you stopped it",
+  "有 {count} 个目录名太长了（收藏夹名加视频目录名超过 {budget} 个字符），拼上本地备份文件夹的路径就可能越过 Windows 的 260 字符上限：{list}": "{count} folder names are too long (the collection name plus the video folder name exceed {budget} characters). With the backup folder path in front they may pass Windows' 260-character limit: {list}"
 }

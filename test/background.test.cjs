@@ -387,6 +387,34 @@ async function suite() {
 
 module.exports = { get results() { return { passed, failed, failures }; } };
 
+test("路径太长时给一句人话，而不是把 NotFoundError 冒出去（1.7.24）", async () => {
+  const background = loadBackground();
+  const tree = await makeDirectoryTree({ "本地备份": {} });
+  const root = await tree.getDirectoryHandle("本地备份");
+  const longName = "标题".repeat(60) + " - BV1xx411c7mD";
+  const error = new Error("目录不存在");
+  error.name = "NotFoundError";
+  root.__failCreate = error;
+  try {
+    await background.__test.createDirectoryOrExplain(root, longName);
+    assert.fail("应当抛错");
+  } catch (caught) {
+    assert.match(caught.message, /建不出/, "不许把 NotFoundError 原样冒出去");
+    assert.match(caught.message, /260/, "要点出 Windows 的路径上限");
+    assert.match(caught.message, /挪到更浅/, "要给可执行的下一步");
+  }
+  // 其它错误不许被改写成路径问题
+  const typeError = new Error("不是目录");
+  typeError.name = "TypeMismatchError";
+  root.__failCreate = typeError;
+  try {
+    await background.__test.createDirectoryOrExplain(root, "x");
+    assert.fail("应当抛错");
+  } catch (caught) {
+    assert.equal(caught.name, "TypeMismatchError", "非 NotFoundError 要原样抛");
+  }
+});
+
 if (isMain) {
   suite().then(() => {
     process.stdout.write("\n\n");

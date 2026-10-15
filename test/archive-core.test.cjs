@@ -649,6 +649,61 @@ test("normalizeConfigPreferences：收藏夹顺序条数与单条长度都封顶
    直接运行时：打印结果并设置退出码。
    被 stability.test.cjs require 时：只把 results 交出去，由那边并进它自己的断言。 */
 
+/* ────────────────── 路径预算（1.7.24 / facet-compat §3.2） ──────────────────
+   Windows 的经典路径上限是 260 个字符，FSA 又拿不到「\\?\」长路径前缀。
+   这里钉住的是「两段共用一个预算」的算法与度量，不是文案。 */
+
+test("两段共用预算：收藏夹名越长，视频目录段收得越短（1.7.24）", () => {
+  assert.equal(core.WINDOWS_PATH_LIMIT_CHARS, 260);
+  assert.equal(core.PATH_SEGMENT_BUDGET_CHARS, 168);
+  assert.equal(core.COLLECTION_NAME_MAX_CHARS, 120, "收藏夹段保持 120：磁盘上已有的名字要能原样读回来");
+  assert.equal(core.RECORD_NAME_MAX_CHARS, 100);
+  assert.equal(core.recordSegmentMax(""), 100, "不知道收藏夹名时保持原样");
+  assert.equal(core.recordSegmentMax("x".repeat(20)), 100, "短收藏夹名不影响标题段");
+  assert.equal(core.recordSegmentMax("x".repeat(120)), 47, "168 − 120 − 1");
+  assert.equal(core.recordSegmentMax("x".repeat(200)), 24, "再长也不把标题段压没");
+});
+
+test("videoDirectoryLabel 传了收藏夹名就按预算收，不传则与以前完全一致（1.7.24）", () => {
+  const long = { bvid: "BV1xx411c7mD", title: "x".repeat(300) };
+  assert.equal(core.videoDirectoryLabel(long).length, 100);
+  assert.equal(core.videoDirectoryLabel(long, 0, { collectionName: "x".repeat(20) }).length, 100);
+  const tight = core.videoDirectoryLabel(long, 0, { collectionName: "x".repeat(120) });
+  assert.equal(tight.length, 47);
+  assert.ok(tight.endsWith(" - BV1xx411c7mD"), "BV 后缀是认人的依据，必须完整");
+  const chinese = core.videoDirectoryLabel({ bvid: "BV1xx411c7mD", title: "标".repeat(300) }, 0, { collectionName: "x".repeat(120) });
+  assert.ok(chinese.length <= 47, `字符数 ${chinese.length}`);
+  assert.ok(Buffer.byteLength(chinese, "utf8") <= 200, "字节闸仍然生效");
+});
+
+test("pathBudgetReport 量路径长度：知道根目录用真的，不知道就保守估（1.7.24）", () => {
+  const assumed = core.pathBudgetReport({ collectionName: "x".repeat(60), recordName: "y".repeat(80) });
+  assert.equal(assumed.assumedRoot, true);
+  assert.equal(assumed.rootChars, 60);
+  assert.equal(assumed.used, 60 + 61 + 81 + 32);
+  assert.equal(assumed.ok, true);
+  assert.equal(assumed.over, 0);
+  assert.equal(core.pathBudgetText(assumed), "", "没超就不出文案");
+  const real = core.pathBudgetReport({ rootPath: "C:\\备份", collectionName: "夹", recordName: "视频" });
+  assert.equal(real.assumedRoot, false);
+  assert.equal(real.rootChars, 5);
+  assert.equal(real.used, 5 + 2 + 3 + 32);
+  const over = core.pathBudgetReport({ rootPath: "x".repeat(240) });
+  assert.equal(over.ok, false);
+  assert.equal(over.over, 240 + 32 - 260);
+  assert.match(core.pathBudgetText(over), /260/);
+  assert.match(core.pathBudgetText(over), /挪到更浅/);
+});
+
+test("describeDirectoryCreateError 只认 NotFoundError，且给出可执行的下一步（1.7.24）", () => {
+  assert.equal(core.describeDirectoryCreateError({ name: "TypeError" }, "x"), "");
+  assert.equal(core.describeDirectoryCreateError(null, "x"), "");
+  const text = core.describeDirectoryCreateError({ name: "NotFoundError" }, "小鲸鱼测试");
+  assert.match(text, /小鲸鱼测试/, "要把建不出来的名字带出来");
+  assert.match(text, /260/);
+  assert.match(text, /挪到更浅/);
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

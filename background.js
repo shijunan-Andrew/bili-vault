@@ -244,6 +244,32 @@ function formatChineseDateTime(date, withMilliseconds = false) {
    字节会越过 NTFS 的 255 字节分量上限，建目录直接抛错。 */
 const MAX_SEGMENT_BYTES = 200;
 
+/* 1.7.24（facet-compat §3.2）：与 archive-core.js 的路径预算常量逐字相同的一份。
+   service worker 是 ES module、import 不了经典脚本，所以只能各留一份（稳定性测试守着）。
+   两个单段上限刻意保持 120 / 100：磁盘上已有的收藏夹目录名要能原样读回来。 */
+const WINDOWS_PATH_LIMIT_CHARS = 260;
+const PATH_SEGMENT_BUDGET_CHARS = 168;
+const COLLECTION_NAME_MAX_CHARS = 120;
+const RECORD_NAME_MAX_CHARS = 100;
+
+// 见 archive-core.js 的 describeDirectoryCreateError：同一句文案，两份逐字相同。
+function describeDirectoryCreateError(error, name) {
+  if (error?.name !== "NotFoundError") return "";
+  return "建不出「" + name + "」这个目录：要么上级目录已经不在了，要么拼出来的完整路径超过了"
+    + " Windows 的 " + WINDOWS_PATH_LIMIT_CHARS + " 个字符上限。把本地备份文件夹挪到更浅的"
+    + "位置（例如 D:\\备份），或把收藏夹名 / 视频标题改短，再试一次。";
+}
+
+async function createDirectoryOrExplain(parent, name) {
+  try {
+    return await parent.getDirectoryHandle(name, { create: true });
+  } catch (error) {
+    const explained = describeDirectoryCreateError(error, name);
+    if (explained) throw new Error(explained);
+    throw error;
+  }
+}
+
 function utf8ByteLength(text) {
   let bytes = 0;
   for (const char of String(text || "")) {
@@ -272,7 +298,7 @@ function safeSegment(input, fallback = "未命名收藏夹") {
   let value = String(input || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
   if (!value || value === "." || value === "..") value = fallback;
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(value)) value = `_${value}`;
-  return truncateToBytes(value.slice(0, 120), MAX_SEGMENT_BYTES);
+  return truncateToBytes(value.slice(0, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES);
 }
 
 /* V1.4.3（P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
@@ -379,7 +405,13 @@ async function uniqueTimeFolder(parent, name) {
       try {
         return await parent.getDirectoryHandle(candidate, { create: true });
       } catch (inner) {
-        if (inner?.name !== "TypeMismatchError") throw inner;
+        if (inner?.name !== "TypeMismatchError") {
+          // 1.7.24（§3.2）：create:true 还抛 NotFoundError，多半是完整路径越过了
+          // Windows 的 260 字符上限 —— 以前这里直接把异常名冒出去。
+          const explained = describeDirectoryCreateError(inner, candidate);
+          if (explained) throw new Error(explained);
+          throw inner;
+        }
         candidate = `${name}_${suffix++}`;
       }
     }
@@ -955,7 +987,7 @@ async function saveFavorite(data) {
       if (collectionNameIsReserved(folderName)) {
         throw new Error(`收藏夹名「${folderName}」和插件自己用的目录重名，为免写乱本地文件，这次没有保存到本地。`);
       }
-      const collectionFolder = await root.getDirectoryHandle(folderName, { create: true });
+      const collectionFolder = await createDirectoryOrExplain(root, folderName);
       const recordFolder = await uniqueTimeFolder(collectionFolder, dateFolderName);
       try {
         // 4.9：先封面、后 txt（txt 即完成标记），失败时把整个目录清掉，不留半截记录
@@ -3701,7 +3733,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       } catch (error) {
         if (error?.name !== "NotFoundError") throw error;
         collectionExisted = false;
-        collection = await root.getDirectoryHandle(collectionName, { create: true });
+        collection = await createDirectoryOrExplain(root, collectionName);
         journal.createdCollections.push({ parentHandle: root, handle: collection, name: collectionName });
       }
       if (!collectionExisted) folderNotes.push(`「${folder.title}」本地没有同名收藏夹，本次按全量导入处理。`);
