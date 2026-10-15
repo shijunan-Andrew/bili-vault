@@ -227,6 +227,13 @@ Say "  浏览器环境单元测试（真执行 background.js 与 library.js 的�
 Invoke-Native $Node @('test/background.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
 if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 浏览器环境单元测试未全过" $C_RED; $failed = $true }
 
+# 1.7.23：页面脚本（library.js / popup.js / content.js）也进真执行测试 —— 最小 DOM + 影子
+# DOM + 真 MutationObserver，把「点确认收藏 → 弹层关上 → 发归档消息」整条链跑完。
+# 之前这三份文件只有静态文本断言，「点了之后到底发没发消息」是测不到的。
+Say "  页面脚本单元测试（真执行 library.js / popup.js / content.js）…" $C_DIM
+Invoke-Native $Node @('test/pages.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
+if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 页面脚本单元测试未全过" $C_RED; $failed = $true }
+
 Say "  词典覆盖…" $C_DIM
 $i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }

@@ -134,6 +134,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 > 最新的在最上面，往下依次变旧。测试版（V1.0.0 之前）的开发历程见后面的「测试版版本说明」。
 
+## V1.7.23：把最后一类「只有静态断言」的代码也跑起来
+
+前两版把 `background.js` 丢进了 `vm`，但 `library.js` / `popup.js` / `content.js` 这三份**页面脚本**还是只有静态文本断言 —— 能证明「写着 `isTrusted`」，证明不了「合成点击真的没发消息」。
+
+这一版补上 `test/pages.test.cjs`（19 项）：一套无依赖的最小 DOM（选择器、事件捕获/冒泡、`.click()` 造合成事件、`fireUserEvent()` 造可信事件、`<dialog>`、影子 DOM、**真的会回调的 MutationObserver**、非零布局盒子），把三份页面脚本按真实脚本顺序加载进 `vm`：
+
+- **收藏确认的完整链路**：合成点击（`isTrusted === false`）点完再把弹层摘掉，一条消息都不许发；真用户点击则要按顺序发出 `bca-import-status` 与 `save-favorite`，并带上真实的收藏夹名、BV 号与时间戳。
+- **导入失败/成功两种弹窗**：标题、正文、`error` 类，以及角标必须等对话框被关掉才清。
+- **窄窗口排序**：`Alt+↑/↓` 走的是同一条 `reorderCollection`，并且真的落盘。
+
+配套地修了测试基建里的几处失真：`MutationObserver` 原来是空壳（观察者永远不回调，收藏链路测到一半就静默走空），事件路径里 `document` 会出现两次（监听器跑两遍），`childElementCount` / `attachShadow` / `getBoundingClientRect` 缺失或恒为零（`visible()` 把所有元素都判成不可见）。观察者回调抛的错也不许再吞，会收集起来给用例断言。
+
+变异测试 5 处（去掉 `isTrusted` / 失败弹窗不换标题 / 开窗就标已读 / 换序不落盘 / 错误摘要不兜底）**全部被抓住**。
+
 ## V1.7.22：给「碰 chrome.* 的那一半」补上真执行测试
 
 到 1.7.21 为止，测试是一边倒的：`test/stability.test.cjs` 那 240 条**读文件做文本正则断言** —— 能证明「约定没被违反」，证明不了「真跑起来对不对」；`archive-core` / `stats-core` 两套是真执行，但它们不碰浏览器 API；夹在中间的那一大块（`background.js` 的统计库读写、原生消息、本机路径打码）**只有静态断言**。
@@ -1511,7 +1525,7 @@ V1.1.20 只挡 `item.isInvalid`，V1.1.21 改用 `importUsefulTitle(item.title)`
 
 收藏夹移动或复制时会一并复制关联的下载目录；移动时再清理来源下载目录。删除视频或收藏夹可在确认窗口中选择是否同时删除关联下载，默认不勾选。下载失败会尝试写入本地备份文件夹的 `001错误报告`。旧的“未分类收藏”下载仍可按 BV/av 号识别并在移动或删除时纳入处理。
 
-稳定性回归检查**以 `node test/stability.test.cjs` 的实际输出为准**（用例还在持续增加，这里不写死数量）。其中包含**真执行 `archive-core.js` 纯函数的单元测试**（把模块 `require` 进来真的调用，覆盖安全命名、目录名与 BV/av 的互认、归档解析、分页、分享文案拆分、易变字段改写等）；其余静态断言覆盖目录结构与清单引用、多语言词典覆盖、归档格式与下载目录匹配、导入链路的失败与风控处理、缓存与封面 URL 生命周期、本地目录打开助手的目录限位，以及每个脚本能否真正解析。1.7.22 起另有 `node test/background.test.cjs`：把 `background.js` 整份丢进 `vm` 跑起来（内存版 `chrome.storage` 与内存版目录树），真调统计库读写、写入口互斥、归档写锁与原生消息握手。可在安装 Node.js 的环境中运行：`node test/stability.test.cjs`。<!-- test-count:240 -->
+稳定性回归检查**以 `node test/stability.test.cjs` 的实际输出为准**（用例还在持续增加，这里不写死数量）。其中包含**真执行 `archive-core.js` 纯函数的单元测试**（把模块 `require` 进来真的调用，覆盖安全命名、目录名与 BV/av 的互认、归档解析、分页、分享文案拆分、易变字段改写等）；其余静态断言覆盖目录结构与清单引用、多语言词典覆盖、归档格式与下载目录匹配、导入链路的失败与风控处理、缓存与封面 URL 生命周期、本地目录打开助手的目录限位，以及每个脚本能否真正解析。1.7.22 起另有 `node test/background.test.cjs`：把 `background.js` 整份丢进 `vm` 跑起来（内存版 `chrome.storage` 与内存版目录树），真调统计库读写、写入口互斥、归档写锁与原生消息握手。1.7.23 起再加 `node test/pages.test.cjs`：用一套最小 DOM（含影子 DOM 与真 `MutationObserver`）把 `library.js` / `popup.js` / `content.js` 真跑起来 —— 覆盖收藏确认的完整链路（合成点击一律忽略、真点击才发归档消息）、导入失败/成功两种弹窗、角标清理时机，以及窄窗口的 Alt+↑/↓ 排序。可在安装 Node.js 的环境中运行：`node test/stability.test.cjs`。<!-- test-count:240 -->
 
 ### 4.5：主题、多语言与若干交互调整
 

@@ -108,6 +108,7 @@ function makeChrome(options = {}) {
     __storageBus: bus,
     __events: events,
     __nativeCalls: [],
+    __messages: [],
     __notifications: [],
     __badge: [],
     storage,
@@ -120,7 +121,24 @@ function makeChrome(options = {}) {
       onConnect: event("runtime.onConnect"),
       getManifest: () => ({ version: options.version || "1.7.22", manifest_version: 3 }),
       getURL: (relative) => `chrome-extension://test-extension-id/${String(relative).replace(/^\//, "")}`,
-      async sendMessage(message) { return options.onRuntimeMessage ? options.onRuntimeMessage(message) : undefined; },
+      /* 真 Chrome 的 sendMessage(message, callback) 会把应答交给回调（没人应答时
+         回调拿到 undefined 且 lastError 被设上）。只记消息不叫回调，
+         content.js 的「先问导入状态、再发归档」这条两段式链路就会断在第一段。 */
+      sendMessage(message, callback) {
+        chrome.__messages.push(message);
+        const respond = (value) => { if (typeof callback === "function") callback(value); };
+        if (typeof options.onRuntimeMessage !== "function") {
+          respond(undefined);
+          return Promise.resolve(undefined);
+        }
+        const result = options.onRuntimeMessage(message, respond);
+        if (result && typeof result.then === "function") {
+          return result.then((value) => { respond(value); return value; });
+        }
+        if (typeof callback === "function" && result !== undefined) respond(result);
+        else if (typeof callback === "function") respond(undefined);
+        return Promise.resolve(result);
+      },
       sendNativeMessage(host, message, callback) {
         chrome.__nativeCalls.push({ host, message });
         const reply = nativeReplies.length ? nativeReplies.shift() : { ok: true, protocol: 3 };
@@ -291,8 +309,12 @@ function makeDirectoryHandle(name, spec = {}) {
       }
       node.__entries.delete(childName);
     },
+    /* 真 Chrome 的 values() 交出来的是**真句柄**（自己带 kind / name，也能继续
+       getFileHandle / values），不是 {kind, name} 这种描述对象。1.7.22 这里交的是
+       描述对象，background.js 只用 kind+name 所以没露馅；1.7.23 给 library.js 的
+       scanRoot 写测试时立刻炸了（collectionEntry.values is not a function）。 */
     async *values() {
-      for (const entry of [...node.__entries.values()]) yield { kind: entry.kind, name: entry.name };
+      for (const entry of [...node.__entries.values()]) yield entry;
     },
     async *keys() { for (const entry of [...node.__entries.values()]) yield entry.name; },
     async queryPermission() { return "granted"; },
