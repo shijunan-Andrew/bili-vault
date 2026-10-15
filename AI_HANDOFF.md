@@ -76,6 +76,18 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.7.2：归档卡在「正在保存」＝ SW 被回收；收藏库不会自动刷新
+
+**现象**（用户真机复测，1.7.1）：① 手动收藏卡在「正在归档视频…」，文件没落盘；② 导入显示成功、文件也落盘了（`辐射\…\视频信息.txt` + `封面.webp` 都在，导入报告写「读取 3 / 新导入 3 / 失败 0」），但收藏库页面看不到。
+
+**根因**：
+1. `save-favorite` / `add-manual-video` / `retry-pending-favorite` 都走 `runInSaveQueueWithDeadline()` 排队等，而**等待期间没有任何保活**。MV3 只认扩展 API 调用 / 事件重置空闲回收（background.js 的注释里就写着这一点），队列里那一个正在导入时能等几分钟 → SW 被回收 → `sendResponse` 永远不发 → 内容脚本的提示卡停在「正在归档视频…」，归档也没写。
+2. 收藏库页面的 `chrome.storage.onChanged` 只订阅 `importState` / `downloadRevision` / `rootHandleRevision` / 语言；新记录落盘只改 `bcaStats`，页面不会重读根目录 → 「导入成功但看不到」。
+
+**修法**：① 新增 `withKeepAlive(task, reason)`（按 `IMPORT_KEEPALIVE_INTERVAL_MS/2` 轮询已有的 `keepServiceWorkerAlive()`）并裹住三条排队路径；② 新增 `scheduleArchiveRefresh()`（900ms 防抖 + 只在页面可见、无弹窗、非批量选择 / 保存时 `displayRoot`），挂在 `changes.bcaStats` 与 `visibilitychange` 上。
+
+**教训**：① 凡是「排队等 + 可能等很久」的路径都要一起保活，别只在导入循环里保活；② 页面订阅 storage 时要问「还有哪些写入会让这个页面该重读而它不知道」—— 这次漏的是 `bcaStats`；③ 定位这类真机问题的捷径是**直接看用户机器上的痕迹**：归档目录的 mtime 与文件清单、`001错误报告/*.txt`、`003database` 里的残留 `.tmp`，比反复问用户快得多（这次就是靠它们把「没落盘」和「落盘了但看不到」两件事分开的）。
+
 ## 1.7.1：`writeFile` 原子写撤回（真机回归，教训在前）
 
 **现象**（用户真机，1.7.0）：手动收藏和导入视频都提示「正在归档视频… / B站已完成收藏，正在保存视频信息和封面。」，但本地收藏夹里最后没有记录。

@@ -1785,6 +1785,30 @@ async function keepServiceWorkerAlive(reason = "import") {
   }
 }
 
+/* 1.7.2：把一份"要排队等"的任务裹上保活。
+   手动收藏 / 添加视频 / 补存都要排在串行队列后面等 —— 队列里那一个可能是几分钟的导入
+   （暂停时更久）。MV3 只认"扩展 API 调用 / 事件"来重置空闲回收，纯 Promise、await、
+   setTimeout 都不算，所以等待期间必须自己定期调一次 API。不保活的后果在真机上已经出现：
+   提示卡停在「正在归档视频…」，service worker 被回收、回调永远不来、文件也没落盘。 */
+async function withKeepAlive(task, reason) {
+  let stopped = false;
+  let timer = 0;
+  const tick = () => {
+    if (stopped) return;
+    // keepServiceWorkerAlive 自带节流：这里按半个间隔轮询，正好让它每轮放行一次
+    keepServiceWorkerAlive(`${reason}-wait`).finally(() => {
+      if (!stopped) timer = setTimeout(tick, Math.max(1000, Math.floor(IMPORT_KEEPALIVE_INTERVAL_MS / 2)));
+    });
+  };
+  timer = setTimeout(tick, Math.max(1000, Math.floor(IMPORT_KEEPALIVE_INTERVAL_MS / 2)));
+  try {
+    return await task;
+  } finally {
+    stopped = true;
+    clearTimeout(timer);
+  }
+}
+
 function importThrowIfCancelled() {
   if (!importRun.cancelled) return;
   const error = new Error("导入已取消。");
@@ -4182,7 +4206,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 1.4.2（P1-3）：导入占着串行队列时这次收藏会一直等下去，所以给它加等待上限；超时就把
     // 这条记成 pendingFavorite 并把原因写进 lastResult —— 弹窗「最近状态」能直接看到，
     // 走「重新授权」那条路时也会顺手补存，用户不必回到 B 站重新收藏一次。
-    runInSaveQueueWithDeadline(saveFavoriteInOrder(message.data), "保存收藏")
+    withKeepAlive(runInSaveQueueWithDeadline(saveFavoriteInOrder(message.data), "保存收藏"), "保存收藏")
       .then((result) => {
         if (result?.busy) {
           chrome.storage.local.set({
@@ -4196,7 +4220,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "add-manual-video") {
-    runInSaveQueueWithDeadline(addManualVideoInOrder(message.data), "添加视频")
+    // 1.7.2：等待期间保活（见 withKeepAlive）—— 队列里可能是几分钟的导入
+    withKeepAlive(runInSaveQueueWithDeadline(addManualVideoInOrder(message.data), "添加视频"), "添加视频")
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, message: error?.message || "添加视频失败。" }));
     return true;
@@ -4208,7 +4233,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "retry-pending-favorite") {
     chrome.storage.local.get("pendingFavorite").then(({ pendingFavorite }) => {
       if (!pendingFavorite) return sendResponse({ ok: false, message: "没有可补存的视频，请回到 B 站重新收藏一次。" });
-      return runInSaveQueueWithDeadline(saveFavoriteInOrder(pendingFavorite), "补存视频").then(sendResponse);
+      return withKeepAlive(runInSaveQueueWithDeadline(saveFavoriteInOrder(pendingFavorite), "补存视频"), "补存视频").then(sendResponse);
     }).catch((error) => sendResponse({ ok: false, message: error.message || "读取待补存视频失败。" }));
     return true;
   }
