@@ -2201,11 +2201,19 @@ async function importRecoverInterruptedImport() {
 
 let importStatePublishedText = "";
 
+/* 1.7.12（perf PF-5）：进度文案逐条变，指纹挡不住「每条都想写」，所以节流窗口本身也要放宽。
+   500 ms → 1500 ms 之后，一轮 3000 条的导入最多写 1/3 的次数；running / paused / finishedAt
+   这些关键状态本来就走 force=true 立即落盘，不会被这个窗口推迟。
+   报告里「更长远的做法」（text 挪去 chrome.storage.session、local 只留小字段）没有采纳：
+   popup.js:504 / popup.js:972（onChanged）与 library.js:2229 都是从 storage.local 读整包，
+   拆成两处读会多出一条只在写入端成立的约定，收益（KB 级 → 字节级）不抵这份耦合。 */
+const IMPORT_STATE_PUBLISH_INTERVAL_MS = 1500;
+
 // 进度更新很密集，写 storage 要节流；关键状态变化用 force 立即落盘
 function publishImportState(patch, force = false) {
   importState = { ...importState, ...patch, updatedAt: Date.now() };
   const now = Date.now();
-  if (!force && now - importStatePublishAt < 500) return;
+  if (!force && now - importStatePublishAt < IMPORT_STATE_PUBLISH_INTERVAL_MS) return;
   // active 是"这一次是否真的有活动导入"的即时答案（由 get-status / bca-import-probe 填），
   // 只在内存和响应里有效，不落盘——落盘就会变成下一个需要探活复位的"残影"。
   const { active: _active, ...persisted } = importState;

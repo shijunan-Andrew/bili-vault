@@ -466,6 +466,13 @@ function matchDownloadedDirectory(video, index) {
 /* 1.7.7（P2-4）：封面缓存上限。原来 4000 是按"最多 4000 个视频目录"设的，而页面同时
    最多显示 25 张卡 —— 上限太高等于让整库的 blob: URL 常驻内存。 */
 const ARCHIVE_CACHE_MAX_PER_ROOT = 600;
+// 1.7.12（perf PF-4）：上面那条是「每个根目录」的上限，根目录个数本身一直没有上限。
+// rootCacheKey 靠 WeakMap 计数发号，而句柄对象一旦不再被引用就会回收 —— 用户重选一次目录
+// （选错再选回来、换一个备份文件夹）就是一个新 key，旧 key 的条目要等到关页面才清。
+// 给根目录数设个上限：超出就从最久没用的开始整份丢掉，连带 storageUsageCache 与
+// lastScanRecordCount 里的同一 key 一起删，别让它们各自留下孤儿条目。
+const ARCHIVE_CACHE_MAX_ROOTS = 2;
+const archiveCacheOrder = []; // rootKey，最近用过的排在最后
 const archiveCache = new Map();        // rootKey -> Map<"收藏夹/目录", entry>
 const lastScanRecordCount = new Map(); // rootKey -> 上次扫描的记录数，用于先给一行 0/N
 const rootKeyIds = new WeakMap();
@@ -478,23 +485,40 @@ function rootCacheKey(handle) {
   return id;
 }
 
-function archiveCacheFor(rootKey) {
-  let store = archiveCache.get(rootKey);
-  if (!store) { store = new Map(); archiveCache.set(rootKey, store); }
-  return store;
-}
-
 // 丢弃一条缓存条目：把它持有的封面 URL 引用交还回去（计数归零才会真的 revoke）
 function dropCacheEntry(entry) {
   releaseCoverRef(entry?.record?.cover);
 }
 
+// 丢掉一个根目录的全部痕迹：逐条交还封面引用后整表删除，顺带清掉另外两张同键的表
+function dropRootCaches(rootKey) {
+  const store = archiveCache.get(rootKey);
+  if (store) for (const entry of store.values()) dropCacheEntry(entry);
+  archiveCache.delete(rootKey);
+  storageUsageCache.delete(rootKey);
+  lastScanRecordCount.delete(rootKey);
+  const at = archiveCacheOrder.indexOf(rootKey);
+  if (at >= 0) archiveCacheOrder.splice(at, 1);
+}
+
+function touchArchiveCacheRoot(rootKey) {
+  const at = archiveCacheOrder.indexOf(rootKey);
+  if (at >= 0) archiveCacheOrder.splice(at, 1);
+  archiveCacheOrder.push(rootKey);
+  while (archiveCacheOrder.length > ARCHIVE_CACHE_MAX_ROOTS) dropRootCaches(archiveCacheOrder[0]);
+}
+
+function archiveCacheFor(rootKey) {
+  let store = archiveCache.get(rootKey);
+  if (!store) { store = new Map(); archiveCache.set(rootKey, store); }
+  // "root:none" 是「没有句柄」的占位，不该占一个根目录名额
+  if (rootKey !== "root:none") touchArchiveCacheRoot(rootKey);
+  return store;
+}
+
 // 「刷新」按钮的退路：逐条交还引用后再整表丢弃，不能直接 delete 掉整张表
 function clearArchiveCache(handle) {
-  const key = rootCacheKey(handle);
-  const store = archiveCache.get(key);
-  if (store) for (const entry of store.values()) dropCacheEntry(entry);
-  archiveCache.delete(key);
+  dropRootCaches(rootCacheKey(handle));
 }
 
 function cacheEntryFor(store, name, size, lastModified) {
@@ -943,63 +967,96 @@ async function restoreCollectionOrder() {
   collectionOrderLoaded = true;
 }
 
+// 1.7.12（perf PF-3）：过滤本来就只是「隐藏行」，实现却是整表重画 —— 每个字符都把 N 行
+// replaceChildren 重建一遍，每行一次 innerHTML 解析 + 一次 querySelector + 一次
+// addEventListener + 一段 SVG 串拼接。现在行节点建一次就留着，之后只切 hidden / active；
+// 只有「行集合 / 计数 / 当前选中项」变了才重建，而这三种变化都不是逐键发生的。
+const collectionRowNodes = new Map(); // collectionKey -> wrapper
+let collectionRowsSignature = "";
+
+function collectionRowsFingerprint(rows, allLabel) {
+  return `${allLabel}\u0002${selectedCollection}\u0002${rows.map((row) => `${row.key}\u0000${row.name}\u0000${row.count}`).join("\u0001")}`;
+}
+
+function buildCollectionRow(row) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "collection-row";
+  const button = document.createElement("button");
+  button.className = "collection-button";
+  button.type = "button";
+  button.dataset.collectionKey = row.key;
+  button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${BcaIcons.svg(row.glyph)}</span><span class="collection-name"></span>${row.key === "*" ? "" : `<span class="collection-drag-handle" title="${escapeHtml(BcaI18n.t("按住拖动调整顺序"))}" aria-hidden="true">${BcaIcons.svg("grip")}</span>`}<span class="collection-count tnum">${row.count}</span>`;
+  button.querySelector(".collection-name").textContent = row.name;
+  button.addEventListener("click", () => {
+    if (selectedCollection !== row.key) selectedVideoIds.clear();
+    selectedCollection = row.key;
+    resetPaging();
+    closeDetail();
+    renderCollections();
+    // 切换收藏范围 = 换数据源，选项池要跟着换
+    refreshVideoFilterOptions();
+    renderVideos();
+  });
+  wrapper.append(button);
+  if (row.key !== "*") {
+    wrapper.classList.add("collection-row-draggable");
+    installCollectionDrag(wrapper, row.name);
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "collection-delete";
+    deleteButton.type = "button";
+    deleteButton.innerHTML = BcaIcons.svg("close");
+    deleteButton.title = BcaI18n.t("删除收藏夹“{name}”", { name: row.name });
+    deleteButton.setAttribute("aria-label", BcaI18n.t("删除收藏夹 {name}", { name: row.name }));
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      askToDeleteCollection(collections.find((collection) => collection.name === row.name));
+    });
+    wrapper.append(deleteButton);
+  }
+  return wrapper;
+}
+
 function renderCollections() {
   const total = allVideos().length;
   const query = collectionFilterInput ? collectionFilterInput.value.trim().toLocaleLowerCase() : "";
-  const visible = query ? collections.filter((item) => item.name.toLocaleLowerCase().includes(query)) : collections;
   const allLabel = BcaI18n.t("全部收藏");
-  const showAllRow = !query || allLabel.toLocaleLowerCase().includes(query);
   collectionTotal.textContent = String(collections.length);
-  if (collectionFilterEmpty) collectionFilterEmpty.hidden = !query || visible.length > 0 || showAllRow;
   // 过滤只是隐藏行，不动 collections 本身：拖动排序与其它逻辑照旧
+  // （「全部收藏」那一行也永远建出来，过滤时切 hidden，不再整个从 DOM 里摘掉）
   const rows = [
-    ...(showAllRow ? [{ name: allLabel, key: "*", count: total, glyph: "library" }] : []),
-    ...visible.map((item) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: "collection" }))
+    { name: allLabel, key: "*", count: total, glyph: "library" },
+    ...collections.map((item) => ({ name: item.name, key: item.name, count: item.videos.length, glyph: "collection" }))
   ];
-  // 过滤时会被隐藏的行里可能有焦点，重画前先记下，重画后还给同一个收藏夹
-  const focusedKey = document.activeElement?.dataset?.collectionKey || "";
-  collectionList.replaceChildren(...rows.map((row) => {
-    const wrapper = document.createElement("div");
-    wrapper.className = "collection-row";
-    const button = document.createElement("button");
-    button.className = `collection-button${selectedCollection === row.key ? " active" : ""}`;
-    button.type = "button";
-    button.dataset.collectionKey = row.key;
-    button.setAttribute("aria-current", selectedCollection === row.key ? "page" : "false");
-    button.innerHTML = `<span class="collection-glyph" aria-hidden="true">${BcaIcons.svg(row.glyph)}</span><span class="collection-name"></span>${row.key === "*" ? "" : `<span class="collection-drag-handle" title="${escapeHtml(BcaI18n.t("按住拖动调整顺序"))}" aria-hidden="true">${BcaIcons.svg("grip")}</span>`}<span class="collection-count tnum">${row.count}</span>`;
-    button.querySelector(".collection-name").textContent = row.name;
-    button.addEventListener("click", () => {
-      if (selectedCollection !== row.key) selectedVideoIds.clear();
-      selectedCollection = row.key;
-      resetPaging();
-      closeDetail();
-      renderCollections();
-      // 切换收藏范围 = 换数据源，选项池要跟着换
-      refreshVideoFilterOptions();
-      renderVideos();
-    });
-    wrapper.append(button);
-    if (row.key !== "*") {
-      wrapper.classList.add("collection-row-draggable");
-      installCollectionDrag(wrapper, row.name);
-      const deleteButton = document.createElement("button");
-      deleteButton.className = "collection-delete";
-      deleteButton.type = "button";
-      deleteButton.innerHTML = BcaIcons.svg("close");
-      deleteButton.title = BcaI18n.t("删除收藏夹“{name}”", { name: row.name });
-      deleteButton.setAttribute("aria-label", BcaI18n.t("删除收藏夹 {name}", { name: row.name }));
-      deleteButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        askToDeleteCollection(collections.find((collection) => collection.name === row.name));
-      });
-      wrapper.append(deleteButton);
+  const signature = collectionRowsFingerprint(rows, allLabel);
+  if (signature !== collectionRowsSignature || collectionRowNodes.size !== rows.length) {
+    // 过滤时会被隐藏的行里可能有焦点，重画前先记下，重画后还给同一个收藏夹
+    const focusedKey = document.activeElement?.dataset?.collectionKey || "";
+    collectionRowNodes.clear();
+    collectionList.replaceChildren(...rows.map((row) => {
+      const wrapper = buildCollectionRow(row);
+      collectionRowNodes.set(row.key, wrapper);
+      return wrapper;
+    }));
+    collectionRowsSignature = signature;
+    if (focusedKey) {
+      const target = [...collectionList.querySelectorAll(".collection-button")].find((item) => item.dataset.collectionKey === focusedKey);
+      if (target) target.focus();
     }
-    return wrapper;
-  }));
-  if (focusedKey) {
-    const target = [...collectionList.querySelectorAll(".collection-button")].find((item) => item.dataset.collectionKey === focusedKey);
-    if (target) target.focus();
   }
+  let visibleCount = 0;
+  for (const row of rows) {
+    const node = collectionRowNodes.get(row.key);
+    if (!node) continue;
+    const hit = !query || row.name.toLocaleLowerCase().includes(query);
+    node.hidden = !hit;
+    if (hit) visibleCount += 1;
+    const button = node.firstElementChild;
+    if (button) {
+      button.classList.toggle("active", selectedCollection === row.key);
+      button.setAttribute("aria-current", selectedCollection === row.key ? "page" : "false");
+    }
+  }
+  if (collectionFilterEmpty) collectionFilterEmpty.hidden = !query || visibleCount > 0;
 }
 
 function selectedRecords() {
@@ -1076,6 +1133,9 @@ function safeCover(cover) {
 /* ---------------- 4.6：UP 主 / 标签 精确筛选（纯本地，不发任何请求） ---------------- */
 
 // 出现次数从多到少，同数量按字典序；用于两个下拉的选项顺序
+// 1.7.12（perf PF-2）：比较器里现写 `localeCompare(..., "zh-CN")` 的话，每比较一次就现建
+// 一个 collator —— 800 个 UP 主排下来约 7700 次，占了那次 6.78 ms 里的大头。提到模块级复用。
+const OPTION_TEXT_COLLATOR = new Intl.Collator("zh-CN");
 function countByFrequency(values) {
   const counts = new Map();
   for (const value of values) {
@@ -1084,7 +1144,7 @@ function countByFrequency(values) {
     counts.set(text, (counts.get(text) || 0) + 1);
   }
   return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"))
+    .sort((left, right) => right[1] - left[1] || OPTION_TEXT_COLLATOR.compare(left[0], right[0]))
     .map(([value, count]) => ({ value, count }));
 }
 
@@ -1109,10 +1169,50 @@ function syncVideoFilterOptions(videosForOptions) {
 // 词频统计 + 全排序 + 重建上千个 <option>；原来它跟着 renderVideos 跑，等于每敲一个
 // 字符都重建一次（10000 条时每次按键 0.5~3 秒）。语义没有变：池子仍然按
 // 「当前收藏范围 + #videoFilter + 搜索词」算，仍然**不受 upFilter / tagFilter 自身影响**。
-function refreshVideoFilterOptions() {
-  // 与 renderVideos 一致：筛选值以 <select> 当前值为准
+//
+// 1.7.12（perf PF-2）：语义没变，但那 0.5~3 秒现在是 6.78 ms（10 000 条 / 12 万标签，
+// 含两次全表词频 + 两次全排序，还不含上千个 new Option 的节点成本）—— 仍然比「敲一个
+// 字符」该有的代价贵得多。所以搜索那条路多一层按 (收藏范围, #videoFilter, 搜索词)
+// 做键的缓存：连着敲、以及退格回到上一个词，都能直接命中。
+// 失效很干脆 —— 所有**数据变化**（扫描、删除、搬运、加视频、下载状态、导入配置）
+// 走的都是下面这个不带缓存的入口，进来先清空缓存，所以缓存只活在一次数据变更到下一次之间。
+const videoFilterPoolCache = new Map(); // 指纹 -> { up, tag }
+const VIDEO_FILTER_POOL_CACHE_MAX = 30;
+
+function videoFilterPoolKey() {
+  return `${selectedCollection}\u0000${videoFilterSelect.value}\u0000${searchQuery()}`;
+}
+
+function buildVideoFilterPool() {
   videoFilter = videoFilterSelect.value;
-  syncVideoFilterOptions(selectedVideos().filter((video) => matchesBaseFilters(video, searchQuery())));
+  const videosForOptions = selectedVideos().filter((video) => matchesBaseFilters(video, searchQuery()));
+  return {
+    up: countByFrequency(videosForOptions.map((video) => video.upName)),
+    tag: countByFrequency(videosForOptions.flatMap((video) => video.tags))
+  };
+}
+
+function applyVideoFilterPool(pool) {
+  if (upFilterSelect) upFilter = populateSelectOptions(upFilterSelect, pool.up, BcaI18n.t("全部 UP 主"), upFilter);
+  if (tagFilterSelect) tagFilter = populateSelectOptions(tagFilterSelect, pool.tag, BcaI18n.t("全部标签"), tagFilter);
+}
+
+// 数据源或筛选条件变化时走这里（不带缓存，顺手把逐键缓存清掉）
+function refreshVideoFilterOptions() {
+  videoFilterPoolCache.clear();
+  applyVideoFilterPool(buildVideoFilterPool());
+}
+
+// 搜索框逐键走这里：同一 (收藏范围, #videoFilter, 搜索词) 只算一次
+function refreshVideoFilterOptionsForSearch() {
+  const key = videoFilterPoolKey();
+  let pool = videoFilterPoolCache.get(key);
+  if (!pool) {
+    pool = buildVideoFilterPool();
+    if (videoFilterPoolCache.size >= VIDEO_FILTER_POOL_CACHE_MAX) videoFilterPoolCache.clear();
+    videoFilterPoolCache.set(key, pool);
+  }
+  applyVideoFilterPool(pool);
 }
 
 function legacySearchIndex(video) {
@@ -2321,6 +2421,18 @@ function releaseFocusTrap(container) {
   }
 }
 
+// 1.7.12（perf PF-7）：报告点名的 `bindCopyButton()` 在本仓库不存在（它把 copyFieldButton
+// 与 trapFocus 看成了一个函数，行号也落在别处），当前也没有「同一个 button 被绑两次」的
+// 可达路径 —— copyFieldButton 每次都新建节点。但「一次点击复制两遍、弹两个 toast」这类
+// 副作用叠加只差一次重构就会回来，所以在绑定这一层加一道幂等闸：同一个元素只认第一次绑定。
+const copyBoundElements = new WeakSet();
+function bindCopyToClipboard(element, value, successMessage) {
+  if (copyBoundElements.has(element)) return element;
+  copyBoundElements.add(element);
+  element.addEventListener("click", () => copyToClipboard(value, successMessage));
+  return element;
+}
+
 function copyFieldButton(value, label) {
   const button = document.createElement("button");
   button.type = "button";
@@ -2328,7 +2440,7 @@ function copyFieldButton(value, label) {
   button.title = label;
   button.setAttribute("aria-label", BcaI18n.t("{label}：{value}", { label, value }));
   button.innerHTML = `${BcaIcons.svg("copy")}${escapeHtml(label)}`;
-  button.addEventListener("click", () => copyToClipboard(value, BcaI18n.t("{label}成功", { label })));
+  bindCopyToClipboard(button, value, BcaI18n.t("{label}成功", { label }));
   return button;
 }
 
@@ -4363,7 +4475,8 @@ function applySearchNow() {
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = 0;
   resetPaging();
-  refreshVideoFilterOptions();
+  // 1.7.12（perf PF-2）：逐键这条路走带缓存的入口，连着敲 / 退格都不再重跑全表词频
+  refreshVideoFilterOptionsForSearch();
   renderVideos();
 }
 

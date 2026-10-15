@@ -2620,6 +2620,76 @@ test("保留目录名只有一份权威名单，收藏库那条链路也查（V1
     "「把下载好的视频放进收藏夹」那条链路也要查保留名单");
 });
 
+// ---- V1.7.12（审查报告 P2 批次 5）----
+
+test("十年区间的日历表不再每次重算，筛选器排序复用同一个 collator（V1.7.12）", () => {
+  const stats = readProjectFile("stats.js");
+  const core = readProjectFile("stats-core.js");
+  const library = readProjectFile("library.js");
+  // PF-1：十年区间一次渲染要铺 3653 天，原来每次 render 重算 4 遍
+  assert.match(stats, /let dayListCache = \{ key: "", keys: null \};/, "日历表要有单槽缓存");
+  assert.match(stats, /if \(dayListCache\.keys && dayListCache\.key === cacheKey\) return dayListCache\.keys;/,
+    "命中缓存要直接返回，别再重算");
+  assert.match(stats, /dayListCache = \{ key: cacheKey, keys: keys \};/, "算完要回填缓存");
+  assert.match(core, /const direct = dayStartTime\(end\.getFullYear\(\), end\.getMonth\(\), end\.getDate\(\) - \(span - 1\)\);/,
+    "clampSpan 要用闭式求解，别一天一天往回退");
+  // PF-2：词频排序的比较器不能每比较一次就现建一个 collator
+  assert.match(library, /const OPTION_TEXT_COLLATOR = new Intl\.Collator\("zh-CN"\);/);
+  assert.equal(/localeCompare\(right\[0\], "zh-CN"\)/.test(library), false, "排序比较器里不该再现场建 collator");
+  assert.match(library, /\.sort\(\(left, right\) => right\[1\] - left\[1\] \|\| OPTION_TEXT_COLLATOR\.compare\(left\[0\], right\[0\]\)\)/);
+  // 逐键那条路走缓存入口；所有「数据变了」的入口仍然走不带缓存的那条（顺带清缓存）
+  const searchStart = library.indexOf("function applySearchNow()");
+  assert.ok(searchStart > 0, "找不到 applySearchNow");
+  const nextFn = library.indexOf("\nfunction ", searchStart + 10);
+  const searchBody = library.slice(searchStart, nextFn > 0 ? nextFn : library.length);
+  assert.match(searchBody, /refreshVideoFilterOptionsForSearch\(\)/, "搜索逐键要走带缓存的入口");
+  assert.equal(/refreshVideoFilterOptions\(\)/.test(searchBody.replace(/refreshVideoFilterOptionsForSearch/g, "")), false,
+    "搜索逐键不该再走不带缓存的入口");
+  assert.match(library, /videoFilterPoolCache\.clear\(\);/);
+  assert.match(library, /const VIDEO_FILTER_POOL_CACHE_MAX = \d+;/);
+});
+
+test("收藏夹列表按输入重画时复用行节点，缓存过的根目录有上限（V1.7.12）", () => {
+  const library = readProjectFile("library.js");
+  // PF-3：逐键重画整个侧栏时，只有指纹变了才重建 <li>
+  assert.match(library, /function collectionRowsFingerprint\(rows, allLabel\)/);
+  assert.match(library, /function buildCollectionRow\(row\)/);
+  assert.match(library, /if \(signature !== collectionRowsSignature \|\| collectionRowNodes\.size !== rows\.length\) \{/,
+    "指纹没变就不该重建行节点");
+  assert.match(library, /const node = collectionRowNodes\.get\(row\.key\);/,
+    "过滤命中与否应落在已有节点上");
+  // PF-4：根目录个数也要有上限，超出时连 storageUsageCache / lastScanRecordCount 一起清
+  assert.match(library, /const ARCHIVE_CACHE_MAX_ROOTS = \d+;/);
+  assert.match(library, /function dropRootCaches\(rootKey\) \{/);
+  assert.match(library, /storageUsageCache\.delete\(rootKey\);/);
+  assert.match(library, /lastScanRecordCount\.delete\(rootKey\);/);
+  assert.match(library, /while \(archiveCacheOrder\.length > ARCHIVE_CACHE_MAX_ROOTS\) dropRootCaches\(archiveCacheOrder\[0\]\);/,
+    "超上限要从最久没用的那份开始丢");
+  assert.match(library, /function clearArchiveCache\(handle\) \{\s*dropRootCaches\(rootCacheKey\(handle\)\);/,
+    "「刷新」的整表丢弃也要走同一条路径");
+});
+
+test("导入进度的落盘窗口放宽，复制绑定做了幂等（V1.7.12）", () => {
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+  // PF-5：报告点的 500ms 整包重写
+  assert.match(background, /const IMPORT_STATE_PUBLISH_INTERVAL_MS = (\d+);/);
+  const interval = Number(background.match(/const IMPORT_STATE_PUBLISH_INTERVAL_MS = (\d+);/)[1]);
+  assert.ok(interval >= 1000, `落盘窗口至少放宽到 1000ms（当前 ${interval}）`);
+  assert.match(background, /if \(!force && now - importStatePublishAt < IMPORT_STATE_PUBLISH_INTERVAL_MS\) return;/);
+  assert.match(background, /if \(text === importStatePublishedText\) return;/, "内容没变仍然不写");
+  // PF-7：报告点名的 bindCopyButton 不存在，但绑定这一层要有幂等闸
+  assert.match(library, /const copyBoundElements = new WeakSet\(\);/);
+  assert.match(library, /function bindCopyToClipboard\(element, value, successMessage\) \{\s*if \(copyBoundElements\.has\(element\)\) return element;/,
+    "同一个元素只认第一次绑定");
+  const copyFieldStart = library.indexOf("function copyFieldButton(value, label)");
+  assert.ok(copyFieldStart > 0, "找不到 copyFieldButton");
+  const nextFn = library.indexOf("\nfunction ", copyFieldStart + 10);
+  const copyFieldBody = library.slice(copyFieldStart, nextFn > 0 ? nextFn : library.length);
+  assert.match(copyFieldBody, /bindCopyToClipboard\(button, value, /, "复制按钮要走幂等绑定");
+  assert.equal(/button\.addEventListener\("click"/.test(copyFieldBody), false, "别在 copyFieldButton 里裸绑 click");
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

@@ -303,11 +303,17 @@
 
   // 区间最多跨 MAX_RANGE_DAYS 个「日历日」。用日期构造递增，越界（undefined）时停手，
   // 免得遇到 275760 年那种会变成 NaN 的年份。
+  // 1.7.12（perf PF-1）：原先每一步都构造一次日期，十年区间要空转 3652 圈；
+  // 现在先直接算最远那一格 —— 正常年份一步到位，只有走到 275760 年那种越界年份
+  // 才会落到下面那个「逐步逼近、遇到非有限值就停」的循环里，行为与原来逐字一致。
   function clampSpan(fromStart, toEnd) {
     if (!Number.isFinite(fromStart) || !Number.isFinite(toEnd)) return { from: fromStart, to: toEnd };
     const end = new Date(toEnd);
+    const span = Math.max(1, Math.floor(numberOr(MAX_RANGE_DAYS, 1)));
+    const direct = dayStartTime(end.getFullYear(), end.getMonth(), end.getDate() - (span - 1));
+    if (Number.isFinite(direct)) return { from: Math.max(fromStart, direct), to: toEnd };
     let limit = dayStartTime(end.getFullYear(), end.getMonth(), end.getDate());
-    for (let i = 1; i < MAX_RANGE_DAYS; i += 1) {
+    for (let i = 1; i < span; i += 1) {
       const start = dayStartTime(end.getFullYear(), end.getMonth(), end.getDate() - i);
       if (!Number.isFinite(start)) break;
       limit = start;

@@ -433,21 +433,34 @@
     return { from: localDayKey(range.from), to: localDayKey(range.to) };
   }
 
-  /* 区间覆盖的天数：不用对端给的 days（形状不一定对），直接按天边界数 */
+  /* 区间覆盖的天数：不用对端给的 days（形状不一定对），直接按天边界数。
+     1.7.12（perf PF-1）：这份表只是 (from, to) 两个日键的函数，但一次 render 会在
+     renderTiles / renderRange / chartModeOf / rowsInRange 里问它 4 遍，十年区间下
+     每遍 3653 圈 × (两次 localDayKey + 一次 dayStartTime) ≈ 2.7 ms。现在两件事：
+     ① 单槽缓存按 "from|to" 命中（区间换了键就换，跨零点也不会读到旧值）；
+     ② 圈内改用一个 Date 游标递推，不再拿「今天 + 86400000」回头解析一次日键
+        （DAY_MS 在夏令时切换日不等于一天，原来的做法就是为了纠这个偏差，
+         这里用 setDate(+1) + setHours(0,0,0,0) 达成同样的归一，省掉一轮解析）。 */
+  let dayListCache = { key: "", keys: null };
   function rangeDayList(range) {
     const keys = [];
     if (!range) return keys;
     const meta = rangeDayKeys(range);
     if (!isDayKey(meta.from) || !isDayKey(meta.to)) return keys;
-    let time = dayStartTime(meta.from);
+    const cacheKey = meta.from + "|" + meta.to;
+    if (dayListCache.keys && dayListCache.key === cacheKey) return dayListCache.keys;
+    const start = dayStartTime(meta.from);
     const last = dayStartTime(meta.to);
-    if (!Number.isFinite(time) || !Number.isFinite(last)) return keys;
+    if (!Number.isFinite(start) || !Number.isFinite(last)) return keys;
+    const cursor = new Date(start);
     let guard = 0;
-    while (time <= last && guard < MAX_CUSTOM_DAYS + 2) {
-      keys.push(localDayKey(time));
-      time = dayStartTime(localDayKey(time + DAY_MS));
+    while (cursor.getTime() <= last && guard < MAX_CUSTOM_DAYS + 2) {
+      keys.push(localDayKey(cursor.getTime()));
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(0, 0, 0, 0);
       guard += 1;
     }
+    dayListCache = { key: cacheKey, keys: keys };
     return keys;
   }
 
