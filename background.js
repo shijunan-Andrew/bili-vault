@@ -52,8 +52,15 @@ const COVER_QUALITY = 0.8;
    而且直接用上游给的地址（页面给的 og:image、本地旧记录、候选列表都可能带脏值）。
    现在两件事一起收紧：域名只允许 B 站图床，且必须走限速与超时。
    白名单只放这两个图床域名，1.3.0 删掉的那三条视频流域名权限一律不许加回来
-   （见 AI_HANDOFF 红线第 4 条，那里写清了是哪三条）。 */
-const COVER_HOST_SUFFIXES = [".hdslb.com", ".bilibili.com"];
+   （见 AI_HANDOFF 红线第 4 条，那里写清了是哪三条）。
+   1.7.11（facet-privacy P2-1）：这份名单必须和 manifest.json 的 host_permissions 一致 ——
+   原来这里还写着 `.bilibili.com`，而 manifest 只授权了 `*.hdslb.com` 与 `api.bilibili.com`，
+   于是「代码白名单放行、Chrome 层拦截」，用户看到的是「封面恢复不了」，排查时又以为域名
+   不在白名单里。现在照着 manifest 拆成两栏：后缀栏对应 `*.hdslb.com`（含裸域名），
+   精确栏对应 `api.bilibili.com`（B 站接口自己回的图床地址）。
+   **以后要加域名，必须同步改 manifest.json 的 host_permissions**（有守卫断言钉住两者一致）。 */
+const COVER_HOST_SUFFIXES = [".hdslb.com"];
+const COVER_EXACT_HOSTS = ["hdslb.com", "api.bilibili.com"];
 const COVER_FETCH_TIMEOUT_MS = 20000;
 
 // 4.5.1：工具栏图标的观感对齐网页/弹窗里的 logo——更大的圆角比例、
@@ -270,7 +277,11 @@ function safeSegment(input, fallback = "未命名收藏夹") {
 
 /* V1.4.3（P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
    原来这份名单在两个地方各写一遍（手动添加、导入），自动归档那条链路漏了 ——
-   B 站收藏夹真叫「001错误报告」时，视频会被写进错误报告目录里。 */
+   B 站收藏夹真叫「001错误报告」时，视频会被写进错误报告目录里。
+   1.7.11（facet-security P2-3）：权威名单现在在 archive-core.js 的
+   `RESERVED_COLLECTION_NAMES` / `isReservedCollectionName()` 里（收藏库那条
+   「把下载好的视频放进收藏夹」链路原本完全不查名单）。SW 是 ES module，拿不到经典脚本，
+   所以这里保留一份**逐字相同**的副本，由 test/stability.test.cjs 的守卫断言逐项比对。 */
 const RESERVED_COLLECTION_NAMES = new Set([
   "错误报告",
   "001错误报告",
@@ -390,7 +401,7 @@ function coverFetchUrl(rawUrl) {
     const parsed = new URL(normalizeUrl(rawUrl));
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
     const host = parsed.hostname.toLowerCase();
-    if (!COVER_HOST_SUFFIXES.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix))) return "";
+    if (!COVER_EXACT_HOSTS.includes(host) && !COVER_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return "";
     if (parsed.protocol === "http:") parsed.protocol = "https:";
     return parsed.href;
   } catch (_) {
@@ -431,20 +442,33 @@ async function loadCoverPng(url) {
   }
 }
 
+/* 1.7.11（facet-security P2-1）：单行字段一律不许带换行与控制符。
+   标题 / 收藏夹名 / 链接 / UP 名这些都可能原样来自页面或接口，上传者能往自己的标题或
+   简介里塞任意多行；这些值以前只是 `\r\n → \n` 归一就写进 视频信息.txt，
+   于是一行 `视频链接：https://evil.example` 就能在解析时覆盖真实字段。
+   读侧（archive-core.js 的 parseInfoFile）另有两道闸，这里从写侧先掐死。
+   简介是**多行字段**，故意不走这个函数。 */
+function infoLineValue(value, fallback = "未知") {
+  const text = String(value ?? "").replace(/[\r\n\t\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  return text || fallback;
+}
+
 function buildInfo(data, folderName, savedAt) {
   const metadata = data.metadata || {};
   const favoriteAt = new Date(Number(data.favoriteAt) || Date.now());
   const favoriteAtText = metadata.imported && metadata.favoriteTimeUnknown
     ? "未知"
     : formatChineseDateTime(favoriteAt, true);
-  const tags = Array.isArray(metadata.tags) && metadata.tags.length ? metadata.tags.join("、") : (metadata.imported ? "未知" : "无");
-  const title = metadata.title || "未知";
-  const videoUrl = metadata.url || "未知";
-  const bvid = metadata.bvid || (videoUrl.match(/\bBV[\w]+/i)?.[0] || "未知");
+  const tags = Array.isArray(metadata.tags) && metadata.tags.length
+    ? metadata.tags.map((tag) => infoLineValue(tag, "")).filter(Boolean).join("、") || (metadata.imported ? "未知" : "无")
+    : (metadata.imported ? "未知" : "无");
+  const title = infoLineValue(metadata.title);
+  const videoUrl = infoLineValue(metadata.url);
+  const bvid = infoLineValue(metadata.bvid || (String(metadata.url || "").match(/\bBV[\w]+/i)?.[0] || "未知"));
   const aid = metadata.aid ? `av${String(metadata.aid).replace(/^av/i, "")}` : "未知";
-  const upMid = metadata.upMid || "未知";
-  const upName = metadata.upName || "未知";
-  const upHome = metadata.upMid ? `https://space.bilibili.com/${metadata.upMid}` : "未知";
+  const upMid = infoLineValue(metadata.upMid);
+  const upName = infoLineValue(metadata.upName);
+  const upHome = metadata.upMid ? `https://space.bilibili.com/${importIsPlaceholder(metadata.upMid) ? "" : String(metadata.upMid).replace(/[^0-9]/g, "")}` : "未知";
   const description = String(metadata.description || "未知").replace(/\r\n/g, "\n");
   const stats = metadata.stats || {};
   const hasStats = STAT_KEYS.some((key) => !importIsPlaceholder(stats[key]));
@@ -453,12 +477,12 @@ function buildInfo(data, folderName, savedAt) {
     "【基本信息】",
     `视频收藏时间：${favoriteAtText}`,
     `信息保存于：${formatDateTime(savedAt)}`,
-    `所属收藏夹：${folderName}`,
+    `所属收藏夹：${infoLineValue(folderName)}`,
     `视频标题：${title}`,
     `视频链接：${videoUrl}`,
     `BV号：${bvid}`,
     `av号：${aid}`,
-    `分区：${metadata.category || "未知"}`,
+    `分区：${infoLineValue(metadata.category)}`,
     `视频时长：${metadata.imported && !(Number(metadata.duration) > 0) ? "未知" : formatDuration(metadata.duration)}`,
     `视频发布时间：${formatPublishDate(metadata.pubdate)}`,
     // 封面候选全失败时这里会留下「待补全」标记，让后续导入还能重新尝试补真封面（见 COVER_PENDING_LINE）
@@ -632,11 +656,11 @@ async function addManualVideo(data) {
     // 又会因为"已存在"被跳过，等于白跑。所以收尾必须自己兜住异常。
     try {
       await chrome.storage.local.set({
-        lastResult: { message: `“${metadata.title}”：${message}`, path: savedPaths.slice(0, 10).join("\n"), createdAt: Date.now() },
+        lastResult: { message: `“${metadata.title}”：${message}`, path: maskLocalUserPaths(savedPaths.slice(0, 10).join("\n")), createdAt: Date.now() },
         // S3：这一支会把上面 logError 写的 lastError 整个覆盖掉，所以 needsReauth 必须自己补上 ——
         // 覆盖掉布尔值就等于把「重新授权」按钮又抹掉了，而这里恰恰会撞上授权失效
         // （writeFile 落盘时才发现权限被回收）。判据与 logError 保持一致，走同一个 helper。
-        ...(failures.length ? { lastError: { reportPath, createdAt: Date.now(), report: message, needsReauth: failures.some((item) => needsReauthFromError(item.message)) } } : { lastError: null })
+        ...(failures.length ? { lastError: { reportPath, createdAt: Date.now(), report: maskLocalUserPaths(message), needsReauth: failures.some((item) => needsReauthFromError(item.message)) } } : { lastError: null })
       });
     } catch (storageError) {
       console.warn("写入最近结果失败（视频已经保存成功）", storageError);
@@ -666,6 +690,32 @@ function addManualVideoInOrder(data) {
 
 // 4.3：错误报告里会带本地目录路径、视频链接和堆栈，提醒用户不要外发
 const ERROR_REPORT_NOTICE = "提示：本报告包含本地目录路径与视频链接，仅供自己排查使用，请勿公开分享。";
+
+/* 1.7.11（facet-privacy P2-2 / P2-4）：报告正文（也含 lastResult.path）里那串绝对路径
+   带着 Windows 用户名 —— `C:\Users\<真名>\Desktop\...`。它原来原样进了 chrome.storage.local，
+   同机任何程序、任何拿到浏览器 profile 的人都能读到，顺着就能推出机主的现实身份。
+   报告文件本身该留就留（排障要用），但**进 storage 和给网页看的那一份**必须先把
+   用户目录名抹掉。文件系统访问 API 不给我们根目录的绝对路径，所以没法做「前缀替换成
+   <备份目录>」那套，这里直接按 Windows 用户目录的形状打码。 */
+/* 用 new RegExp 而不是正则字面量：test/stability.test.cjs 里的 stripComments 是手写词法
+   扫描器，它在正则的字符类里碰到 `[\\/]` 会提前收尾、把后面的代码当成字符串，结果注释
+   再也剥不掉 —— 几条「死代码不许回来」的断言就会误报。字符串形式绕开这个坑。 */
+const USER_DIR_PATTERN = new RegExp("([A-Za-z]:[\\\\/]Users[\\\\/])[^\\\\/\\r\\n\"'<>|]+", "gi");
+const LEGACY_USER_DIR_PATTERN = new RegExp("([A-Za-z]:[\\\\/]Documents and Settings[\\\\/])[^\\\\/\\r\\n\"'<>|]+", "gi");
+const PATH_SPLIT_PATTERN = new RegExp("[\\\\/]+");
+
+function maskLocalUserPaths(text) {
+  return String(text ?? "")
+    .replace(USER_DIR_PATTERN, "$1<用户>")
+    .replace(LEGACY_USER_DIR_PATTERN, "$1<用户>");
+}
+
+// 存进 storage 的报告路径只留归档内的相对位置（「001错误报告/xxx_错误报告.txt」），
+// 用户目录名一并打码 —— 显示给用户看的信息量不变，机器上留的明文少一截。
+function storageReportLabel(path) {
+  const parts = maskLocalUserPaths(path).split(PATH_SPLIT_PATTERN).filter(Boolean);
+  return parts.slice(-2).join("/");
+}
 
 function reportText(error, context = {}) {
   const now = new Date();
@@ -745,7 +795,7 @@ async function logError(error, context = {}) {
   // import-bili-favorites 的处理器更糟 —— 它在 await logError 之后才 sendResponse，
   // 一旦抛在这里，调用方永远收不到回应（弹窗一直转圈）。
   try {
-    await chrome.storage.local.set({ lastError: { report, reportPath, createdAt: Date.now(), needsReauth: needsReauthFromError(error) }, authorizedErrorAt: null });
+    await chrome.storage.local.set({ lastError: { report: maskLocalUserPaths(report), reportPath: storageReportLabel(reportPath), createdAt: Date.now(), needsReauth: needsReauthFromError(error) }, authorizedErrorAt: null });
   } catch (storageError) {
     console.warn("写入错误报告失败（报告正文仍会返回给调用方）", storageError);
   }
@@ -799,7 +849,7 @@ async function saveFavorite(data) {
     // 原来它裸 await 在同一个 try 里：storage 一抛错就被 catch 改写成「保存失败」，
     // 而磁盘上其实已经有一份完整记录。收尾必须自己兜住异常，不许改写已成功的结果。
     try {
-      await chrome.storage.local.set({ lastResult: { message, path: savedFolders.join("\n"), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+      await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(savedFolders.join("\n")), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
     } catch (storageError) {
       console.warn("写入最近结果失败（收藏已经保存成功）", storageError);
     }
@@ -813,7 +863,7 @@ async function saveFavorite(data) {
     return {
       ok: false,
       message: error?.message || "保存失败。",
-      details: saved.reportPath ? `错误报告已保存：${saved.reportPath}` : "错误报告保存在插件中；点击插件图标可查看并下载。"
+      details: saved.reportPath ? `错误报告已保存：${storageReportLabel(saved.reportPath)}` : "错误报告保存在插件中；点击插件图标可查看并下载。"
     };
   }
 }
@@ -1006,6 +1056,15 @@ async function biliImportApiGet(path, params = {}, timeoutMs = 15000, tabId = nu
   // 唯一的出网口 —— 所有 B 站请求都在这里排队限速，见 biliThrottleWait 的说明
   await biliThrottleWait();
   const url = new URL(path, "https://api.bilibili.com");
+  /* 1.7.11（facet-security P2-2）：这是全插件唯一带 cookie 的请求出口
+     （下面 fetch 用 credentials: "include"），但以前从不校验解析出来的地址还在不在
+     api.bilibili.com。今天 16 个调用点的 path 全是字面量，所以没有可利用路径 —— 但这是
+     「下一行编辑就可能踩中」的纵深缺陷：只要将来有人传入 `//evil.example/x` 这种
+     protocol-relative 形式的 path（URL 构造函数会把主机整个换掉），就会变成带着用户的
+     B 站 cookie 访问任意主机。**这个断言不能删。** */
+  if (url.origin !== "https://api.bilibili.com") {
+    throw new Error("接口地址不在允许的域名里。");
+  }
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
@@ -1816,7 +1875,11 @@ const IMPORT_QUEUE_WAIT_TIMEOUT_MS = 30000;
 // active 快照（见 importReconcileState），残影可以立刻复位，不必再等 90 秒。
 // chrome.storage.session 默认配额 10MB。被改写的 视频信息.txt 原文只保留这么多字节，
 // 超出后只记名字：回滚时这类文件无法还原内容，会在结果里如实报出来。
-const IMPORT_JOURNAL_TEXT_BUDGET_BYTES = 2 * 1024 * 1024;
+// 1.7.11（facet-privacy P2-8）：撤销真正需要的只是「目录 + 文件名 + 原文」，原文省不掉，
+// 但 2MB 意味着一次大导入能把上千条记录的简介与收藏时间整段留在会话里。读到 session 的
+// 只有后台自己（不落盘、不向内容脚本暴露），所以风险本来就低 —— 这里把窗口收窄到 1MB，
+// 够覆盖正常的一次导入，超出的部分照旧只记名字。
+const IMPORT_JOURNAL_TEXT_BUDGET_BYTES = 1 * 1024 * 1024;
 
 // 连续命中风控的条目数（连续 N 条都撞限流就中止整轮导入，阈值常量见导入区块）
 let importRateLimitStreak = 0;
@@ -2131,7 +2194,7 @@ async function importRecoverInterruptedImport() {
   await chrome.storage.local.set({
     // needsReauth 恒为 false：中断报告是"service worker 被回收"，与文件夹授权无关。
     // 显式写出来是为了让这个字段在每条 lastError 上都存在，前台不必区分"旧数据"和"这次没失效"。
-    lastError: { report: report.slice(0, 16000), reportPath, createdAt: Date.now(), needsReauth: false }
+    lastError: { report: maskLocalUserPaths(report.slice(0, 16000)), reportPath: storageReportLabel(reportPath), createdAt: Date.now(), needsReauth: false }
   }).catch(() => {});
   return true;
 }
@@ -3648,7 +3711,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
     await chrome.storage.local.set({
       // needsReauth 恒为 false：风控中止与文件夹授权无关。
       // 显式写出来是为了让这个字段在每条 lastError 上都存在，前台不必区分"旧数据"和"这次没失效"。
-      lastError: { report: reportLines.join("\n").slice(0, 16000), reportPath, createdAt: finishedAt, needsReauth: false },
+      lastError: { report: maskLocalUserPaths(reportLines.join("\n").slice(0, 16000)), reportPath: storageReportLabel(reportPath), createdAt: finishedAt, needsReauth: false },
       lastResult: { message, createdAt: finishedAt }
     });
     publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message, rateLimited: true }, true);
@@ -3672,7 +3735,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
     // S3：导入失败也可能是"写到一半写入授权失效"（ensureWritePermission 在任务开始时查过，
     // 但授权可能中途被回收）。报告正文里会带这句原文，这里顺手把它翻译成布尔值，
     // 前台的「重新授权」按钮就不必再依赖中文文案。
-    await chrome.storage.local.set({ lastError: { report, reportPath, createdAt: Date.now(), needsReauth: needsReauthFromError(report) } });
+    await chrome.storage.local.set({ lastError: { report: maskLocalUserPaths(report), reportPath: storageReportLabel(reportPath), createdAt: Date.now(), needsReauth: needsReauthFromError(report) } });
   }
   // 分页缺口必须同时出现在回给界面的消息里，否则界面只会显示"失败 N 个"
   const message = `导入/更新完成：新导入 ${imported} 个，更新 ${refreshed} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`
@@ -3777,7 +3840,7 @@ async function recordFavoriteError(data) {
   return {
     ok: false,
     message: error.message,
-    details: saved.reportPath ? `错误报告已保存：${saved.reportPath}` : "错误报告保存在插件中；点击插件图标可查看并下载。",
+    details: saved.reportPath ? `错误报告已保存：${storageReportLabel(saved.reportPath)}` : "错误报告保存在插件中；点击插件图标可查看并下载。",
     reportPath: saved.reportPath
   };
 }

@@ -2526,6 +2526,100 @@ test("归档目录名的 200 字节闸、坏库留档、半截目录都钉住（
   assert.match(readProjectFile("theme.js"), /storage\.persist\(\)/);
 });
 
+// ---- V1.7.11（审查报告 P2 批次 4）------------------------------------------
+
+test("出网口只有白名单里的域名，报告里的本机路径先打码再进 storage（V1.7.11）", () => {
+  const background = readProjectFile("background.js");
+  const manifest = readProjectFile("manifest.json");
+
+  // 封面白名单必须和 manifest 的 host_permissions 对齐：代码放行的域名如果没被授权，
+  // service worker 侧 fetch 会被 Chrome 直接拦掉，用户只看到「封面恢复不了」
+  assert.match(background, /const COVER_HOST_SUFFIXES = \["\.hdslb\.com"\];/,
+    "封面白名单只留 manifest 已授权的 hdslb 系域名");
+  assert.equal(/\.bilibili\.com/.test(background.match(/const COVER_HOST_SUFFIXES = \[[^\]]*\];/)?.[0] || ""), false,
+    "bilibili.com 没在 manifest 的 host_permissions 里，代码白名单不许放行它");
+  assert.match(manifest, /"https:\/\/\*\.hdslb\.com\/\*"/);
+  assert.match(background, /以后要加域名，必须同步改 manifest\.json 的 host_permissions/,
+    "注释里要写明新增域名必须同步 manifest.json 的 host_permissions");
+
+  // 唯一带 cookie 的出网口要自己断言 origin —— 将来谁把 path 拼成绝对地址就会被当场拦下
+  assert.match(background, /const url = new URL\(path, "https:\/\/api\.bilibili\.com"\);/);
+  assert.match(background, /if \(url\.origin !== "https:\/\/api\.bilibili\.com"\) \{\s*\n\s*throw new Error\("接口地址不在允许的域名里。"\);/,
+    "biliImportApiGet 必须自己校验解析后的 origin");
+
+  // 报告正文里的 C:\\Users\\<真名>\\... 不再原样进 chrome.storage.local
+  assert.match(background, /function maskLocalUserPaths\(text\) \{/);
+  assert.equal(/lastError: \{ report: report\.slice\(0, 16000\)/.test(background), false,
+    "报告正文进 storage 前必须先打码，不许裸写");
+  const rawWrites = background.match(/report: (?!maskLocalUserPaths)[A-Za-z]/g) || [];
+  assert.deepEqual(rawWrites, [], "所有 report 写入点都要走 maskLocalUserPaths");
+  assert.match(background, /reportPath: storageReportLabel\(/);
+});
+
+test("缓存的 B 站 UID 有清除入口，剪贴板提示说了实话（V1.7.11）", () => {
+  const settingsHtml = readProjectFile("settings.html");
+  const settingsJs = readProjectFile("settings.js");
+  const library = readProjectFile("library.js");
+
+  assert.match(settingsHtml, /id="forgetUid"/, "设置页要有「忘记已记住的 UID」按钮");
+  assert.match(settingsHtml, /data-i18n="归档会记录收藏时间"/,
+    "归档会记收藏时刻这件事要让用户知情（facet-privacy P2-5）");
+  assert.match(settingsJs, /chrome\.storage\.local\.remove\("lastImportUid"\)/,
+    "按钮必须真的清掉 lastImportUid");
+  assert.match(settingsJs, /\$\("forgetUid"\)\?\.addEventListener\("click"/);
+
+  // 剪贴板不会被自动清空这件事要写在提示里，别让用户以为插件替他收拾了
+  assert.match(library, /剪贴板不会被自动清空，贴完记得覆盖掉。/);
+});
+
+test("归档文本的字段解析关得住简介里的换行注入（V1.7.11）", () => {
+  const archive = readProjectFile("archive-core.js");
+  const background = readProjectFile("background.js");
+
+  // 读侧：只认已知段、同键首次出现优先、进过内容段就不再重开字段段
+  assert.match(archive, /const FIELD_SECTIONS = new Set\(\["基本信息", "UP主", "互动数据"\]\);/);
+  assert.match(archive, /const CONTENT_SECTIONS = new Set\(\["标签", "视频简介"\]\);/);
+  assert.match(archive, /if \(key && !\(key in fields\)\) fields\[key\] = value;/,
+    "同一个键要首次出现优先，否则后面的行能覆盖真实值");
+  assert.match(archive, /if \(divider > 0 && !fieldsClosed && FIELD_SECTIONS\.has\(section\)\)/,
+    "进过内容段之后不许再认字段");
+
+  // 写侧：单行字段一律走 infoLineValue，把换行/控制符压成空格
+  assert.match(background, /function infoLineValue\(value, fallback = "未知"\) \{/);
+  assert.match(background, /const title = infoLineValue\(metadata\.title\);/);
+  assert.match(background, /const videoUrl = infoLineValue\(metadata\.url\);/);
+  assert.match(background, /const upName = infoLineValue\(metadata\.upName\);/);
+  assert.match(background, /所属收藏夹：\$\{infoLineValue\(folderName\)\}/);
+
+  // 渲染侧：链接只认 B 站自己的域名，注入成功也只会变成一行纯文本
+  const library = readProjectFile("library.js");
+  assert.match(library, /function bilibiliLink\(value\) \{/);
+  assert.match(library, /url: bilibiliLink\(url\),/);
+  assert.match(library, /upHome: bilibiliLink\(field\(info, "UP主主页"\)\),/);
+});
+
+test("保留目录名只有一份权威名单，收藏库那条链路也查（V1.7.11）", () => {
+  const archive = readProjectFile("archive-core.js");
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+
+  assert.match(archive, /const RESERVED_COLLECTION_NAMES = \[/);
+  assert.match(archive, /function isReservedCollectionName\(name\) \{/);
+  assert.match(archive, /isReservedCollectionName,/);
+  // 名单内容两边必须逐项一致（SW 拿不到经典脚本，只能留一份副本）
+  const names = (source, pattern) => {
+    const block = source.match(pattern)?.[0] || "";
+    return [...block.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  };
+  assert.deepEqual(
+    names(archive, /const RESERVED_COLLECTION_NAMES = \[[\s\S]*?\];/),
+    names(background, /const RESERVED_COLLECTION_NAMES = new Set\(\[[\s\S]*?\]\);/),
+    "两边的保留目录名必须逐项一致"
+  );
+  assert.match(library, /if \(BcaArchiveCore\.isReservedCollectionName\(collectionName\)\) \{/,
+    "「把下载好的视频放进收藏夹」那条链路也要查保留名单");
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
@@ -2918,7 +3012,7 @@ test("失效原因：attr → 文案映射（真跑）", () => {
 test("失效原因写进 视频信息.txt：失效才写，有效一个字都不加（真跑）", () => {
   // 依赖一起加载：buildInfo 内部用 format*/importIsPlaceholder，importIsPlaceholder 用 importClean
   const { buildInfo } = loadBackgroundFunctions(
-    ["buildInfo", "importIsPlaceholder", "importClean", "importAttrReason",
+    ["buildInfo", "infoLineValue", "importIsPlaceholder", "importClean", "importAttrReason",
       "formatDateTime", "formatChineseDateTime", "formatDuration", "formatPublishDate", "localDateParts"],
     ["STAT_KEYS", "STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES", "IMPORT_ATTR_LABELS"]
   );
@@ -2954,7 +3048,7 @@ test("失效原因的全链路：接口 attr → importMetadata → 视频信息
   // importMetadata 现造的**另一个对象**。只在 buildInfo 里写逻辑、忘了在 importMetadata
   // 里带上 attr 的话，原因永远只停在内存里，txt 里一行都不会有（而且不会有任何报错）。
   const { importMetadata, buildInfo } = loadBackgroundFunctions(
-    ["importMetadata", "buildInfo", "importUsefulTitle", "importIsInvalidTitle", "importClean",
+    ["importMetadata", "buildInfo", "infoLineValue", "importUsefulTitle", "importIsInvalidTitle", "importClean",
       "importBvToAid", "importAidToBv", "importAttrReason", "importIsPlaceholder",
       "formatDateTime", "formatChineseDateTime", "formatDuration", "formatPublishDate", "localDateParts"],
     ["IMPORT_INVALID_TITLES", "IMPORT_BV_TABLE", "IMPORT_ATTR_LABELS", "STAT_KEYS", "STAT_LABELS", "IMPORT_PLACEHOLDER_VALUES"]
@@ -3638,8 +3732,8 @@ test("改收藏夹归属时，新旧两种磁盘标签都要认（静态回归�
   );
   assert.match(
     readProjectFile("background.js"),
-    /所属收藏夹：\$\{folderName\}/,
-    "background.js 的 buildInfo 是唯一的写入方，要用新标签"
+    /所属收藏夹：\$\{infoLineValue\(folderName\)\}/,
+    "background.js 的 buildInfo 是唯一的写入方，要用新标签（1.7.11 起值还要过单行净化）"
   );
   // 不许退回只认旧标签
   assert.doesNotMatch(library, /\/\^保存文件夹\[：:\]\.\*\$\/m/);
@@ -4428,8 +4522,21 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
 
   // P2-15 / P2-16 / P2-17：封面出网与页面代取的兜底
   assert.ok(background.includes("const COVER_FETCH_TIMEOUT_MS = 20000;"), "封面下载必须有超时");
-  assert.ok(background.includes('const COVER_HOST_SUFFIXES = [".hdslb.com", ".bilibili.com"];'),
+  assert.ok(background.includes('const COVER_HOST_SUFFIXES = [".hdslb.com"];'),
     "封面域名白名单只允许 B 站图床");
+  // 1.7.11（facet-privacy P2-1）：白名单必须和 manifest 的 host_permissions 对得上。
+  // 原来这里写着 `.bilibili.com`，而 manifest 只授权了 `*.hdslb.com` 与 `api.bilibili.com`，
+  // 于是「代码放行、Chrome 拦截」—— 用户只看到「封面恢复不了」。这条断言把两者钉在一起，
+  // 以后加域名必须两边一起改。
+  const manifestHosts = JSON.parse(readProjectFile("manifest.json")).host_permissions || [];
+  const coverExact = (background.match(/const COVER_EXACT_HOSTS = \[([^\]]*)\];/) || [, ""])[1]
+    .split(",").map((item) => item.trim().replace(/^"|"$/g, "")).filter(Boolean);
+  for (const suffix of [".hdslb.com"]) {
+    assert.ok(manifestHosts.includes(`https://*${suffix}/*`),
+      `封面后缀白名单 ${suffix} 必须在 manifest 的 host_permissions 里有对应授权，实际 ${JSON.stringify(manifestHosts)}`);
+  }
+  assert.deepEqual(coverExact, ["hdslb.com", "api.bilibili.com"],
+    "精确白名单必须与 manifest 授权的 api.bilibili.com 一致");
   assert.ok(!/COVER_HOST_SUFFIXES[\s\S]{0,200}(bilivideo|akamaized)/.test(background),
     "白名单里不许出现 bilivideo / akamaized（1.3.0 已删掉的三条权限）");
   assert.ok(background.includes("const coverUrl = coverFetchUrl(normalized);"),
@@ -4555,7 +4662,7 @@ test("选完目录必须真的读一次，空文件夹也要建出三个固定�
 });
 
 test("封面白名单接受接口回的 http 地址并升到 https（V1.4.5）", () => {
-  const { coverFetchUrl } = loadBackgroundFunctions(["coverFetchUrl", "normalizeUrl"], ["COVER_HOST_SUFFIXES"]);
+  const { coverFetchUrl } = loadBackgroundFunctions(["coverFetchUrl", "normalizeUrl"], ["COVER_HOST_SUFFIXES", "COVER_EXACT_HOSTS"]);
 
   // V1.4.3 的 P2-17 白名单只认 https，而 B 站接口回的 pic 是 http://i0.hdslb.com/...
   // 而 manifest 只申请了 https://*.hdslb.com/* —— 于是「接口来的封面候选」全被挡掉：

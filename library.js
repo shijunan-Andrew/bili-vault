@@ -589,6 +589,26 @@ function releaseDetailCover() {
   detailCoverUrl = "";
 }
 
+/* 1.7.11（facet-security P2-1）：视频链接与 UP 主主页都来自 视频信息.txt，而那份文本的
+   源头是页面 / 接口。读侧已经不许伪造字段了（parseInfoFile 只在已知段里认字段、同键首次
+   出现优先），这里再从渲染侧收一道：只有 B 站自己的域名才当链接渲染，别的退回纯文本。
+   万一以后又裂开一条注入路径，最坏也只是详情页多显示一行字，不会变成「点一下就跳到
+   别人站点」的锚点。 */
+const BILIBILI_LINK_HOSTS = ["bilibili.com", "b23.tv"];
+
+function bilibiliLink(value) {
+  const text = String(value ?? "").trim();
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch (_) {
+    return "";
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+  const host = parsed.hostname.toLowerCase();
+  return BILIBILI_LINK_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ? text : "";
+}
+
 function videoFromArchiveRecord(collectionName, recordEntry, record, downloadIndex, previousVideos) {
   const info = record.info;
   const share = record.share;
@@ -614,7 +634,7 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
     collection: collectionName,
     directory: recordEntry.name,
     title,
-    url: /^https?:\/\//i.test(url) ? url : "",
+    url: bilibiliLink(url),
     bvid,
     aid,
     downloaded: downloadState.downloaded,
@@ -627,7 +647,7 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
     invalidReason: invalidReasonText(field(info, "失效原因")),
     upName,
     upMid: field(info, "UP主UID"),
-    upHome: field(info, "UP主主页"),
+    upHome: bilibiliLink(field(info, "UP主主页")),
     upFans: realField(info, "UP主粉丝数"),
     favoriteAt: date,
     savedAt: record.savedAt,
@@ -2871,6 +2891,12 @@ async function markVideoDownloaded(video) {
   const parent = await getWritableDownloadParent({ create: true });
   if (!parent) throw new Error(BcaI18n.t("无法创建默认下载文件夹 000视频下载，请检查本地备份文件夹的写入权限。"));
   const collectionName = BcaArchiveCore.safeName(video.collection || "未分类收藏", "未分类收藏", 120);
+  /* 1.7.11（facet-security P2-3）：这条链路以前不查保留目录名 —— B 站收藏夹真叫
+     「001错误报告」时，下载好的视频会被放进插件的错误报告目录里。名单的唯一一份在
+     archive-core.js（background.js 那两条链路也用它，SW 里另有一份逐字相同的副本）。 */
+  if (BcaArchiveCore.isReservedCollectionName(collectionName)) {
+    throw new Error(BcaI18n.t("收藏夹名「{name}」和插件自己用的目录重名，为免写乱本地文件，这次没有保存到本地。", { name: collectionName }));
+  }
   const directoryName = BcaArchiveCore.videoDirectoryLabel(video, 0);
   const collectionHandle = await parent.getDirectoryHandle(collectionName, { create: true });
   const directoryHandle = await collectionHandle.getDirectoryHandle(directoryName, { create: true });
@@ -2938,12 +2964,25 @@ async function runMarkDownloaded() {
 /* ---------------- 4.8.2：手填的下载根目录绝对路径 ----------------
 
    没装本地目录打开助手时，绝对路径没有别的来源。用户在 1.3.0 之前的下载页
-   填过一次的值仍然保留在这里，读出来拼路径，复制到的就是能直接粘进资源管理器的完整路径。 */
+   填过一次的值仍然保留在这里，读出来拼路径，复制到的就是能直接粘进资源管理器的完整路径。
+
+   1.7.11（facet-privacy P2-2）：这串路径里带 Windows 用户名（`C:\Users\<真名>\...`），
+   明文躺在 chrome.storage.local 里，同机任何程序、任何拿到浏览器 profile 的人都能读到。
+   下载页 1.3.0 就删了，现在只有 1.3.0 之前留下的老值可能还在 —— 所以这里做一次
+   **单向迁移**：读到就把它从 storage 里删掉，只在本次会话的内存里留着用。 */
+
+let downloadRootPathMemory = "";
 
 async function readDownloadRootPath() {
+  if (downloadRootPathMemory) return downloadRootPathMemory;
   try {
     const saved = await chrome.storage.local.get("downloadRootPath");
-    return String(saved?.downloadRootPath || "").trim().replace(/[\\/]+$/, "");
+    const value = String(saved?.downloadRootPath || "").trim().replace(/[\\/]+$/, "");
+    if (!value) return "";
+    downloadRootPathMemory = value;
+    // 老值用一次就从磁盘上抹掉，不给它继续明文常驻的机会
+    try { await chrome.storage.local.remove("downloadRootPath"); } catch (_) {}
+    return value;
   } catch (_) { return ""; }
 }
 
@@ -4451,7 +4490,13 @@ toggleFailuresButton?.addEventListener("click", () => {
   failuresExpanded = !failuresExpanded;
   renderFailures();
 });
-copyFailuresButton?.addEventListener("click", () => copyToClipboard(failureLines().join("\n"), BcaI18n.t("已复制失败清单。")));
+/* 1.7.11（facet-privacy P2-7）：剪贴板是同机所有程序都能读的公共位置，而这批内容里
+   带的是整批失败视频的标题。原来只回一句「已复制失败清单。」，用户不知道复制走的是什么、
+   也不知道它不会自动消失。现在把条数与「含标题」「不会被自动清空」都写在提示里。 */
+copyFailuresButton?.addEventListener("click", () => {
+  const lines = failureLines();
+  copyToClipboard(lines.join("\n"), BcaI18n.t("已复制 {count} 条失败项（含视频标题）。剪贴板不会被自动清空，贴完记得覆盖掉。", { count: formatCountText(lines.length) }));
+});
 clearFailuresButton?.addEventListener("click", () => clearRefreshFailures());
 collectionFilterInput?.addEventListener("input", () => renderCollections());
 collectionFilterInput?.addEventListener("keydown", (event) => { if (event.key === "Escape") { collectionFilterInput.value = ""; renderCollections(); } });

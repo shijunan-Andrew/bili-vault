@@ -43,6 +43,25 @@
     return truncateToBytes(name.slice(0, 120), MAX_SEGMENT_BYTES) || fallback;
   }
 
+  /* 1.7.11（facet-security P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
+     原来这份名单只写在 background.js 里（手动添加 / 导入两条链路会查），而
+     「将下载到本地的视频放入收藏夹中」那条链路走的是本文件的 safeName，**不查名单** ——
+     一个真叫「001错误报告」的 B 站收藏夹会被建成同名目录，和插件的错误报告目录混在一起。
+     现在名单下沉到这里当唯一一份；background.js 与 library.js 都引用它（SW 是 ES module，
+     拿不到经典脚本，所以那边保留一份逐字相同的常量，靠稳定性测试逐字比对）。 */
+  const RESERVED_COLLECTION_NAMES = [
+    "错误报告",
+    "001错误报告",
+    "002同步报告",
+    "视频下载",
+    "000视频下载",
+    "003database"
+  ];
+
+  function isReservedCollectionName(name) {
+    return RESERVED_COLLECTION_NAMES.includes(safeCollectionName(name));
+  }
+
   function withSourceCollection(parsedVideo, sourceItem = {}) {
     const video = parsedVideo && typeof parsedVideo === "object" ? parsedVideo : {};
     return {
@@ -163,14 +182,35 @@
     return info?.fields?.[key] || "";
   }
 
+  /* 1.7.11（facet-security P2-1）：视频标题 / 简介 / 标签 / UP 名都是**页面可控**的文本
+     （上传者能往自己视频的简介里塞任意多行），而原来这里是「后出现的行覆盖先出现的行」+
+     「任何段里的 `键：值` 都算字段」。于是简介里写一行 `视频链接：https://evil.example`
+     就能覆盖掉真实链接，详情页的「在 B 站打开视频」会跳到攻击者站点；写 `视频状态：已失效`
+     能让记录显示成失效、引导用户去删。不执行代码，但足以伪造本地归档的元数据。
+     两道闸：① 只在已知的元数据段里认字段（【视频简介】/【标签】本来就另有出口）；
+     ② 同一个键**首次出现优先** —— 真值在前，简介在后，伪造就覆盖不了了。 */
+  const FIELD_SECTIONS = new Set(["基本信息", "UP主", "互动数据"]);
+
+  /* 【标签】/【视频简介】是**内容段**：它们整段是页面可控的自由文本（上传者想写什么写什么），
+     而 buildInfo 把它们排在字段段之后。所以一旦进过内容段，后面再出现的 `【基本信息】`
+     之类一律不再认 —— 少了这一刀，简介里写一行 `【基本信息】` 就能重开字段解析段，
+     把真实文件里本来没有的键（视频状态 / 失效原因）塞进来。 */
+  const CONTENT_SECTIONS = new Set(["标签", "视频简介"]);
+
   function parseInfoFile(text) {
     const raw = String(text ?? "");
     const fields = {};
     const sections = {};
     let section = "基本信息";
+    let fieldsClosed = false;
     for (const line of raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").split("\n")) {
       const heading = line.match(/^【(.+?)】\s*$/);
-      if (heading) { section = heading[1]; sections[section] ||= []; continue; }
+      if (heading) {
+        section = heading[1];
+        if (CONTENT_SECTIONS.has(section)) fieldsClosed = true;
+        sections[section] ||= [];
+        continue;
+      }
       if (section === "视频简介") {
         if (line.trim()) sections[section].push(line);
         continue;
@@ -182,10 +222,10 @@
         continue;
       }
       const divider = line.indexOf("：") >= 0 ? line.indexOf("：") : line.indexOf(":");
-      if (divider > 0) {
+      if (divider > 0 && !fieldsClosed && FIELD_SECTIONS.has(section)) {
         const key = line.slice(0, divider).trim();
         const value = line.slice(divider + 1).trim();
-        if (key) fields[key] = value;
+        if (key && !(key in fields)) fields[key] = value;
       } else if (line.trim()) {
         sections[section] ||= [];
         sections[section].push(line.trim());
@@ -351,6 +391,8 @@
 
   const api = Object.freeze({
     safeCollectionName,
+    isReservedCollectionName,
+    RESERVED_COLLECTION_NAMES,
     withSourceCollection,
     identifiersFromDirectoryName,
     downloadIndexKey,

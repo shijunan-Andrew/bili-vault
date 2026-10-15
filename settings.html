@@ -78,6 +78,10 @@
           <span class="nav-icon" data-icon="user"></span>
           <span class="nav-text" data-i18n="宠物">宠物</span>
         </button>
+        <button type="button" class="nav-item" data-group="localdata">
+          <span class="nav-icon" data-icon="shield"></span>
+          <span class="nav-text" data-i18n="本机数据">本机数据</span>
+        </button>
       </nav>
     </aside>
 
@@ -295,6 +299,33 @@
             <p class="setting-row-desc" data-i18n="若看不到动画效果，请在 Windows → 辅助功能 → 视觉效果里开启「动画效果」；浏览器开启「减少动态效果」时，宠物会安静地待着不动。">若看不到动画效果，请在 Windows → 辅助功能 → 视觉效果里开启「动画效果」；浏览器开启「减少动态效果」时，宠物会安静地待着不动。</p>
           </div>
         </div>
+      </section>
+
+      <!-- 1.7.11（facet-privacy P2-3 / P2-5）：本机到底留了哪些和「你是谁」有关的东西，
+           说清楚 + 给一个能反悔的按钮。UID 那条是报告点名的：为了「与 B 站对比」缓存了
+           用户自己的 UID，只进不出、没有失效期也没有清除入口。 -->
+      <section class="settings-card" id="group-localdata" data-group="localdata">
+        <h2 data-i18n="本机数据">本机数据</h2>
+        <p class="card-lead" data-i18n="插件只在本机留东西，不会上传。下面这些和「你是谁」有关，可以随时清掉。">插件只在本机留东西，不会上传。下面这些和「你是谁」有关，可以随时清掉。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="已记住的 B 站 UID">已记住的 B 站 UID</p>
+            <p class="setting-row-desc" data-i18n="为了「与 B 站对比」不用每次重开收藏夹页，插件会记住你的 UID 存本机。它对应到你的 B 站账号，随时可以忘记。">为了「与 B 站对比」不用每次重开收藏夹页，插件会记住你的 UID 存本机。它对应到你的 B 站账号，随时可以忘记。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="forgetUid" data-i18n="忘记已记住的 UID">忘记已记住的 UID</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="归档会记录收藏时间">归档会记录收藏时间</p>
+            <p class="setting-row-desc" data-i18n="每条 视频信息.txt 里都写着这条视频的收藏时刻（精确到秒），用来排序和时间线。它会反映你的作息和兴趣变化，介意的话可以整目录删掉。">每条 视频信息.txt 里都写着这条视频的收藏时刻（精确到秒），用来排序和时间线。它会反映你的作息和兴趣变化，介意的话可以整目录删掉。</p>
+          </div>
+        </div>
+
+        <p class="row-status" id="forgetUidStatus" role="status" hidden></p>
       </section>
 
       <p class="settings-foot" data-i18n="外观、语言、数据统计和使用说明都在这里改，改完立即生效。">外观、语言、数据统计和使用说明都在这里改，改完立即生效。</p>

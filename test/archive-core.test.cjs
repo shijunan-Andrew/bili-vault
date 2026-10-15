@@ -313,6 +313,56 @@ test("parseInfoFile 保留 raw 原文", () => {
   assert.equal(info.raw, SAMPLE);
 });
 
+/* 1.7.11（facet-security P2-1）：视频标题 / 简介 / 标签 / UP 名都是页面可控文本，
+   上传者能往自己视频的简介里塞任意多行。归档文件里摘要是排在字段段之后的自由文本，
+   所以「简介里写一行 视频链接：https://evil.example」曾经能覆盖真实链接 —— 详情页的
+   「在 B 站打开视频」就会跳到别人站点。下面三种写法现在都必须无效。 */
+test("简介里的换行注入不了字段（1.7.11 security P2-1）", () => {
+  const injected = [
+    "【基本信息】",
+    "视频标题：真实标题",
+    "视频链接：https://www.bilibili.com/video/BV1xx411c7mD",
+    "BV号：BV1xx411c7mD",
+    "",
+    "【UP主】",
+    "UP主昵称：真实UP",
+    "UP主UID：12345",
+    "UP主主页：https://space.bilibili.com/12345",
+    "",
+    "【互动数据】",
+    "播放量：1000",
+    "",
+    "【标签】",
+    "标签一",
+    "",
+    "【视频简介】",
+    "正常的第一行",
+    "视频链接：https://evil.example",
+    "UP主主页：https://evil.example",
+    "播放量：999999",
+    "【基本信息】",
+    "视频状态：已失效",
+    "失效原因：被注入的原因",
+    ""
+  ].join("\n");
+  const info = core.parseInfoFile(injected);
+  assert.equal(info.fields["视频链接"], "https://www.bilibili.com/video/BV1xx411c7mD",
+    "真实链接在最前，后出现的行不许覆盖它");
+  assert.equal(info.fields["UP主主页"], "https://space.bilibili.com/12345",
+    "UP 主主页同理");
+  assert.equal(info.fields["播放量"], "1000", "互动数据不许被简介里的同名行改写");
+  assert.equal(info.fields["视频状态"], undefined,
+    "进过内容段之后不许再重开字段段，否则能凭空塞进本来没有的键");
+  assert.equal(info.fields["失效原因"], undefined, "同上");
+  assert.deepEqual(info.sections["视频简介"], ["正常的第一行", "视频链接：https://evil.example", "UP主主页：https://evil.example", "播放量：999999"],
+    "注入的那几行还是简介正文，只是不再被当成字段");
+});
+
+test("同一个键在同一个段里出现两次时保留第一次（1.7.11 security P2-1）", () => {
+  const info = core.parseInfoFile("【基本信息】\n视频标题：真标题\n简介残留\n视频标题：假标题\n");
+  assert.equal(info.fields["视频标题"], "真标题");
+});
+
 test("parseInfoFile 对空输入不抛错", () => {
   const info = core.parseInfoFile("");
   assert.deepEqual(info.fields, {});

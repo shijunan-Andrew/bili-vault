@@ -89,6 +89,33 @@ function clearWallpaperStatus() {
   }
 }
 
+/* 1.7.11（facet-privacy P2-3）：「与 B 站对比」为了不用每次重开收藏夹页，把用户自己的
+   B 站 UID 缓存在 chrome.storage.local 的 lastImportUid 里 —— 只进不出，既没有失效期
+   也没有清除入口。这里给一个明确的「忘记」按钮：清完下次对比会重新引导一次，功能不受影响。 */
+let forgetUidStatusTimer = 0;
+const FORGET_UID_STATUS_MS = 4000;
+
+function showForgetUidStatus(key) {
+  const box = $("forgetUidStatus");
+  if (!box) return;
+  writeText(box, BcaI18n.t(key));
+  setVisible(box, true);
+  if (forgetUidStatusTimer) clearTimeout(forgetUidStatusTimer);
+  forgetUidStatusTimer = setTimeout(() => {
+    forgetUidStatusTimer = 0;
+    setVisible(box, false);
+  }, FORGET_UID_STATUS_MS);
+}
+
+async function forgetRememberedUid() {
+  try {
+    await chrome.storage.local.remove("lastImportUid");
+    showForgetUidStatus("已忘记记住的 B 站 UID，下次对比会重新问你一次。");
+  } catch (error) {
+    showForgetUidStatus(`没能清掉：${error?.message || BcaI18n.t("插件存储不可用")}`);
+  }
+}
+
 // 「自定义」才显示背景图那一组；毛玻璃是全局效果，但强度滑块只在开关打开时才有意义
 function renderAppearance() {
   const custom = BcaTheme.current() === "custom";
@@ -406,6 +433,9 @@ async function boot() {
       })
       .catch(() => showWallpaperError("浏览器不让存背景图片，可能是空间不够。"));
   });
+
+  // 1.7.11（facet-privacy P2-3）：缓存的 B 站 UID 要有一个能反悔的入口
+  $("forgetUid")?.addEventListener("click", () => { forgetRememberedUid(); });
 
   // 滑块要「拖着就生效」，所以监听 input 而不是 change（change 要等松手）
   const sliders = [

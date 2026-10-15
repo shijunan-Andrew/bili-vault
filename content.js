@@ -170,12 +170,18 @@
       ...domTags
     ].filter(Boolean))];
     /* 审查 P2：整页第一个 space 链接可能落在顶栏（那是用户自己的空间），
-       先在 UP 主信息容器里找，找不到再退回整页 —— 状态字段（owner.mid）仍然优先。 */
-    const upLink = document.querySelector(
+       先在 UP 主信息容器里找，找不到再退回整页 —— 状态字段（owner.mid）仍然优先。
+       1.7.11（facet-privacy P2-6）：只有链接确实来自 UP 主信息容器时才拿它当 UID。
+       整页兜底那个可能落在顶栏 / 推荐位 / 评论区，写错 UID 比留空危险 —— 留空时
+       buildInfo 用「未知」占位，用户一眼能看出是没抓到，而不是抓成了别人。 */
+    const upContainerLink = document.querySelector(
       '#v_upinfo a[href*="space.bilibili.com/"], .up-info a[href*="space.bilibili.com/"], .upname a[href*="space.bilibili.com/"]'
-    ) || document.querySelector('a[href*="space.bilibili.com/"]');
+    );
+    const upLink = upContainerLink || document.querySelector('a[href*="space.bilibili.com/"]');
     const upUrl = upLink?.href || "";
-    const upMid = owner.mid || owner.uid || upUrl.match(/space\.bilibili\.com\/(\d+)/)?.[1] || "";
+    const ownerMid = String(owner.mid || owner.uid || "");
+    const linkMid = upUrl.match(/space\.bilibili\.com\/(\d+)/)?.[1] || "";
+    const upMid = ownerMid || (upContainerLink ? linkMid : "");
     const title = video.title || document.querySelector("h1")?.textContent?.trim() || document.title.replace(/_哔哩哔哩.*$/i, "").trim();
     const player = document.querySelector("video");
 
