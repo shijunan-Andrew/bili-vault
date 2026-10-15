@@ -1895,7 +1895,12 @@ let importWasRunning = false;
 let importIsRunning = false;
 
 function applyImportState(state) {
+  const wasRunning = importIsRunning;
   importIsRunning = state?.running === true;
+  /* 1.7.5：导入**结束**才收口刷一次列表。之前靠 bcaStats 变化触发，而导入期间每写一批
+     快照都会写一次 bcaStats —— 真机上 575 个记录就是一遍遍整树重扫（「正在读取 568/575…」），
+     文件系统调用量随记录数线性上升，收益却只是列表早点更新几条。 */
+  if (wasRunning && !importIsRunning) scheduleArchiveRefresh();
   if (!importRunningNotice) return;
   lastImportState = state || null;
   const running = state?.running === true;
@@ -4185,11 +4190,13 @@ window.addEventListener("beforeunload", () => {
    但收藏库页面看不到」。这里补一次防抖刷新：等落盘稳定下来（导入是一批批写的），
    只在页面可见、没有弹窗、没在批量选择 / 保存的时候动列表，避免打断用户手上的操作。 */
 let archiveRefreshTimer = 0;
+/* 1.7.5：自动刷新的防抖窗口。导入期间不再进来（见下面 storage 监听与 applyImportState），
+   所以固定一个小值就够；真机上要避免的是「一次导入扫几十遍」。 */
+const ARCHIVE_REFRESH_DELAY_MS = 900;
 function scheduleArchiveRefresh() {
   if (archiveRefreshTimer) window.clearTimeout(archiveRefreshTimer);
-  // 1.7.3：导入期间快照一批批地写，节流到 4 秒一次并**不弹提示**——真机反馈是
-  // 「每隔几秒就提示一次『已读取 N 个视频』」，列表自己更新就够了，不必每次都报。
-  const delay = importIsRunning ? 4000 : 900;
+  // 1.7.3：节流到 4 秒 —— 真机反馈是「每隔几秒就提示一次『已读取 N 个视频』」。
+  // 1.7.5：导入期间不再触发这里（见 storage 监听与 applyImportState），所以固定 900ms 就够。
   archiveRefreshTimer = window.setTimeout(async () => {
     archiveRefreshTimer = 0;
     if (!rootHandle) return;
@@ -4199,13 +4206,15 @@ function scheduleArchiveRefresh() {
     const error = await refreshAfterLocalChange(() =>
       displayRoot(rootHandle, selectedCollection, BcaI18n.t("已读取"), { silentToast: true }));
     if (error) console.warn("收藏库自动刷新失败（下次写入时还会再试）", error);
-  }, delay);
+  }, ARCHIVE_REFRESH_DELAY_MS);
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  // 1.7.2：新记录落盘后自动刷新（见 scheduleArchiveRefresh）
-  if (changes.bcaStats) scheduleArchiveRefresh();
+  // 1.7.5：新记录落盘后刷新列表 —— 但**导入期间不刷**（那时每批快照都会写 bcaStats，
+  // 575 个记录会被整树重扫一遍又一遍）。导入结束由 applyImportState 统一收口补一次；
+  // 手动收藏 / 补存这类单条写入没有导入在跑，仍然会立刻反映到列表上。
+  if (changes.bcaStats && !importIsRunning) scheduleArchiveRefresh();
   // P2-8：后台把导入状态写在 importState 上，订阅它就能在收藏库里给出「导入进行中」的提示
   if (changes.importState) applyImportState(changes.importState.newValue);
   if (changes.downloadRevision && rootHandle) {
@@ -4236,8 +4245,9 @@ window.addEventListener("focus", refreshDownloadStatuses);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   refreshDownloadStatuses();
-  // 1.7.2：切回这个页面时也补一次刷新 —— 页面不可见期间 bcaStats 变化是收不到的
-  scheduleArchiveRefresh();
+  /* 1.7.5：切回标签页不再整树重扫视频资料 —— 用户的要求是「浏览行为不算」，
+     只有导入新视频 / 删除视频 / 点刷新这类主动行为才重扫（导入结束那一次由
+     applyImportState 收口）。页面不可见期间漏掉的刷新会在下次主动行为时补上。 */
   // 在后台被跳过的那次体积统计在这里补上（走缓存，签名没变不会重算，见 P2-12）
   if (rootHandle) updateStorageUsage(rootHandle);
 });
