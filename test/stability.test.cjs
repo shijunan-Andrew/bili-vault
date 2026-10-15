@@ -333,7 +333,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "1.7.12");
+  assert.equal(manifest.version, "1.7.13");
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   // notifications 是 1.7.3 加的：导入要跑几分钟，用户多半已经关掉弹窗，只把结果写进
