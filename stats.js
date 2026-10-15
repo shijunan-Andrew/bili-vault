@@ -47,11 +47,10 @@
   /* 自定义区间能选多长，由 stats-core.js 的 MAX_RANGE_DAYS 说了算
      （真的算出来在下面 core 之后，叫 MAX_CUSTOM_DAYS）。
      两边各写一个数就会出现「界面能选、核心偷偷截断」这种最难受的组合。 */
-  /* 扇形最多单独上色几块，剩下的并成「其他」 —— 图例太长反而看不清 */
-  const PIE_MAX_SLICES = 7;
-  /* 低于这个占比的收藏夹并成一块「其它收藏夹（不足 3%）」：饼图上那点小扇面
-     看不出是谁，图例又多一行。3% 是用户提的数，和「看趋势的柱子」同一个口径。 */
-  const PIE_MIN_PERCENT = 3;
+  /* 饼图单独上色的块数（1.7.6 用户口径）：按数量排名前 5 名的收藏夹各自一块、
+     显示完整名字，第 6 名及以后并成一块「其它收藏夹」。调色板 8 档，够用。 */
+  const PIE_TOP_NAMED = 5;
+  const PIE_MAX_SLICES = PIE_TOP_NAMED + 1;
   const DAY_MS = 86400000;
 
   /* 七个预置区间，顺序就是下拉里的顺序（文案由 t() 给，不在这里写死） */
@@ -855,53 +854,19 @@
       " A " + radius + " " + radius + " 0 " + large + " 1 " + to[0] + " " + to[1] + " Z";
   }
 
-  /* 饼图分块规则（1.6.5 按用户提议改的）：
-     占比 ≥ PIE_MIN_PERCENT 的各自一块，最多 PIE_MAX_SLICES 块
-     （调色板 8 档，留一档给「其它」）；剩下的全并成一块「其它」。
-     改之前是「最大的 5 个 + 其它」：18 个收藏夹时会把 40% 的量悄没声地塞进
-     「其它收藏夹」，用户按图例看还以为收藏夹里就那么几个。
-     只剩一个小尾巴时不合并 —— 那一条挂着自己的名字比塞进「其它」有用。
-     labels.minor 是「都因为不足 3% 才被并」时用的说法，
-     labels.many(n) 是「≥3% 的超过 7 块、多出来的被挤进来」时用的说法。 */
-  function mergePieSlices(list, labels) {
-    const total = list.reduce((sum, item) => sum + item.count, 0);
-    if (list.length <= PIE_MAX_SLICES) return list;
-    const keep = [];
-    const rest = [];
-    list.forEach((item) => {
-      const percent = total > 0 ? (item.count / total) * 100 : 0;
-      if (percent >= PIE_MIN_PERCENT && keep.length < PIE_MAX_SLICES) keep.push(item);
-      else rest.push(item);
-    });
-    const sumOf = (items) => items.reduce((sum, item) => sum + item.count, 0);
-    if (!keep.length) {
-      /* 极端情况：每一块都不足 3%（收藏夹特别多）。那就把最大的几块留下来，
-         剩下的一律并掉 —— 全是 2% 的细条画出来谁也读不了。 */
-      const head = list.slice(0, PIE_MAX_SLICES);
-      const tail = list.slice(PIE_MAX_SLICES);
-      return head.concat([{ name: labels.many(tail.length), count: sumOf(tail), other: true }]);
-    }
-    if (rest.length <= 1) return list;
-    const allMinor = rest.every((item) => total > 0 && (item.count / total) * 100 < PIE_MIN_PERCENT);
-    return keep.concat([{
-      name: allMinor ? labels.minor : labels.many(rest.length),
-      count: sumOf(rest),
+  /* 饼图分块规则（1.7.6 按用户口径）：按**数量排名**取前 PIE_TOP_NAMED（5）名各自一块、
+     显示完整名字，第 6 名及以后全部并成一块「其它收藏夹」。
+     1.6.5 试过按占比（≥3% 各自一块、最多 7 块）—— 这次按要求换回「看排名」：
+     名次比占比更贴合「我最常收的是哪几个收藏夹」这个问法，也不会出现
+     「4% 的小块有名字、30% 的大块反而进了其它」这种读起来别扭的结果。 */
+  function mergePieSlices(list, otherLabel) {
+    if (list.length <= PIE_TOP_NAMED) return list;
+    const tail = list.slice(PIE_TOP_NAMED);
+    return list.slice(0, PIE_TOP_NAMED).concat([{
+      name: otherLabel,
+      count: tail.reduce((sum, item) => sum + item.count, 0),
       other: true
     }]);
-  }
-
-  function pieLabelsForCollections() {
-    return {
-      minor: t("其它收藏夹（不足 3%）"),
-      many: (count) => t("其它收藏夹（{count} 个）", { count: formatCount(count) })
-    };
-  }
-
-  function pieLabelsForYears() {
-    return {
-      minor: t("其它年份"),
-      many: (count) => t("其它年份（{count} 个）", { count: formatCount(count) })
-    };
   }
 
   /* 占比取整：按最大余数法分配，保证加起来正好 100%
@@ -939,7 +904,7 @@
       if (count > 0) list.push({ name: name, count: count });
     });
     list.sort((a, b) => (b.count - a.count) || (a.name < b.name ? -1 : 1));
-    return mergePieSlices(list, pieLabelsForCollections());
+    return mergePieSlices(list, t("其它收藏夹"));
   }
 
   /* 饼图本体：收藏夹构成和按年份构成共用一份，颜色档位也就跟着一致。
@@ -1440,10 +1405,10 @@
       const count = Math.max(0, numberOr(row.count, 0));
       if (count > 0) list.push({ name: row.label || row.day, count: count });
     });
-    /* 年份按时间排（轴上的先后就是年份先后），但「留下哪几块」要看占比：
-       先按条数挑出够大的，剩下的并进「其它年份」，最后再按时间摆回去。 */
+    /* 年份按时间排（轴上的先后就是年份先后），但「留下哪几块」要看数量排名：
+       先按条数挑出前几名，剩下的并进「其它年份」，最后再按时间摆回去。 */
     const byCount = list.slice().sort((a, b) => (b.count - a.count) || (a.name < b.name ? -1 : 1));
-    const picked = mergePieSlices(byCount, pieLabelsForYears());
+    const picked = mergePieSlices(byCount, t("其它年份"));
     if (!picked.some((slice) => slice.other)) return list;
     picked.sort((a, b) => (a.other ? 1 : (b.other ? -1 : (a.name < b.name ? -1 : 1))));
     return picked;

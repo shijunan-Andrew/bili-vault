@@ -76,6 +76,13 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 - **不要做「失效视频定期复查 / 恢复」功能**。用户的判断是：B 站上失效的视频基本不会恢复，为此加一套定时复查没有意义。**现在的行为就够了**——导入到本地时查一次失效视频的资料并存下来。`recoverInvalidVideos` 开关与「更新视频状态」都保持现状，不要再扩展。
 
+## 1.7.6：饼图分块口径换回「数量排名前五」
+
+1. 规则（`stats.js`）：`const PIE_TOP_NAMED = 5; const PIE_MAX_SLICES = PIE_TOP_NAMED + 1;`，`mergePieSlices(list, otherLabel)` 只保留 `list.slice(0, PIE_TOP_NAMED)`，其余求和成一块 `{name: otherLabel, other: true}`；`list.length <= PIE_TOP_NAMED` 时不合并。
+2. 删掉 `PIE_MIN_PERCENT`、`pieLabelsForCollections()`、`pieLabelsForYears()`（1.6.5 的 ≥3% 规则与两个带计数的标签）；调用点改成直接传 `t("其它收藏夹")` / `t("其它年份")`（`slicesOfDay` 与 `yearSlices`）。`yearSlices` 仍是「先按条数挑、再按时间摆回去」，`other` 那块排最后。
+3. 词典：删 `其它收藏夹（不足 3%）`、`其它收藏夹（{count} 个）`、`其它年份（{count} 个）`，新增 `其它收藏夹`（zh-TW「其它收藏夾」/ en "Other collections"）→ 859 条；README.md 的 i18n 条数标记同步成 859（`release.ps1` 会拿它跟词典实数比）。
+4. 教训：饼图分块规则是**用户可见的口径**，改规则要连着词典键与 README 的条数标记一起改 —— 少改一处，`release.ps1` 的 i18n 闸门就会拦下来（这次正是它拦的）。
+
 ## 1.7.5：列表重扫只由主动行为触发（挂在 bcaStats 上会变成放大环路）
 
 1. 症状（真机）：收藏库每隔很小一段时间就整树重扫一遍视频资料，575 个记录时进度反复出现「正在读取 568/575…」，文件系统开销随记录数线性上升。
