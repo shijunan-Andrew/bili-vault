@@ -141,6 +141,42 @@ let pendingDeleteAction = null;
 let deleteInProgress = false;
 let collectionCreateInProgress = false;
 let videoAddInProgress = false;
+
+/* 1.7.10（facet-destructive P2-5）：归档侧的写者有两个上下文 —— 后台的导入，和这个页面里的
+   删除 / 搬运 / 新建目录。它们各自排队（importRunChain、各区自己的 *InProgress 标志），
+   但彼此完全看不见对方，同时写同一批目录时导入会把刚删掉的目录名字写回统计库。
+   这里用一个 storage.session 的共享闸门把两边摆到同一张桌上：页面这边三个标志任意一个为真
+   就立「library」锁，全部放开才解锁；后台的导入开始时读它，读到就先不开跑。 */
+const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
+// 超过这个岁数的锁当作陈旧遗留（浏览器/页面崩在写入中间），不能把人永久挡在门外
+const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
+
+async function setArchiveWriteLock(kind) {
+  try { await chrome.storage.session.set({ [ARCHIVE_WRITE_LOCK_KEY]: { kind, since: Date.now() } }); } catch (_) {}
+}
+
+// 只清自己那一把：别人后写进来的锁不能被顺手抹掉
+async function clearArchiveWriteLock(kind) {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || !kind || lock.kind === kind) await chrome.storage.session.remove(ARCHIVE_WRITE_LOCK_KEY);
+  } catch (_) {}
+}
+
+function publishLibraryWriteLock() {
+  const busy = deleteInProgress || collectionCreateInProgress || videoAddInProgress;
+  return busy ? setArchiveWriteLock("library") : clearArchiveWriteLock("library");
+}
+
+async function archiveWriteLockedByImport() {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || lock.kind !== "import") return false;
+    return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS;
+  } catch (_) { return false; }
+}
 let selectionMode = false;
 let videoFilter = "all";
 // 4.6：UP 主 / 标签两个精确筛选，值取自当前范围（纯本地计算，不发请求）
@@ -150,6 +186,10 @@ let selectedVideoIds = new Set();
 let visibleVideoIds = [];
 let pendingCollectionAction = null;
 let collectionOrder = [];
+// 1.7.10（facet-storage P2-1）：「确实没保存过顺序」和「这次没读出来」必须分开。
+// 旧代码把两者都当成空数组，一次 storage 读失败就静默丢掉用户排好的顺序，
+// 之后任何一次拖拽都会把「扫描顺序」当成用户顺序写回磁盘，原顺序再也回不来。
+let collectionOrderLoaded = false;
 let draggedCollectionName = "";
 let downloadStatusCheckRunning = false;
 let lastSelectedVideoId = "";
@@ -654,12 +694,34 @@ function refreshScanNotice() {
       list: `${info.issues.slice(0, 4).join("；")}${info.issues.length > 4 ? "；…" : ""}`
     }));
   }
+  // 1.7.10（facet-destructive P2-6）：被打断的导入留下的半截目录原来是静默跳过的 ——
+  // 它永远躺在磁盘上，收藏库里一个字都不提，用户既不知道它存在，也无从判断该不该删。
+  if (info.unfinished?.length) {
+    lines.push(BcaI18n.t("另有 {count} 个目录没写完（没有 视频信息.txt，多半是上次导入被打断）：{list}", {
+      count: info.unfinished.length,
+      list: `${info.unfinished.slice(0, 3).join("；")}${info.unfinished.length > 3 ? "；…" : ""}`
+    }));
+  }
   setScanNotice(lines.join("\n"));
+}
+
+/* 1.7.10（facet-destructive P2-6）：区分「目录没写完」和「目录内容有问题」。
+   没有 视频信息.txt 的目录就是导入写到一半被打断留下的（写入顺序是先建目录、再写封面、
+   最后写 视频信息.txt，所以缺 txt 就等于没写完）。完全空的目录不算 —— 那可能只是用户
+   自己刚建的，报出来只会让人困惑。 */
+async function isUnfinishedRecord(recordEntry) {
+  const infoHandle = await optionalFileHandle(recordEntry, "视频信息.txt");
+  if (infoHandle) return false;
+  for await (const entry of recordEntry.values()) {
+    if (entry.kind === "file" || entry.kind === "directory") return true;
+  }
+  return false;
 }
 
 async function scanRoot(handle, preserveDownloadStatuses = true) {
   const scanned = [];
   const issues = [];
+  const unfinished = [];
   const downloadIndex = await scanDownloadedDirectories(handle);
   const previousVideos = new Map(preserveDownloadStatuses ? allVideos().map((video) => [video.id, video]) : []);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
@@ -691,7 +753,11 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
         if (stats.processed % 8 === 0) progress.update({ done: stats.processed, total: stats.total });
         try {
           const record = await readArchiveRecord(collectionEntry.name, recordEntry, cache, stats);
-          if (!record) continue;
+          if (!record) {
+            // 1.7.10（P2-6）：读不出内容的目录里，只有「没写完」这一类要单独报出来
+            if (await isUnfinishedRecord(recordEntry)) unfinished.push(`${collectionEntry.name}/${recordEntry.name}`);
+            continue;
+          }
           videos.push(videoFromArchiveRecord(collectionEntry.name, recordEntry, record, downloadIndex, previousVideos));
         } catch (error) {
           issues.push(`${collectionEntry.name}/${recordEntry.name}：${error.message || BcaI18n.t("读取失败")}`);
@@ -705,7 +771,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   }
   scanned.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
   // hits/reads/total 挂在返回值上，界面用它显示「本次命中缓存多少条」
-  return { collections: scanned, issues, stats: { hits: stats.hits, reads: stats.reads, total: stats.total } };
+  return { collections: scanned, issues, unfinished, stats: { hits: stats.hits, reads: stats.reads, total: stats.total } };
 }
 
 function parseDate(value, fallback) {
@@ -820,9 +886,17 @@ function reorderCollection(sourceName, targetName, afterTarget) {
   if (targetIndex < 0) return clearCollectionDragStyles();
   reordered.splice(targetIndex + (afterTarget ? 1 : 0), 0, source);
   collections = reordered;
-  collectionOrder = collections.map((collection) => collection.name);
+  // 1.7.10（facet-storage P2-1）：这次没扫到的收藏夹（临时没权限、目录被占用）不能因为
+  // 一次拖拽就被挤出顺序表 —— 它们排在看得见的这批后面，彼此的相对次序照旧。
+  const visibleNames = new Set(collections.map((collection) => collection.name));
+  collectionOrder = [...collections.map((collection) => collection.name), ...collectionOrder.filter((name) => !visibleNames.has(name))];
   clearCollectionDragStyles();
   renderCollections();
+  if (!collectionOrderLoaded) {
+    // 从来没成功读到磁盘上那份顺序，就不能拿这次的扫描顺序去覆盖它
+    showToast(BcaI18n.t("这次没能读到已保存的收藏夹顺序，为避免覆盖它，本次排序只临时生效。"));
+    return;
+  }
   chrome.storage.local.set({ collectionOrder }).then(() => showToast(BcaI18n.t("收藏夹顺序已保存"))).catch((error) => showToast(BcaI18n.t("保存排序失败：{message}", { message: error?.message || BcaI18n.t("插件存储不可用") })));
 }
 
@@ -833,13 +907,20 @@ function applyCollectionOrder(items) {
     const rightIndex = orderIndex.has(right.name) ? orderIndex.get(right.name) : Number.MAX_SAFE_INTEGER;
     return leftIndex - rightIndex || left.name.localeCompare(right.name, "zh-CN");
   });
-  collectionOrder = items.map((collection) => collection.name);
+  // 1.7.10（facet-storage P2-1）：不能拿「本次扫描结果」整份重写内存里的顺序 ——
+  // 这次没扫到的收藏夹会被挤出去，等它们下次出现就排到末尾了。已知顺序里这次没出现的
+  // 名字原样保留在后面，相对次序不变；新出现的按扫描顺序接在可见的那批之后。
+  const visibleNames = new Set(items.map((collection) => collection.name));
+  collectionOrder = [...items.map((collection) => collection.name), ...collectionOrder.filter((name) => !visibleNames.has(name))];
   return items;
 }
 
+// 1.7.10（facet-storage P2-1）：只有这次真的读到了才置 collectionOrderLoaded。
+// 读失败时调用方不许清空、也不许写回（见启动处的 catch 与 reorderCollection）。
 async function restoreCollectionOrder() {
   const saved = await chrome.storage.local.get("collectionOrder");
   collectionOrder = Array.isArray(saved.collectionOrder) ? saved.collectionOrder.filter((name) => typeof name === "string") : [];
+  collectionOrderLoaded = true;
 }
 
 function renderCollections() {
@@ -1399,6 +1480,11 @@ function downloadConfigFile() {
   }
 }
 
+// 1.7.10（facet-storage P2-2）：manifest 里没有 unlimitedStorage，chrome.storage.local
+// 是 10MB 硬配额，而配置文件正常只有几 KB。这里给一个 256KB 的闸，免得一次误选
+// （例如把导出的归档清单当配置导入）就把插件存储挤到配额边缘。
+const MAX_CONFIG_BYTES = 256 * 1024;
+
 // 导入前逐项校验：任何一项不认识就退回默认值，不让坏文件把界面写成空白
 function sanitizeConfigPreferences(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
@@ -1412,12 +1498,16 @@ function sanitizeConfigPreferences(raw) {
     locale: BcaI18n.isSupported(source.locale) ? source.locale : null,
     pageSize: PAGE_SIZES.includes(pageSizeValue) ? pageSizeValue : null,
     viewMode: source.viewMode === "list" || source.viewMode === "grid" ? source.viewMode : null,
-    collectionOrder: Array.isArray(source.collectionOrder) ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500) : [],
+    // 1.7.10（facet-storage P2-2）：条数封顶不够，每一条也要封顶 —— 500 个超长字符串
+    // 一样能把 chrome.storage.local 挤到配额边缘。
+    collectionOrder: Array.isArray(source.collectionOrder)
+      ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500).map((name) => name.slice(0, 120))
+      : [],
     filters: {
       search,
       videoFilter: videoFilterValue,
-      upFilter: typeof filters.upFilter === "string" ? filters.upFilter : "all",
-      tagFilter: typeof filters.tagFilter === "string" ? filters.tagFilter : "all",
+      upFilter: typeof filters.upFilter === "string" ? filters.upFilter.slice(0, 120) : "all",
+      tagFilter: typeof filters.tagFilter === "string" ? filters.tagFilter.slice(0, 120) : "all",
       sort: sortValue
     }
   };
@@ -1429,11 +1519,28 @@ async function applyConfigPreferences(preferences, rawOrder) {
   if (preferences.locale) await BcaI18n.use(preferences.locale);
   if (preferences.pageSize) pageSize = preferences.pageSize;
   if (preferences.viewMode) viewMode = preferences.viewMode;
+  // 1.7.10（facet-storage P2-2）：写失败原来是空 catch，用户看到「配置已导入。」
+  // 却不知道排序根本没存下来。现在每一种「没生效」都收进 warnings，由调用方
+  // 如实告诉用户 —— 宁可说「导入成功但有 N 项没生效」，也不能报喜不报忧。
+  const warnings = [];
   // 收藏夹排序只在配置里带了排序、且本机确实有这些收藏夹时才写，
-  // 否则会把用户现有的顺序覆盖成一份对不上的清单
-  if (rawOrder.length && collections.some((collection) => rawOrder.includes(collection.name))) {
-    collectionOrder = rawOrder;
-    try { await chrome.storage.local.set({ collectionOrder }); } catch (_) {}
+  // 否则会把用户现有的顺序覆盖成一份对不上的清单。
+  // 1.7.10（P2-2）：只要求「至少一个对得上」不够 —— 对不上的那些照样会被写进去。
+  if (rawOrder.length) {
+    const known = new Set(collections.map((collection) => collection.name));
+    const usable = rawOrder.filter((name) => known.has(name));
+    if (!usable.length) {
+      warnings.push(BcaI18n.t("配置里的收藏夹顺序在本机一个都对不上，已忽略。"));
+    } else if (!collectionOrderLoaded) {
+      warnings.push(BcaI18n.t("这次没能读到已保存的收藏夹顺序，为避免覆盖它，配置里的顺序没有写入。"));
+    } else {
+      collectionOrder = usable;
+      try {
+        await chrome.storage.local.set({ collectionOrder });
+      } catch (error) {
+        warnings.push(BcaI18n.t("收藏夹顺序没保存成功：{message}", { message: error?.message || BcaI18n.t("插件存储不可用") }));
+      }
+    }
   }
   searchInput.value = preferences.filters.search;
   videoFilterSelect.value = preferences.filters.videoFilter;
@@ -1444,13 +1551,23 @@ async function applyConfigPreferences(preferences, rawOrder) {
   saveViewSettings();
   applyViewMode();
   resetPaging();
+  return warnings;
 }
 
 async function importConfigFromText(text) {
+  const source = String(text || "");
+  // 1.7.10（facet-storage P2-2）：大小闸在解析之前 —— 先量再吃，别把 10MB 的
+  // JSON.parse 结果留在内存里。文件选择处还有一道 file.size 的同款检查。
+  if (source.length > MAX_CONFIG_BYTES) {
+    throw new Error(BcaI18n.t("这个配置文件有 {size}，超过了 {limit}，为了不把插件存储挤爆，没有导入。", {
+      size: formatBytes(source.length),
+      limit: formatBytes(MAX_CONFIG_BYTES)
+    }));
+  }
   let payload;
   try {
     // 导出时写了 BOM，这里去掉再解析
-    payload = JSON.parse(String(text || "").replace(/^\ufeff/, ""));
+    payload = JSON.parse(source.replace(/^\ufeff/, ""));
   } catch (_) {
     throw new Error(BcaI18n.t("这个文件不是合法的 JSON，无法导入。"));
   }
@@ -1460,10 +1577,19 @@ async function importConfigFromText(text) {
   const preferences = sanitizeConfigPreferences(payload.preferences);
   const rawOrder = Array.isArray(payload.preferences?.collectionOrder) ? preferences.collectionOrder : [];
   // upFilter / tagFilter 指向的 UP 主或标签可能已经不在本地库里，扫描后统一落回「全部」
-  await applyConfigPreferences(preferences, rawOrder);
+  const warnings = await applyConfigPreferences(preferences, rawOrder);
   if (rootHandle) await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已导入配置"));
   // 没有根目录时数据源是空的：选项池按空数据源重建一次（与 4.6 的行为一致，会落回「全部」）
   else { renderCollections(); refreshVideoFilterOptions(); renderVideos(); }
+  // 1.7.10（facet-storage P2-2）：落回「全部」是 populateSelectOptions 的自愈行为，
+  // 界面不会吭声，用户只看到「导入后列表空了」，很容易以为数据被删了。这里补一句。
+  if (preferences.filters.upFilter !== "all" && upFilter === "all") {
+    warnings.push(BcaI18n.t("配置里的 UP 主筛选在本机没有对应项，已落回「全部」。"));
+  }
+  if (preferences.filters.tagFilter !== "all" && tagFilter === "all") {
+    warnings.push(BcaI18n.t("配置里的标签筛选在本机没有对应项，已落回「全部」。"));
+  }
+  return warnings;
 }
 
 
@@ -2586,11 +2712,23 @@ function closeDeleteConfirmation() {
   confirmDeleteButton.textContent = BcaI18n.t("删除本地文件，不可恢复");
 }
 
-async function copyDirectoryContents(source, target) {
+/* 1.7.10（facet-destructive P2-1）：目标里已经有同名文件时**不许静默覆盖**。
+   眼下两个调用方都保证目标是刚建出来的新目录（uniqueRecordFolderName 先探过不存在），
+   所以这条路径今天走不到；但「复制进一个已经存在的目录」这一步之差，就足以让用户
+   自己放进去的同名文件被无声抹掉。宁可少写一个文件、由调用方报出来，也不要悄悄盖掉。
+   返回 { copied, skipped } —— skipped 里是「目标已存在、因此没动」的文件名。 */
+async function copyDirectoryContents(source, target, result = { copied: 0, skipped: [] }) {
   for await (const [name, entry] of source.entries()) {
     if (entry.kind === "directory") {
       const childTarget = await target.getDirectoryHandle(name, { create: true });
-      await copyDirectoryContents(entry, childTarget);
+      await copyDirectoryContents(entry, childTarget, result);
+      continue;
+    }
+    // 不带 create 地探一次：找不到会抛 NotFoundError，说明目标里还没有这个名字
+    let existing = null;
+    try { existing = await target.getFileHandle(name); } catch (_) { existing = null; }
+    if (existing) {
+      result.skipped.push(name);
       continue;
     }
     const sourceFile = await entry.getFile();
@@ -2599,11 +2737,13 @@ async function copyDirectoryContents(source, target) {
     try {
       await writable.write(sourceFile);
       await writable.close();
+      result.copied += 1;
     } catch (error) {
       try { await writable.abort(); } catch (_) {}
       throw error;
     }
   }
+  return result;
 }
 
 async function updateSavedFolderName(directory, folderName) {
@@ -2695,7 +2835,11 @@ async function copyVideoRecord(video, targetName) {
   const targetRecordName = await uniqueRecordFolderName(targetCollection, video.directory);
   const targetRecord = await targetCollection.getDirectoryHandle(targetRecordName, { create: true });
   try {
-    await copyDirectoryContents(sourceRecord, targetRecord);
+    const copyResult = await copyDirectoryContents(sourceRecord, targetRecord);
+    // 1.7.10（P2-1）：目标里本来就有同名文件时复制会跳过它们 —— 这绝不能算复制成功
+    if (copyResult.skipped.length) {
+      throw new Error(`目标目录里已经有同名文件，没有覆盖：${copyResult.skipped.slice(0, 3).join("、")}`);
+    }
     // 复核要在 updateSavedFolderName 之前做：那一步会改写目标里的 视频信息.txt（改「所属收藏夹」
     // 那一行），字节数本来就和源不同
     const problems = await diffCopiedDirectory(sourceRecord, targetRecord);
@@ -2870,7 +3014,13 @@ async function copyDownloadDirectories(downloadParent, video, targetNames) {
       const source = sources.find((item) => item.collectionName !== targetName) || sources[0];
       const targetNameOnDisk = await uniqueRecordFolderName(targetCollection, source.directory.name);
       const targetDirectory = await targetCollection.getDirectoryHandle(targetNameOnDisk, { create: true });
-      try { await copyDirectoryContents(source.directory, targetDirectory); }
+      try {
+        const copyResult = await copyDirectoryContents(source.directory, targetDirectory);
+        // 1.7.10（P2-1）：跳过任何文件都说明「本来就有同名文件」，不能算搬运成功
+        if (copyResult.skipped.length) {
+          throw new Error(`目标目录里已经有同名文件，没有覆盖：${copyResult.skipped.slice(0, 3).join("、")}`);
+        }
+      }
       catch (error) {
         await targetCollection.removeEntry(targetNameOnDisk, { recursive: true }).catch(() => {});
         throw error;
@@ -3094,6 +3244,7 @@ async function confirmCollectionAction() {
   const targetNames = selectedActionTargetNames();
   if (!targetNames.length) { showToast(BcaI18n.t("请选择一个或多个收藏夹。")); return; }
   confirmCollectionActionButton.dataset.busy = "true";
+  setArchiveWriteLock("library");
   confirmCollectionActionButton.disabled = true;
   confirmCollectionActionButton.textContent = BcaI18n.t("正在整理…");
   cancelCollectionActionButton.disabled = true;
@@ -3103,6 +3254,11 @@ async function confirmCollectionAction() {
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    // 1.7.10（facet-destructive P2-5）：搬运/复制是归档侧最重的写操作（复制整目录再删源），
+    // 后台导入正在跑时先不动 —— 导入会把这一批目录的名字和统计写回 003database。
+    if (await archiveWriteLockedByImport()) {
+      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再搬 —— 两边同时写同一批目录会留下对不上的记录。"));
+    }
     const downloadParent = action.videos.some((video) => video.hasDownloadFiles) ? await getWritableDownloadParent() : null;
     const duplicateSets = new Map(targetNames.map((name) => [
       name,
@@ -3153,6 +3309,7 @@ async function confirmCollectionAction() {
   } catch (error) {
     showResultDialog(BcaI18n.t("整理失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
   } finally {
+    clearArchiveWriteLock("library");
     confirmCollectionActionButton.dataset.busy = "false";
     confirmCollectionActionButton.textContent = BcaI18n.t("确认");
     cancelCollectionActionButton.disabled = false;
@@ -3172,15 +3329,31 @@ async function confirmPendingDelete() {
   const action = pendingDeleteAction;
   if (!action) return;
   deleteInProgress = true;
+  publishLibraryWriteLock();
   cancelDeleteButton.disabled = true;
   confirmDeleteButton.disabled = true;
   confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("正在删除收藏夹…") : action.type === "batch" ? BcaI18n.t("正在批量删除…") : BcaI18n.t("正在删除…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    // 1.7.10（facet-destructive P2-5）：后台正在导入时先别删 —— 导入那边会把这一批目录的
+    // 统计写回 003database，删一半的目录名会被它照着写入，留下指向已删目录的幽灵行。
+    if (await archiveWriteLockedByImport()) {
+      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再删 —— 两边同时写同一批目录会留下对不上的记录。"));
+    }
     const deleteDownloads = deleteAssociatedDownloads.checked;
     const downloadParent = deleteDownloads ? await getWritableDownloadParent() : null;
+    /* 1.7.10（facet-destructive P2-3）：不带 create 地调 getWritableDownloadParent 时，
+       000视频下载 不存在会返回 null（不是抛错）。原来这一支就是「什么都不做、也什么都
+       不说」—— 用户明明勾了「同时删除关联下载」，下载文件一个都没动，结果对话框里没有
+       任何交代。下载根目录被改名/移走、或改用自选目录后旧目录留在别处时都会走到这里。
+       这不是「确实没有下载文件」，是「这次没法确认」，必须说出来。 */
+    if (deleteDownloads && !downloadParent) {
+      downloadCleanupNotes.push(BcaI18n.t("没找到下载文件夹（000视频下载），关联的下载文件这次一个都没动。"));
+    }
     const downloadCleanupFailures = [];
+    // 1.7.10（facet-destructive P2-3）：「这次没法确认」和「确实没有」要分开说。
+    const downloadCleanupNotes = [];
     let batchResult = null;
     if (action.type === "collection") {
       await rootHandle.removeEntry(action.collection.name, { recursive: true });
@@ -3218,7 +3391,7 @@ async function confirmPendingDelete() {
        catch 接住，弹出来的却是「删除失败」，用户只会再点一次「删除」再吃一次同样的错。 */
     const refreshError = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
     if (action.type === "collection") {
-      showResultDialog(BcaI18n.t("已删除整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      showResultDialog(BcaI18n.t("已删除整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       // 1.7.0（批次 B / P1）：原来失败清单只把**第一条**塞进 3 秒就消失的 toast，
@@ -3235,19 +3408,21 @@ async function confirmPendingDelete() {
         lines.push(BcaI18n.t("；{count} 个下载目录未能删除", { count: downloadCleanupFailures.length }));
         lines.push(...downloadCleanupFailures);
       }
+      lines.push(...downloadCleanupNotes);
       const suffix = refreshFailureSuffix(refreshError);
-      if (batchResult.failures.length || downloadCleanupFailures.length) {
+      if (batchResult.failures.length || downloadCleanupFailures.length || downloadCleanupNotes.length) {
         showResultDialog(BcaI18n.t("批量删除结果"), lines.join("；") + suffix, batchResult.failures.length ? "error" : "ok");
       } else {
         showToast(lines.join("；") + suffix);
       }
     } else {
-      showResultDialog(BcaI18n.t("已删除本地归档"), [BcaI18n.t("本地归档文件已删除。"), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      showResultDialog(BcaI18n.t("已删除本地归档"), [BcaI18n.t("本地归档文件已删除。"), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     }
   } catch (error) {
     showResultDialog(BcaI18n.t("删除失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
   } finally {
     deleteInProgress = false;
+    publishLibraryWriteLock();
     cancelDeleteButton.disabled = false;
     confirmDeleteButton.disabled = false;
     confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : BcaI18n.t("删除本地文件");
@@ -3341,12 +3516,18 @@ collectionForm.addEventListener("submit", async (event) => {
   try { name = validateCollectionName(collectionNameInput.value); }
   catch (error) { showToast(error.message); collectionNameInput.focus(); return; }
   collectionCreateInProgress = true;
+  publishLibraryWriteLock();
   submitCreateCollectionButton.disabled = true;
   cancelCreateCollectionButton.disabled = true;
   submitCreateCollectionButton.textContent = BcaI18n.t("正在创建…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    // 1.7.10（facet-destructive P2-5）：后台导入正在跑时不新建目录/搬运 ——
+    // 导入那边也在建收藏夹目录、也在数目录，两边同时动会互相覆盖对方的判断。
+    if (await archiveWriteLockedByImport()) {
+      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再改 —— 两边同时写同一批目录会留下对不上的记录。"));
+    }
     try {
       await rootHandle.getDirectoryHandle(name);
       throw new Error(BcaI18n.t("收藏夹“{name}”已存在。", { name }));
@@ -3362,6 +3543,7 @@ collectionForm.addEventListener("submit", async (event) => {
     showToast(BcaI18n.t("创建失败：{message}", { message: error?.message || BcaI18n.t("本地文件夹操作失败。") }));
   } finally {
     collectionCreateInProgress = false;
+    publishLibraryWriteLock();
     submitCreateCollectionButton.disabled = false;
     cancelCreateCollectionButton.disabled = false;
     submitCreateCollectionButton.textContent = BcaI18n.t("创建收藏夹");
@@ -3375,12 +3557,18 @@ videoForm.addEventListener("submit", async (event) => {
   const collectionNames = selectedTargetNames(videoTargetOptions);
   if (!collectionNames.length) { showToast(BcaI18n.t("请选择一个或多个目标收藏夹。")); return; }
   videoAddInProgress = true;
+  publishLibraryWriteLock();
   submitAddVideoButton.disabled = true;
   cancelAddVideoButton.disabled = true;
   submitAddVideoButton.textContent = BcaI18n.t("正在解析并保存…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    // 1.7.10（facet-destructive P2-5）：后台导入正在跑时不再往归档里加新目录 ——
+    // 这条链路会经后台建目录写文件，与导入是两条独立队列，同时动会互相覆盖判断。
+    if (await archiveWriteLockedByImport()) {
+      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再加 —— 两边同时写同一批目录会留下对不上的记录。"));
+    }
     const result = await chrome.runtime.sendMessage({
       type: "add-manual-video",
       data: { identifier, collections: collectionNames }
@@ -3395,6 +3583,7 @@ videoForm.addEventListener("submit", async (event) => {
     showToast(BcaI18n.t("添加失败：{message}", { message: error?.message || BcaI18n.t("无法解析或保存视频。") }));
   } finally {
     videoAddInProgress = false;
+    publishLibraryWriteLock();
     submitAddVideoButton.disabled = false;
     cancelAddVideoButton.disabled = false;
     submitAddVideoButton.textContent = BcaI18n.t("解析并保存");
@@ -3520,7 +3709,18 @@ function publishedStatsFingerprintOf(stats) {
   } catch (_) { return ""; }
 }
 
-async function syncStatsDatabase(handle) {
+/* 1.7.10（facet-storage P2-3）：扫描结果比旧库少到这个比例以下，就认作「这次没扫全」
+   而不是「用户删了这么多」。0.7 是经验值：真删视频一般是一条条删，很少一次掉三成；
+   而一次收藏夹读失败、一次被取消的扫描，掉的一定远超三成。 */
+const STATS_SHRINK_KEEP_RATIO = 0.7;
+
+// 坏库留档用的本地时间戳（与 background.js 的 statsBackupTimestamp 同一个格式）
+function statsBackupStamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+async function syncStatsDatabase(handle, options = {}) {
   const core = globalThis.BcaStatsCore;
   if (!handle || !core) return;
   const videos = allVideos();
@@ -3528,15 +3728,51 @@ async function syncStatsDatabase(handle) {
     const directory = await handle.getDirectoryHandle(core.DATABASE_FOLDER_NAME, { create: true });
     const file = await directory.getFileHandle(core.DATABASE_FILE_NAME, { create: true });
     let previous = null;
+    /* 1.7.10（facet-storage P2-3）：旧库解析失败必须与「旧库不存在」分开。
+       下面两道闸门（0 条 / 明显变少）全都基于 previous，previous 为 null 时它们是
+       失效的 —— 也就是说，一次 JSON 解析失败就足够把历史统计与亲密度清零，而用户
+       只会看到统计页数字变小。坏文件的现场还要先留下来，否则「为什么清零」永远查不出。 */
+    let previousBroken = false;
+    let previousBytes = 0;
     try {
-      const text = await (await file.getFile()).text();
+      const blob = await file.getFile();
+      previousBytes = blob.size || 0;
+      const text = await blob.text();
       if (text.trim()) previous = JSON.parse(text);
-    } catch (_) { /* 旧库坏了就当没有，下面整份重建 */ }
+    } catch (_) { previousBroken = true; }
+    if (previousBroken && previousBytes > 0) {
+      try {
+        const brokenText = await (await file.getFile()).text();
+        const backup = await directory.getFileHandle(`database.bad.${statsBackupStamp()}.json`, { create: true });
+        const writable = await backup.createWritable();
+        await writable.write(brokenText);
+        await writable.close();
+        console.warn("旧数据库解析失败，已另存为 database.bad.<时间戳>.json，下面整份重建。");
+      } catch (error) {
+        // 连现场都留不下来：宁可不写，也不能把唯一一份证据抹掉
+        console.warn("旧数据库解析失败且无法另存现场，跳过本次同步。", error);
+        showToast(BcaI18n.t("本地数据库读不出来，这次先不动它，免得把唯一的现场覆盖掉。"));
+        return;
+      }
+    }
     // 1.6.1：扫描到 0 条时不许用空结果覆盖已经有内容的库。
     // 删掉几个视频之后的那次重扫曾经拿空列表整份重建，把陪伴天数与累计保存数一起抹平。
     // 空扫描不是「库里没有东西」的证据，只是这一次没扫到；库里本来就是空的就照常写。
-    if (!videos.length && previous && Object.keys(previous.videos || {}).length) {
+    const previousCount = previous ? Object.keys(previous.videos || {}).length : 0;
+    if (!videos.length && previousCount) {
       console.warn("扫描到 0 条记录，保留已有数据库，不用空结果覆盖。");
+      return;
+    }
+    /* 1.7.10（facet-storage P2-3）：「扫到 0 条」只是最极端的一种。收藏夹临时没权限、
+       扫描半路被打断，都会得到一个**明显更小**的 videos，原来照样整份重写，统计页
+       凭空掉一大截而界面什么都不说。这里按比例再拦一道，并且说清楚怎么强制落库
+       （「刷新」按钮走 forceStatsSync，那是用户明确说「我知道，照这次的算」）。 */
+    if (!options.forceStatsSync && previousCount && videos.length < previousCount * STATS_SHRINK_KEEP_RATIO) {
+      console.warn(`扫描到 ${videos.length} 条，数据库里原有 ${previousCount} 条，保留已有数据库。`);
+      showToast(BcaI18n.t("这次只扫到 {scan} 个视频，数据库里原有 {known} 个，已先保留数据库不动。确实删了这些的话，点一次「刷新」就会按这次的重新统计。", {
+        scan: formatCountText(videos.length),
+        known: formatCountText(previousCount)
+      }));
       return;
     }
     const database = core.databaseFromVideos(videos, { previous });
@@ -3582,7 +3818,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
     hits: result.stats?.hits || 0,
     reads: result.stats?.reads || 0,
     total: result.stats?.total || 0,
-    issues: result.issues
+    issues: result.issues,
+    unfinished: result.unfinished || []
   };
   if (result.stats?.total) lastScanRecordCount.set(rootCacheKey(handle), result.stats.total);
   // 扫描成功、确定要换掉 collections 了：上一批 video 对象交还它们持有的封面 URL。
@@ -3615,7 +3852,7 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   // 大目录的递归体积统计很慢，放在渲染之后异步跑，不阻塞界面
   updateStorageUsage(handle);
   // 1.5.0：数据库同步也放在渲染之后，同样是「慢活不挡界面」
-  syncStatsDatabase(handle);
+  syncStatsDatabase(handle, options);
 }
 
 function syncDetailDownloadAction() {
@@ -3938,7 +4175,10 @@ async function refreshCurrentRoot() {
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "read" });
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录读取权限。"));
-    await displayRoot(rootHandle, collectionToKeep, BcaI18n.t("已刷新"));
+    // 1.7.10（facet-storage P2-3）：用户明确点了「刷新」，就是明确说「按这次的扫描结果算」，
+    // 所以这道人工动作要能越过「比旧库少太多就不覆盖」的那道闸门，否则真删了一大批视频的人
+    // 会被永久卡在旧数字上。
+    await displayRoot(rootHandle, collectionToKeep, BcaI18n.t("已刷新"), { forceStatsSync: true });
   } catch (error) {
     if (error?.name !== "AbortError") showToast(BcaI18n.t("刷新失败：{message}", { message: error?.message || BcaI18n.t("无法读取本地目录。") }));
   } finally { forceFullScan = false; setBusy(false); }
@@ -4258,8 +4498,18 @@ configFileInput?.addEventListener("change", async () => {
   if (!file) return;
   importConfigButton.disabled = true;
   try {
-    await importConfigFromText(await file.text());
-    showToast(BcaI18n.t("配置已导入。"));
+    // 1.7.10（facet-storage P2-2）：先按文件大小拦一道，别把超大文件整个读进内存
+    if (file.size > MAX_CONFIG_BYTES) {
+      throw new Error(BcaI18n.t("这个配置文件有 {size}，超过了 {limit}，为了不把插件存储挤爆，没有导入。", {
+        size: formatBytes(file.size),
+        limit: formatBytes(MAX_CONFIG_BYTES)
+      }));
+    }
+    const warnings = await importConfigFromText(await file.text());
+    // 1.7.10（P2-2）：有没生效的项就必须说出来，不能一律报「配置已导入。」
+    showToast(warnings?.length
+      ? BcaI18n.t("配置已导入，但有 {count} 项没生效：{detail}", { count: warnings.length, detail: warnings.join("；") })
+      : BcaI18n.t("配置已导入。"));
   } catch (error) {
     // 导入失败必须说清楚原因，不能静默
     showToast(BcaI18n.t("导入配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
@@ -4374,7 +4624,13 @@ document.addEventListener("visibilitychange", () => {
 // 唯一的行为变化：页面在前台闲置时不会再自动刷新「已下载」状态，切回本页或
 // 下载完成后仍然会刷新（写在 AI_HANDOFF 里的「前台定时扫描间隔 60 秒」要一起改掉）。
 BcaI18n.init().catch(() => {}).then(() => Promise.all([
-  restoreCollectionOrder().catch(() => { collectionOrder = []; }),
+  // 1.7.10（facet-storage P2-1）：读不出来就**什么都不做** —— 不清内存里的顺序
+  // （启动时本来就是空的），也不置 collectionOrderLoaded，这样后面任何一次拖拽
+  // 都不会拿扫描顺序去覆盖磁盘上那份。旧代码在这里写 `collectionOrder = []`，
+  // 等于把「读失败」当成「没保存过」。
+  restoreCollectionOrder().catch(() => {
+    showToast(BcaI18n.t("收藏夹顺序没读出来，本次先按扫描顺序显示；为避免覆盖，这期间不会保存排序。"));
+  }),
   restoreViewSettings(),
   restoreImportHint(),
   restoreImportState(),

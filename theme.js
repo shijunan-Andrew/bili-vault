@@ -266,11 +266,25 @@
     try { global.chrome?.storage?.local?.set({ [WALLPAPER_REVISION_KEY]: Date.now() }); } catch (_) {}
   }
 
+  /* 1.7.10（facet-storage P2-5）：背景图是 IndexedDB 里的一份 Blob，浏览器在磁盘吃紧时
+     可以随时把它回收掉，而用户完全不会知道 —— 界面只是某天起「背景图没了」。
+     manifest 里的 unlimitedStorage 已经让扩展存储变成持久化的，这里再显式请求一次
+     作为兜底（已经持久化时是空操作）。失败不影响存图本身，所以整条链都吞掉错误。 */
+  function requestDurableStorage() {
+    try {
+      const storage = global.navigator?.storage;
+      if (!storage?.persist) return;
+      Promise.resolve(storage.persisted?.())
+        .then((already) => (already ? true : storage.persist()))
+        .catch(() => {});
+    } catch (_) {}
+  }
+
   function saveWallpaper(file) {
     if (!file) return Promise.reject(new Error("no file"));
     return prepareWallpaper(file)
       .then((prepared) => withWallpaperStore("readwrite", (store) => store.put(prepared, WALLPAPER_KEY))
-        .then(() => { applyWallpaperUrl(prepared); announceWallpaperChange(); return prepared; }));
+        .then(() => { applyWallpaperUrl(prepared); announceWallpaperChange(); requestDurableStorage(); return prepared; }));
   }
 
   function clearWallpaper() {

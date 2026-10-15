@@ -3,11 +3,44 @@
 
   const MEDIA_EXTENSIONS = new Set(["mp4", "mkv", "webm", "m4s", "flv", "mov", "avi"]);
 
+  /* 1.7.10（facet-destructive P2-2）：文件名还有个「字节」上限，原来只按字符截。
+     NTFS 的单个路径分量上限是 255 字节，而一个汉字在 UTF-8 下占 3 字节：标题上限
+     100 字符 = 最多 300 字节，收藏夹名 120 字符 = 最多 360 字节，再拼上「 - BV号」
+     就直接越线 —— getDirectoryHandle 抛错，那一条视频稳定导不进来，用户只看到
+     「保存失败」而不知道原因。两个上限取严的那个，字符上限照旧保留（纯 ASCII
+     的行为一个字都不变），并且按码点累加，不会把 emoji 切成半个代理对。
+     留 200 而不是 255：后面 uniqueRecordFolderName 还可能追加「 (1)」。 */
+  const MAX_SEGMENT_BYTES = 200;
+
+  function utf8ByteLength(text) {
+    let bytes = 0;
+    for (const char of String(text || "")) {
+      const code = char.codePointAt(0);
+      bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    }
+    return bytes;
+  }
+
+  function truncateToBytes(text, maxBytes) {
+    const source = String(text || "");
+    if (maxBytes <= 0) return "";
+    if (utf8ByteLength(source) <= maxBytes) return source;
+    let used = 0;
+    let result = "";
+    for (const char of source) {
+      const size = utf8ByteLength(char);
+      if (used + size > maxBytes) break;
+      used += size;
+      result += char;
+    }
+    return result;
+  }
+
   function safeCollectionName(value, fallback = "未分类收藏") {
     let name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
     if (!name || name === "." || name === "..") name = fallback;
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) name = `_${name}`;
-    return name.slice(0, 120) || fallback;
+    return truncateToBytes(name.slice(0, 120), MAX_SEGMENT_BYTES) || fallback;
   }
 
   function withSourceCollection(parsedVideo, sourceItem = {}) {
@@ -23,9 +56,9 @@
   // 下好的文件要能凭 BV 号认出这个目录并对上号，所以提到这里共享，全项目只此一份实现。
   function safeName(value, fallback = "未知", maxLength = 100) {
     const name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
-    if (!name || name === "." || name === "..") return fallback.slice(0, maxLength);
-    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return `_${name}`.slice(0, maxLength);
-    return name.slice(0, maxLength);
+    if (!name || name === "." || name === "..") return truncateToBytes(fallback.slice(0, maxLength), MAX_SEGMENT_BYTES);
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return truncateToBytes(`_${name}`.slice(0, maxLength), MAX_SEGMENT_BYTES);
+    return truncateToBytes(name.slice(0, maxLength), MAX_SEGMENT_BYTES);
   }
 
   // 目录名以 " - BV号"（或 av 号）结尾，identifiersFromDirectoryName 靠这个后缀认人。
@@ -34,7 +67,9 @@
     const rawAid = String(video?.aid || "").trim().replace(/^av/i, "");
     const suffix = /^BV[0-9A-Za-z]{10}$/.test(rawBvid) ? rawBvid : /^\d+$/.test(rawAid) ? `av${rawAid}` : `视频${index + 1}`;
     const tail = ` - ${suffix}`;
-    const title = safeName(video?.title, "未知").slice(0, Math.max(1, 100 - tail.length));
+    // 后缀（BV/av 号）是认人的依据，必须整段留住：字节预算先扣掉它，剩下的给标题。
+    const titleBudget = Math.max(1, MAX_SEGMENT_BYTES - utf8ByteLength(tail));
+    const title = truncateToBytes(safeName(video?.title, "未知").slice(0, Math.max(1, 100 - tail.length)), titleBudget);
     return `${title}${tail}`;
   }
 

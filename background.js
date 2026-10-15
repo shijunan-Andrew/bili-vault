@@ -230,11 +230,42 @@ function formatChineseDateTime(date, withMilliseconds = false) {
   return `${p.year}年${p.month}月${p.day}日 ${p.hour}时${p.minute}分${p.second}秒${withMilliseconds ? `.${p.millisecond}` : ""}`;
 }
 
+/* 1.7.10（facet-destructive P2-2）：目录名还有一道「字节」闸。
+   service worker 是 ES module、import 不了经典脚本，所以与 archive-core.js 的
+   utf8ByteLength / truncateToBytes 各留一份逐字相同的副本（稳定性测试守着两份）。
+   字符上限照旧（收藏夹名 120），字节上限 200 —— 一个汉字 3 字节，120 汉字 = 360
+   字节会越过 NTFS 的 255 字节分量上限，建目录直接抛错。 */
+const MAX_SEGMENT_BYTES = 200;
+
+function utf8ByteLength(text) {
+  let bytes = 0;
+  for (const char of String(text || "")) {
+    const code = char.codePointAt(0);
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+function truncateToBytes(text, maxBytes) {
+  const source = String(text || "");
+  if (maxBytes <= 0) return "";
+  if (utf8ByteLength(source) <= maxBytes) return source;
+  let used = 0;
+  let result = "";
+  for (const char of source) {
+    const size = utf8ByteLength(char);
+    if (used + size > maxBytes) break;
+    used += size;
+    result += char;
+  }
+  return result;
+}
+
 function safeSegment(input, fallback = "未命名收藏夹") {
   let value = String(input || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
   if (!value || value === "." || value === "..") value = fallback;
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(value)) value = `_${value}`;
-  return value.slice(0, 120);
+  return truncateToBytes(value.slice(0, 120), MAX_SEGMENT_BYTES);
 }
 
 /* V1.4.3（P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
@@ -1984,6 +2015,9 @@ async function clearImportRunSnapshot() {
    先把 active:false 写进 session，再删键：中间被打断时留下的也是一份"已完成"的快照，
    不会被误判成中断。（键仍然要删，否则下一次的孤儿判定会看到一份旧记录。） */
 async function finishImportRunSnapshot() {
+  // 1.7.10（P2-5）：这一轮结束了，把跨上下文闸门放掉。放在最前面，保证任何一条返回路径
+  // 都会经过它（下面第一行就可能提前 return）。
+  await clearArchiveWriteLock("import");
   if (!importRunSnapshot) return clearImportRunSnapshot();
   importRunSnapshot = {
     ...importRunSnapshot, active: false, paused: false, finished: true, finishedAt: Date.now()
@@ -2686,27 +2720,78 @@ function importIdentifierKeys(item) {
    数据库坏了、没权限、写不进去都不影响归档本身 —— 归档才是这个插件的正事。 */
 const statsPendingRecords = [];
 
-// 1.5.1（P1-12）：坏库留档的文件名。
+// 1.5.1（P1-12）：坏库留档的文件名前缀。
 // File System Access API 没有 rename，所以「改名留档」只能拆成两步：先把原文原样写进
 // 这个文件，成功之后才删掉原文件（见 archiveBrokenStatsDatabase / readStatsDatabase）。
-// 每次损坏都覆盖同一份留档：坏文件通常只坏一次，固定名字比堆一串带时间戳的文件好找，
-// 也不会在用户的备份目录里慢慢攒垃圾。
-const STATS_DATABASE_BACKUP_NAME = "database.bad.json";
+// 1.7.10（facet-destructive P2-4）：原来是固定名 database.bad.json —— 坏文件通常只坏一次，
+// 但「第二次损坏把第一次的现场整份覆盖掉」是真的会丢证据，而坏在哪正是要查的东西。
+// 改成带本地时间戳，并且只保留最近 STATS_DATABASE_KEEP_BACKUPS 份，和错误报告目录的
+// REPORT_KEEP_FILES 同一个思路：不会在用户的备份目录里慢慢攒垃圾。
+const STATS_DATABASE_BACKUP_PREFIX = "database.bad.";
+const STATS_DATABASE_KEEP_BACKUPS = 5;
+
+// 本地时间戳，定长：YYYYMMDD-HHMMSS。定长才能直接按文件名排序定新旧。
+function statsBackupTimestamp(date = new Date()) {
+  const p = localDateParts(date);
+  return `${p.year}${p.month}${p.day}-${p.hour}${p.minute}${p.second}`;
+}
+
+// 只留最近 keep 份留档，其余删掉。失败的删除不致命：下次留档时还会再试一遍。
+async function trimStatsBackups(directory, keep) {
+  let names = [];
+  try {
+    for await (const entry of directory.values()) {
+      if (entry.kind !== "file") continue;
+      if (!entry.name.startsWith(STATS_DATABASE_BACKUP_PREFIX) || !entry.name.endsWith(".json")) continue;
+      names.push(entry.name);
+    }
+  } catch (_) {
+    return 0;
+  }
+  if (names.length <= keep) return 0;
+  names = names.sort();
+  let removed = 0;
+  for (const stale of names.slice(0, names.length - keep)) {
+    try {
+      await directory.removeEntry(stale);
+      removed += 1;
+    } catch (_) {
+      // 留着它不致命
+    }
+  }
+  return removed;
+}
 
 // 把损坏的库原文留档，返回留档文件名；写不进去就返回空串（调用方据此决定别删原文件）。
 // 写的是**原文**，一个字节都不加工：留档的意义就是事后能拿它去查"到底是哪一步写坏的"，
 // 重新序列化一遍会把证据洗掉。
 async function archiveBrokenStatsDatabase(directory, text) {
-  try {
-    const backup = await directory.getFileHandle(STATS_DATABASE_BACKUP_NAME, { create: true });
-    const writable = await backup.createWritable();
-    await writable.write(text);
-    await writable.close();
-    return STATS_DATABASE_BACKUP_NAME;
-  } catch (error) {
-    console.warn("本地数据库损坏，且留档副本写入失败：原文件保持不动。", error);
-    return "";
+  const stamp = statsBackupTimestamp();
+  // 同一秒里第二次损坏不能覆盖第一份现场，所以先探在不在，在就换后缀。
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+    const name = `${STATS_DATABASE_BACKUP_PREFIX}${stamp}${suffix}.json`;
+    let exists = true;
+    try {
+      await directory.getFileHandle(name);
+    } catch (_) {
+      exists = false;
+    }
+    if (exists) continue;
+    try {
+      const backup = await directory.getFileHandle(name, { create: true });
+      const writable = await backup.createWritable();
+      await writable.write(text);
+      await writable.close();
+      await trimStatsBackups(directory, STATS_DATABASE_KEEP_BACKUPS);
+      return name;
+    } catch (error) {
+      console.warn("本地数据库损坏，且留档副本写入失败：原文件保持不动。", error);
+      return "";
+    }
   }
+  console.warn("本地数据库损坏，但同一时间戳的留档名已占满 100 个，放弃留档：原文件保持不动。");
+  return "";
 }
 
 /* ---------- 1.7.0（批次 A / P0）：读不到库时绝不允许整份重写 ----------
@@ -2856,9 +2941,9 @@ async function readStatsDatabase(root) {
   } catch (error) {
     // 1.5.1（P1-12）：这里以前是个空 catch，坏库被下面整份重写成空库 —— 历史统计与宠物
     // 亲密度无声归零，用户只看到"数据没了"，事后连坏在哪都查不了（原文已经没了）。
-    // 现在：先把原文留档成 database.bad.json，留档成功才删原文件，然后才重建空库，
+    // 现在：先把原文留档成 database.bad.<时间戳>.json，留档成功才删原文件，然后才重建空库，
     // 并且把这件事同时写进控制台和弹窗「最近状态」（lastResult）——
-    // 用户看到的是"数据没了但原文还在 003database/database.bad.json"，而不是无声归零。
+    // 用户看到的是"数据没了但原文还在 003database/数据库留档文件"，而不是无声归零。
     const backupName = await archiveBrokenStatsDatabase(directory, text);
     if (backupName) {
       try {
@@ -2927,6 +3012,55 @@ async function writeStatsDatabase(root, records) {
     console.warn("写入本地数据库失败（归档不受影响）", error);
     return null;
   }
+}
+
+/* 1.7.10（facet-storage P2-4）：队列不能「先清再写」。
+   原来 `statsPendingRecords.splice(...)` 在 await 之前就把队列清空了，写失败这一批的
+   统计行永远不会重试 —— 归档文件本身是完整的（下一次收藏库扫描能重建回来），
+   但 totals.savedTotal 这个单调计数补不回来，用户只看到「统计页少了刚导入的一批」。
+   现在失败就把整批放回队首，下一轮接着写；连续失败到 STATS_WRITE_NOTICE_AFTER 次
+   才升级成用户可见的提示（走 lastResult，与「读不出库」同一个通道），之后每隔
+   STATS_WRITE_NOTICE_INTERVAL 次再提醒一次，免得刷屏。
+   队列有上限：库里确实写不进去时不能无限攒内存。超了从最旧的丢，并把丢掉的条数
+   报出来 —— 这些记录靠下一次全量扫描还能重建。 */
+const STATS_WRITE_NOTICE_AFTER = 3;
+const STATS_WRITE_NOTICE_INTERVAL = 10;
+const STATS_PENDING_MAX_RECORDS = 20000;
+let statsWriteFailureStreak = 0;
+
+function reportStatsWriteFailure() {
+  reportStatsWriteBlocked(
+    `本地数据库这次写不进去（已连试 ${statsWriteFailureStreak} 次）。归档文件本身是完整的，`
+    + "下次打开收藏库重新扫描就能把统计补回来；要是一直这样，检查 003database 文件夹能不能写。"
+  );
+}
+
+// 把待写队列落一次盘。成功返回新库，失败返回 null（且队列原样留着）。
+async function flushStatsPendingRecords(root) {
+  if (!statsPendingRecords.length) return null;
+  const batch = statsPendingRecords.splice(0, statsPendingRecords.length);
+  const database = await writeStatsDatabase(root, batch);
+  if (database) {
+    statsWriteFailureStreak = 0;
+    return database;
+  }
+  // 失败：整批放回队首（这一批比新来的先写，顺序不能反）
+  statsPendingRecords.unshift(...batch);
+  statsWriteFailureStreak += 1;
+  const overThreshold = statsWriteFailureStreak - STATS_WRITE_NOTICE_AFTER;
+  if (statsWriteFailureStreak === STATS_WRITE_NOTICE_AFTER
+    || (overThreshold > 0 && overThreshold % STATS_WRITE_NOTICE_INTERVAL === 0)) {
+    reportStatsWriteFailure();
+  }
+  if (statsPendingRecords.length > STATS_PENDING_MAX_RECORDS) {
+    const dropped = statsPendingRecords.length - STATS_PENDING_MAX_RECORDS;
+    statsPendingRecords.splice(0, dropped);
+    reportStatsWriteBlocked(
+      `本地数据库连续写不进去，已丢掉最早排队的 ${dropped} 条统计记录`
+      + `（队列最多留 ${STATS_PENDING_MAX_RECORDS} 条）。归档文件不受影响，重新扫描收藏库就能补回来。`
+    );
+  }
+  return null;
 }
 
 /* 一条刚存好的归档记录 → 数据库里的一行。时间用的就是写进 视频信息.txt 的那一串
@@ -3059,6 +3193,20 @@ async function importBiliFavoritesInner(data, tabId = null) {
   // 更不会把取消信号打到另一个对象上（见 importBiliFavoritesInOrder 的注释）。
   const run = claimImportRun();
   if (!run) throw new Error("已经有一轮导入正在进行，请先等它结束或取消它。");
+  /* 1.7.10（facet-destructive P2-5）：本地收藏库正在删 / 搬 / 新建目录时不开始这一轮 ——
+     两边同时写同一批归档目录，导入会把刚删掉的目录名字写回统计库。
+     注意这个 await 必须放在 claimImportRun() **之后**：挪到前面就等于在「置位」之前
+     又开了一个窗口，连点两次又能钻进来（见上面 4.9.x 那段注释）。 */
+  if (await archiveWriteLockHeldBy("library")) {
+    run.active = false;
+    run.cancelled = false;
+    publishImportState({ running: false, paused: false, finishedAt: Date.now() }, true);
+    await clearImportRunSnapshot();
+    throw new Error("本地收藏库正在改动归档（删除 / 搬运 / 新建目录），等它做完再导入。");
+  }
+  // 占位成功、且收藏库那边没在写：把「导入进行中」摆到跨上下文闸门上。
+  // 放在这里而不是 claimImportRun 里 —— 那个函数是纯粹的占位判断，测试会把它单独抠出来跑。
+  setArchiveWriteLock("import");
   // root 必须声明在函数作用域：这一轮导入从头到尾都要用它（建收藏夹目录、写视频目录、
   // 落盘错误报告）。原来写成 try 块里的 `const root`，try 一结束 root 就没了 ——
   // 导入走到「建收藏夹目录」那一步直接 ReferenceError: root is not defined。
@@ -3429,8 +3577,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
       }
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
       // 1.5.0：一个收藏夹跑完就把数据库落一次盘（中途被取消也只丢最后这一小段）
+      // 1.7.10（P2-4）：改走 flushStatsPendingRecords —— 写失败会把整批放回队列重试
       if (statsPendingRecords.length) {
-        await writeStatsDatabase(root, statsPendingRecords.splice(0, statsPendingRecords.length));
+        await flushStatsPendingRecords(root);
       }
     }
   } catch (error) {
@@ -3549,6 +3698,41 @@ function claimImportRun() {
   const run = { active: true, paused: false, cancelled: false, waiters: [] };
   importRun = run;
   return run;
+}
+
+/* 1.7.10（facet-destructive P2-5）：importRunChain / importRunPublishChain 只保证「同一队列
+   里顺序执行」，那叫排队、不叫互斥；而收藏库页面里的删除 / 搬运 / 新建目录是另一套完全
+   独立的写者，service worker 根本看不到。两边同时写同一批归档目录时，导入会把刚删掉的
+   目录名字写回统计库、搬运会复制到一半被扫描读走。
+   这里放一把跨上下文的闸门：storage.session 对扩展页面与 SW 都可见，浏览器重启自动清空，
+   正好是「这次会话内的互斥」这个语义。
+     · 后台导入期间写 { kind: "import", since }，结束时清掉；
+     · 收藏库要动归档之前先读它，导入在跑就先不动，并如实告诉用户；
+     · 反过来收藏库动手期间也写 { kind: "library" }，导入开始时同样要读它。 */
+const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
+// 超过这个岁数的锁当作陈旧遗留（浏览器/页面崩在写入中间），不能把人永久挡在门外
+const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
+
+async function setArchiveWriteLock(kind) {
+  try { await chrome.storage.session.set({ [ARCHIVE_WRITE_LOCK_KEY]: { kind, since: Date.now() } }); } catch (_) {}
+}
+
+// 只清自己那一把：别人后写进来的锁不能被顺手抹掉
+async function clearArchiveWriteLock(kind) {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || !kind || lock.kind === kind) await chrome.storage.session.remove(ARCHIVE_WRITE_LOCK_KEY);
+  } catch (_) {}
+}
+
+async function archiveWriteLockHeldBy(kind) {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || lock.kind !== kind) return false;
+    return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS;
+  } catch (_) { return false; }
 }
 
 function importBiliFavoritesInOrder(data, tabId = null) {

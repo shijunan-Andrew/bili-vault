@@ -107,10 +107,28 @@ test("videoDirectoryLabel 拒绝格式不对的 BV 号", () => {
   assert.equal(core.videoDirectoryLabel({ bvid: "BV1xx411c7mDXX", title: "标题" }, 0), "标题 - 视频1");
 });
 
-test("videoDirectoryLabel 总长度不超过 100（长标题要按后缀长度让位）", () => {
+test("videoDirectoryLabel 总长度不超过 100 字符、也不超过 200 字节（后缀必须完整）", () => {
+  // 1.7.10（P2-2）：原来只卡字符数，中文标题 86 字 = 258 字节，越过 NTFS 的
+  // 255 字节分量上限。现在两个上限取严的那个。
   const long = core.videoDirectoryLabel({ bvid: "BV1xx411c7mD", title: "标".repeat(300) });
-  assert.equal(long.length, 100, `实际 ${long.length}`);
+  assert.ok(long.length <= 100, `字符数 ${long.length} 应 ≤ 100`);
+  assert.ok(Buffer.byteLength(long, "utf8") <= 200, `字节数 ${Buffer.byteLength(long, "utf8")} 应 ≤ 200`);
   assert.ok(long.endsWith(" - BV1xx411c7mD"), "后缀必须完整保留");
+  const ascii = core.videoDirectoryLabel({ bvid: "BV1xx411c7mD", title: "x".repeat(300) });
+  assert.equal(ascii.length, 100, "纯 ASCII 走字符上限，行为与以前一致");
+});
+
+test("safeName / safeSegment 的 200 字节闸：中文按码点截，emoji 不切半个（1.7.10 P2-2）", () => {
+  assert.equal(core.safeName("x".repeat(200)).length, 100, "ASCII 仍是 100 字符上限");
+  const chinese = core.safeName("标".repeat(200));
+  assert.equal(Buffer.byteLength(chinese, "utf8"), 198, "66 个汉字 = 198 字节，再放一个就 201");
+  assert.equal(chinese.length, 66);
+  const emoji = core.safeName("😀".repeat(100));
+  assert.equal(Buffer.byteLength(emoji, "utf8"), 200, "50 个 emoji = 200 字节");
+  assert.equal(emoji.length, 100, "50 个 emoji = 100 个 UTF-16 码元");
+  assert.equal([...emoji].length, 50, "按码点数是 50 个完整的 emoji，没有半个代理对");
+  const collection = core.safeCollectionName("夹".repeat(200));
+  assert.ok(Buffer.byteLength(collection, "utf8") <= 200, "收藏夹名同样受字节闸约束");
 });
 
 test("videoDirectoryLabel 的标题也走 safeName（非法字符会变下划线）", () => {

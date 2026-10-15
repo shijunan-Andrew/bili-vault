@@ -337,8 +337,11 @@ test("the extension never exposes its pages to web origins", () => {
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   // notifications 是 1.7.3 加的：导入要跑几分钟，用户多半已经关掉弹窗，只把结果写进
-  // storage 等于没有终态提示（store 审核与真机反馈都指向这一点）。不接受其它任何权限。
-  assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "notifications", "storage"]);
+  // storage 等于没有终态提示（store 审核与真机反馈都指向这一点）。
+  // unlimitedStorage 是 1.7.10 加的（facet-storage P2-5）：背景图存在 IndexedDB 里，
+  // 没有这个权限时 chrome.storage.local 只有 10MB 硬配额、IndexedDB 随时可能被回收；
+  // 加上它同时解决「配额」与「会被清掉」两件事。不接受其它任何权限。
+  assert.deepEqual(manifest.permissions.slice().sort(), ["clipboardWrite", "nativeMessaging", "notifications", "storage", "unlimitedStorage"]);
   // 打开本地收藏库改由后台 chrome.tabs.create 完成
   const background = readProjectFile("background.js");
   const content = readProjectFile("content.js");
@@ -2436,6 +2439,93 @@ test("快捷键交给读屏，失败时弹窗给出人话摘要，移除背景�
   assert.match(readProjectFile("settings.html"), /id="wallpaperStatus" role="status" hidden/);
 });
 
+// ---- V1.7.10（审查报告 P2 批次 3）------------------------------------------
+
+test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", () => {
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+  // 闸门键名与陈旧阈值必须在两边逐字一致 —— 名字差一个字，两边就各锁各的，等于没有互斥
+  for (const source of [background, library]) {
+    assert.match(source, /const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";/);
+    assert.match(source, /const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 \* 60 \* 1000;/);
+    assert.match(source, /chrome\.storage\.session/);
+  }
+  // 后台：导入开始时锁上、结束时放掉
+  assert.match(background, /setArchiveWriteLock\("import"\);/);
+  assert.match(background, /async function finishImportRunSnapshot\(\) \{\s*\n\s*\/\/[\s\S]{0,200}?await clearArchiveWriteLock\("import"\);/);
+  // 后台开始导入之前要看收藏库那侧有没有人在写
+  assert.match(background, /if \(await archiveWriteLockHeldBy\("library"\)\) \{/);
+  // 页面：三个写入标志任意一个为真就立锁，并在这四条写路径上先问后台
+  assert.match(library, /function publishLibraryWriteLock\(\) \{/);
+  assert.match(library, /const busy = deleteInProgress \|\| collectionCreateInProgress \|\| videoAddInProgress;/);
+  assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 4, "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径都要先查闸门");
+  assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
+  // 只清自己那一把：不能把别人后写进来的锁顺手抹掉
+  assert.match(background, /if \(!lock \|\| !kind \|\| lock\.kind === kind\) await chrome\.storage\.session\.remove/);
+});
+
+test("统计库够不够格被覆盖，要看这一次扫到多少（V1.7.10）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const STATS_SHRINK_KEEP_RATIO = 0\.7;/);
+  // 旧库解析不出来时先把现场留档，备份失败就不动它 —— 原来是「解析失败就当没有旧库」，
+  // 接着照写，把唯一一份完整历史覆盖掉。
+  assert.match(library, /previousBroken/);
+  assert.match(library, /database\.bad\.\$\{/);
+  assert.match(library, /本地数据库读不出来，这次先不动它，免得把唯一的现场覆盖掉。/);
+  // 扫描结果比旧库少太多时只提示不覆盖；「刷新」按钮是用户明确表示「确实删了」的出口
+  assert.match(library, /videos\.length < previousCount \* STATS_SHRINK_KEEP_RATIO/);
+  assert.match(library, /forceStatsSync: true/);
+  assert.match(library, /async function syncStatsDatabase\(handle, options = \{\}\)/);
+});
+
+test("收藏夹顺序没读出来时不许写回，配置导入要有上限和交代（V1.7.10）", () => {
+  const library = readProjectFile("library.js");
+  // 「确实没保存过」和「这次没读出来」分开：后者清空内存顺序就等于把用户排好的顺序扔了
+  assert.match(library, /let collectionOrderLoaded = false;/);
+  assert.match(library, /collectionOrderLoaded = true;/);
+  assert.match(library, /if \(!collectionOrderLoaded\) \{\s*\n\s*\/\/[^\n]*\n\s*showToast\(BcaI18n\.t\("这次没能读到已保存的收藏夹顺序，为避免覆盖它，本次排序只临时生效。"\)\);/);
+  assert.equal(/collectionOrder = \[\]; \}\)/.test(library), false, "读失败不许清空顺序");
+  assert.match(library, /const MAX_CONFIG_BYTES = 256 \* 1024;/);
+  assert.match(library, /file\.size > MAX_CONFIG_BYTES/);
+  // 单条目录名与两个筛选值都要有长度上限 + 与实际收藏夹求交集
+  assert.match(library, /\.slice\(0, 500\)\.map\(\(name\) => name\.slice\(0, 120\)\)/);
+  assert.match(library, /const known = new Set\(collections\.map\(\(collection\) => collection\.name\)\);/);
+  // 写失败不能再是空 catch
+  assert.equal(/storage\.local\.set\(\{ collectionOrder \}\)[^\n]*catch \(_\) \{\}/.test(library), false, "配置导入写 storage 失败要说话");
+});
+
+test("归档目录名的 200 字节闸、坏库留档、半截目录都钉住（V1.7.10）", () => {
+  const core = readProjectFile("archive-core.js");
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+  // 文件名上限是字节不是字符：85 个汉字就到 NTFS 的 255 字节了
+  assert.match(core, /const MAX_SEGMENT_BYTES = 200;/);
+  assert.match(core, /function truncateToBytes\(text, maxBytes\) \{/);
+  assert.match(background, /function truncateToBytes\(text, maxBytes\) \{/);
+  assert.match(core, /truncateToBytes\(name\.slice\(0, 120\), MAX_SEGMENT_BYTES\) \|\| fallback/);
+  assert.match(background, /return truncateToBytes\(value\.slice\(0, 120\), MAX_SEGMENT_BYTES\);/);
+  // 坏库改带时间戳，且只留最近几份
+  assert.equal(/STATS_DATABASE_BACKUP_NAME/.test(background), false, "固定的 database.bad.json 会被第二次损坏覆盖");
+  assert.match(background, /const STATS_DATABASE_BACKUP_PREFIX = "database\.bad\.";/);
+  assert.match(background, /const STATS_DATABASE_KEEP_BACKUPS = 5;/);
+  // 统计写入失败要把这批记录放回队首，不能先清队再写、失败即丢整批
+  assert.match(background, /async function flushStatsPendingRecords\(root\) \{/);
+  assert.match(background, /statsPendingRecords\.unshift\(\.\.\.batch\);/);
+  assert.match(background, /const STATS_PENDING_MAX_RECORDS = 20000;/);
+  // 复制原语不许覆盖已存在的目标文件
+  assert.match(library, /async function copyDirectoryContents\(source, target, result = \{ copied: 0, skipped: \[\] \}\) \{/);
+  assert.match(library, /目标目录里已经有同名文件，没有覆盖/);
+  // 下载清理「这次没法确认」要和「确实没有」分开说
+  assert.match(library, /没找到下载文件夹（000视频下载），关联的下载文件这次一个都没动。/);
+  // 半截目录（没有 视频信息.txt）要单独报出来，不能静默 continue
+  assert.match(library, /async function isUnfinishedRecord\(recordEntry\) \{/);
+  assert.match(library, /另有 \{count\} 个目录没写完（没有 视频信息\.txt，多半是上次导入被打断）：\{list\}/);
+  assert.match(library, /unfinished: result\.unfinished \|\| \[\]/);
+  // 背景图要请求持久化存储，别让浏览器当临时数据回收
+  assert.match(readProjectFile("manifest.json"), /"unlimitedStorage"/);
+  assert.match(readProjectFile("theme.js"), /storage\.persist\(\)/);
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
@@ -4111,7 +4201,11 @@ test("背景图存 IndexedDB 的 Blob，不进 chrome.storage（静态回归）"
   assert.match(theme, /WALLPAPER_DB = "bili-vault-appearance"/);
   assert.match(theme, /indexedDB\.open\(WALLPAPER_DB, 1\)/);
   assert.equal(/mirrorToStorage\([^)]*[Ww]allpaper/.test(theme), false, "图片不许进 chrome.storage");
-  assert.equal(/unlimitedStorage/.test(readProjectFile("manifest.json")), false, "没为背景图新增任何权限");
+  // 1.7.10（facet-storage P2-5）：这条原来钉的是「不许有任何新权限」。加 unlimitedStorage
+  // 是为了让背景图所在的 IndexedDB 不被浏览器当临时数据回收、并解开 chrome.storage.local
+  // 的 10MB 硬配额。权限清单的完整白名单由 manifest 那条测试守着，这里只钉两件事：
+  // 图片本身仍然不进 chrome.storage，以及存图后确实请求了持久化存储。
+  assert.match(theme, /storage\.persist\(\)/, "存图后要请求持久化存储，别让浏览器把背景图当临时数据回收");
 
   // 存之前先压一道：长边 2560 + webp 0.92（压不动就原样存 —— 压不了不该挡住用户设背景）
   assert.match(theme, /file\.type\.startsWith\("image\/"\)/, "只接受图片");
@@ -4568,7 +4662,10 @@ test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {
   // 1.7.7（P0-1）：写之前必须比实质指纹 —— 少了它，"写 → onChanged → 重扫 → 再写"
   // 就是一个开着页面就每秒一轮、永不停止的环路。
   assert.ok(library.includes("publishedStatsFingerprintOf"), "快照没变时不许再写（P0-1 环路）");
-  assert.ok(library.includes("syncStatsDatabase(handle)"), "同步助手要真的被调用");
+  // 1.7.10（P2-3）：同步助手要接受并收到 options —— 「刷新」靠 forceStatsSync 越过
+  // 「比旧库少太多就先不覆盖」那道闸门。断言按语义写，不钉死某一行的字面量。
+  assert.match(library, /async function syncStatsDatabase\(handle, options = \{\}\)/, "同步助手要接受 options");
+  assert.ok(library.includes("syncStatsDatabase(handle, options)"), "同步助手要真的被调用，且把 options 透传进去");
 
   // 设置页：数据统计与宠物挂件两个入口
   assert.ok(settingsHtml.includes('data-group="stats"'), "左导航要有数据统计这一项");
