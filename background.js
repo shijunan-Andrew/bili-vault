@@ -3133,7 +3133,14 @@ async function readStatsDatabase(root) {
     return result(applyStatsMirror(BcaStatsCore.emptyDatabase(), mirror), false, "unreadable");
   }
   // 空文件 = 还没写过的新库，不是损坏，不该触发留档（能安全落盘）
-  if (!text.trim()) return result(BcaStatsCore.emptyDatabase(), true, "empty");
+  // 1.7.19：空文件也是「库读不出来」的一种 —— 1.7.16 之前的就地截断写一旦半途中断，
+  // 留下的正是 0 字节文件（而不是坏 JSON）。以前这里直接交空库，那几个「只会往前走」
+  // 的数（firstSeenAt / savedTotal / 亲密度 / 摸头次数）就跟着归零。
+  // 镜像里有就顶回来；全新安装时镜像不存在，applyStatsMirror 原样返回，不会凭空造数。
+  if (!text.trim()) {
+    const mirror = await readStatsMirror();
+    return result(applyStatsMirror(BcaStatsCore.emptyDatabase(), mirror), true, "empty");
+  }
   try {
     const database = BcaStatsCore.normalizeDatabase(JSON.parse(text));
     await syncStatsMirror(database);
@@ -3172,7 +3179,12 @@ async function readStatsDatabase(root) {
       const mirror = await readStatsMirror();
       return result(applyStatsMirror(BcaStatsCore.emptyDatabase(), mirror), false, "corrupt-unarchived", text);
     }
-    return result(BcaStatsCore.emptyDatabase(), true, "corrupt", "");
+    // 1.7.19：留档成功 ≠ 历史找得回来。原文虽然存进了 database.bad.<时间戳>.json，
+    // 但那只是一份坏文件；镜像里才是「上一次还能读出来时」的累计值。这条分支以前
+    // 直接把空库交出去，等于刚留完档就把还能救的数字扔掉，和上面「读不出来」那条
+    // 分支要的是同一个补法。
+    const mirror = await readStatsMirror();
+    return result(applyStatsMirror(BcaStatsCore.emptyDatabase(), mirror), true, "corrupt", "");
   }
 }
 

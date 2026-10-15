@@ -409,6 +409,10 @@
   }
 
   document.addEventListener("click", (event) => {
+    // 1.7.19（风控红线）：只认真实用户点击。合成事件能骗过下面那道 700ms 去抖和
+    // 签名去重 —— 页面里任何脚本 dispatch 一次 click，就能替用户按下「确认收藏」，
+    // 而归档是往本地磁盘写东西的副作用，不该由不可信事件触发。
+    if (!event.isTrusted) return;
     if (!archiveEnabled) return;
     const dialog = findFavoriteDialog(event);
     if (!dialog || !clickedConfirm(event, dialog)) return;

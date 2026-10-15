@@ -125,10 +125,11 @@
     const root = document.documentElement;
     root.dataset.appearance = mode === "custom" ? "custom" : "plain";
     root.classList.toggle("bca-glass", Boolean(appearance.glass));
-    // 遮罩是「浅色雾」而不是黑幕：页面底色本来就是浅的，压一层白雾既压得住花哨的照片，
-    // 又不会把整页拖进深色（整页变暗会让后面的白卡片看着是浮起来的）。上限 92%：
-    // 盖死就完全看不见照片了，那还不如不设背景。
-    root.style.setProperty("--bca-wallpaper-veil", `rgba(242, 245, 249, ${((appearance.veil / 100) * 0.92).toFixed(3)})`);
+    // 遮罩是「页面底色的雾」而不是黑幕：压一层底色既压得住花哨的照片，又不会把整页
+    // 拖进另一个极端。颜色按主题给（浅色主题浅雾、夜晚主题深雾，见 theme.css 的
+    // --bca-veil-rgb），这里只填 alpha —— 写死浅色的话夜晚主题会白蒙蒙一层。
+    // 上限 92%：盖死就完全看不见照片了，那还不如不设背景。
+    root.style.setProperty("--bca-wallpaper-veil", `rgba(var(--bca-veil-rgb), ${((appearance.veil / 100) * 0.92).toFixed(3)})`);
     root.style.setProperty("--bca-wallpaper-blur", `${appearance.blur}px`);
     root.style.setProperty("--bca-glass-blur", `${appearance.glassBlur}px`);
   }

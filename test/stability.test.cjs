@@ -4596,9 +4596,10 @@ test("外观的三个数值都会落到 <html> 的 CSS 变量上（真跑一遍 
   assert.equal(theme.classes.has("bca-glass"), true, "开了毛玻璃要挂 bca-glass");
   assert.equal(theme.properties["--bca-wallpaper-blur"], "24px");
   assert.equal(theme.properties["--bca-glass-blur"], "12px");
-  // 遮罩是「浅色雾」，颜色就是页面底色（--bg #f2f5f9），不是黑幕：
-  // 黑幕会把整页拖进深色，后面的白卡片看着就是浮起来的。
-  assert.equal(theme.properties["--bca-wallpaper-veil"], "rgba(242, 245, 249, 0.736)");
+  // 遮罩是「页面底色的雾」，不是黑幕：黑幕会把整页拖进深色，后面的白卡片看着
+  // 就是浮起来的。颜色改由 theme.css 的 --bca-veil-rgb 按主题给（浅色浅雾、
+  // 夜晚深雾），这里只填 alpha —— 写死浅色的话夜晚主题会白蒙蒙一层（V1.7.19）。
+  assert.equal(theme.properties["--bca-wallpaper-veil"], "rgba(var(--bca-veil-rgb), 0.736)");
 
   // 关掉毛玻璃要把类名摘掉，不能只靠「不再写变量」——类名留着，卡片还是半透明
   theme.api.setAppearance({ glass: false });
@@ -4609,6 +4610,53 @@ test("外观的三个数值都会落到 <html> 的 CSS 变量上（真跑一遍 
   theme.api.onAppearanceChange((next) => { seen = next.veil; });
   theme.api.setAppearance({ veil: 20 });
   assert.equal(seen, 20, "改外观要通知订阅者");
+});
+
+// ---- V1.7.19（残留 P1 三条：统计镜像 / 可信点击 / 深色雾）----
+
+test("交给调用方的空库必须先过统计镜像，四条出口一条都不许漏（V1.7.19）", () => {
+  const bg = readProjectFile("background.js");
+  // 直接 assert.doesNotMatch：只要有人把 result(BcaStatsCore.emptyDatabase()) 写回来就红
+  assert.doesNotMatch(bg, /result\(BcaStatsCore\.emptyDatabase\(\)/,
+    "空库必须先过 applyStatsMirror 再交给调用方，不许直接塞进 result()");
+  assert.equal(
+    [...bg.matchAll(/applyStatsMirror\(BcaStatsCore\.emptyDatabase\(\), mirror\)/g)].length,
+    4,
+    "四条空库出口（读不出来 / 空文件 / 坏库没留档 / 坏库已留档）都要用镜像顶回累计值"
+  );
+  // 全新安装时镜像还不存在，applyStatsMirror 必须原样返回，不许凭空造数
+  assert.match(bg, /function applyStatsMirror\(database, mirror\) \{\s*\n\s*if \(!mirror\) return database;/,
+    "没有镜像时必须原样返回，不能凭空造数");
+});
+
+test("自动归档只认真实用户点击，合成事件不许替用户按下确认（V1.7.19）", () => {
+  const content = readProjectFile("content.js");
+  const at = content.indexOf('document.addEventListener("click"');
+  assert.ok(at > 0, "找不到收藏确认的点击监听");
+  const handler = content.slice(at, content.indexOf("}, true);", at));
+  assert.match(handler, /if \(!event\.isTrusted\) return;/,
+    "确认收藏的监听要先查 event.isTrusted；合成点击能骗过 700ms 去抖与签名去重");
+  // 这条守卫要挡在「有没有开启归档」之前：关掉功能时也不该被合成事件唤起
+  assert.ok(handler.indexOf("!event.isTrusted") < handler.indexOf("!archiveEnabled"),
+    "isTrusted 要在 archiveEnabled 之前判");
+  // 插件自己从来不该合成点击 —— 一旦有了，上面的检查会把自己的路也堵死
+  assert.doesNotMatch(content, /\.click\(\)|dispatchEvent\(/,
+    "content.js 里不许出现合成点击");
+});
+
+test("壁纸遮罩的颜色跟着主题走，theme.js 只填 alpha（V1.7.19）", () => {
+  const css = readProjectFile("theme.css");
+  const js = readProjectFile("theme.js");
+  assert.match(css, /--bca-veil-rgb: 242, 245, 249;/, "浅色主题要给出雾的 RGB 通道");
+  assert.match(css, /--bca-wallpaper-veil: rgba\(var\(--bca-veil-rgb\), 0\.46\)/,
+    "兜底遮罩要用主题色，不许再写死十六进制");
+  const manualDark = css.match(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/)[1];
+  const systemDark = css.match(/:root:not\(\[data-theme="light"\]\) \{([\s\S]*?)\n  \}/)[1];
+  for (const [label, block] of [["手动深色", manualDark], ["跟随系统深色", systemDark]]) {
+    assert.match(block, /--bca-veil-rgb: 15, 18, 22;/, `${label}块要给出深雾的 RGB 通道（= --bg）`);
+  }
+  assert.ok(js.includes("rgba(var(--bca-veil-rgb), "), "theme.js 只该填 alpha，颜色交给 --bca-veil-rgb");
+  assert.equal(js.includes("rgba(242, 245, 249"), false, "theme.js 里不许再写死浅色雾");
 });
 
 test("外观的取值会被夹在范围内，脏数据不许穿透（真跑一遍 theme.js）", () => {
