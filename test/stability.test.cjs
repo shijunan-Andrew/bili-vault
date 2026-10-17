@@ -3119,7 +3119,7 @@ test("交接文档的「维护规范」与「协作规矩」不许被删（V1.7.
   assert.ok(handoff.indexOf("## 项目文档的维护规范") < handoff.indexOf("## 快速开始"), "维护规范要排在快速开始之前");
   assert.ok(handoff.includes("什么时候必须更新"), "维护规范要写清什么时候更新");
   // 1.7.29：维护规范管的是「一整套」文档，不只这一份
-  for (const doc of ["README.md", "SMOKE_TEST.md", "docs/ARCHITECTURE.md", "docs/HISTORY.md", "bili_vault_ref/TODO.md"]) {
+  for (const doc of ["README.md", "SMOKE_TEST.md", "docs/ARCHITECTURE.md", "docs/HISTORY.md", "Desktop\\bili_vault_ref\\TODO.md"]) {
     assert.ok(handoff.includes(doc), "维护规范要覆盖 " + doc);
   }
   assert.ok(handoff.includes("从待办里删掉"), "维护规范要写清待办做完了怎么处理");
@@ -3271,6 +3271,23 @@ test("导出归档元数据：格式身份、校验和、保留目录名与写�
   // ⑦ 导入正在跑时不许导（否则拿到的是半成品），这与「删除 / 搬运」共用同一把闸门
   assert.ok(library.includes("导入正在跑，等它结束再导出，免得导到一半的数据。"),
     "导入期间要拒绝导出，别把半成品当成现状");
+});
+
+test("交接文档里提到参考目录，要写清是桌面上那个（V1.7.31）", () => {
+  const docs = ["AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "docs/ARCHITECTURE.md", "docs/HISTORY.md"];
+  let checked = 0;
+  for (const doc of docs) {
+    const text = readProjectFile(doc);
+    for (const match of text.matchAll(/(.{0,16})(bili_vault_ref[\\/])/g)) {
+      checked += 1;
+      assert.match(
+        match[1],
+        /Desktop\\$/,
+        doc + " 里的 " + match[2] + " 要写成 Desktop\\bili_vault_ref\\…，否则看起来像仓库里的相对路径"
+      );
+    }
+  }
+  assert.ok(checked > 0, "这份守卫本身不能形同虚设：至少该有几处引用到参考目录");
 });
 
 test("the extractor also picks up strings passed as arguments", () => {

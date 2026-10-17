@@ -5,6 +5,19 @@
 > 行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
 
+## 1.7.31：交接前的文档一致性收尾
+
+**改了什么**（纯文档 + 一条守卫，不动代码行为）：
+- 仓库文档里指向桌面参考目录的写法统一成 `Desktop\bili_vault_ref\…`：`README.md` 5 处、`docs/HISTORY.md` 7 处（探针、验证台、审查报告）。原来只写目录名加一个斜杠，在仓库里读起来像相对路径，接手的人会找不到。
+- 新增守卫「交接文档里提到参考目录，要写清是桌面上那个（V1.7.31）」：仓库五份文档里凡是「目录名紧跟斜杠」的路径写法，前面必须是 `Desktop\`。测试 250 → 251。
+- 参考区 `TODO.md`：版本号 V1.7.29 → V1.7.31；`# 待办` / `## 待办` 重名改掉；删掉「导出功能必须先想清的四件事」（1.7.30 已按那四条实现）；「如果只做一件事」不再依赖那条已完成项；补 1.7.28–1.7.31 已完成记录。
+- 参考区 `README.md`：去掉「`_*.cjs` 183 个」这类会漂的数字；把「大部分脚本写死 `b_catch` 路径」限定成「早期脚本」；行尾统一成 CRLF。
+- 全量体检（自写脚本）：五份仓库文档 + 两份参考区活文档 —— 零死链、零重复标题、零标题层级跳跃、零裸 LF / 叠 CR / BOM，文档里点名的仓库脚本全部存在。
+
+**为什么值得记一笔**：这类「文档里看起来能点开、实际找不到」的路径，是交接给新 agent 时最浪费时间的一类问题，而且它会反复长出来 —— 所以配了守卫，而不是只改一遍。
+
+**踩的坑**：第一版体检脚本把「文档所在目录」当成了仓库根，于是 `docs/ARCHITECTURE.md` 里的 `../AI_HANDOFF.md` 全被误报成坏链接。修法是按 `path.dirname(doc)` 解析相对链接。
+
 ## 1.7.30：导出归档元数据（路线图第 2 项）
 
 **改了什么**：新增「导出归档元数据」——把一次磁盘扫描的结果写成单个 JSON，带 `schemaVersion`、`generatedAt`、`appVersion`、`counts`、`collections`、`records`、`stale`，以及文档末尾的 SHA-256 `checksum`。
@@ -27,7 +40,7 @@
 
 **根因**：`truncateToBytes()` 是按码点走的，但它只管**字节数**，管不到「先按字符切」这一步 —— 所以两层保护各自看着都对，合起来仍然漏。§3.4 原本判为 P3，1.7.24 收掉同区域的 §3.2（路径长度 260）后才被翻出来。
 
-**同时**：`AI_HANDOFF.md` 的「本文档的维护规范」改名「项目文档的维护规范」，范围扩到 `README.md` / `SMOKE_TEST.md` / `docs/*.md` / `bili_vault_ref/TODO.md`，并补上「待办做完了要从 TODO 里删掉」这类动作；守卫断言加了一条「维护规范要覆盖这五份文档」。
+**同时**：`AI_HANDOFF.md` 的「本文档的维护规范」改名「项目文档的维护规范」，范围扩到 `README.md` / `SMOKE_TEST.md` / `docs/*.md` / `Desktop\bili_vault_ref\TODO.md`，并补上「待办做完了要从 TODO 里删掉」这类动作；守卫断言加了一条「维护规范要覆盖这五份文档」。
 
 **守卫**：`test/stability.test.cjs` 新增「按字符截断的地方一律按码点截，不许把代理对劈开（V1.7.29）」（静态：11 处调用点都不许退回 `.slice(0, n)` 形式、`sliceCodePoints` 必须导出）；`test/archive-core.test.cjs` 新增 3 条真执行用例（助手本身、`safeCollectionName`/`safeName`、`videoDirectoryLabel` 的 BV 后缀边界）。测试 stability 248 → 249、archive-core 72 → 75。
 
@@ -65,7 +78,7 @@
 **改动**
 1. `SMOKE_TEST.md` 顶部加「当前全量验收清单（按功能，不按版本）」14 条；各版本增量清单保留在下面回查。
 2. `docs/HISTORY.md` 加 1.7.8 – 1.7.24 的 17 行索引表 —— 那 17 个批次过去只写在 README 更新说明里，本文的历史线从 1.7.7 直接跳到 1.7.25。
-3. README 两处探针路径 `b_catch/` → `bili_vault_ref/`；删掉三处写死数字。
+3. README 两处探针路径 `b_catch/` → `Desktop\bili_vault_ref\`；删掉三处写死数字。
 4. 「4.1–4.2 期遗留的两条历史限制」从 `AI_HANDOFF.md` 挪进本文（4.2 已解决），入口文档留一行指针。
 5. `AI_HANDOFF.md` 自维护规范的门槛 600 行 → 700 行（它当时已 660 行，原门槛与自己矛盾）。
 6. 新增 1 条守卫：钉住「SMOKE 有当前全量清单」「HISTORY 有 1.7.8–1.7.24 索引」，删了就红。测试 247 → 248。
@@ -179,20 +192,20 @@
 
 **定位**：`git diff c6a2cbd e1dbd49` 里，归档链路（`addManualVideo`、`saveImportedItem`）只被改过一个函数 —— `background.js` 的 `writeFile`（1.7.0 改成「临时文件 + `temp.move(directory, name)` 覆盖」，非 `NotSupportedError`/`TypeError` 的错误原样抛出）。而两条链路都在 `writeFile` 抛错时执行 `removeEntry(record.name, { recursive: true })` 删掉整条记录，于是「更安全的写盘」直接变成「功能坏掉」。
 
-**修法**：`writeFile` 完整退回 1.7.0 之前的就地写（不留临时文件）；`library.js` 的 `writeFileAtomically` 把「换名失败按错误类型分流」改成「一律退回就地写」（临时文件保留 + `lastResult` 写明这一点仍保留）。数据库那一侧的原子写不动。（1.7.16 更正：「页面里从 1.6.1 用到 1.6.5」不是 `move()` 可用的证据 —— `writeFileAtomically` 换名失败会静默退回就地写，成功失败都看不出来。真机探针见 `bili_vault_ref/move-probe.js` 与 `bili_vault_ref/move-probe2.js`。）验证台 `bili_vault_ref/_verify-170-p0.cjs` 的 T8 改成守「失败必须抛错、且不新增文件」（9/9 通过）。
+**修法**：`writeFile` 完整退回 1.7.0 之前的就地写（不留临时文件）；`library.js` 的 `writeFileAtomically` 把「换名失败按错误类型分流」改成「一律退回就地写」（临时文件保留 + `lastResult` 写明这一点仍保留）。数据库那一侧的原子写不动。（1.7.16 更正：「页面里从 1.6.1 用到 1.6.5」不是 `move()` 可用的证据 —— `writeFileAtomically` 换名失败会静默退回就地写，成功失败都看不出来。真机探针见 `Desktop\bili_vault_ref\move-probe.js` 与 `Desktop\bili_vault_ref\move-probe2.js`。）验证台 `Desktop\bili_vault_ref\_verify-170-p0.cjs` 的 T8 改成守「失败必须抛错、且不新增文件」（9/9 通过）。
 
 **教训（下次别再犯）**：① 在 service worker 里用 FSA 的 `move()` 之前，必须先在真机上确认它存在、以及换名失败时抛什么错 —— 页面里的经验（`writeFileAtomically` 从 1.6.1 起就在用）不能直接搬到 SW。（**1.7.16 实测结论**：SW 里 `move()` 存在且能用、覆盖已存在文件也能用；真正的坑是兜底只认 `NotSupportedError`/`TypeError`，而真机上报的是 `NoModificationAllowedError`（目标被占用），于是它没退回就地写、直接把异常交给了「失败就删整条记录」的调用方。教训本身仍然成立 —— 但「怎么验」有了现成的探针。）② 改「写盘」这类基础函数前，先把**所有调用方在失败时的行为**列出来 —— 这次的调用方是「失败就把整条记录删掉」，后果被它放大成了「用户以为没收藏成功」；③ 一个「看起来更安全」的改造，只要让原本能成功的路径变成失败路径，就是净损失。
 
 ## 1.7.0：上线前审查的批次 A/B/C（两条 P0 + 数据面 P1 + 文档漂移）
 
-上线前全项目审查（P0=2、P1=24、P2≈55、P3≈50，10 个分面的原文报告在开发机的 `bili_vault_ref/bili-vault-1.7.0-审查报告.md`）。用户批了批次 A/B/C，本版只做这三批。
+上线前全项目审查（P0=2、P1=24、P2≈55、P3≈50，10 个分面的原文报告在开发机的 `Desktop\bili_vault_ref\bili-vault-1.7.0-审查报告.md`）。用户批了批次 A/B/C，本版只做这三批。
 
 1. **P0-1 读不到数据库时整份重写成空库**。`readStatsDatabase()`（background.js）在 `getFile().text()` 抛错时返回 `emptyDatabase()`，而 `writeStatsDatabase()` / `touchPetInDatabase()` 会在这份空库上追加本轮记录再整份写回 —— 历史统计与宠物亲密度无声归零。修法：读函数回报 `canWrite`/`reason`（`unreadable` / `empty` / `ok` / `corrupt` / `corrupt-unarchived`），两个写入口共用 `statsDatabaseWriteBlocked()` 守卫，读不可信就一个字节都不写，只把原因写进 `lastResult` 与角标。
 2. **P0-2 不可恢复字段没有兜底**。`firstSeenAt` / `totals.savedTotal` / `pet.affinity` / `pet.totalTouch` 在 `chrome.storage.local.bcaStatsMirror` 留镜像（`syncStatsMirror` 只在真的变了才写），读失败时 `applyStatsMirror` 用 `Math.max` 顶回来。另外每次改写正文前 `archivePreviousStatsDatabase()` 把上一版原文写进 `database.bak.json`（**副本比正文早一版**：先写副本、成功后再重写正文，File System Access 没有 rename）。
 3. **坏 JSON 且留档失败 = 也拒绝写**（`reason: "corrupt-unarchived"`）。1.5.1 只解决了「留档成功再重建」，留档失败那支还会整份重写 —— 等于把用户唯一一份坏文件也覆盖掉，事后无从恢复。
 4. **批次 B（数据面 P1）**：`writeFileAtomically()`（library.js）用 `isMoveUnsupportedError()` 分清「本机没有 move()」与「这次换名失败」，后者不再退回就地写（会把正文截成半截）；临时文件写成功后不再无条件删除（它是最后一份完整副本，删了才是真丢），并把文件名写进 `lastResult`；`writeFile()`（background.js）同样处理 + 补 `lastResult`；删收藏夹的确认文案改成说清「删的是整个目录」；批量删除改走 `showResultDialog` 并列出失败明细；复制记录改成校验复制件与源逐字节一致后再删源；`rollbackImport()` 的四个 `catch (_) {}` 收集成 `failures[]` 并写进取消导入的终态文案；导入失败写 `lastResult.failed = true`，`popup.js` 的 `refreshStatus()` 据此强制展开「最近状态」（角标在弹窗打开时就被清掉，折叠卡片是唯一痕迹）；`stats.js` 两处：`monthText` 重复声明互相覆盖 + `new Date("YYYY-MM")` 按 UTC 解析（UTC 以西差一个月）、`bindResize` 丢第二个参数导致旧快照 resize 后主图空白。
 5. **批次 C（一致性与文档漂移）**：彩蛋页入口先 `fetch(chrome.runtime.getURL("bili-old-2015/index.html"))` 探资源在不在包里，不在就给对话框（`pack.ps1` 排除该目录，真实安装包里点它只会开出「找不到文件」）；README / AI_HANDOFF / SMOKE_TEST 的漂移数字对齐实测（发行包 42 文件约 1.4 MB 解压后、词典 859 条、数据库纯函数 58 项、`retro.*` 早已删除）；`release.ps1` 新增「文档里的词典条数（`<!-- i18n-count:N -->`）必须和 `--check` 的实际条数一致」的闸门。
-6. **教训**：`test/stability.test.cjs` 全是文本级断言，看不见「读失败 → 空库 → 整份重写」这类跨函数后果。对这一档后果（丢数据）值得写一个**内存假 FSA + 假 chrome 的验证台**：`bili_vault_ref/_verify-170-p0.cjs` 用 `vm` 装载 `stats-core.js` + `background.js`（去掉第 5 行的副作用 `import`），覆盖读失败拒写、镜像兜底、`database.bak.json` 轮转、留档失败拒写、原子写的失败路径，9/9 通过。真机上这些失败路径没法安全复现，所以这份验证台是这一版的主要证据。
+6. **教训**：`test/stability.test.cjs` 全是文本级断言，看不见「读失败 → 空库 → 整份重写」这类跨函数后果。对这一档后果（丢数据）值得写一个**内存假 FSA + 假 chrome 的验证台**：`Desktop\bili_vault_ref\_verify-170-p0.cjs` 用 `vm` 装载 `stats-core.js` + `background.js`（去掉第 5 行的副作用 `import`），覆盖读失败拒写、镜像兜底、`database.bak.json` 轮转、留档失败拒写、原子写的失败路径，9/9 通过。真机上这些失败路径没法安全复现，所以这份验证台是这一版的主要证据。
 7. **另一个坑**：`release.ps1` 是带 UTF-8 BOM 的 PowerShell 脚本，用 edit 工具改写会把 BOM 剥掉，PS 5.1 会按 GBK 解码整个文件（16 处语法错误）。改完必须确认 BOM 还在（`[System.IO.File]::ReadAllBytes(...)` 前 3 字节是 `EF BB BF`）。
 
 ## 1.6.5：首尾「整桶」的口径、饼图分块规则、图例滚动

@@ -29,7 +29,7 @@
 
 ## 项目文档的维护规范
 
-**这套文档是什么**：`AI_HANDOFF.md`（入口：现状、规矩、红线）、`README.md`（用户看到的：装什么、怎么用、每个版本改了什么）、`SMOKE_TEST.md`（发版前的真机清单）、`docs/ARCHITECTURE.md`（机制、数据流、接口）、`docs/HISTORY.md`（逐版本的根因与教训），以及仓库外的 `bili_vault_ref/TODO.md`（唯一「活的」待办）。
+**这套文档是什么**：`AI_HANDOFF.md`（入口：现状、规矩、红线）、`README.md`（用户看到的：装什么、怎么用、每个版本改了什么）、`SMOKE_TEST.md`（发版前的真机清单）、`docs/ARCHITECTURE.md`（机制、数据流、接口）、`docs/HISTORY.md`（逐版本的根因与教训），以及仓库外的 `Desktop\bili_vault_ref\TODO.md`（唯一「活的」待办）。
 
 **谁读**：接手这个项目的 AI，以及用户本人。所以写的是「现在该怎么做」，不是日记；每条结论都要能被验证 —— 给文件名、grep 锚点或测试项名，不要写「已经处理好了」这种核对不了的话。
 
@@ -43,7 +43,7 @@
 | 新踩到一个「不看就会再犯」的坑 | `AI_HANDOFF.md`「修改原则」 | 先写结论（该怎么做），再写一句来由（哪个版本踩的、错在哪） |
 | 用法 / 步骤变了 | `README.md`（用户侧）+ `SMOKE_TEST.md`（发版侧） | 两边都要改；只改一处等于留了个假动作 |
 | 冒烟清单要覆盖新功能 | `SMOKE_TEST.md` | 加在对应版本小节里，写清「怎么做 / 看到什么算对」 |
-| 待办有增减、做完了、换方向了 | `bili_vault_ref/TODO.md` | 做完的**从待办里删掉**，在「已完成」记一行版本号；别把做完的事留在待办里 |
+| 待办有增减、做完了、换方向了 | `Desktop\bili_vault_ref\TODO.md` | 做完的**从待办里删掉**，在「已完成」记一行版本号；别把做完的事留在待办里 |
 | 任何一份文档的数字 / 路径 / 命令过期 | 就地改 | 优先改成「读法」而不是写死的值（指向 `manifest.json`、`git`、`test/status.cjs` 的输出） |
 | `AI_HANDOFF.md`「当前状态」要与仓库对账 | `AI_HANDOFF.md` | 跑 `node test/status.cjs --write`（它会真跑五套测试），**不要手改数字** |
 | `AI_HANDOFF.md` 涨到约 700 行以上 | `AI_HANDOFF.md` | 先判断能不能放进 `docs/ARCHITECTURE.md` 或 `docs/HISTORY.md`。入口文档**不许**再长出逐版本小节（有守卫断言） |
@@ -63,7 +63,7 @@ node test/status.cjs --check        # 「当前状态」那张表与仓库实际
 node test/i18n-extract.cjs --check  # 动了词典才需要
 ```
 
-再加一步人肉检查：改了**命令、路径、文件名**之后，grep 一遍旧值有没有在 `README.md` / `SMOKE_TEST.md` / `docs/*` / `bili_vault_ref/TODO.md` 里残留。
+再加一步人肉检查：改了**命令、路径、文件名**之后，grep 一遍旧值有没有在 `README.md` / `SMOKE_TEST.md` / `docs/*` / `Desktop\bili_vault_ref\TODO.md` 里残留。
 
 ## 当前状态
 
@@ -71,9 +71,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 953 条（`zh-TW` / `en` 各一份；缺 0，作者已删的旧词条 52） |
-| 测试基线 | stability 250 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
+| 测试基线 | stability 251 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-17 23:14，当时 HEAD `874e973`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-17 23:39，当时 HEAD `8468271`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -367,7 +367,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:250 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:251 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
