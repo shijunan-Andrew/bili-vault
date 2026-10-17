@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **242** 项里<!-- test-count:242 -->，绝大多数是**读文件做文本正则断言**（另有 72 + 61 + 25 + 19 项真执行单元测试：`archive-core.js` / `stats-core.js` 的纯函数、1.7.22 起把 `background.js` 整份丢进 `vm` 跑起来的浏览器环境套件，以及 1.7.23 起用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件）——
+`node test/stability.test.cjs` 的 **243** 项里<!-- test-count:243 -->，绝大多数是**读文件做文本正则断言**（另有 72 + 61 + 25 + 19 项真执行单元测试：`archive-core.js` / `stats-core.js` 的纯函数、1.7.22 起把 `background.js` 整份丢进 `vm` 跑起来的浏览器环境套件，以及 1.7.23 起用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -31,6 +31,13 @@
 - [ ] 已有一个**测试用的小收藏夹**（3–5 条就够，别拿上千条的默认收藏夹测）
 
 ---
+
+## V1.7.25 新增的几条
+
+这一版只动了文档，真机项就两条：
+
+1. 打开仓库根目录，确认 `AI_HANDOFF.md` / `docs/ARCHITECTURE.md` / `docs/HISTORY.md` 三份都在，且 `AI_HANDOFF.md` 开头表格里三个链接点得开。
+2. 跑一次 `pack.ps1`，解压出来的 zip 里**不该有** `docs/` 目录，且运行期文件一个不少。
 
 ## V1.7.24 新增的几条
 

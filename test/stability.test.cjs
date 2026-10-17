@@ -3091,6 +3091,22 @@ test("路径太长的报错真的接在建目录的那几条链路上（V1.7.24�
   assert.match(core, /收藏夹段是 round-trip 的/);
 });
 
+test("AI_HANDOFF 只留入口，架构参考与版本日志各在各的文档里（V1.7.25）", () => {
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  const arch = readProjectFile("docs/ARCHITECTURE.md");
+  const history = readProjectFile("docs/HISTORY.md");
+  // 入口文档不许再长出逐版本小节 —— 否则又会涨回几百行没人读
+  assert.doesNotMatch(handoff, /^## \d+\.\d+\.\d+[：:]/m, "版本日志要放 docs/HISTORY.md");
+  // 三份文档的地图必须互相指得到
+  assert.match(handoff, /\]\(docs\/ARCHITECTURE\.md\)/, "入口文档要指向架构参考");
+  assert.match(handoff, /\]\(docs\/HISTORY\.md\)/, "入口文档要指向版本日志");
+  assert.doesNotMatch(arch, /^## \d+\.\d+\.\d+[：:]/m, "版本日志不该塞进架构参考");
+  assert.match(history, /^## \d+\.\d+\.\d+[：:]/m, "版本日志里要有版本小节");
+  // 硬规则必须留在入口文档第一屏，不能被拆出去
+  for (const rule of ["只在 `theme.css` 定义", "UTF-8 带 BOM", "BcaI18n.t(", "node --check"]) {
+    assert.ok(handoff.includes(rule), `快速开始的硬规则里要有：${rule}`);
+  }
+});
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
@@ -4966,7 +4982,7 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   assert.match(backgroundCode, /budgetExhausted \|\| rateLimitedAbort/);
 
   // P2-21：打包白名单脚本在，且排除清单里确实有开发文件
-  for (const name of [".node-path", "test", "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1"]) {
+  for (const name of [".node-path", "test", "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1", "docs"]) {
     assert.ok(pack.includes(`"${name}"`), `pack.ps1 要排除 ${name}`);
   }
 
