@@ -54,6 +54,18 @@ function Invoke-Native {
   }
 }
 
+# 走 GitHub 的命令（ls-remote / fetch / push）统一走这里：先直连，直连不通再自动走代理。
+# 这样**系统代理保持关闭也能发版** —— 只要 Clash Verge 的内核在跑，混合端口就一直在监听，
+# 跟「系统代理」那个开关无关；而开着全局代理反而会让浏览国内网站变卡。
+function Invoke-GitRemote {
+  param([string[]]$Arguments)
+  $direct = Invoke-Native $Git $Arguments
+  if ($LASTEXITCODE -eq 0) { return $direct }
+  Say "  直连 GitHub 不通，改走代理 $ProxyUrl 重试…" $C_YELLOW
+  $viaProxy = Invoke-Native $Git ($GitArgs + $Arguments)
+  return $viaProxy
+}
+
 # ───────── 找 git 与 node（都不依赖终端 PATH 已刷新） ─────────
 function Find-Exe {
   param([string]$Name, [string[]]$Candidates, [string]$LocalHint)
@@ -149,24 +161,23 @@ if ($reserved.Count) {
   Die "发布中止：先清掉这些文件。"
 }
 
-# ───────── 2. 代理（这一步不过就什么都不动） ─────────
-Say "`n【2/6】检查代理" $C_DIM
+# ───────── 2. 到 GitHub 的路（这一步不过就什么都不动） ─────────
+Say "`n【2/6】检查能不能到 GitHub" $C_DIM
 $portOpen = Test-NetConnection -ComputerName '127.0.0.1' -Port $ProxyPort -InformationLevel Quiet -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-if (-not $portOpen) {
-  Say "  代理端口 $ProxyPort 没开。" $C_YELLOW
-  Say "  → 请打开 Clash Verge 并确认节点已连接，然后重新运行本脚本。" $C_YELLOW
-  Say "  （不开代理会卡 20 秒然后 Connection was reset；本脚本没有改动任何文件）" $C_DIM
-  exit 1
+if ($portOpen) {
+  Say "  Clash 混合端口 $ProxyPort 在监听（系统代理开不开都不影响 git）。" $C_DIM
+} else {
+  Say "  Clash Verge 的内核没在跑（端口 $ProxyPort 不通），先试直连。" $C_YELLOW
 }
-Say "  端口 $ProxyPort 已开放，测试能否到达 GitHub…" $C_DIM
-$probe = Invoke-Native $Git ($GitArgs + @('ls-remote', '--heads', 'origin'))
+$probe = Invoke-GitRemote @('ls-remote', '--heads', 'origin')
 if ($LASTEXITCODE -ne 0) {
-  Say "  代理开着，但到 GitHub 不通：" $C_YELLOW
+  Say "  直连和代理都到不了 GitHub：" $C_YELLOW
   $probe | Select-Object -First 3 | ForEach-Object { Say "    $_" $C_YELLOW }
-  Say "  → 请在 Clash 里换一个节点，然后重新运行本脚本。" $C_YELLOW
+  Say "  → 请打开 Clash Verge（系统代理不用开），确认节点能连上，再重新运行本脚本。" $C_YELLOW
+  Say "  （本步骤之前没有改动任何文件）" $C_DIM
   exit 1
 }
-Say "  [$([char]0x2713)] 代理可用" $C_GREEN
+Say "  [$([char]0x2713)] 能到 GitHub" $C_GREEN
 
 # ───────── 3. 改版本号（记住原值以便回滚） ─────────
 Say "`n【3/6】改版本号 → $版本" $C_DIM
@@ -362,7 +373,7 @@ Remove-Item -LiteralPath $msgFile -Force -ErrorAction SilentlyContinue
 Invoke-Native $Git @('tag', '-f', $Tag) | Out-Null
 Say "  [$([char]0x2713)] 已提交并打 tag $Tag" $C_GREEN
 
-$pushOut = Invoke-Native $Git ($GitArgs + @('push', 'origin', 'main', '--tags'))
+$pushOut = Invoke-GitRemote @('push', 'origin', 'main', '--tags')
 if ($LASTEXITCODE -ne 0) {
   Say "  [$([char]0x2716)] 推送失败：" $C_RED
   $pushOut | Select-Object -First 5 | ForEach-Object { Say "    $_" $C_RED }
@@ -372,7 +383,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $localSha = (Invoke-Native $Git @('rev-parse', '--short', 'main')) -join ""
-Invoke-Native $Git ($GitArgs + @('fetch', 'origin', '--quiet')) | Out-Null
+Invoke-GitRemote @('fetch', 'origin', '--quiet') | Out-Null
 $remoteSha = (Invoke-Native $Git @('rev-parse', '--short', 'origin/main')) -join ""
 Say "`n[$([char]0x2714)] 发布完成：$Tag" $C_GREEN
 Say "  本地 main $localSha / 远程 main $remoteSha"

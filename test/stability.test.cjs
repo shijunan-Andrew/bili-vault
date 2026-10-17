@@ -3119,6 +3119,16 @@ test("交接文档的「维护规范」与「协作规矩」不许被删（V1.7.
     assert.ok(handoff.includes(rule), `协作规矩里要有：${rule}`);
   }
 });
+test("发版不强制开系统代理：git 先直连、失败才走代理（V1.7.26）", () => {
+  const script = readProjectFile("release.ps1");
+  assert.match(script, /function Invoke-GitRemote \{/, "release.ps1 要有直连 / 代理回退助手");
+  assert.match(script, /\$direct = Invoke-Native \$Git \$Arguments/, "先试直连");
+  for (const call of ["ls-remote", "push", "fetch"]) {
+    assert.ok(script.includes(`Invoke-GitRemote @('${call}'`), `${call} 要走回退助手`);
+  }
+  assert.doesNotMatch(script, /-not \$portOpen/, "端口没开不许直接退出：系统代理关着也要能发版");
+  assert.ok(script.includes("系统代理不用开"), "连不上时的提示要说清系统代理不用开");
+});
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

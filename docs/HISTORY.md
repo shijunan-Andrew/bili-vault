@@ -4,6 +4,21 @@
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；用户可见的版本说明在 [`README.md`](../README.md)。
 > 行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## 1.7.26：发版不再需要开系统代理
+
+**根因**：`release.ps1` 第 2 步用 `Test-NetConnection` 探 `127.0.0.1:7897`，探不到就 `exit 1`，而脚本里所有 git 远程命令（`ls-remote` / `push` / `fetch`）一律带 `-c http.proxy=…` 强行走代理。于是「发版」和「开着系统代理」被绑在了一起 —— 可系统代理一开，浏览国内网站就变卡，用户每次发版都得手动开、发完再关。
+
+实测还发现一个关键事实：**混合端口跟「系统代理」开关无关**。Clash Verge 的内核（`verge-mihomo.exe`）跑着的时候 `127.0.0.1:7897` 就一直在 LISTENING，而当时 `HKCU\...\Internet Settings\ProxyEnable = 0`（系统代理是关的）；同时 `git ls-remote` 直连也能成功。
+
+**改法**：
+- 新增 `Invoke-GitRemote`：先 `Invoke-Native $Git $Arguments` 直连，`$LASTEXITCODE -ne 0` 时才加 `$GitArgs`（两个 `-c *.proxy=`）重试。`ls-remote` / `push` / `fetch` 三处都换成它。
+- 第 2 步不再按端口是否开放中止：端口开着打一句提示，关着就说「内核没在跑，先试直连」，真正的中止条件变成「`Invoke-GitRemote` 返回值非 0」，提示语改成「打开 Clash Verge（系统代理不用开）」。
+- 交接文档同步改口：`AI_HANDOFF.md` 里「检查工作区与代理」→「检查工作区与能不能到 GitHub」，并写明「不用手工设 `HTTPS_PROXY`、不用开系统代理」。
+
+**验证**：临时探针 `_probe-gitremote.ps1` 抠出函数跑两个分支 —— 直连成功（exit 0，输出 `78664d3`）；直连失败自动打印「改走代理…重试」并把代理侧的 `fatal: ... does not appear to be a git repository` 与 exit 128 带出来。`release.ps1` 用 `[System.Management.Automation.Language.Parser]::ParseFile` 验过 PARSE OK，BOM（`efbbbf`）保留。
+
+**教训**：把「发版」绑在「某个外部开关必须是开着的」上面时，先验证那个开关是否真的是必要条件 —— 这里的真实依赖只是「内核在跑」，而不是「系统代理开着」，前者关着系统代理也在。
+
 ## 1.7.25：交接文档拆成「入口 + 架构 + 历史」三份
 
 `AI_HANDOFF.md` 长到 1180 行 / 200 KB，其中版本日志 350 行、架构细节 470 行，而接手的人最先要看的「怎么测、怎么发版、哪些规则不能破」在文件末尾。**纯文档整理，代码一行没改**：
