@@ -3128,6 +3128,11 @@ test("交接文档的「维护规范」与「协作规矩」不许被删（V1.7.
   for (const rule of ["约 50 轮", "80 轮", "随时可以交接", "不要继续往下开新活"]) {
     assert.ok(handoff.includes(rule), `换会话规则里要有：${rule}`);
   }
+  // 工具/插件更新后失效要先问用户，不许硬试
+  assert.ok(handoff.includes("### 工具或插件突然用不了"), "协作规矩里要写清工具失效怎么办");
+  for (const rule of ["同一个工具连续失败两次", "先问用户", "十几次"]) {
+    assert.ok(handoff.includes(rule), `工具失效规则里要有：${rule}`);
+  }
   // 行尾不许叠 CR：test/status.cjs --write 曾经每跑一次就多叠一个 \r
   assert.doesNotMatch(handoff, /\r\r/, "AI_HANDOFF.md 的行尾叠了多余的 CR");
   const statusScript = readProjectFile("test/status.cjs");

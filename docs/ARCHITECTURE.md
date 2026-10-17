@@ -39,12 +39,12 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
 │   ├── stability.test.cjs        # 静态回归断言为主（项数以实际输出为准，别写死）
-│   ├── archive-core.test.cjs     # 72 项真执行单元测试：require archive-core.js 真的调用它
-│   ├── stats-core.test.cjs       # 61 项真执行单元测试：require stats-core.js（固定时间戳，绝不用真实 Date.now）
+│   ├── archive-core.test.cjs     # 真执行单元测试：require archive-core.js 真的调用它
+│   ├── stats-core.test.cjs       # 真执行单元测试：require stats-core.js（固定时间戳，绝不用真实 Date.now）
 │   ├── harness.cjs               # 1.7.22：执行级测试的壳：内存版 chrome.storage + 内存版 FileSystem 目录树 + 把 background.js 丢进 vm
-│   ├── background.test.cjs       # 1.7.22：25 项真执行单元测试：真调 readStatsDatabase / writeStatsDatabase / 三个写入口互斥链 / 归档写锁 / nativeHostRequest
+│   ├── background.test.cjs       # 1.7.22：真执行单元测试：真调 readStatsDatabase / writeStatsDatabase / 三个写入口互斥链 / 归档写锁 / nativeHostRequest
 │   ├── dom-harness.cjs           # 1.7.23：最小 DOM（选择器引擎、事件冒泡、<dialog>、ShadowRoot、真 MutationObserver），让页面脚本能真跑
-│   ├── pages.test.cjs            # 1.7.23：19 项真执行单元测试：在 dom-harness 里加载 library.html / popup.html / content.js
+│   ├── pages.test.cjs            # 1.7.23：真执行单元测试：在 dom-harness 里加载 library.html / popup.html / content.js
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
 │   ├── archive-audit.cjs         # 本地归档的标签/简介覆盖情况体检
@@ -249,15 +249,15 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 一次覆盖 约 8800 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**
 
-- **主测试套件是文本级断言，不执行被测代码**（这一条在 V1.0.0 之后有所缓解：`test/archive-core.test.cjs` 里的单元测试是真执行的，见「常用验证」）。`stability.test.cjs` 的其余断言是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
+- **`stability.test.cjs` 仍是文本级断言，不执行被测代码**（1.7.22 / 1.7.23 之后已经有四套真执行：`archive-core`、`stats-core`、`background`（vm 里跑 `background.js`，带内存版 `chrome.*` 与 FileSystem）、`pages`（最小 DOM 里跑三个页面脚本），见「常用验证」）。`stability.test.cjs` 的其余断言是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
 - **配置没有版本迁移**。`CONFIG_VERSION = 1`，导入配置时只校验结构不做迁移。将来升版本必须补。
 - **没有多标签页互斥**。两个标签页同时打开同一归档、同时做写操作（标记已下载 / 删除 / 移动）没有锁。日常使用很难触发，但理论上存在竞态。
 - **没有归档完整性校验与备份机制**。`视频信息.txt` 损坏就是永久丢失，插件没有校验和、没有导出元数据的功能。
 - **原生宿主名仍是 `com.bcatch.folder_opener`**（`b_catch` 时代的名字），宿主版本号 `3.9.0`（1.7.13 起每个响应都带 `protocol: 3`，扩展侧会校验）。**改名会让所有已安装用户的注册失效**，所以要么不改，要么改的时候写迁移脚本。
 - **扩展 ID 推不出来，只能读**。解压扩展的 ID 与加载时的绝对路径有关，改文件夹名后**以 `chrome://extensions` 显示的 ID 为准**；ID 变了就重跑 `install-native-folder-opener.ps1`。1.7.13 试过四种编码都算不出已装 ID，所以别写任何「从路径算 ID」的脚本。
-- **`openDb` 在 `library.js` / `popup.js` 里各有一份**（`download.js` 那一份已随 1.3.0 删除），两份都缺少 `objectStoreNames.contains` 守卫（当前版本号都是 1、升级只跑一次，所以没暴露；一旦有人把版本号改成 2 就会抛 `ConstraintError`）。
-- **全项目有 55 处静默吞错**（`catch (_) {}`），`library.js` 占 24 处。用户可见的失败路径里大约一半是静默的。
-- **归档路径可能超过 Windows 的 `MAX_PATH`（260）**。各段上限是"收藏夹 120 + 视频目录 100"，最坏情况合计约 328 字符。开发机 `LongPathsEnabled = 1` 所以没暴露；**别人不一定开了这个**。
+- **`openDb` 有三份**（`background.js`、`library.js`、`popup.js`；`download.js` 那一份已随 1.3.0 删除），三份都缺少 `objectStoreNames.contains` 守卫（当前版本号都是 1、升级只跑一次，所以没暴露；一旦有人把版本号改成 2 就会抛 `ConstraintError`）。
+- **全项目有一批静默吞错**（`catch (_) {}`），`library.js` 与 `background.js` 最多；用户可见的失败路径里大约一半是静默的。**处数别写死**，要数字现数：`grep -c "catch (_) {}" *.js`。
+- **归档路径仍要盯着 Windows 的 `MAX_PATH`（260）**。1.7.24 起改成「两段共用预算」：收藏夹段仍最多 120 字符，视频目录段按 `recordSegmentMax(collectionName)` 自动收紧，两段合计不超过 `PATH_SEGMENT_BUDGET_CHARS = 168`（= 260 − 假定根 60 − 预留 32）；`pathBudgetReport()` 能算出还差多少，`scanRoot` 碰到超长目录名会在扫描提示里报出来。**FSA 只给句柄不给真实路径**，所以根那 60 是假定值 —— 下载根放得极深时仍可能撞上限，撞上时报的是「路径过长」而不是「目录不存在」（`describeDirectoryCreateError`）。
 
 ### 图标与外链（4.8.1）
 

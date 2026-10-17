@@ -67,7 +67,7 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 词典 | 945 条（`zh-TW` / `en` 各一份；缺 0，作者已删的旧词条 52） |
 | 测试基线 | stability 247 · archive-core 72 · stats-core 61 · background 25 · pages 19（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-17 14:27，当时 HEAD `ec45e26`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-17 22:10，当时 HEAD `2a1348f`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -97,7 +97,7 @@ node test/i18n-extract.cjs --check
 **发版**（版本号不带 `V`，两个位置参数）：
 
 ```powershell
-pwsh -NoProfile -File .\release.ps1 1.7.25 "一句话说明" -Yes
+pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 ```
 
 它会：检查工作区干净与能不能到 GitHub → 改写 3 处版本号 → 跑全部测试与文档标记核对 → 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
@@ -128,6 +128,16 @@ pwsh -NoProfile -File .\release.ps1 1.7.25 "一句话说明" -Yes
 本机是 Windows：日常命令用 bash 工具，Windows 原生功能才用 pwsh 工具；跑 `release.ps1` 必须用 **PowerShell 7**（pwsh 工具），不能用 `powershell.exe`（5.1）。
 
 **GitHub 访问不用开系统代理**：Clash Verge 的内核（`verge-mihomo.exe`）跑着的时候 `127.0.0.1:7897` 就一直在监听，「系统代理」那个开关关着也能走；`release.ps1` 会先直连、不通再自动走代理。平时把系统代理关着不影响发版，也就不会因为全局代理而拖慢国内网站。
+
+### 工具或插件突然用不了：先问用户，别硬试
+
+**DeepSeek Harness 本体和插件会被用户不定期更新**（升级常带来工具改名、参数变化、行为变化，甚至某个工具整个消失）。所以工具失效时的第一反应不是硬试，是**先问用户**：
+
+- **同一个工具连续失败两次就停下来**。把「工具名 + 完整报错 + 你已经试过什么」一起给用户，问一句「是不是刚更新过 / 要不要我换个做法」，等答复再动。
+- 分清两种失败：**我的参数写错了** —— 自己改参数；**这个工具不存在 / 坏了** —— 一律先问。后者**不要自己造替代方案**（压缩工具坏了就去手改上下文、浏览器工具坏了就换别的路子），凡是你猜的替代方案都可能把状态搞得更乱。
+- 真实翻车（2026-10-17）：上下文压缩插件更新之后，有一个会话里 agent 连续调用压缩工具**十几次**全部失败 —— 既没拿到压缩效果，又白烧了大量时间和 token。**第一次失败后问一句，后面十几次都能省掉。**
+
+判定标准：**失败是确定的、原因不明的、重试没有信息增益** —— 满足这三条就停下来问。
 
 ### 子智能体能干什么，不能干什么
 
@@ -320,7 +330,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | `background.js`（消息、统计库、导入、写锁） | 上面 + `node test/background.test.cjs` |
 | `archive-core.js`（命名、解析、配置形状、路径预算） | 上面 + `node test/archive-core.test.cjs` |
 | `stats-core.js`（数据库模型、快照、区间） | 上面 + `node test/stats-core.test.cjs` |
-| `native/*.ps1`、`native/*.cs`、安装/卸载脚本 | `powershell -NoProfile -File test-native-folder-opener.ps1` 自检 |
+| `native/*.ps1`、`native/*.cs`、安装/卸载脚本 | `pwsh -NoProfile -File test-native-folder-opener.ps1` 自检 |
 | 任何 `.ps1` / `.cs` | **确认仍是 UTF-8 带 BOM**（`edit` / `write` 会剥掉它） |
 | 任何 `.js` | `node --check` 该文件（静态断言看不见语法错误） |
 | 发版相关（`release.ps1` / `pack.ps1`） | 全量 —— `release.ps1` 第 4 步跑的就是全量 |
@@ -329,20 +339,22 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 | 套件 | 管什么 | 挂了通常意味着 |
 |---|---|---|
-| `stability.test.cjs`（246） | 静态断言：读文件比对文本 / 正则，核对全仓约定（常量成对、文案存在、文档标记、入口规则） | 被改掉的字面还被别处引用，或某条约定被违反 |
-| `archive-core.test.cjs`（72） | 真执行 `archive-core.js`：目录命名、`视频信息.txt` 解析、配置形状、路径预算 | 纯函数语义变了 |
-| `stats-core.test.cjs`（61） | 真执行 `stats-core.js`：数据库模型、快照、区间计算 | 统计口径变了 |
-| `background.test.cjs`（25） | 在 vm 里跑 `background.js`：内存版 `chrome.*` + FileSystem，覆盖统计库写入 / 回队 / 回滚 / 互斥、归档写锁 | service worker 的契约破了 |
-| `pages.test.cjs`（19） | 在最小 DOM 里跑 `library.js` / `popup.js` / `content.js` | 页面交互、选择器或事件链破了 |
+| `stability.test.cjs` | 静态断言：读文件比对文本 / 正则，核对全仓约定（常量成对、文案存在、文档标记、入口规则） | 被改掉的字面还被别处引用，或某条约定被违反 |
+| `archive-core.test.cjs` | 真执行 `archive-core.js`：目录命名、`视频信息.txt` 解析、配置形状、路径预算 | 纯函数语义变了 |
+| `stats-core.test.cjs` | 真执行 `stats-core.js`：数据库模型、快照、区间计算 | 统计口径变了 |
+| `background.test.cjs` | 在 vm 里跑 `background.js`：内存版 `chrome.*` + FileSystem，覆盖统计库写入 / 回队 / 回滚 / 互斥、归档写锁 | service worker 的契约破了 |
+| `pages.test.cjs` | 在最小 DOM 里跑 `library.js` / `popup.js` / `content.js` | 页面交互、选择器或事件链破了 |
+
+各套的项数**不写死在这里**（会漂）：五套的当前值见上面「当前状态」那张脚本生成的表，`stability.test.cjs` 的总数另有三处 `<!-- test-count:N -->` 标记由 `release.ps1` 核对。
 
 在项目根目录执行。**下面五套都要跑**，`release.ps1` 第 4 步跑的也是这五套，任一退出码非 0 就算失败：
 
 ```powershell
 node test/stability.test.cjs      # 静态回归断言为主（项数以实际输出为准，别写死）
-node test/archive-core.test.cjs   # 72 项真执行
-node test/stats-core.test.cjs     # 61 项真执行
-node test/background.test.cjs     # 25 项真执行（内存版 chrome.* + FileSystem，background.js 丢进 vm）
-node test/pages.test.cjs          # 19 项真执行（dom-harness 里加载 library.html / popup.html / content.js）
+node test/archive-core.test.cjs   # 真执行：归档命名、文本解析、配置形状
+node test/stats-core.test.cjs     # 真执行：数据库模型、快照、区间
+node test/background.test.cjs     # 真执行：内存版 chrome.* + FileSystem，background.js 丢进 vm
+node test/pages.test.cjs          # 真执行：dom-harness 里加载 library.html / popup.html / content.js
 node test/i18n-extract.cjs --check
 ```
 
@@ -415,7 +427,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 3. 动过词典键：`node test/i18n-extract.cjs --check` 缺 0 条。
 4. 动过测试项数或词典条数：三处 `<!-- test-count:N -->` / `<!-- i18n-count:N -->` 与实际一致（`release.ps1` 会卡，但别等它卡）。
 5. 动过「当前状态」相关的东西：`node test/status.cjs --write` 刷新过。
-6. 动过界面：真机预览走过改动的页面（`C:\Users\Maxwell\Desktop\b_catch\_appearance-preview.cjs`，端口 8792）。
+6. 动过界面：真机预览走过改动的页面（`C:\Users\Maxwell\Desktop\bili_vault_ref\_appearance-preview.cjs`，端口 8792）。
 7. `git status` 干净；**没发版就明说「还没发版」**，不要把「代码写完」说成「已经上线」。
 8. 回复里报清楚：改了哪些文件、测试数字、还剩什么没做。
 
@@ -585,7 +597,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     6. **发分发包用 `pack.ps1`，别手工压 zip**（P2-21）：它排掉 `.git` / `test/` / 三份 md / `release.ps1` / `pack.ps1` / `.node-path`，并在打包前断言「清单完整、开发文件没混进去」。
     7. **`release.ps1` 的 README 小节守卫是拿 `git tag` 全量比对的**（不只是本次要发的版本）—— 起因是 V1.4.0 的整节标题被一次编辑误删，而当时发的是 V1.4.1，隔了两个版本才发现。**编辑 README 时不要动 `## V<版本>：` 这一整行**；`test/stability.test.cjs` 里另有一条断言要求这些小节从新到旧排列、且 `## V1.4.0：` 必须存在。
     8. **开发阶段只要代码，不要 Release、不要桌面 zip**（用户 2026-10-14 明确要求，原话「现在插件还在测试开发阶段，不用上传 release，只需要上传代码就行了，以后不用在我桌面上生成 zip 了」）：`release.ps1` 照跑（它就是「提交 + 打 tag + 推送」＝上传代码），**不往 GitHub 建 Release、不把安装包传进 Release、也不再跑 `pack.ps1` 往桌面写 `bili-vault-<版本>.zip`**。注意 `release.ps1` 本身不建 Release（`api.github.com/.../releases` 一直是空的，V1.6.0–V1.6.5 都只有 tag），所以别再提醒用户「把 zip 传到 Release 页」—— 只有用户当面要安装包时才 `pack.ps1`，打完当场交给他。
-    9. **收工要关掉临时起的浏览器与预览进程**（用户 2026-10-15 要求，原话「下次在你完成工作后关掉浏览器后台任务」）：验收用的预览服务器（`C:\Users\Maxwell\Desktop\b_catch\_appearance-preview.cjs`，端口 **8792**；查询参数 `locale=` / `theme=` / `glass=` / `wallpaper=` / `veiled=` / `bad=1`）和 `bsk` 浏览器会话都是临时脚手架 —— 交付／答复之前用 `job_kill` 停掉后台作业、`bsk_session stop` 关掉会话（`bsk_session list` 确认没有残留），别把它们留在用户的任务面板和会话列表里。
+    9. **收工要关掉临时起的浏览器与预览进程**（用户 2026-10-15 要求，原话「下次在你完成工作后关掉浏览器后台任务」）：验收用的预览服务器（`C:\Users\Maxwell\Desktop\bili_vault_ref\_appearance-preview.cjs`，端口 **8792**；查询参数 `locale=` / `theme=` / `glass=` / `wallpaper=` / `veiled=` / `bad=1`）和 `bsk` 浏览器会话都是临时脚手架 —— 交付／答复之前用 `job_kill` 停掉后台作业、`bsk_session stop` 关掉会话（`bsk_session list` 确认没有残留），别把它们留在用户的任务面板和会话列表里。
 25. **「同一件判断散在多处」与「给用户看的假状态」是第二批审查里两种反复出现的病。**（V1.4.3 修上线前审查第二批时定。）
     1. **同一份名单/同一类判断只能有一处。**（P2-3）「保留目录名」原来在手动添加、导入两处各写一遍，自动归档那条链路就漏了 —— B 站收藏夹真叫「001错误报告」时，视频会被写进报告目录。现在只有 `RESERVED_COLLECTION_NAMES` + `collectionNameIsReserved()` 一处，**新增任何「写进用户备份文件夹」的入口时，先 grep 这个函数**。
     2. **判断「某件事还在不在跑」要用最紧的那条依据，不要用时间窗口。**（P2-6）内存里的 `importRun.active` 才是真相，`chrome.storage.local` 里的 `running: true` 只是残影。原来要求残影的 `updatedAt` 超过 90 秒才复位，于是浏览器重启后的前 90 秒里，弹窗一直显示「导入中」、暂停/取消按钮都在，点了却只回「当前没有正在进行的导入」—— **恰恰在最需要自愈的那段时间里给用户看假状态**。现在的判据是「`chrome.storage.session` 里有没有 `active: true` 的快照」，没有就立刻复位。
