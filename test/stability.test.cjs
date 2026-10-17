@@ -3180,6 +3180,21 @@ test("交接文档列出「同一判断的两份实现」的权威位置（V1.7.
   assert.match(readProjectFile("library.js"), /function identifiersOverlap\(/, "library.js 要有 identifiersOverlap 的副本");
 });
 
+// ---- V1.7.28（交接用的两份索引：当前全量验收清单 / 1.7.8–1.7.24 历史索引）----
+test("交接用的两份索引不许被删（V1.7.28）", () => {
+  const smoke = readProjectFile("SMOKE_TEST.md");
+  const history = readProjectFile("docs/HISTORY.md");
+  assert.match(smoke, /^## 当前全量验收清单（按功能，不按版本）$/m, "冒烟清单要给新人一份「当前该跑哪几条」");
+  assert.ok(
+    smoke.indexOf("## 当前全量验收清单") < smoke.indexOf("## V1.7.27 新增的几条"),
+    "当前全量清单要排在版本增量清单之前，否则新人还是先看到增量",
+  );
+  assert.match(history, /^## 关于 1\.7\.8 – 1\.7\.24/m, "历史文档要交代 1.7.8–1.7.24 那 17 个批次的去处");
+  for (const v of ["1.7.8", "1.7.16", "1.7.24"]) {
+    assert.ok(history.includes(`| ${v} |`), `历史索引表里缺 ${v}`);
+  }
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
