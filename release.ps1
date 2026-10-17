@@ -245,6 +245,12 @@ Say "  页面脚本单元测试（真执行 library.js / popup.js / content.js�
 Invoke-Native $Node @('test/pages.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
 if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 页面脚本单元测试未全过" $C_RED; $failed = $true }
 
+# 1.7.27：交接文档里的「当前状态」必须是脚本生成的，手写必漂。--check 只读不跑测试，
+# 对不上就说明文档落后了 —— 跑 node test/status.cjs --write 刷新，而不是去改数字。
+Say "  交接文档的「当前状态」…" $C_DIM
+Invoke-Native $Node @('test/status.cjs', '--check') | ForEach-Object { Say "    $_" $C_DIM }
+if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 交接文档的「当前状态」与仓库实际不一致" $C_RED; $failed = $true }
+
 Say "  词典覆盖…" $C_DIM
 $i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
 $i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }

@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **245** 项里<!-- test-count:245 -->，绝大多数是**读文件做文本正则断言**（另有 72 + 61 + 25 + 19 项真执行单元测试：`archive-core.js` / `stats-core.js` 的纯函数、1.7.22 起把 `background.js` 整份丢进 `vm` 跑起来的浏览器环境套件，以及 1.7.23 起用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件）——
+`node test/stability.test.cjs` 的 **247** 项里<!-- test-count:247 -->，绝大多数是**读文件做文本正则断言**（另有 72 + 61 + 25 + 19 项真执行单元测试：`archive-core.js` / `stats-core.js` 的纯函数、1.7.22 起把 `background.js` 整份丢进 `vm` 跑起来的浏览器环境套件，以及 1.7.23 起用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -31,6 +31,13 @@
 - [ ] 已有一个**测试用的小收藏夹**（3–5 条就够，别拿上千条的默认收藏夹测）
 
 ---
+
+## V1.7.27 新增的几条
+
+1. 打开 `AI_HANDOFF.md`，第二节「当前状态」应有一张表；表里 `stability` 的项数与 `node test/stability.test.cjs` 打印的 `ℹ tests` 一致。
+2. 故意把表里那个数字改错，跑 `node test/stability.test.cjs` 应变红；再跑 `node test/status.cjs --write` 应恢复变绿（这条就是验「手写必漂、脚本才靠得住」）。
+3. `node test/status.cjs --check` 单独跑应打印 `[OK] 「当前状态」与仓库实际一致`。
+4. 看「同一判断的权威位置」表，`patchVolatileFields` 那行应明确写着「没有逐字守卫」。
 
 ## V1.7.26 新增的几条
 

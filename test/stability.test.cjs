@@ -3129,6 +3129,38 @@ test("发版不强制开系统代理：git 先直连、失败才走代理（V1.7
   assert.doesNotMatch(script, /-not \$portOpen/, "端口没开不许直接退出：系统代理关着也要能发版");
   assert.ok(script.includes("系统代理不用开"), "连不上时的提示要说清系统代理不用开");
 });
+// ---- V1.7.27（交接文档：状态快照与权威位置）----
+
+test("「当前状态」是脚本生成的，且与仓库实际对得上（V1.7.27）", () => {
+  const doc = readProjectFile("AI_HANDOFF.md");
+  const begin = doc.indexOf("<!-- status:begin -->");
+  const end = doc.indexOf("<!-- status:end -->");
+  assert.ok(begin > 0 && end > begin, "AI_HANDOFF.md 里要有 status 起始/结束标记");
+  const block = doc.slice(begin + "<!-- status:begin -->".length, end);
+  assert.ok(block.includes("| 项 | 值 |"), "状态块要有表格");
+  assert.ok(block.includes("审查欠账"), "状态块要写清 P0 / P1 / P2 的处理情况");
+  assert.ok(block.includes("node test/status.cjs --write"), "状态块要写清怎么重新生成");
+  const realStability = (readProjectFile("test/stability.test.cjs").match(/^test\(/gm) || []).length;
+  assert.ok(
+    block.includes("stability " + realStability),
+    "状态块里的 stability 项数要和实际一致（实际 " + realStability + "）—— 跑 node test/status.cjs --write"
+  );
+});
+
+test("交接文档列出「同一判断的两份实现」的权威位置（V1.7.27）", () => {
+  const doc = readProjectFile("AI_HANDOFF.md");
+  assert.match(doc, /## 同一判断的权威位置/, "要有一节专门讲「改一处就要同步另一处」");
+  for (const name of ["patchVolatileFields", "identifiersOverlap", "STAT_KEYS", "describeFileSystemError"]) {
+    assert.ok(doc.includes(name), "权威位置表要覆盖 " + name);
+  }
+  assert.match(doc, /没有逐字守卫/, "没有守卫的那几行要明确写出来，别让人以为有守卫");
+  // 表里点到的双份实现必须真的还在两份文件里；哪天合并成一份，这张表就该改了
+  assert.match(readProjectFile("archive-core.js"), /function patchVolatileFields\(/, "archive-core.js 要有 patchVolatileFields");
+  assert.match(readProjectFile("background.js"), /function patchVolatileFields\(/, "background.js 要有 patchVolatileFields 的等价实现");
+  assert.match(readProjectFile("background.js"), /function identifiersOverlap\(/, "background.js 要有 identifiersOverlap");
+  assert.match(readProjectFile("library.js"), /function identifiersOverlap\(/, "library.js 要有 identifiersOverlap 的副本");
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
