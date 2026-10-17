@@ -3123,6 +3123,11 @@ test("交接文档的「维护规范」与「协作规矩」不许被删（V1.7.
   for (const rule of ["bili_vault_ref", "以 `_` 开头的文件", "不是仓库的一部分"]) {
     assert.ok(handoff.includes(rule), `文件归属规则里要有：${rule}`);
   }
+  // 会话轮次到了要收尾换人：先交接、再提醒，不许半途提
+  assert.ok(handoff.includes("### 会话长了就收尾换人"), "协作规矩里要写清什么时候该换会话");
+  for (const rule of ["约 50 轮", "80 轮", "随时可以交接", "不要继续往下开新活"]) {
+    assert.ok(handoff.includes(rule), `换会话规则里要有：${rule}`);
+  }
   // 行尾不许叠 CR：test/status.cjs --write 曾经每跑一次就多叠一个 \r
   assert.doesNotMatch(handoff, /\r\r/, "AI_HANDOFF.md 的行尾叠了多余的 CR");
   const statusScript = readProjectFile("test/status.cjs");
