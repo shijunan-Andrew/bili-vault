@@ -3107,6 +3107,18 @@ test("AI_HANDOFF 只留入口，架构参考与版本日志各在各的文档里
     assert.ok(handoff.includes(rule), `快速开始的硬规则里要有：${rule}`);
   }
 });
+test("交接文档的「维护规范」与「协作规矩」不许被删（V1.7.26）", () => {
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  // 维护规范必须在开头，且回答「什么时候改」
+  assert.ok(handoff.includes("## 本文档的维护规范"), "维护规范要写进交接文档");
+  assert.ok(handoff.indexOf("## 本文档的维护规范") < handoff.indexOf("## 快速开始"), "维护规范要排在快速开始之前");
+  assert.ok(handoff.includes("什么时候必须更新"), "维护规范要写清什么时候更新");
+  // 协作规矩：子智能体的边界、浏览器收尾、问询先回答
+  assert.ok(handoff.includes("## 开发环境与协作规矩"), "协作规矩要写进交接文档");
+  for (const rule of ["子智能体的产出一律视为", "bsk_session action=stop", "在用户明确点头之前不要改文件"]) {
+    assert.ok(handoff.includes(rule), `协作规矩里要有：${rule}`);
+  }
+});
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。

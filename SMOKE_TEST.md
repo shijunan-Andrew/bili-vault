@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **243** 项里<!-- test-count:243 -->，绝大多数是**读文件做文本正则断言**（另有 72 + 61 + 25 + 19 项真执行单元测试：`archive-core.js` / `stats-core.js` 的纯函数、1.7.22 起把 `background.js` 整份丢进 `vm` 跑起来的浏览器环境套件，以及 1.7.23 起用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件）——
+`node test/stability.test.cjs` 的 **244** 项里<!-- test-count:244 -->，绝大多数是**读文件做文本正则断言**（另有 72 + 61 + 25 + 19 项真执行单元测试：`archive-core.js` / `stats-core.js` 的纯函数、1.7.22 起把 `background.js` 整份丢进 `vm` 跑起来的浏览器环境套件，以及 1.7.23 起用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
