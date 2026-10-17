@@ -68,11 +68,23 @@
     return result;
   }
 
+  /* 1.7.29（facet-compat §3.4）：按**码点**截字符，不能按 UTF-16 码元。
+     name.slice(0, 120) 数的是码元，一个 emoji 占 2 个码元 —— 正好在第 120 个码元处
+     落刀时会把代理对劈成两半，留下一个孤立代理；写进目录名后 Windows 把它变成 "?"。
+     本文件下面的 truncateToBytes 是按码点走的，但它只管字节数，管不到「先按字符切」这一步。 */
+  function sliceCodePoints(value, maxChars) {
+    const source = String(value == null ? "" : value);
+    const limit = Number(maxChars);
+    if (!Number.isFinite(limit) || limit < 0) return source;
+    const chars = Array.from(source);
+    return chars.length <= limit ? source : chars.slice(0, Math.floor(limit)).join("");
+  }
+
   function safeCollectionName(value, fallback = "未分类收藏") {
     let name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
     if (!name || name === "." || name === "..") name = fallback;
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) name = `_${name}`;
-    return truncateToBytes(name.slice(0, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES) || fallback;
+    return truncateToBytes(sliceCodePoints(name, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES) || fallback;
   }
 
   /* 1.7.11（facet-security P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
@@ -107,9 +119,9 @@
   // 下好的文件要能凭 BV 号认出这个目录并对上号，所以提到这里共享，全项目只此一份实现。
   function safeName(value, fallback = "未知", maxLength = RECORD_NAME_MAX_CHARS) {
     const name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
-    if (!name || name === "." || name === "..") return truncateToBytes(fallback.slice(0, maxLength), MAX_SEGMENT_BYTES);
-    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return truncateToBytes(`_${name}`.slice(0, maxLength), MAX_SEGMENT_BYTES);
-    return truncateToBytes(name.slice(0, maxLength), MAX_SEGMENT_BYTES);
+    if (!name || name === "." || name === "..") return truncateToBytes(sliceCodePoints(fallback, maxLength), MAX_SEGMENT_BYTES);
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return truncateToBytes(sliceCodePoints(`_${name}`, maxLength), MAX_SEGMENT_BYTES);
+    return truncateToBytes(sliceCodePoints(name, maxLength), MAX_SEGMENT_BYTES);
   }
 
   // 目录名以 " - BV号"（或 av 号）结尾，identifiersFromDirectoryName 靠这个后缀认人。
@@ -123,7 +135,7 @@
     // 1.7.24（§3.2）：知道收藏夹段多长时，标题段按「两段合起来的预算」收 ——
     // 固定 100 的话，120 + 100 = 220 再加上根目录与记录目录里的文件名就贴着 260 了。
     const segmentMax = recordSegmentMax(options.collectionName);
-    const title = truncateToBytes(safeName(video?.title, "未知").slice(0, Math.max(1, segmentMax - tail.length)), titleBudget);
+    const title = truncateToBytes(sliceCodePoints(safeName(video?.title, "未知"), Math.max(1, segmentMax - tail.length)), titleBudget);
     return `${title}${tail}`;
   }
 
@@ -526,11 +538,11 @@
       collectionOrder: (Array.isArray(source.collectionOrder) ? source.collectionOrder : [])
         .filter((name) => typeof name === "string")
         .slice(0, CONFIG_MAX_ORDER_ENTRIES)
-        .map((name) => name.slice(0, CONFIG_MAX_TEXT_LENGTH)),
+        .map((name) => sliceCodePoints(name, CONFIG_MAX_TEXT_LENGTH)),
       filters: {
-        search: typeof filters.search === "string" ? filters.search.slice(0, CONFIG_MAX_TEXT_LENGTH) : "",
-        upFilter: typeof filters.upFilter === "string" ? filters.upFilter.slice(0, CONFIG_MAX_TEXT_LENGTH) : "all",
-        tagFilter: typeof filters.tagFilter === "string" ? filters.tagFilter.slice(0, CONFIG_MAX_TEXT_LENGTH) : "all"
+        search: typeof filters.search === "string" ? sliceCodePoints(filters.search, CONFIG_MAX_TEXT_LENGTH) : "",
+        upFilter: typeof filters.upFilter === "string" ? sliceCodePoints(filters.upFilter, CONFIG_MAX_TEXT_LENGTH) : "all",
+        tagFilter: typeof filters.tagFilter === "string" ? sliceCodePoints(filters.tagFilter, CONFIG_MAX_TEXT_LENGTH) : "all"
       }
     };
   }
@@ -602,6 +614,7 @@
     pathBudgetReport,
     pathBudgetText,
     describeDirectoryCreateError,
+    sliceCodePoints,
     findDownloadMatch,
     downloadStateFromIndex,
     isMediaFileName,

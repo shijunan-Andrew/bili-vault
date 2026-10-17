@@ -1691,7 +1691,7 @@ function sanitizeConfigPreferences(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
   const filters = source.filters && typeof source.filters === "object" ? source.filters : {};
   const pageSizeValue = Number(source.pageSize);
-  const search = typeof filters.search === "string" ? filters.search.slice(0, 200) : "";
+  const search = typeof filters.search === "string" ? BcaArchiveCore.sliceCodePoints(filters.search, 200) : "";
   const videoFilterValue = ["all", "invalid", "downloaded"].includes(filters.videoFilter) ? filters.videoFilter : "all";
   const sortValue = ["newest", "oldest", "title", "views"].includes(filters.sort) ? filters.sort : "newest";
   return {
@@ -1702,13 +1702,13 @@ function sanitizeConfigPreferences(raw) {
     // 1.7.10（facet-storage P2-2）：条数封顶不够，每一条也要封顶 —— 500 个超长字符串
     // 一样能把 chrome.storage.local 挤到配额边缘。
     collectionOrder: Array.isArray(source.collectionOrder)
-      ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500).map((name) => name.slice(0, 120))
+      ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500).map((name) => BcaArchiveCore.sliceCodePoints(name, 120))
       : [],
     filters: {
       search,
       videoFilter: videoFilterValue,
-      upFilter: typeof filters.upFilter === "string" ? filters.upFilter.slice(0, 120) : "all",
-      tagFilter: typeof filters.tagFilter === "string" ? filters.tagFilter.slice(0, 120) : "all",
+      upFilter: typeof filters.upFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.upFilter, 120) : "all",
+      tagFilter: typeof filters.tagFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.tagFilter, 120) : "all",
       sort: sortValue
     }
   };
@@ -3924,7 +3924,7 @@ videoDialog.addEventListener("cancel", (event) => { if (videoAddInProgress) even
 let lastRenameFailureNote = "";
 function renameFailureNote(error) {
   const name = error?.name || "未知错误";
-  const message = String(error?.message || "").slice(0, 200);
+  const message = BcaArchiveCore.sliceCodePoints(String(error?.message || ""), 200);
   lastRenameFailureNote = `${name}：${message}`;
   return lastRenameFailureNote;
 }

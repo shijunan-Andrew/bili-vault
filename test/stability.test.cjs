@@ -2488,7 +2488,7 @@ test("收藏夹顺序没读出来时不许写回，配置导入要有上限和�
   assert.match(library, /const MAX_CONFIG_BYTES = 256 \* 1024;/);
   assert.match(library, /file\.size > MAX_CONFIG_BYTES/);
   // 单条目录名与两个筛选值都要有长度上限 + 与实际收藏夹求交集
-  assert.match(library, /\.slice\(0, 500\)\.map\(\(name\) => name\.slice\(0, 120\)\)/);
+  assert.match(library, /\.slice\(0, 500\)\.map\(\(name\) => BcaArchiveCore\.sliceCodePoints\(name, 120\)\)/);
   assert.match(library, /const known = new Set\(collections\.map\(\(collection\) => collection\.name\)\);/);
   // 写失败不能再是空 catch
   assert.equal(/storage\.local\.set\(\{ collectionOrder \}\)[^\n]*catch \(_\) \{\}/.test(library), false, "配置导入写 storage 失败要说话");
@@ -2502,8 +2502,8 @@ test("归档目录名的 200 字节闸、坏库留档、半截目录都钉住（
   assert.match(core, /const MAX_SEGMENT_BYTES = 200;/);
   assert.match(core, /function truncateToBytes\(text, maxBytes\) \{/);
   assert.match(background, /function truncateToBytes\(text, maxBytes\) \{/);
-  assert.match(core, /truncateToBytes\(name\.slice\(0, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\) \|\| fallback/);
-  assert.match(background, /return truncateToBytes\(value\.slice\(0, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\);/);
+  assert.match(core, /truncateToBytes\(sliceCodePoints\(name, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\) \|\| fallback/);
+  assert.match(background, /return truncateToBytes\(sliceCodePoints\(value, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\);/);
   // 坏库改带时间戳，且只留最近几份
   assert.equal(/STATS_DATABASE_BACKUP_NAME/.test(background), false, "固定的 database.bad.json 会被第二次损坏覆盖");
   assert.match(background, /const STATS_DATABASE_BACKUP_PREFIX = "database\.bad\.";/);
@@ -3110,9 +3110,14 @@ test("AI_HANDOFF 只留入口，架构参考与版本日志各在各的文档里
 test("交接文档的「维护规范」与「协作规矩」不许被删（V1.7.26）", () => {
   const handoff = readProjectFile("AI_HANDOFF.md");
   // 维护规范必须在开头，且回答「什么时候改」
-  assert.ok(handoff.includes("## 本文档的维护规范"), "维护规范要写进交接文档");
-  assert.ok(handoff.indexOf("## 本文档的维护规范") < handoff.indexOf("## 快速开始"), "维护规范要排在快速开始之前");
+  assert.ok(handoff.includes("## 项目文档的维护规范"), "维护规范要写进交接文档");
+  assert.ok(handoff.indexOf("## 项目文档的维护规范") < handoff.indexOf("## 快速开始"), "维护规范要排在快速开始之前");
   assert.ok(handoff.includes("什么时候必须更新"), "维护规范要写清什么时候更新");
+  // 1.7.29：维护规范管的是「一整套」文档，不只这一份
+  for (const doc of ["README.md", "SMOKE_TEST.md", "docs/ARCHITECTURE.md", "docs/HISTORY.md", "bili_vault_ref/TODO.md"]) {
+    assert.ok(handoff.includes(doc), "维护规范要覆盖 " + doc);
+  }
+  assert.ok(handoff.includes("从待办里删掉"), "维护规范要写清待办做完了怎么处理");
   // 协作规矩：子智能体的边界、浏览器收尾、问询先回答
   assert.ok(handoff.includes("## 开发环境与协作规矩"), "协作规矩要写进交接文档");
   for (const rule of ["子智能体的产出一律视为", "bsk_session action=stop", "在用户明确点头之前不要改文件"]) {
@@ -3193,6 +3198,32 @@ test("交接用的两份索引不许被删（V1.7.28）", () => {
   for (const v of ["1.7.8", "1.7.16", "1.7.24"]) {
     assert.ok(history.includes(`| ${v} |`), `历史索引表里缺 ${v}`);
   }
+});
+
+// ---- V1.7.29（facet-compat §3.4：按 UTF-16 码元截断会劈开代理对）----
+test("按字符截断的地方一律按码点截，不许把代理对劈开（V1.7.29）", () => {
+  const core = readProjectFile("archive-core.js");
+  const bg = readProjectFile("background.js");
+  const lib = readProjectFile("library.js");
+  // 助手存在、且核心那份导出给页面用
+  assert.match(core, /function sliceCodePoints\(value, maxChars\) \{/);
+  assert.match(core, /^ {4}sliceCodePoints,$/m, "archive-core 要把 sliceCodePoints 导出给 library.js");
+  assert.match(bg, /function sliceCodePoints\(value, maxChars\) \{/, "后台是 ES module，import 不了经典脚本，得留一份同实现的");
+  // 文件名来源的截断全部走它
+  assert.match(core, /truncateToBytes\(sliceCodePoints\(name, COLLECTION_NAME_MAX_CHARS\)/);
+  assert.match(core, /truncateToBytes\(sliceCodePoints\(name, maxLength\)/);
+  assert.match(core, /truncateToBytes\(sliceCodePoints\(fallback, maxLength\)/);
+  assert.match(core, /sliceCodePoints\(safeName\(video\?\.title/);
+  assert.match(bg, /truncateToBytes\(sliceCodePoints\(value, COLLECTION_NAME_MAX_CHARS\)/);
+  // 配置里的收藏夹名 / 筛选词、以及会显示给用户的错误摘要
+  assert.match(lib, /BcaArchiveCore\.sliceCodePoints\(name, 120\)/);
+  assert.ok(!/\.map\(\(name\) => name\.slice\(0, 120\)\)/.test(lib), "配置里的收藏夹名要按码点截");
+  assert.ok(!/filters\.upFilter\.slice\(0, 120\)/.test(lib), "UP 主筛选要按码点截");
+  assert.ok(!/filters\.tagFilter\.slice\(0, 120\)/.test(lib), "标签筛选要按码点截");
+  assert.match(lib, /BcaArchiveCore\.sliceCodePoints\(String\(error\?\.message \|\| ""\), 200\)/);
+  // 不许退回按码元截
+  assert.ok(!/truncateToBytes\(name\.slice\(0, /.test(core), "安全名不许再按码元截");
+  assert.ok(!/truncateToBytes\(value\.slice\(0, /.test(bg), "safeSegment 不许再按码元截");
 });
 
 test("the extractor also picks up strings passed as arguments", () => {

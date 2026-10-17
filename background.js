@@ -294,11 +294,23 @@ function truncateToBytes(text, maxBytes) {
   return result;
 }
 
+/* 1.7.29（facet-compat §3.4）：按**码点**截字符，不能按 UTF-16 码元。
+   name.slice(0, 120) 数的是码元，一个 emoji 占 2 个码元 —— 正好在第 120 个码元处
+   落刀时会把代理对劈成两半，留下一个孤立代理；写进目录名后 Windows 把它变成 "?"。
+   本文件下面的 truncateToBytes 是按码点走的，但它只管字节数，管不到「先按字符切」这一步。 */
+function sliceCodePoints(value, maxChars) {
+  const source = String(value == null ? "" : value);
+  const limit = Number(maxChars);
+  if (!Number.isFinite(limit) || limit < 0) return source;
+  const chars = Array.from(source);
+  return chars.length <= limit ? source : chars.slice(0, Math.floor(limit)).join("");
+}
+
 function safeSegment(input, fallback = "未命名收藏夹") {
   let value = String(input || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
   if (!value || value === "." || value === "..") value = fallback;
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(value)) value = `_${value}`;
-  return truncateToBytes(value.slice(0, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES);
+  return truncateToBytes(sliceCodePoints(value, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES);
 }
 
 /* V1.4.3（P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
@@ -429,7 +441,7 @@ async function uniqueTimeFolder(parent, name) {
 let lastRenameFailureNote = "";
 function renameFailureNote(error) {
   const name = error?.name || "未知错误";
-  const message = String(error?.message || "").slice(0, 200);
+  const message = sliceCodePoints(String(error?.message || ""), 200);
   lastRenameFailureNote = `${name}：${message}`;
   return lastRenameFailureNote;
 }

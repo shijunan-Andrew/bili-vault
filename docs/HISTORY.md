@@ -4,6 +4,17 @@
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；用户可见的版本说明在 [`README.md`](../README.md)。
 > 行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+
+## 1.7.29：emoji 代理对（facet-compat §3.4）与维护规范的范围
+
+**改了什么**：按字符数截断的地方以前数的都是 UTF-16 码元，一个 emoji 占 2 个码元，正好在边界落刀就会把代理对劈成两半，留下一个孤立代理，写进目录名后 Windows 把它变成 `?`。新增 `sliceCodePoints()`（`archive-core.js` 导出、`background.js` 留一份同实现，因为后台是 ES module 无法 require 经典脚本），并替换全部 11 处按码元截的调用点：`safeCollectionName` / `safeName`（三处分支）/ `videoDirectoryLabel` 的标题段、配置的收藏夹顺序与 `search`/`upFilter`/`tagFilter`、以及 `library.js` 与 `background.js` 里的错误摘要。
+
+**根因**：`truncateToBytes()` 是按码点走的，但它只管**字节数**，管不到「先按字符切」这一步 —— 所以两层保护各自看着都对，合起来仍然漏。§3.4 原本判为 P3，1.7.24 收掉同区域的 §3.2（路径长度 260）后才被翻出来。
+
+**同时**：`AI_HANDOFF.md` 的「本文档的维护规范」改名「项目文档的维护规范」，范围扩到 `README.md` / `SMOKE_TEST.md` / `docs/*.md` / `bili_vault_ref/TODO.md`，并补上「待办做完了要从 TODO 里删掉」这类动作；守卫断言加了一条「维护规范要覆盖这五份文档」。
+
+**守卫**：`test/stability.test.cjs` 新增「按字符截断的地方一律按码点截，不许把代理对劈开（V1.7.29）」（静态：11 处调用点都不许退回 `.slice(0, n)` 形式、`sliceCodePoints` 必须导出）；`test/archive-core.test.cjs` 新增 3 条真执行用例（助手本身、`safeCollectionName`/`safeName`、`videoDirectoryLabel` 的 BV 后缀边界）。测试 stability 248 → 249、archive-core 72 → 75。
+
 ## 关于 1.7.8 – 1.7.24（这 17 个版本的详细记录在 README 里）
 
 > 本文从 1.7.25 起逐版本记录**工程侧**内容（根因、踩坑、设计取舍）。1.7.8 – 1.7.24 是 **P0–P2 审查整改的 17 个批次**，逐版本说明写在 [`README.md`](../README.md) 的「正式版更新」里（那是面向用户的写法，但每条都写了根因）。下面这张表只做索引，让新接手的人一眼看到那 17 个版本各在收什么。

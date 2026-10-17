@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **248** 项里<!-- test-count:248 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **249** 项里<!-- test-count:249 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -52,6 +52,12 @@
 - [ ] **发版闸门**：`node test/status.cjs --check` 打印 `[OK]`；`git status` 干净。
 
 ---
+
+## V1.7.29 新增的几条
+
+1. 用一条**标题带 emoji**（比如 `😀`）的视频手动收藏/导入一次 → 打开生成的视频目录，目录名里的 emoji 应该还是 emoji，**不是 `?` 也不是半个字**。
+2. 收藏夹名带 emoji 时新建收藏夹 → 磁盘上建的目录名同样不许出现 `?`。
+3. 导出一份配置再导入回来 → 收藏夹顺序与筛选词里的 emoji 不应被截成 `?`。
 
 ## V1.7.28 新增的几条
 

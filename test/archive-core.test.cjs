@@ -704,6 +704,38 @@ test("describeDirectoryCreateError 只认 NotFoundError，且给出可执行的�
   assert.match(text, /挪到更浅/);
 });
 
+test("按码点截字符：emoji 不许剩下孤立代理（1.7.29 facet-compat §3.4）", () => {
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  assert.equal(core.sliceCodePoints("😀😀😀", 2), "😀😀");
+  assert.equal(core.sliceCodePoints("abc", 2), "ab");
+  assert.equal(core.sliceCodePoints("abc", 99), "abc");
+  assert.equal(core.sliceCodePoints("", 5), "");
+  assert.equal(core.sliceCodePoints(null, 3), "");
+  assert.equal(core.sliceCodePoints("😀", 0), "");
+  // 抓的正是这条旧 bug：第 120 个「码元」落在代理对中间
+  const splitAt = "a".repeat(119) + "😀";
+  assert.equal(loneSurrogate.test(splitAt.slice(0, 120)), true, "旧写法确实会劈开（这条断言的牙就靠它）");
+  assert.equal(loneSurrogate.test(core.sliceCodePoints(splitAt, 120)), false, "按码点截不许劈开代理对");
+});
+
+test("safeCollectionName / safeName 截出来的名字里不许有孤立代理（1.7.29）", () => {
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  const name = "a".repeat(119) + "😀";
+  const collection = core.safeCollectionName(name);
+  assert.equal(loneSurrogate.test(collection), false, "收藏夹名不许留孤立代理");
+  assert.ok(collection.startsWith("a".repeat(119)), "截断不该动前面的字符");
+  const record = core.safeName("a".repeat(99) + "😀", "未知");
+  assert.equal(loneSurrogate.test(record), false, "safeName 不许留孤立代理");
+});
+
+test("videoDirectoryLabel 的标题段不许把 emoji 劈开，BV 后缀要完整（1.7.29）", () => {
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  // 后缀 " - BV1xx411c7mD" 是 15 个字符 → 标题段预算 100 - 15 = 85，把 emoji 放在第 85 个码点上
+  const label = core.videoDirectoryLabel({ title: "a".repeat(84) + "😀" + "a".repeat(20), bvid: "BV1xx411c7mD" });
+  assert.equal(loneSurrogate.test(label), false, "视频目录名不许留孤立代理");
+  assert.ok(/ - BV1xx411c7mD$/.test(label), "BV 后缀必须完整保留");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {
