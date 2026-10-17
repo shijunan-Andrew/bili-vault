@@ -99,7 +99,8 @@
     "002同步报告",
     "视频下载",
     "000视频下载",
-    "003database"
+    "003database",
+    "004导出"
   ];
 
   function isReservedCollectionName(name) {
@@ -593,6 +594,253 @@
     return Boolean(fields.collections || fields.search || fields.upFilter || fields.tagFilter);
   }
 
+  /* 1.7.30（路线图第 2 项）：把整个归档的元数据导成单个 JSON。
+     这一项在 TODO.md 里挂了一阵子，因为要先想清四件事，这里是答案：
+     ① 权威来源：以磁盘上的真实扫描结果为准。数据库里多出来、磁盘上找不到的行只作
+        stale（过期）对照列出来，不当成「有这条记录」的证据 —— 1.7.0 的空库重写与
+        1.7.10 的坏库留档都说明数据库不能默认信任。
+     ② 格式演进：app + schemaVersion 定住身份与形状；往后只许加字段，不许改已有字段的语义。
+     ③ 完整性：checksum 覆盖「本文件除 checksum 之外的全部内容」。键序固定，验证方解析后
+        删掉 checksum 再 JSON.stringify（紧凑），取 UTF-8 字节的 SHA-256 即可复算。
+     ④ 位置：写在归档根目录下的 EXPORT_DIR_NAME（004导出）。那个名字已经在
+        RESERVED_COLLECTION_NAMES 里，不会被当成收藏夹扫出来。
+     纯函数全部放在本文件（node 能 require，测得到）；写盘由 library.js 做。 */
+  const EXPORT_APP_ID = "bili-vault/archive-export";
+  const EXPORT_SCHEMA_VERSION = 1;
+  const EXPORT_DIR_NAME = "004导出";
+  const EXPORT_FILE_SUFFIX = "归档元数据";
+  const EXPORT_CHECKSUM_ALGORITHM = "sha256";
+  const EXPORT_CHECKSUM_NOTE = "checksum.value = 把本文件解析成对象、删掉 checksum 字段后，按原键序 JSON.stringify（紧凑），再取 UTF-8 字节的 SHA-256。";
+
+  // SHA-256 的 64 个轮常量与 8 个初始值。用纯 JS 实现而不是引第三方库：
+  // 本项目没有 npm 依赖，而 crypto.subtle 是异步的、Node 侧还要额外分支。
+  const SHA256_ROUND_CONSTANTS = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+  const SHA256_INITIAL_STATE = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+
+  function rotateRight32(value, shift) {
+    return (value >>> shift) | (value << (32 - shift));
+  }
+
+  // 手写 UTF-8 编码：不能借 TextEncoder，那会让本文件的纯函数在 node 里也要额外造壳。
+  // 按码点迭代，所以单个 emoji 会编成正确的 4 字节，不会先被劈成孤立代理。
+  function utf8BytesOf(text) {
+    const source = String(text == null ? "" : text);
+    const bytes = [];
+    for (const char of source) {
+      const code = char.codePointAt(0);
+      if (code < 0x80) {
+        bytes.push(code);
+      } else if (code < 0x800) {
+        bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+      } else if (code < 0x10000) {
+        bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+      } else {
+        bytes.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 0x3f), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+      }
+    }
+    return bytes;
+  }
+
+  function sha256Hex(text) {
+    const bytes = utf8BytesOf(text);
+    const bitLength = bytes.length * 8;
+    bytes.push(0x80);
+    while (bytes.length % 64 !== 56) bytes.push(0);
+    const highBits = Math.floor(bitLength / 0x100000000);
+    bytes.push((highBits >>> 24) & 0xff, (highBits >>> 16) & 0xff, (highBits >>> 8) & 0xff, highBits & 0xff);
+    bytes.push((bitLength >>> 24) & 0xff, (bitLength >>> 16) & 0xff, (bitLength >>> 8) & 0xff, bitLength & 0xff);
+    const state = SHA256_INITIAL_STATE.slice();
+    const schedule = new Array(64);
+    for (let offset = 0; offset < bytes.length; offset += 64) {
+      for (let index = 0; index < 16; index++) {
+        const at = offset + index * 4;
+        schedule[index] = ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) | 0;
+      }
+      for (let index = 16; index < 64; index++) {
+        const previous15 = schedule[index - 15];
+        const previous2 = schedule[index - 2];
+        const small0 = rotateRight32(previous15, 7) ^ rotateRight32(previous15, 18) ^ (previous15 >>> 3);
+        const small1 = rotateRight32(previous2, 17) ^ rotateRight32(previous2, 19) ^ (previous2 >>> 10);
+        schedule[index] = (schedule[index - 16] + small0 + schedule[index - 7] + small1) | 0;
+      }
+      let a = state[0];
+      let b = state[1];
+      let c = state[2];
+      let d = state[3];
+      let e = state[4];
+      let f = state[5];
+      let g = state[6];
+      let h = state[7];
+      for (let index = 0; index < 64; index++) {
+        const big1 = rotateRight32(e, 6) ^ rotateRight32(e, 11) ^ rotateRight32(e, 25);
+        const choose = (e & f) ^ (~e & g);
+        const first = (h + big1 + choose + SHA256_ROUND_CONSTANTS[index] + schedule[index]) | 0;
+        const big0 = rotateRight32(a, 2) ^ rotateRight32(a, 13) ^ rotateRight32(a, 22);
+        const majority = (a & b) ^ (a & c) ^ (b & c);
+        const second = (big0 + majority) | 0;
+        h = g;
+        g = f;
+        f = e;
+        e = (d + first) | 0;
+        d = c;
+        c = b;
+        b = a;
+        a = (first + second) | 0;
+      }
+      state[0] = (state[0] + a) | 0;
+      state[1] = (state[1] + b) | 0;
+      state[2] = (state[2] + c) | 0;
+      state[3] = (state[3] + d) | 0;
+      state[4] = (state[4] + e) | 0;
+      state[5] = (state[5] + f) | 0;
+      state[6] = (state[6] + g) | 0;
+      state[7] = (state[7] + h) | 0;
+    }
+    return state.map((value) => (value >>> 0).toString(16).padStart(8, "0")).join("");
+  }
+
+  function exportFileStamp(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, "0");
+    const when = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+    return `${when.getFullYear()}${pad(when.getMonth() + 1)}${pad(when.getDate())}-${pad(when.getHours())}${pad(when.getMinutes())}${pad(when.getSeconds())}`;
+  }
+
+  function exportFileName(date = new Date()) {
+    return `${EXPORT_FILE_SUFFIX}-${exportFileStamp(date)}.json`;
+  }
+
+  function exportStatsOf(stats) {
+    const source = stats && typeof stats === "object" ? stats : {};
+    const row = {};
+    for (const key of STAT_KEYS) row[key] = String(source[key] == null ? "" : source[key]);
+    return row;
+  }
+
+  // 一行 = 磁盘上真实存在的一个视频目录。字段名与 library.js 扫描出来的 video 对象对齐，
+  // 名字保留原样（不做 camelCase 转换），这样「界面看到什么、导出就是什么」对得上。
+  function exportRowFromVideo(video) {
+    const source = video && typeof video === "object" ? video : {};
+    const asText = (value) => String(value == null ? "" : value);
+    const asNumber = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    };
+    return {
+      collection: asText(source.collection),
+      directory: asText(source.directory),
+      title: asText(source.title),
+      url: asText(source.url),
+      bvid: asText(source.bvid),
+      aid: asText(source.aid),
+      upName: asText(source.upName),
+      upMid: asText(source.upMid),
+      upHome: asText(source.upHome),
+      upFans: asText(source.upFans),
+      favoriteAt: asText(source.favoriteAt),
+      savedAt: asText(source.savedAt),
+      timestamp: asNumber(source.timestamp),
+      category: asText(source.category),
+      duration: asText(source.duration),
+      publishDate: asText(source.publishDate),
+      isInvalid: source.isInvalid === true,
+      invalidReason: asText(source.invalidReason),
+      downloaded: source.downloaded === true,
+      tags: Array.isArray(source.tags) ? source.tags.filter((tag) => typeof tag === "string") : [],
+      stats: exportStatsOf(source.stats),
+      description: asText(source.description)
+    };
+  }
+
+  // 「数据库里有、磁盘上没有」的行。它们的 key 就是视频信息.txt 的标题（stats-core 的规范），
+  // 内容只取能自解释的几个字段 —— 目的是让人能判断「这条该不该清」，不是还原整条记录。
+  function buildExportStaleRows(database, seenKeys) {
+    const videos = database && typeof database === "object" && database.videos && typeof database.videos === "object" ? database.videos : {};
+    const seen = seenKeys && typeof seenKeys.has === "function" ? seenKeys : new Set(Array.isArray(seenKeys) ? seenKeys : []);
+    return Object.keys(videos)
+      .filter((key) => !seen.has(key))
+      .sort()
+      .map((key) => {
+        const row = videos[key] && typeof videos[key] === "object" ? videos[key] : {};
+        const at = Number(row.at);
+        return {
+          key,
+          collection: String(row.collection || ""),
+          title: String(row.title || ""),
+          bvid: String(row.bvid || ""),
+          aid: String(row.aid || ""),
+          at: Number.isFinite(at) ? at : 0
+        };
+      });
+  }
+
+  /* 组装整份导出载荷。输入里：
+     - collections：library.js 扫描出来的 [{ name, videos: [...] }]
+     - database：003database/database.json 解析出来的对象（读不到时传 null）
+     - seenKeys：扫描到的记录按 stats-core 的规则算出的 key 集合（用来算 stale）
+     - databaseState：ok / missing / broken / unreadable，写进 source 让下游知道可信度
+     - generatedAt / appVersion：由调用方给，纯函数不自己读时钟与 manifest */
+  function buildArchiveExportPayload(input = {}) {
+    const collections = Array.isArray(input.collections) ? input.collections : [];
+    const collectionRows = [];
+    const records = [];
+    for (const collection of collections) {
+      const name = String(collection && collection.name ? collection.name : "");
+      const videos = Array.isArray(collection && collection.videos) ? collection.videos : [];
+      collectionRows.push({ name, count: videos.length });
+      for (const video of videos) records.push(exportRowFromVideo(video));
+    }
+    const stale = buildExportStaleRows(input.database, input.seenKeys || []);
+    return {
+      app: EXPORT_APP_ID,
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      generatedAt: String(input.generatedAt || ""),
+      appVersion: String(input.appVersion || ""),
+      source: {
+        kind: "disk-scan",
+        databaseState: String(input.databaseState || "unknown")
+      },
+      checksumNote: EXPORT_CHECKSUM_NOTE,
+      counts: { collections: collectionRows.length, records: records.length, stale: stale.length },
+      collections: collectionRows,
+      records,
+      stale
+    };
+  }
+
+  function serializeExportPayload(payload) {
+    return JSON.stringify(payload);
+  }
+
+  function buildArchiveExportDocument(input = {}) {
+    const payload = buildArchiveExportPayload(input);
+    const value = sha256Hex(serializeExportPayload(payload));
+    const document = { ...payload, checksum: { algorithm: EXPORT_CHECKSUM_ALGORITHM, value } };
+    return { payload, checksum: value, document, text: `${JSON.stringify(document, null, 2)}\n` };
+  }
+
+  // 校验方要能自己复算：解析文件 → 删掉 checksum → 紧凑序列化 → sha256。
+  function verifyArchiveExportChecksum(document) {
+    const source = document && typeof document === "object" ? document : {};
+    const { checksum, ...rest } = source;
+    const expected = checksum && typeof checksum.value === "string" ? checksum.value : "";
+    const actual = sha256Hex(serializeExportPayload(rest));
+    return {
+      ok: Boolean(expected) && expected === actual,
+      expected,
+      actual,
+      algorithm: checksum && typeof checksum.algorithm === "string" ? checksum.algorithm : ""
+    };
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,
@@ -615,6 +863,18 @@
     pathBudgetText,
     describeDirectoryCreateError,
     sliceCodePoints,
+    // 1.7.30（路线图第 2 项）：归档元数据导出的纯函数层
+    EXPORT_APP_ID,
+    EXPORT_SCHEMA_VERSION,
+    EXPORT_DIR_NAME,
+    EXPORT_FILE_SUFFIX,
+    EXPORT_CHECKSUM_ALGORITHM,
+    sha256Hex,
+    exportFileName,
+    buildArchiveExportPayload,
+    serializeExportPayload,
+    buildArchiveExportDocument,
+    verifyArchiveExportChecksum,
     findDownloadMatch,
     downloadStateFromIndex,
     isMediaFileName,

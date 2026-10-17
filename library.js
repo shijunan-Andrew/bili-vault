@@ -118,6 +118,8 @@ const copyFailuresButton = document.getElementById("copyFailures");
 const clearFailuresButton = document.getElementById("clearFailures");
 const exportConfigButton = document.getElementById("exportConfig");
 const importConfigButton = document.getElementById("importConfig");
+// 1.7.30（路线图第 2 项）：导出整个归档的元数据
+const exportArchiveButton = document.getElementById("exportArchive");
 const configFileInput = document.getElementById("configFileInput");
 const batchManageButton = document.getElementById("batchManage");
 const batchToolbar = document.getElementById("batchToolbar");
@@ -813,7 +815,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   // 目录列表本身每次重新枚举，缓存只省文件读取，所以新增/删除目录一定反映得出来
   const collections = [];
   for await (const collectionEntry of handle.values()) {
-    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database"].includes(collectionEntry.name)) continue;
+    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"].includes(collectionEntry.name)) continue;
     collections.push(collectionEntry);
   }
   for (const collectionEntry of collections) {
@@ -1678,6 +1680,89 @@ function downloadConfigFile(includePersonal = true) {
       : BcaI18n.t("配置已导出（只含外观与档位）。"));
   } catch (error) {
     showToast(BcaI18n.t("导出配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
+  }
+}
+
+
+/* 1.7.30（路线图第 2 项）：把整个归档的元数据导成单个 JSON，写进归档根目录的
+   004导出/。载荷组装与校验和在 archive-core.js（纯函数、node 里测得到），
+   这里只做「取数据 + 写盘 + 说人话」三件事。
+   权威来源是磁盘扫描结果、不是数据库 —— 理由写在 archive-core.js 那段注释里（①）。 */
+async function exportArchiveMetadata() {
+  if (!rootHandle) { showToast(BcaI18n.t("先选一个本地备份文件夹，再导出归档元数据。")); return; }
+  if (await archiveWriteLockedByImport()) { showToast(BcaI18n.t("导入正在跑，等它结束再导出，免得导到一半的数据。")); return; }
+  const videos = allVideos();
+  if (!videos.length) { showToast(BcaI18n.t("收藏库里还没有记录。先点「刷新」读一遍，再导出。")); return; }
+  const exportButton = document.getElementById("exportArchive");
+  if (exportButton) exportButton.disabled = true;
+  showToast(BcaI18n.t("正在导出归档元数据…"));
+  try {
+    const statsCore = globalThis.BcaStatsCore;
+    const seenKeys = new Set(
+      (statsCore ? videos.map((video) => statsCore.videoKey(video)) : []).filter(Boolean)
+    );
+    let database = null;
+    let databaseState = "missing";
+    if (statsCore) {
+      try {
+        const databaseDirectory = await rootHandle.getDirectoryHandle(statsCore.DATABASE_FOLDER_NAME);
+        const databaseFile = await databaseDirectory.getFileHandle(statsCore.DATABASE_FILE_NAME);
+        const databaseText = await (await databaseFile.getFile()).text();
+        const parsed = JSON.parse(databaseText.replace(/^\uFEFF/, ""));
+        if (parsed && typeof parsed === "object" && parsed.videos && typeof parsed.videos === "object") {
+          database = parsed;
+          databaseState = "ok";
+        } else {
+          databaseState = "broken";
+        }
+      } catch (error) {
+        // 读不到数据库不算导出失败：磁盘上的记录才是权威，缺的只是 stale 对照。
+        databaseState = error?.name === "NotFoundError" ? "missing" : "unreadable";
+      }
+    }
+    const built = BcaArchiveCore.buildArchiveExportDocument({
+      collections: collections.map((collection) => ({ name: collection.name, videos: collection.videos })),
+      database,
+      seenKeys,
+      databaseState,
+      generatedAt: new Date().toISOString(),
+      appVersion: String(chrome?.runtime?.getManifest?.()?.version || "")
+    });
+    const exportDirectory = await rootHandle.getDirectoryHandle(BcaArchiveCore.EXPORT_DIR_NAME, { create: true });
+    // 同秒连点两次也不覆盖前一份：撞名就加 -2、-3。
+    const baseName = BcaArchiveCore.exportFileName(new Date()).replace(/\.json$/, "");
+    let fileName = `${baseName}.json`;
+    for (let attempt = 2; attempt < 100; attempt += 1) {
+      try {
+        await exportDirectory.getFileHandle(fileName);
+        fileName = `${baseName}-${attempt}.json`;
+      } catch (error) {
+        if (error?.name !== "NotFoundError") throw error;
+        break;
+      }
+    }
+    const exportFile = await exportDirectory.getFileHandle(fileName, { create: true });
+    const writable = await exportFile.createWritable();
+    await writable.write(built.text);
+    await writable.close();
+    showToast(BcaI18n.t("已导出 {count} 条记录到 {file}。校验和 {checksum}…", {
+      count: BcaArchiveCore.formatCountText(built.payload.counts.records),
+      file: fileName,
+      checksum: built.checksum.slice(0, 8)
+    }));
+    if (built.payload.counts.stale) {
+      showToast(BcaI18n.t("另有 {count} 条数据库里多出来的行已标成 stale（磁盘上找不到）。", {
+        count: BcaArchiveCore.formatCountText(built.payload.counts.stale)
+      }));
+    }
+  } catch (error) {
+    const explained = BcaArchiveCore.describeDirectoryCreateError(error, BcaArchiveCore.EXPORT_DIR_NAME)
+      || BcaArchiveCore.describeFileSystemError(error);
+    showToast(BcaI18n.t("归档元数据导出失败：{message}", {
+      message: explained || error?.message || BcaI18n.t("未知错误")
+    }));
+  } finally {
+    if (exportButton) exportButton.disabled = false;
   }
 }
 
@@ -3798,7 +3883,7 @@ function validateCollectionName(rawName) {
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
     throw new Error(BcaI18n.t("这个名称是 Windows 保留名称，请换一个名称。"));
   }
-  if (["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
+  if (["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database", "004导出"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
   return name;
 }
 
@@ -4862,6 +4947,8 @@ confirmBackdrop.addEventListener("click", (event) => {
 exportConfigButton?.addEventListener("click", () => downloadConfigFile(true));
 // 1.7.17（facet-privacy P1-2）：不含收藏夹顺序与筛选的出口，点了不再弹确认
 (document.getElementById("exportConfigSlim"))?.addEventListener("click", () => downloadConfigFile(false));
+// 1.7.30（路线图第 2 项）：导出整个归档的元数据（含 schema 版本 + 校验和）
+exportArchiveButton?.addEventListener("click", () => { exportArchiveMetadata(); });
 importConfigButton?.addEventListener("click", () => {
   configFileInput.value = "";
   configFileInput.click();

@@ -1793,7 +1793,12 @@ test("settings export never leaks directory handles or archive data", () => {
   assert.match(library, /这个文件不是合法的 JSON，无法导入。/);
   assert.match(library, /这不是哔哩藏库导出的配置文件。/);
   // 导出内容里绝不能出现目录句柄或 B 站数据
-  const exportBlock = library.slice(library.indexOf("导出配置") - 200, library.indexOf("导出配置") + 2400);
+  // 1.7.30：原来按「导出配置」四个字取 ±窗口，旁边新增的「导出归档元数据」也会被框进来
+  // （它必须碰 rootHandle），所以改成精确切出 downloadConfigFile 这一个函数。
+  const exportStart = library.indexOf("function downloadConfigFile(");
+  const exportEnd = library.indexOf("async function exportArchiveMetadata(");
+  assert.ok(exportStart > 0 && exportEnd > exportStart, "找不到「导出配置」的实现");
+  const exportBlock = library.slice(exportStart, exportEnd);
   for (const forbidden of ["rootHandle", "collectionHandle", "directoryHandle", "cover", "bvid", "upMid"]) {
     assert.equal(exportBlock.includes(forbidden), false, `导出配置里不该出现 ${forbidden}`);
   }
@@ -2458,7 +2463,7 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   // 页面：三个写入标志任意一个为真就立锁，并在这四条写路径上先问后台
   assert.match(library, /function publishLibraryWriteLock\(\) \{/);
   assert.match(library, /const busy = deleteInProgress \|\| collectionCreateInProgress \|\| videoAddInProgress;/);
-  assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 4, "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径都要先查闸门");
+  assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 5, "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径，加上 1.7.30 的导出，都要先查闸门");
   assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
   // 只清自己那一把：不能把别人后写进来的锁顺手抹掉
   assert.match(background, /if \(!lock \|\| !kind \|\| lock\.kind === kind\) await chrome\.storage\.session\.remove/);
@@ -3224,6 +3229,48 @@ test("按字符截断的地方一律按码点截，不许把代理对劈开（V1
   // 不许退回按码元截
   assert.ok(!/truncateToBytes\(name\.slice\(0, /.test(core), "安全名不许再按码元截");
   assert.ok(!/truncateToBytes\(value\.slice\(0, /.test(bg), "safeSegment 不许再按码元截");
+});
+
+// ---- V1.7.30（路线图第 2 项：导出归档元数据）----
+
+test("导出归档元数据：格式身份、校验和、保留目录名与写盘位置都钉住了（V1.7.30）", () => {
+  const core = readProjectFile("archive-core.js");
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+  const html = readProjectFile("library.html");
+  // ① 格式身份：app + schemaVersion 定住「这是什么文件、什么形状」
+  assert.match(core, /const EXPORT_APP_ID = "bili-vault\/archive-export";/);
+  assert.match(core, /const EXPORT_SCHEMA_VERSION = 1;/);
+  assert.match(core, /app: EXPORT_APP_ID,/);
+  assert.match(core, /schemaVersion: EXPORT_SCHEMA_VERSION,/);
+  // ② 完整性：sha256 + 可复算的验证函数
+  assert.match(core, /const EXPORT_CHECKSUM_ALGORITHM = "sha256";/);
+  assert.match(core, /function sha256Hex\(text\) \{/);
+  assert.match(core, /function verifyArchiveExportChecksum\(document\) \{/);
+  assert.match(core, /verifyArchiveExportChecksum,/);
+  // ③ 权威来源是磁盘扫描，数据库里多出来的行只作 stale
+  assert.match(core, /function buildExportStaleRows\(database, seenKeys\) \{/);
+  assert.match(core, /const stale = buildExportStaleRows\(input\.database, input\.seenKeys \|\| \[\]\);/);
+  assert.match(core, /databaseState: String\(input\.databaseState \|\| "unknown"\)/);
+  // ④ 导出目录名进了保留名单，后台那份副本与收藏库两条链路都要同步跳过
+  assert.match(core, /const EXPORT_DIR_NAME = "004导出";/);
+  const archiveList = (core.match(/const RESERVED_COLLECTION_NAMES = \[[\s\S]*?\];/) || [""])[0];
+  assert.ok(archiveList.includes('"004导出"'), "权威保留名单要含 004导出");
+  const backgroundList = (background.match(/const RESERVED_COLLECTION_NAMES = new Set\(\[[\s\S]*?\]\);/) || [""])[0];
+  assert.ok(backgroundList.includes('"004导出"'), "后台那份逐字副本也要含 004导出");
+  assert.ok(library.includes('["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"].includes(collectionEntry.name)'),
+    "扫描时要跳过 004导出，否则它会被当成一个收藏夹");
+  assert.ok(library.includes('["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database", "004导出"].includes(name)'),
+    "新建收藏夹时也要拦 004导出");
+  // ⑤ 接线：按钮、处理函数、写盘用的是 core 给的目录名
+  assert.match(html, /id="exportArchive"/);
+  assert.match(library, /exportArchiveButton\?\.addEventListener\("click", \(\) => \{ exportArchiveMetadata\(\); \}\);/);
+  assert.match(library, /await rootHandle\.getDirectoryHandle\(BcaArchiveCore\.EXPORT_DIR_NAME, \{ create: true \}\);/);
+  // ⑥ 同秒连点两次不许覆盖前一份
+  assert.match(library, /fileName = `\$\{baseName\}-\$\{attempt\}\.json`;/);
+  // ⑦ 导入正在跑时不许导（否则拿到的是半成品），这与「删除 / 搬运」共用同一把闸门
+  assert.ok(library.includes("导入正在跑，等它结束再导出，免得导到一半的数据。"),
+    "导入期间要拒绝导出，别把半成品当成现状");
 });
 
 test("the extractor also picks up strings passed as arguments", () => {
@@ -5210,7 +5257,8 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
   const namesOf = (literal) => [...literal.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
   // 保留目录名（扫描时要跳过的一整份名单）与固定目录名（选完目录就建出来的那几个）
   // 是两种形状：1.5.0 起 003database 同时属于两者。
-  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "003database", "视频下载", "错误报告"].join("|");
+  // 1.7.30：多了 004导出（归档元数据导出目录）
+  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "003database", "004导出", "视频下载", "错误报告"].join("|");
   const shapeStructure = ["000视频下载", "001错误报告", "002同步报告", "003database"].join("|");
   const shapes = reservedLists.map(([literal]) => namesOf(literal).join("|"));
   assert.ok(shapes.filter((shape) => shape === shapeReserved).length >= 2,

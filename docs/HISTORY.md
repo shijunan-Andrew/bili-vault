@@ -5,6 +5,22 @@
 > 行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
 
+## 1.7.30：导出归档元数据（路线图第 2 项）
+
+**改了什么**：新增「导出归档元数据」——把一次磁盘扫描的结果写成单个 JSON，带 `schemaVersion`、`generatedAt`、`appVersion`、`counts`、`collections`、`records`、`stale`，以及文档末尾的 SHA-256 `checksum`。
+
+- `archive-core.js` 新增纯函数面：`EXPORT_APP_ID` / `EXPORT_SCHEMA_VERSION` / `EXPORT_DIR_NAME`（`004导出`）/ `EXPORT_CHECKSUM_ALGORITHM` / `sha256Hex`（自带实现，不依赖 `crypto.subtle`）/ `exportFileName` / `buildArchiveExportPayload` / `serializeExportPayload` / `buildArchiveExportDocument` / `verifyArchiveExportChecksum`。
+- `library.js` 加 `exportArchiveMetadata()`：先查导入写闸门、再读 `003database/database.json`、以 `allVideos()` 的 `videoKey` 算 `seenKeys`，写进 `004导出/`，撞名加 `-N` 后缀。
+- `004导出` 加进保留目录名（`archive-core.js` 与 `background.js` 两份逐字同步），扫描与新建收藏夹都跳过它。
+- 词典 +8 条（945 → 953）。
+
+**为什么要做**：`视频信息.txt` 是唯一持久格式，坏了就没有第二份；用户 2026-10-10 定的路线图第 2 项就是补这个可迁移性缺口。
+
+**踩的坑**：
+1. 词典键里把源码的 `stale` 写成「陈旧」，`i18n --check` 报「缺 1 条」—— 中文原文当 key，必须与源码字面量逐字相同。
+2. 旧的「导出配置不外泄」守卫用 `indexOf("导出配置") ± 2400` 取窗口，新函数紧挨着落在窗口里、它必须碰 `rootHandle` → 误报。改成按 `downloadConfigFile` 到 `exportArchiveMetadata` 精确切片。
+3. 校验和自己实现（不能靠 `crypto.subtle`，`archive-core.js` 要能在 node 里直接 `require`）：用 6 组向量与 `node:crypto` 对齐，含 `""`、`abc`、中文、emoji、1000 个 a、JSON。
+
 ## 1.7.29：emoji 代理对（facet-compat §3.4）与维护规范的范围
 
 **改了什么**：按字符数截断的地方以前数的都是 UTF-16 码元，一个 emoji 占 2 个码元，正好在边界落刀就会把代理对劈成两半，留下一个孤立代理，写进目录名后 Windows 把它变成 `?`。新增 `sliceCodePoints()`（`archive-core.js` 导出、`background.js` 留一份同实现，因为后台是 ES module 无法 require 经典脚本），并替换全部 11 处按码元截的调用点：`safeCollectionName` / `safeName`（三处分支）/ `videoDirectoryLabel` 的标题段、配置的收藏夹顺序与 `search`/`upFilter`/`tagFilter`、以及 `library.js` 与 `background.js` 里的错误摘要。

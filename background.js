@@ -327,7 +327,9 @@ const RESERVED_COLLECTION_NAMES = new Set([
   "视频下载",
   "000视频下载",
   // 1.5.0：本地数据库根目录（003database），收藏夹不许占用
-  "003database"
+  "003database",
+  // 1.7.30：归档元数据导出目录（004导出），收藏夹不许占用
+  "004导出"
 ]);
 
 function collectionNameIsReserved(name) {

@@ -736,6 +736,79 @@ test("videoDirectoryLabel 的标题段不许把 emoji 劈开，BV 后缀要完�
   assert.ok(/ - BV1xx411c7mD$/.test(label), "BV 后缀必须完整保留");
 });
 
+test("导出归档元数据：sha256 与已知向量逐字一致（中文与 emoji 按 UTF-8 编码）", () => {
+  const crypto = require("node:crypto");
+  assert.equal(core.sha256Hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  assert.equal(core.sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  for (const text of ["中文", "😀 emoji", "a".repeat(1000), JSON.stringify({ a: 1, b: "中" })]) {
+    assert.equal(
+      core.sha256Hex(text),
+      crypto.createHash("sha256").update(text, "utf8").digest("hex"),
+      `sha256 与 node:crypto 对不上：${text.slice(0, 12)}`
+    );
+  }
+});
+
+test("导出载荷：schema 身份、以磁盘为准、stale 只列数据库里多出来的行", () => {
+  const payload = core.buildArchiveExportPayload({
+    collections: [
+      { name: "夹A", videos: [{ collection: "夹A", directory: "标题 - BV1xx411c7mD", title: "标题", bvid: "BV1xx411c7mD", tags: ["t1", 2], stats: { view: "1", danmaku: "" } }] },
+      { name: "夹B", videos: [] }
+    ],
+    database: {
+      videos: {
+        "bvid:BV1xx411c7mD": { title: "在磁盘上" },
+        "title:夹A\u0000旧的": { title: "旧的", collection: "夹A", at: 7 }
+      }
+    },
+    seenKeys: new Set(["bvid:BV1xx411c7mD"]),
+    databaseState: "ok",
+    generatedAt: "2026-11-02T00:00:00.000Z",
+    appVersion: "1.7.30"
+  });
+  assert.equal(payload.app, "bili-vault/archive-export");
+  assert.equal(payload.schemaVersion, 1);
+  assert.deepEqual(payload.counts, { collections: 2, records: 1, stale: 1 });
+  assert.equal(payload.records[0].collection, "夹A");
+  assert.equal(payload.records[0].downloaded, false);
+  assert.deepEqual(payload.records[0].tags, ["t1"]);
+  assert.deepEqual(Object.keys(payload.records[0].stats), ["view", "danmaku", "like", "coin", "favorite", "share"]);
+  assert.equal(payload.stale[0].key, "title:夹A\u0000旧的");
+  assert.equal(payload.stale[0].at, 7);
+  assert.equal(payload.source.kind, "disk-scan");
+  assert.equal(payload.source.databaseState, "ok");
+  assert.match(payload.checksumNote, /SHA-256/);
+  assert.equal(payload.checksum, undefined, "checksum 是文档层的，不在被打分的载荷里");
+});
+
+test("导出文件的校验和能复算；改一个字节就验不过", () => {
+  const built = core.buildArchiveExportDocument({
+    collections: [{ name: "夹A", videos: [{ collection: "夹A", title: "标题", bvid: "BV1xx411c7mD" }] }],
+    generatedAt: "2026-11-02T00:00:00.000Z",
+    appVersion: "1.7.30"
+  });
+  assert.equal(built.checksum.length, 64);
+  const parsed = JSON.parse(built.text);
+  assert.equal(parsed.checksum.algorithm, "sha256");
+  const verified = core.verifyArchiveExportChecksum(parsed);
+  assert.equal(verified.ok, true, "原样解析回来必须验得过");
+  assert.equal(verified.actual, built.checksum);
+  const tampered = JSON.parse(built.text);
+  tampered.records[0].title = "改过的";
+  const broken = core.verifyArchiveExportChecksum(tampered);
+  assert.equal(broken.ok, false, "改过内容必须验不过");
+  assert.notEqual(broken.actual, broken.expected);
+  assert.equal(core.verifyArchiveExportChecksum({ ...parsed, checksum: { algorithm: "sha256", value: "" } }).ok, false, "空校验和不算过");
+});
+
+test("导出文件名带时间戳，004导出 是保留目录", () => {
+  assert.equal(core.exportFileName(new Date(2026, 10, 2, 9, 5, 7)), "归档元数据-20261102-090507.json");
+  assert.equal(core.EXPORT_DIR_NAME, "004导出");
+  assert.equal(core.isReservedCollectionName("004导出"), true, "导出目录必须被认成保留目录");
+  assert.equal(core.RESERVED_COLLECTION_NAMES.includes("004导出"), true);
+  assert.equal(core.safeCollectionName("004导出"), "004导出", "保留名本身不该被改写");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

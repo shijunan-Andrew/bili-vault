@@ -943,5 +943,13 @@
   "正在停下，等当前这个视频收尾…": "Stopping — letting the current video finish…",
   "移动或复制已中止": "Move or copy stopped",
   "已中止，剩下 {count} 个没有处理": "{count} left untouched because you stopped it",
-  "有 {count} 个目录名太长了（收藏夹名加视频目录名超过 {budget} 个字符），拼上本地备份文件夹的路径就可能越过 Windows 的 260 字符上限：{list}": "{count} folder names are too long (the collection name plus the video folder name exceed {budget} characters). With the backup folder path in front they may pass Windows' 260-character limit: {list}"
+  "有 {count} 个目录名太长了（收藏夹名加视频目录名超过 {budget} 个字符），拼上本地备份文件夹的路径就可能越过 Windows 的 260 字符上限：{list}": "{count} folder names are too long (the collection name plus the video folder name exceed {budget} characters). With the backup folder path in front they may pass Windows' 260-character limit: {list}",
+  "导出归档元数据": "Export archive metadata",
+  "先选一个本地备份文件夹，再导出归档元数据。": "Pick a local backup folder first, then export archive metadata.",
+  "导入正在跑，等它结束再导出，免得导到一半的数据。": "An import is running. Wait for it to finish before exporting, so you do not capture a half-finished state.",
+  "收藏库里还没有记录。先点「刷新」读一遍，再导出。": "The library has no records yet. Click Refresh to read it once, then export.",
+  "正在导出归档元数据…": "Exporting archive metadata…",
+  "已导出 {count} 条记录到 {file}。校验和 {checksum}…": "Exported {count} records to {file}. Checksum {checksum}…",
+  "另有 {count} 条数据库里多出来的行已标成 stale（磁盘上找不到）。": "{count} extra rows found only in the database are marked stale (not on disk).",
+  "归档元数据导出失败：{message}": "Archive metadata export failed: {message}"
 }

@@ -53,6 +53,8 @@
           <!-- 1.7.17（facet-privacy P1-2）：配置文件里默认带着收藏夹名和筛选关键词，
                那是「你是谁、你在看什么」。给一个不含个人内容的出口，占一整行免得挤成三个小按钮。 -->
           <button id="exportConfigSlim" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="download"></span><span data-i18n="只导外观与档位">只导外观与档位</span></button>
+          <!-- 1.7.30（路线图第 2 项）：把整个归档的元数据导成单个 JSON，写进归档根目录的 004导出/。 -->
+          <button id="exportArchive" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="download"></span><span data-i18n="导出归档元数据">导出归档元数据</span></button>
           <input id="configFileInput" type="file" accept="application/json,.json" hidden>
         </div>
       </div>

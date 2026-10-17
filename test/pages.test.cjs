@@ -358,6 +358,61 @@ async function suiteLibrary() {
     assert.equal(card.getAttribute("tabindex"), "0");
     assert.ok(card.getAttribute("aria-label"), "卡片要有可访问名");
   });
+
+  await test("导出归档元数据：真写进 004导出，校验和可复算，数据库里多出来的行标 stale（V1.7.30）", async () => {
+    const archiveCore = require("../archive-core.js");
+    const chrome = makeChrome({ version: "1.7.30", localData: {} });
+    const page = dom.loadPage({ htmlFile: "library.html", chrome });
+    await settle();
+    const g = page.window;
+    const root = await makeDirectoryTree({ "_测试归档": sampleTree() }).getDirectoryHandle("_测试归档");
+    await g.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+
+    // 手工把数据库写成「1 条磁盘上找不到的旧行」，用来看 stale 的对照是否真的生效
+    const databaseDirectory = await root.getDirectoryHandle("003database", { create: true });
+    const databaseFile = await databaseDirectory.getFileHandle("database.json", { create: true });
+    const databaseWritable = await databaseFile.createWritable();
+    await databaseWritable.write(JSON.stringify({
+      videos: { "bvid:BV1zz411c7mZ": { at: 1, day: "2026-01-01", collection: "旧夹", title: "旧行", bvid: "BV1zz411c7mZ", aid: "" } },
+      totals: { savedTotal: 1 }
+    }));
+    await databaseWritable.close();
+
+    const button = page.document.getElementById("exportArchive");
+    assert.ok(button, "收藏库侧栏要有「导出归档元数据」按钮");
+    button.click();
+    await settle(24);
+
+    const exportDirectory = await root.getDirectoryHandle("004导出");
+    const firstNames = [];
+    for await (const entry of exportDirectory.values()) firstNames.push(entry.name);
+    assert.equal(firstNames.length, 1, `应该只写一份，实际 ${JSON.stringify(firstNames)}`);
+    assert.match(firstNames[0], /^归档元数据-\d{8}-\d{6}\.json$/);
+
+    const written = await (await exportDirectory.getFileHandle(firstNames[0])).getFile();
+    const exported = JSON.parse(await written.text());
+    assert.equal(exported.app, "bili-vault/archive-export");
+    assert.equal(exported.schemaVersion, 1);
+    assert.equal(exported.counts.records, 3, "三条都来自磁盘扫描");
+    assert.equal(exported.counts.stale, 1, "数据库里多出来的那一行要标 stale");
+    assert.equal(exported.stale[0].key, "bvid:BV1zz411c7mZ");
+    assert.equal(exported.source.databaseState, "ok");
+    assert.equal(archiveCore.verifyArchiveExportChecksum(exported).ok, true, "写出来的文件校验和必须能复算");
+
+    // 再点一次：同秒也不许覆盖前一份
+    button.click();
+    await settle(24);
+    const secondNames = [];
+    for await (const entry of exportDirectory.values()) secondNames.push(entry.name);
+    assert.equal(secondNames.length, 2, `同秒连点两次要留两份，实际 ${JSON.stringify(secondNames)}`);
+
+    // 重扫一遍：004导出 不能被当成一个收藏夹
+    await g.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const collectionNames = [...page.document.querySelectorAll("#collectionList .collection-name")].map(textOf);
+    assert.equal(collectionNames.includes("004导出"), false, `004导出 被当成收藏夹扫出来了：${JSON.stringify(collectionNames)}`);
+  });
 }
 
 /* ---------------- popup.html ---------------- */
