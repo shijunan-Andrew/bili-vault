@@ -9,22 +9,16 @@
 - **版本管理方式在 V1.0.0 改了**：以前每个版本是一个独立文件夹（`b_catch_*` → `bili-vault-beta*`），现在**改用 git**——每个版本一个 commit 与一个同名 tag（`beta1.0` … `beta4.9`、`V1.0.0` 一路到当前版本；**tag 数量每次发布都在涨，别在任何地方写死**），提交日期用的是各版本快照的真实文件时间，所以 `git log` 直接就是那条时间线。远程：`https://github.com/shijunan-Andrew/bili-vault`。**新版本直接在当前目录改并提交，不要再复制文件夹。**
 - **历史版本编号沿革**：项目最初叫 `b_catch`，目录名 `b_catch_1.0` … `b_catch_3.8`，后来随改名统一成 `bili-vault-beta1.0` … `bili-vault-beta3.8`。**这些快照目录现在都已删除**，内容完整保留在 git 历史里（`git show beta2.0:manifest.json` 这样就能取到）。完整的逐版本演变见 `README.md` 的版本历史段，图示与量化数据见 `Desktop\bili-vault开发文档\`。
 
-  **目录名与 manifest 版本号曾经不一致**——早期那套是手工复制文件夹，改名时没同步 `manifest.json`。只有下面这 3 个对不上，其余都一致，查历史时按这张表对齐，别被绕进去：
+  **目录名与 manifest 版本号曾经不一致**——早期那套是手工复制文件夹，改名时没同步 `manifest.json`。已知对不上的只有 3 个：`beta1.0` 里写 `1.1.3`、`beta1.1` 里写 `1.1.4`、`beta3.8-uncomplete` 里写 `3.7.0`（3.8 做了一半的快照）。**查任何历史版本的版本号，一律用 `git show <tag>:manifest.json`，别信目录名。**
 
-  | tag | `manifest.json` 里写的 |
-  |---|---|
-  | `beta1.0` | `1.1.3` |
-  | `beta1.1` | `1.1.4` |
-  | `beta3.8-uncomplete` | `3.7.0`（它是 3.8 做了一半的快照，版本号还没来得及改） |
-
-  **这个问题现在不会再发生了**：目录名不再带版本号（就是 `bili-vault`），版本只有两个来源——`manifest.json` 的 `version` 与 git tag，而 `release.ps1` 会把它们一起改。想在某个历史提交上确认版本，用 `git show <tag>:manifest.json`。
+  **这个问题现在不会再发生了**：目录名不再带版本号（就是 `bili-vault`），版本只有两个来源——`manifest.json` 的 `version` 与 git tag，而 `release.ps1` 会把它们一起改。
 
 - 3.6 之前没有测试套件、没有 `archive-core.js`、也没有本文件；3.6 起才建立「抽取纯逻辑 + 静态回归测试 + 交接文档」这套工程约定。
 - **4.0 是一次纯界面重构**，磁盘格式与数据流完全没动：它把四份互相覆写的 CSS 收敛成 `theme.css` 单层令牌体系，并确立了本文件「界面与设计系统」那六条约定。4.0 之前的 CSS 是层层追加的补丁（`.library-link` 被定义 4 次、`.primary` 和 `.toggle-switch` 各 3 次），改一处样式极容易被下游区块盖掉——**若要理解某条界面约定的来历，先看这一条**。
 - **4.5 新增主题与多语言两个横切能力**（`theme.js` / `theme.css` 深色令牌、`i18n.js` + `locales/`），并调整了排序、卡片徽标与「更新视频状态」的位置。
 - 项目没有 npm 依赖或打包步骤。扩展直接从 `chrome://extensions` 加载解压目录。原生辅助程序是唯一需要“构建”的部分：安装脚本用系统自带 `csc.exe` 把 `native\folder-opener-launcher.cs` 编译成宿主启动器。
 - 用户主要使用中文界面和 Windows/Chrome。回答修改结果时用中文、清楚说明文件、行为变化和检查结果。
-- 注意：Chrome 的扩展程序 ID 由插件所在**绝对路径**推导。换目录（例如 `bili-vault-beta4.9` → `bili-vault`，或 V1.0.0 那次从 `b-vault-V1.0.0` 改名）ID 就会变，安装本地目录打开助手时必须填入新 ID。**所以尽量不要改这个目录的名字。**
+- 注意：解压扩展的 ID 与加载时的**绝对路径**有关，换目录可能变 ID（这是 Chrome 对 unpacked 扩展的规则）。但**不要自己算**：1.7.13 试过 utf8 / utf8-大写 / utf16le / utf16le-大写 四种编码，都算不出已装的 `fmjfnoklnindjjemlbbagjjiaackjjhb`。ID 的唯一可信来源是 `chrome://extensions` 里显示的那个；安装脚本把当时的值记在 `%LOCALAPPDATA%\BcaFolderOpener\settings.json` 的 `extensionId` 里。**所以尽量不要改这个目录的名字**；真要改，重新加载扩展 → 核对 ID → 需要时重跑 `install-native-folder-opener.ps1`。
 
 ## 功能概览
 
@@ -429,7 +423,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 ## 目录结构
 
 ```text
-bili-vault/                       # 仓库根即扩展目录；改名会改变扩展 ID，必须重装本地目录打开助手
+bili-vault/                       # 仓库根即扩展目录；改名前先看「项目基线」里那条扩展 ID 说明
 ├── .git/                         # 完整版本历史（tag: beta1.0 … beta4.9、V1.0.0 一路到当前版本；数量随发布增长，别写死）
 ├── .gitignore / .gitattributes   # 忽略本地归档；换行策略（.bat/.ps1/.cs 钉死 CRLF）
 ├── .node-path                    # 本机 node.exe 的路径（各人机器不同，已被 .gitignore，不进仓库）
@@ -461,11 +455,13 @@ bili-vault/                       # 仓库根即扩展目录；改名会改变�
 ├── uninstall-native-folder-opener.ps1
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
-│   ├── stability.test.cjs        # Node 内置测试（项数以 `node test/stability.test.cjs` 的实际输出为准）：静态回归断言 + 并进来的单元测试
-│   ├── archive-core.test.cjs     # 68 项真执行单元测试：require archive-core.js 真的调用它
+│   ├── stability.test.cjs        # 静态回归断言为主（项数以实际输出为准，别写死）
+│   ├── archive-core.test.cjs     # 72 项真执行单元测试：require archive-core.js 真的调用它
 │   ├── stats-core.test.cjs       # 61 项真执行单元测试：require stats-core.js（固定时间戳，绝不用真实 Date.now）
 │   ├── harness.cjs               # 1.7.22：执行级测试的壳：内存版 chrome.storage + 内存版 FileSystem 目录树 + 把 background.js 丢进 vm
-│   ├── background.test.cjs       # 1.7.22：24 项真执行单元测试：真调 readStatsDatabase / writeStatsDatabase / 三个写入口互斥链 / 归档写锁 / nativeHostRequest
+│   ├── background.test.cjs       # 1.7.22：25 项真执行单元测试：真调 readStatsDatabase / writeStatsDatabase / 三个写入口互斥链 / 归档写锁 / nativeHostRequest
+│   ├── dom-harness.cjs           # 1.7.23：最小 DOM（选择器引擎、事件冒泡、<dialog>、ShadowRoot、真 MutationObserver），让页面脚本能真跑
+│   ├── pages.test.cjs            # 1.7.23：19 项真执行单元测试：在 dom-harness 里加载 library.html / popup.html / content.js
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
 │   ├── archive-audit.cjs         # 本地归档的标签/简介覆盖情况体检
@@ -674,8 +670,8 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **配置没有版本迁移**。`CONFIG_VERSION = 1`，导入配置时只校验结构不做迁移。将来升版本必须补。
 - **没有多标签页互斥**。两个标签页同时打开同一归档、同时做写操作（标记已下载 / 删除 / 移动）没有锁。日常使用很难触发，但理论上存在竞态。
 - **没有归档完整性校验与备份机制**。`视频信息.txt` 损坏就是永久丢失，插件没有校验和、没有导出元数据的功能。
-- **原生宿主名仍是 `com.bcatch.folder_opener`**（`b_catch` 时代的名字），宿主版本号仍是 `3.8.0`。**改名会让所有已安装用户的注册失效**，所以要么不改，要么改的时候写迁移脚本。
-- **扩展 ID 由插件所在目录的绝对路径决定**，所以**每次改文件夹名都需要重新加载扩展并重跑 `install-native-folder-opener.ps1`**。这是 Chrome 的机制，绕不过去，只能靠文档提醒。
+- **原生宿主名仍是 `com.bcatch.folder_opener`**（`b_catch` 时代的名字），宿主版本号 `3.9.0`（1.7.13 起每个响应都带 `protocol: 3`，扩展侧会校验）。**改名会让所有已安装用户的注册失效**，所以要么不改，要么改的时候写迁移脚本。
+- **扩展 ID 推不出来，只能读**。解压扩展的 ID 与加载时的绝对路径有关，改文件夹名后**以 `chrome://extensions` 显示的 ID 为准**；ID 变了就重跑 `install-native-folder-opener.ps1`。1.7.13 试过四种编码都算不出已装 ID，所以别写任何「从路径算 ID」的脚本。
 - **`openDb` 在 `library.js` / `popup.js` 里各有一份**（`download.js` 那一份已随 1.3.0 删除），两份都缺少 `objectStoreNames.contains` 守卫（当前版本号都是 1、升级只跑一次，所以没暴露；一旦有人把版本号改成 2 就会抛 `ConstraintError`）。
 - **全项目有 55 处静默吞错**（`catch (_) {}`），`library.js` 占 24 处。用户可见的失败路径里大约一半是静默的。
 - **归档路径可能超过 Windows 的 `MAX_PATH`（260）**。各段上限是"收藏夹 120 + 视频目录 100"，最坏情况合计约 328 字符。开发机 `LongPathsEnabled = 1` 所以没暴露；**别人不一定开了这个**。
@@ -899,13 +895,18 @@ UP主主页：https://space.bilibili.com/……
 
 ## 常用验证
 
-在项目根目录执行：
+在项目根目录执行。**下面五套都要跑**，`release.ps1` 第 4 步跑的也是这五套，任一退出码非 0 就算失败：
 
 ```powershell
-node test/stability.test.cjs
+node test/stability.test.cjs      # 静态回归断言为主（项数以实际输出为准，别写死）
+node test/archive-core.test.cjs   # 72 项真执行
+node test/stats-core.test.cjs     # 61 项真执行
+node test/background.test.cjs     # 25 项真执行（内存版 chrome.* + FileSystem，background.js 丢进 vm）
+node test/pages.test.cjs          # 19 项真执行（dom-harness 里加载 library.html / popup.html / content.js）
+node test/i18n-extract.cjs --check
 ```
 
-检查项数**以 `node test/stability.test.cjs` 的实际输出为准**（用例一直在加，别在这里写死）。构成是：绝大多数静态回归断言 + 1 项把 `test/archive-core.test.cjs` 的真执行单元测试并进来。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
+`test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
 可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:242 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
@@ -960,7 +961,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 1. 对所有 `.js` 执行 `node --check`。
 2. 解析 `manifest.json` 并确认脚本、弹窗等本地引用存在。
 3. 检查每个 HTML 的本地 JS/CSS 引用存在，确认 `library.html` 在业务脚本之前加载 `archive-core.js`。
-4. 若改动 PowerShell，使用 PowerShell Parser 解析所有 `.ps1`，不要仅靠运行安装脚本验证。注意本机执行策略禁止直接运行 `.ps1`，要用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …`。
+4. 若改动 PowerShell，使用 PowerShell Parser 解析所有 `.ps1`，不要仅靠运行安装脚本验证。本机执行策略是 Restricted，直接双击/裸跑 `.ps1` 会被拒；用 `pwsh -NoProfile -File <脚本>`（PowerShell 7）跑，**不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，详见「修改原则」第 2 条。
 5. 读取 `manifest.json`、`settings.json` 一类 UTF-8 文件时显式指定编码，PowerShell 5.1 的 `Get-Content` 默认按 ANSI 读取，中文会乱码。
 6. 改动本地目录打开助手时，重新运行安装脚本（沙箱验证可加 `-SkipRegistry -HostRoot <临时目录>`）并执行 `test-native-folder-opener.ps1`，它会真正按帧协议调用编译出的启动器。
 7. 有条件时在 Chrome 加载扩展，登录 B 站验证收藏、导入、手动标记已下载、移动/删除和徽标状态。Node 检查不能替代真实 B 站登录/API 测试。
@@ -972,11 +973,10 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 - Native Messaging 仅用于 Windows 资源管理器打开目录。它的清单不允许 `args`，`path` 必须是无参数可执行文件；没有安装或设置不正确时，网页不能直接启动 Explorer，详情页必须保留“复制视频目录路径”这类退路提示。
 - 用户曾报告收藏成功但本地归档失败，并看到 B 站收藏弹窗提示 `The next() called multiple times`。另一次控制台网络错误指向 Kaspersky 浏览器组件的 `gc.kis.v2.scr.kaspersky-labs.com`。后者不是本项目域名；判断归因前需在禁用相关第三方扩展的环境中复现。不要把这类外部错误直接归为本扩展故障。
 - 3.8 修复的两个本地目录打开助手缺陷都是运行时问题，Node 静态检查发现不了：一个是 Chrome 静默忽略清单 `args`，一个是 PowerShell 5.1 的默认 ANSI 读取。改动这一块必须跑 `test-native-folder-opener.ps1`，不能只做语法检查。
-- 待确认（尚未定性）：`content.js` 在 MV3 隔离世界中读取页面变量 `window.__INITIAL_STATE__`，而清单未声明 `world: "MAIN"`，该变量很可能始终读不到，元数据实际走 DOM/meta 回退，自动归档的“分区/视频时长/视频发布时间/标签”容易落成“未知”。需要用一份真实的 `视频信息.txt` 核对后再决定是否改用其他采集方式。
+- **已定性（1.7.20 处理完）**：`content.js` 在 MV3 隔离世界里读不到页面的 `window.__INITIAL_STATE__`（清单没声明 `world: "MAIN"`），所以那段读取一直是死的。1.7.20 已把它删掉，只在代码里留一行注释说明为什么读不到；元数据一律走 DOM/meta 采集。**别再加回来**，要拿页面全局变量必须先加 MAIN 世界的桥。
 - **归档数据本身的完整度**（4.1 实测一个上千条的档案）：只有约两成有标签、约四成有简介，将近一半两者都没有。根因是导入流程里 `normalizeImportMedia()` 把 `tags` 硬编码为 `[]`，且只有失效视频会去抓资料。4.1 负责把这些数据正确地显示出来，**4.2 负责在导入/更新时把它们抓全**——对已有档案执行一次「导入或更新」，缺失的标签、发布时间、粉丝数与互动数据都会被补上。
 - **一个已证实的数据错误**：某条归档里 `UP主UID` 写的不是该视频作者的真实 `mid`（两者对不上；抽查另外 4 条记录都是对的），怀疑是收藏夹接口在个别条目上返回了错误的 `upper`。4.2 因为改从 `/x/web-interface/view` 取 UP 主信息，执行一次更新即可修正这类记录。
 - 4.2 的导入会对每条视频发 2–3 个请求（view + tags + 每个 UP 一次的 relation/stat），**这是用户明确要求的完整抓取**。**注意速率在 4.3 已下调为串行 + 每条间隔 800ms**（原为并发 2 + 350ms）；如果将来风控变严，应先调 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，而不是回到“只补缺失字段”的老逻辑。
-- ~~3.7 的下载目录日志修复仍需真机验证~~ —— 那段代码随 1.3.0 的下载功能一起删除，此条只作历史记录。
 
 ### 已知限制（4.5）
 
@@ -1025,9 +1025,9 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
    - **小改动一行带过就行**：界面微调、小优化，不用展开。
    - **小到不值得单独发版的，就别发版** —— 直接提交、不打 tag，自然也不需要小节。这一条是关键：**不打 tag 就不会有缺环问题**。
    - **但凡是打了 tag 的版本，README 里必须有 `## V<版本>：...` 这一节（标题 + 至少一行）**，否则时间线会断。这条以前没写下来，结果 V1.1.4 到 V1.1.13 之间漏了 9 个版本：`git tag` 有 16 个而 README 只有 5 个，而漏掉的那几个恰恰是风控这一整轮最要紧的改动。**`release.ps1` 会检查这一节在不在，没有就拒绝发布。**
-2. **发布走 `release.ps1`，不要手工改版本号**。它会检查工作区与代理 → 改 3 处版本号 → 跑全部检查 → 不过就回滚 → 提交 → 打 tag → 推送。用法（**版本号不带 `V` 前缀，位置参数**）：`powershell -NoProfile -ExecutionPolicy Bypass -File .\release.ps1 1.3.0 "说明" -Yes`，推送前先设 `HTTPS_PROXY` 与 `HTTP_PROXY=http://127.0.0.1:7897`。发布前照 `SMOKE_TEST.md` 走一遍真机验证。
+2. **发布走 `release.ps1`，不要手工改版本号**。它会检查工作区与代理 → 改 3 处版本号 → 跑全部检查 → 不过就回滚 → 提交 → 打 tag → 推送。用法（**版本号不带 `V` 前缀，位置参数**）：`pwsh -NoProfile -File .\release.ps1 1.7.24 "说明" -Yes`。代理由脚本自己检查（它先探 `127.0.0.1:7897` 通不通），**不用手工设 `HTTPS_PROXY`**。发布前照 `SMOKE_TEST.md` 走一遍真机验证。
 
-   **在 DSH 沙箱里必须用 `pwsh`（PowerShell 7）跑它，不要从 bash 调 `powershell.exe`（5.1）。** 2026 年 V1.7.18 发布时踩到：5.1 跑在沙箱里时，`Invoke-Native` 里 `& $Node ... | ForEach-Object` 拿不到子进程的任何输出（`$LASTEXITCODE` 仍是 0，所以三个测试套件的「未全过」也不报），于是「文档里的词典条数」那一步读到 0 种、报「没能从词典检查的输出里读出唯一的条数」并回滚版本号 —— 看着像词典坏了，其实词典完全正常。**判断方法**：如果第 4 步里 `ℹ tests/pass/fail` 那三行没打印出来，就是这个坑，换成 pwsh 重跑即可（`pwsh -NoProfile -File .\release.ps1 1.7.18 "说明" -Yes`）。
+   **绝对不要用 `powershell.exe`（Windows PowerShell 5.1）跑它。** V1.7.18 发布时踩过：5.1 跑在沙箱里时，`Invoke-Native` 里 `& $Node ... | ForEach-Object` 拿不到子进程的任何输出（`$LASTEXITCODE` 仍是 0，所以测试套件的「未全过」也不报），于是「文档里的词典条数」那一步读到 0 种、报「没能从词典检查的输出里读出唯一的条数」并回滚版本号 —— 看着像词典坏了，其实词典完全正常。**判断方法**：如果第 4 步里 `ℹ tests/pass/fail` 那些行没打印出来，就是这个坑，换 `pwsh` 重跑即可。
 3. 先读本文件、`README.md`、相关页面和消息两端，不要只改单侧响应协议。
 4. **本地文件格式的向后兼容 —— 分两个阶段，这是一个开关（用户 2026-10-11 补充）**：
 
@@ -1135,7 +1135,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     6. **发分发包用 `pack.ps1`，别手工压 zip**（P2-21）：它排掉 `.git` / `test/` / 三份 md / `release.ps1` / `pack.ps1` / `.node-path`，并在打包前断言「清单完整、开发文件没混进去」。
     7. **`release.ps1` 的 README 小节守卫是拿 `git tag` 全量比对的**（不只是本次要发的版本）—— 起因是 V1.4.0 的整节标题被一次编辑误删，而当时发的是 V1.4.1，隔了两个版本才发现。**编辑 README 时不要动 `## V<版本>：` 这一整行**；`test/stability.test.cjs` 里另有一条断言要求这些小节从新到旧排列、且 `## V1.4.0：` 必须存在。
     8. **开发阶段只要代码，不要 Release、不要桌面 zip**（用户 2026-10-14 明确要求，原话「现在插件还在测试开发阶段，不用上传 release，只需要上传代码就行了，以后不用在我桌面上生成 zip 了」）：`release.ps1` 照跑（它就是「提交 + 打 tag + 推送」＝上传代码），**不往 GitHub 建 Release、不把安装包传进 Release、也不再跑 `pack.ps1` 往桌面写 `bili-vault-<版本>.zip`**。注意 `release.ps1` 本身不建 Release（`api.github.com/.../releases` 一直是空的，V1.6.0–V1.6.5 都只有 tag），所以别再提醒用户「把 zip 传到 Release 页」—— 只有用户当面要安装包时才 `pack.ps1`，打完当场交给他。
-    9. **收工要关掉临时起的浏览器与预览进程**（用户 2026-10-15 要求，原话「下次在你完成工作后关掉浏览器后台任务」）：验收用的预览服务器（`node b_catch\_lead-preview.cjs`，8793）和 `bsk` 浏览器会话都是临时脚手架 —— 交付／答复之前用 `job_kill` 停掉后台作业、`bsk_session stop` 关掉会话（`bsk_session list` 确认没有残留），别把它们留在用户的任务面板和会话列表里。
+    9. **收工要关掉临时起的浏览器与预览进程**（用户 2026-10-15 要求，原话「下次在你完成工作后关掉浏览器后台任务」）：验收用的预览服务器（`C:\Users\Maxwell\Desktop\b_catch\_appearance-preview.cjs`，端口 **8792**；查询参数 `locale=` / `theme=` / `glass=` / `wallpaper=` / `veiled=` / `bad=1`）和 `bsk` 浏览器会话都是临时脚手架 —— 交付／答复之前用 `job_kill` 停掉后台作业、`bsk_session stop` 关掉会话（`bsk_session list` 确认没有残留），别把它们留在用户的任务面板和会话列表里。
 25. **「同一件判断散在多处」与「给用户看的假状态」是第二批审查里两种反复出现的病。**（V1.4.3 修上线前审查第二批时定。）
     1. **同一份名单/同一类判断只能有一处。**（P2-3）「保留目录名」原来在手动添加、导入两处各写一遍，自动归档那条链路就漏了 —— B 站收藏夹真叫「001错误报告」时，视频会被写进报告目录。现在只有 `RESERVED_COLLECTION_NAMES` + `collectionNameIsReserved()` 一处，**新增任何「写进用户备份文件夹」的入口时，先 grep 这个函数**。
     2. **判断「某件事还在不在跑」要用最紧的那条依据，不要用时间窗口。**（P2-6）内存里的 `importRun.active` 才是真相，`chrome.storage.local` 里的 `running: true` 只是残影。原来要求残影的 `updatedAt` 超过 90 秒才复位，于是浏览器重启后的前 90 秒里，弹窗一直显示「导入中」、暂停/取消按钮都在，点了却只回「当前没有正在进行的导入」—— **恰恰在最需要自愈的那段时间里给用户看假状态**。现在的判据是「`chrome.storage.session` 里有没有 `active: true` 的快照」，没有就立刻复位。
@@ -1175,6 +1175,6 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     1. **service worker 里没有词典**：`background.js` 拿不到 `BcaI18n` 的词典（它只管 storage 与网络），所以宠物互动这条消息只回 `{ ok, lineIndex, affinity, todayTouch, totalTouch, capped }`，四句台词写在 `pet.js` 里逐个 `translate("…")`。**后台一旦自己拼中文，等于绕过整套 i18n**；而且后台拼的字符串也没法随切语言更新。
     2. **台词必须写成一条条 `translate("…")` 调用**：`pet.js` 一开始把四句塞进 `const TOUCH_LINES = [...]` 数组字面量，`test/i18n-extract.cjs` 只认调用点，这四句就永远不进词典（缺了不报错，只是切语言那四句不翻译）。抽取器现在也认 `translate(` 这层包装 —— 但**新写的包装函数要同步告诉抽取器**，否则又是一个静默漏翻。
     3. **数据库只存明细**：`003database/database.json` 里只有「一条视频一条记录」，总数 / 今日 / 近 7 天 / 排行榜 / 柱状图全部由 `stats-core.js` 现算（`snapshot()`）。存了汇总就一定要同步更新，早晚会出现「图表和列表对不上」这类无法解释的 bug。
-    4. **纯函数模块要能被 node `require`**：`stats-core.js` 与 `archive-core.js` 一样，IIFE 挂 `globalThis` 给浏览器、末尾 `module.exports = api` 给 node —— 这样 `test/stats-core.test.cjs` 能在 node 里真跑（31 条），而不是只做文本断言。`release.ps1` 里这两套都要跑。
+    4. **纯函数模块要能被 node `require`**：`stats-core.js` 与 `archive-core.js` 一样，IIFE 挂 `globalThis` 给浏览器、末尾 `module.exports = api` 给 node —— 这样 `test/stats-core.test.cjs` 能在 node 里真跑（61 条），而不是只做文本断言。`release.ps1` 里这两套都要跑。
     5. **整份重建而不是增量合并**：收藏库扫描完调 `syncStatsDatabase()`，用 `databaseFromVideos(videos, { previous })` 把数据库整份重写（只保留 `createdAt` 与宠物状态）。扫描看得到的才算数 —— 用户在收藏库里删掉的视频不该继续留在统计里。
 
