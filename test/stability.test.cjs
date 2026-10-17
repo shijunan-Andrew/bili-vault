@@ -3118,6 +3118,15 @@ test("交接文档的「维护规范」与「协作规矩」不许被删（V1.7.
   for (const rule of ["子智能体的产出一律视为", "bsk_session action=stop", "在用户明确点头之前不要改文件"]) {
     assert.ok(handoff.includes(rule), `协作规矩里要有：${rule}`);
   }
+  // 文件放哪：项目直系进仓库，其余进 bili_vault_ref
+  assert.ok(handoff.includes("### 文件放哪"), "协作规矩里要写清文件该放哪儿");
+  for (const rule of ["bili_vault_ref", "以 `_` 开头的文件", "不是仓库的一部分"]) {
+    assert.ok(handoff.includes(rule), `文件归属规则里要有：${rule}`);
+  }
+  // 行尾不许叠 CR：test/status.cjs --write 曾经每跑一次就多叠一个 \r
+  assert.doesNotMatch(handoff, /\r\r/, "AI_HANDOFF.md 的行尾叠了多余的 CR");
+  const statusScript = readProjectFile("test/status.cjs");
+  assert.ok(statusScript.includes('replace(/\\r?\\n/g, "\\r\\n")'), "status.cjs 写回前要归一已有行尾");
 });
 test("发版不强制开系统代理：git 先直连、失败才走代理（V1.7.26）", () => {
   const script = readProjectFile("release.ps1");

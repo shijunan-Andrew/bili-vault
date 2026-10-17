@@ -81,7 +81,9 @@ function readHandoff() {
 }
 
 function writeHandoff(state) {
-  const crlf = state.text.replace(/\n/g, "\r\n");
+  // 先把行尾统一成 \r\n；必须用 /\r?\n/ 而不是 /\n/，
+  // 否则文件里已有的 \r\n 每跑一次 --write 就多叠一个 \r（历史上把 AI_HANDOFF.md 叠成了 5 个 CR）。
+  const crlf = state.text.replace(/\r?\n/g, "\r\n");
   fs.writeFileSync(handoffPath, (state.bom ? "\uFEFF" : "") + crlf, "utf8");
 }
 
