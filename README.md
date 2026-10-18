@@ -135,16 +135,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.7.30 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.7.31：交接前的最后一次文档对齐
+## V1.7.32：交接前的最后一次一致性体检
 
-这一版没动任何代码逻辑，只把「换一个 agent 接手时会被绊到」的文档问题清干净：
+这一版同样没动运行逻辑，做的是「确认这套文档和规矩真的能交给下一个人」：
 
-- **参考区的路径写法统一**：仓库文档里提到桌面上的参考目录时，一律写成 `Desktop\bili_vault_ref\…`（原来有几处只写目录名加一个斜杠，看起来像仓库里的相对路径，接手的人会找不到）。并加了一条守卫断言钉住这个写法。
-- **参考区 `TODO.md` 对齐**：版本号从 V1.7.29 更新到当前版本；删掉「导出功能要先想清的四件事」这类已经做完的设计前提；补上 1.7.28–1.7.31 的已完成记录。
-- **参考区 `README.md` 去掉会漂的数字**（「`_*.cjs` 183 个」这类），并把「早期脚本写死 `b_catch` 绝对路径」的范围说准。
-- **全量体检**：五份仓库文档 + 参考区两份「活」文档 —— 零死链、零重复标题、零标题层级跳跃、零裸 LF / 叠 CR / BOM，文档里点名的仓库脚本全部存在。
-
-（这条改动对日常使用没有影响，纯粹是交接前的文档收口。）
+- **体检结果**：五份仓库文档零死链、零重复标题、零标题层级跳跃、零裸 LF / 叠 CR / BOM；文档里点名的 9 个测试脚本全部存在且语法通过。原生脚本的 UTF-8 BOM、`minimum_chrome_version: 111`、仓库里没有 `package.json` 这几条硬规则逐条核过，都对得上。
+- **修掉一处自相矛盾的表述**：`AI_HANDOFF.md` 的文档地图里，`README.md` 那行还写着「每个版本改了什么」——与新的「只放最新一版」冲突，已改掉。
+- **把新规矩钉进测试**：新增断言要求 README 里**只能有当前版本一个小节**、必须链到 `docs/HISTORY.md`、当前版本在 HISTORY 里真有一节，并且文档地图那行必须写明「只放最新一版」。以后谁把历史堆回 README，`node test/stability.test.cjs` 当场就红，不用等到发版。
 
 ## 测试与文档
 
@@ -152,7 +149,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
 - **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 953 条**<!-- i18n-count:953 -->，缺一条就失败。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:252 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:253 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

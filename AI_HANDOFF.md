@@ -7,7 +7,7 @@
 | `AI_HANDOFF.md`（本文） | 快速开始、项目基线、硬规则、红线、修改原则、验证与发版 | 每次接手都读 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 目录结构、界面与设计系统、主要数据流、`视频信息.txt` 格式、页面与消息接口、状态保存位置 | 要改某条链路时按需查 |
 | [`docs/HISTORY.md`](docs/HISTORY.md) | 1.3.0 到现在逐版本改了什么、根因是什么、踩过哪些坑 | 想知道「为什么当初这么做」时查 |
-| [`README.md`](README.md) | 面向使用者的安装与功能说明，**版本说明只放最新一版** | 要改用户可见行为时看 |
+| [`README.md`](README.md) | 面向使用者的安装与功能说明，**只放最新一版的版本说明** | 要改用户可见行为时看 |
 
 > **别把本文当唯一真相。** 版本号、测试项数、词典条数一律以 `manifest.json`、`git`、测试实际输出为准。本文里带 `<!-- test-count -->` / `<!-- i18n-count -->` 标记的数字会被 `release.ps1` 自动核对，没标记的数字可能已经过期。
 
@@ -71,9 +71,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 953 条（`zh-TW` / `en` 各一份；缺 0，作者已删的旧词条 52） |
-| 测试基线 | stability 252 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
+| 测试基线 | stability 253 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-18 14:35，当时 HEAD `a3bccd8`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-18 14:49，当时 HEAD `a62561f`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -385,7 +385,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:252 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:253 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

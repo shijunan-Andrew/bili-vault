@@ -3308,6 +3308,48 @@ test("长任务要分阶段推进，这条规矩必须写在交接文档里", ()
   }
 });
 
+// ---- V1.7.32（交接前一致性：README 只放最新一版）----
+test("README 只放最新一版，旧版一律归 docs/HISTORY.md（V1.7.32）", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  const readme = readProjectFile("README.md");
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  const history = readProjectFile("docs/HISTORY.md");
+
+  // 1. 文档地图里 README 那行必须写明「只放最新一版」
+  const mapRow = handoff
+    .split(/\r?\n/)
+    .find((line) => line.includes("`README.md`") && line.trim().startsWith("|"));
+  assert.ok(mapRow, "AI_HANDOFF 的文档地图里要有一行讲 README（以 | 开头）");
+  assert.match(mapRow, /只[放留]最新一版/, "文档地图要说清 README 只放最新一版，别写「每个版本改了什么」");
+
+  // 2. README 里只能有最新一版一个小节，而且必须与 docs/HISTORY.md 的第一节对上
+  const sections = [...readme.matchAll(/^## V?(\d+\.\d+\.\d+)[：:]/gm)].map((m) => m[1]);
+  const historySections = [...history.matchAll(/^## V?(\d+\.\d+\.\d+)[：:]/gm)].map((m) => m[1]);
+  assert.equal(
+    sections.length,
+    1,
+    `README 只许放最新一版一个小节，现在有 ${sections.length} 个：${sections.join("、")}；旧版要剪到 docs/HISTORY.md`
+  );
+  assert.equal(
+    sections[0],
+    historySections[0],
+    `README 那一节应该是最新版本 V${historySections[0]}（docs/HISTORY.md 第一节），实际 V${sections[0]}`
+  );
+
+  // 3. README 必须给出「旧版去哪找」的链接（链接文字里可能有反引号，只认目标地址）
+  assert.match(
+    readme,
+    /\]\(docs\/HISTORY\.md\)/,
+    "README 要链到 docs/HISTORY.md，读者才知道旧版在哪"
+  );
+
+  // 4. 那一版在 HISTORY 里必须真有完整一节
+  assert.ok(
+    history.includes(`## V${sections[0]}：`),
+    `docs/HISTORY.md 里要有「## V${sections[0]}：」这一节`
+  );
+});
+
 test("the extractor also picks up strings passed as arguments", () => {
   // content.js 的提示卡文字是通过 showNotice(...) 传进去、再挂到 dataset.i18n 上的，
   // 属性式扫描一条都收不到。这类"传参式"文案漏掉的话，提示卡永远不会被翻译。
@@ -5199,12 +5241,14 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   const readme = readProjectFile("README.md");
   const historyDoc = readProjectFile("docs/HISTORY.md");
   const readmeSections = [...readme.matchAll(/^## V(\d+(?:\.\d+){0,3})[：:]/gm)].map((m) => m[1]);
+  const histSections = [...historyDoc.matchAll(/^## V(\d+(?:\.\d+){0,3})[：:]/gm)].map((m) => m[1]);
   const manifestVersion = JSON.parse(readProjectFile("manifest.json")).version;
   assert.equal(readmeSections.length, 1,
     `README 只放最新一版，现在有 ${readmeSections.length} 个版本小节：${readmeSections.join("、")}`);
-  assert.equal(readmeSections[0], manifestVersion,
-    `README 里那一节应该是当前版本 V${manifestVersion}，实际是 V${readmeSections[0]}`);
-  const histSections = [...historyDoc.matchAll(/^## V(\d+(?:\.\d+){0,3})[：:]/gm)].map((m) => m[1]);
+  // 比的是 docs/HISTORY.md 的第一节（= 最新一版），不是 manifest：发版前 manifest 还停在上一个版本，
+  // 由 release.ps1 在发版时才改写；这里若跟 manifest 比，每个版本在提交前都会红。
+  assert.equal(readmeSections[0], histSections[0],
+    `README 里那一节应该是最新版本 V${histSections[0]}（docs/HISTORY.md 第一节），实际是 V${readmeSections[0]}`);
   assert.ok(histSections.length >= 100, `docs/HISTORY.md 的版本小节太少：${histSections.length}`);
   for (const version of ["1.0.0", "1.3.1", "1.4.0", "1.7.8", "1.7.24", "1.7.31"]) {
     assert.ok(histSections.includes(version), `docs/HISTORY.md 里缺 V${version} 的小节`);

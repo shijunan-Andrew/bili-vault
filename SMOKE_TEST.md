@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **252** 项里<!-- test-count:252 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **253** 项里<!-- test-count:253 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -52,6 +52,12 @@
 - [ ] **发版闸门**：`node test/status.cjs --check` 打印 `[OK]`；`git status` 干净。
 
 ---
+
+## V1.7.32 新增的几条
+
+1. `chrome://extensions` 里确认版本显示 **V1.7.32**；收藏库、设置页各打开一次。
+2. 打开 `README.md`：「正式版更新」下面**只有 V1.7.32 一节**，且给出了指向 `docs/HISTORY.md` 的链接；再打开 `docs/HISTORY.md`，最新一节也是 V1.7.32，往下能一路排到 V1.0.0。
+3. `node test/stability.test.cjs` 应 253 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
 
 ## V1.7.31 新增的几条
 
