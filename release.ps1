@@ -122,14 +122,15 @@ Say "  [$([char]0x2713)] 干净" $C_GREEN
 # 排查用的临时脚本如果留在扩展根目录，插件就直接加载不了 —— 真机上发生过一次。
 # 更麻烦的是 .gitignore 里有 _*.cjs，git status 看不见它，上面那个净树检查会漏掉，
 # 所以这里用文件系统直接查，不看 git。
-# 每个 tag 都要有 README 小节 —— 以前靠人记，V1.x 时期（V1.1.4 到 V1.1.13）漏过 9 个版本，
-# 当时 git tag 有 16 个而 README 只有 5 个，读文档的人直接失去时间线。
-# （这几个数字是当年的现场记录，当前仓库已无法自证，留着只为说明这道闸门为什么存在。）
-# 所以让脚本强制：没有 "## V<版本>" 这一节就不许发布。
+# 版本小节分两处放：「README.md」只放**最新一版**（用户要看的），
+# 「docs/HISTORY.md」放完整历史（从最新一版一路回溯到 V1.0.0 与 36 个测试版）。
+# 以前所有版本都堆在 README 里，涨到 1800 行、和 HISTORY 大量重复，改一处漏一处；
+# 而且 V1.x 时期 README 漏过 9 个 tag 的小节（V1.1.4–V1.1.13），V1.4.0 的标题也被误删过。
+# 所以两道闸门：① 这次要发的版本必须在 README 里有小节；② 所有 tag 都必须能在 HISTORY 里找到。
 $readme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw -Encoding UTF8
 if ($readme -notmatch "(?m)^## V$([regex]::Escape($版本))[：:]") {
   Say "  README.md 里没有「## V$版本：...」这一节。" $C_RED
-  Say "  打了 tag 就必须有 README 小节，否则版本历史会缺环。" $C_YELLOW
+  Say "  打了 tag 就必须有版本小节，否则版本历史会缺环。" $C_YELLOW
   Say "  写多少看改动大小：bug 修复/新功能写清楚，界面微调一行带过即可。" $C_YELLOW
   Say "  不值得单独发版的改动就别发版 —— 直接提交、不打 tag。" $C_YELLOW
   Die "发布中止：先在 README.md 里补上 V$版本 的小节。"
@@ -137,19 +138,30 @@ if ($readme -notmatch "(?m)^## V$([regex]::Escape($版本))[：:]") {
 
 # 只查「这次要发的版本」还不够 —— V1.x 时期 V1.4.0 的 README 小节标题曾被一次编辑误删，
 # 而当时发的是 V1.4.1，那一节整整缺了一版都没人发现（发现时已经隔了两个版本）。
-# 所以这里把 git tag 全量过一遍：任何一个 V 开头的 tag 在 README.md 里找不到
-# "## V<版本>" 这一节，就不许发布。
+# 所以这里把 git tag 全量过一遍：任何一个 V 开头的 tag 在 docs/HISTORY.md 里找不到
+# "## V<版本>" 这一节，就不许发布。下面这段先拦住「README 里堆了多个版本小节」。
+# README 只留最新一版：多于一个小节说明旧的没归档，会让「同一段历史两份」的老问题回来。
+$readmeSections = @([regex]::Matches($readme, '(?m)^## V(\d+(?:\.\d+){0,3})[：:]'))
+if ($readmeSections.Count -gt 1) {
+  $inReadme = @($readmeSections | ForEach-Object { 'V' + $_.Groups[1].Value })
+  Say "  README.md 里有 $($readmeSections.Count) 个版本小节：$($inReadme -join '、')" $C_RED
+  Say "  README 只放最新一版，更早的版本要移到 docs/HISTORY.md。" $C_YELLOW
+  Die "发布中止：把 README.md 里除 V$版本 以外的版本小节移进 docs/HISTORY.md。"
+}
+
+$history = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'docs/HISTORY.md') -Raw -Encoding UTF8
+
 $tagList = @(Invoke-Native $Git @('tag') |
   ForEach-Object { $_.Trim() } |
   Where-Object { $_ -match '^V\d' })
 $missingSections = @($tagList | Where-Object {
-  $readme -notmatch "(?m)^## $([regex]::Escape($_))[：:]"
+  $history -notmatch "(?m)^## $([regex]::Escape($_))[：:]"
 })
 if ($missingSections.Count) {
-  Say "  README.md 里缺 $($missingSections.Count) 个已打 tag 的版本小节：" $C_RED
+  Say "  docs/HISTORY.md 里缺 $($missingSections.Count) 个已打 tag 的版本小节：" $C_RED
   foreach ($m in $missingSections) { Say "    ## $m：..." $C_RED }
-  Say "  打了 tag 就必须有 README 小节，否则版本历史会缺环。" $C_YELLOW
-  Die "发布中止：先补上上面这些版本的 README 小节。"
+  Say "  打了 tag 就必须有版本小节，否则版本历史会缺环。" $C_YELLOW
+  Die "发布中止：先补上上面这些版本的 docs/HISTORY.md 小节。"
 }
 
 $reserved = @(Get-ChildItem -LiteralPath $PSScriptRoot -Force -ErrorAction SilentlyContinue |

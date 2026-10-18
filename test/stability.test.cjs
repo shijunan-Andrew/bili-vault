@@ -3106,7 +3106,7 @@ test("AI_HANDOFF 只留入口，架构参考与版本日志各在各的文档里
   assert.match(handoff, /\]\(docs\/ARCHITECTURE\.md\)/, "入口文档要指向架构参考");
   assert.match(handoff, /\]\(docs\/HISTORY\.md\)/, "入口文档要指向版本日志");
   assert.doesNotMatch(arch, /^## \d+\.\d+\.\d+[：:]/m, "版本日志不该塞进架构参考");
-  assert.match(history, /^## \d+\.\d+\.\d+[：:]/m, "版本日志里要有版本小节");
+  assert.match(history, /^## V?\d+\.\d+\.\d+[：:]/m, "版本日志里要有版本小节");
   // 硬规则必须留在入口文档第一屏，不能被拆出去
   for (const rule of ["只在 `theme.css` 定义", "UTF-8 带 BOM", "BcaI18n.t(", "node --check"]) {
     assert.ok(handoff.includes(rule), `快速开始的硬规则里要有：${rule}`);
@@ -3199,9 +3199,9 @@ test("交接用的两份索引不许被删（V1.7.28）", () => {
     smoke.indexOf("## 当前全量验收清单") < smoke.indexOf("## V1.7.27 新增的几条"),
     "当前全量清单要排在版本增量清单之前，否则新人还是先看到增量",
   );
-  assert.match(history, /^## 关于 1\.7\.8 – 1\.7\.24/m, "历史文档要交代 1.7.8–1.7.24 那 17 个批次的去处");
+  // 2026-10：README 的历史整体并入 HISTORY 之后，那 17 个批次已经有真正的小节，不再需要索引表
   for (const v of ["1.7.8", "1.7.16", "1.7.24"]) {
-    assert.ok(history.includes(`| ${v} |`), `历史索引表里缺 ${v}`);
+    assert.match(history, new RegExp(`^## V${v.replace(/\./g, "\\.")}[：:]`, "m"), `历史文档里缺 V${v} 的小节`);
   }
 });
 
@@ -3288,6 +3288,24 @@ test("交接文档里提到参考目录，要写清是桌面上那个（V1.7.31�
     }
   }
   assert.ok(checked > 0, "这份守卫本身不能形同虚设：至少该有几处引用到参考目录");
+});
+
+// ---- 交接文档：长任务要分阶段推进（用户 2026-10 要求）----
+test("长任务要分阶段推进，这条规矩必须写在交接文档里", () => {
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  assert.match(handoff, /^### 长任务要分阶段/m, "交接文档要有「长任务要分阶段」这一节");
+  const start = handoff.indexOf("### 长任务要分阶段");
+  const nextAt = handoff.indexOf("\n### ", start + 10);
+  const body = nextAt < 0 ? handoff.slice(start) : handoff.slice(start, nextAt);
+  for (const must of [
+    "不要一口气从头做到尾",
+    "不要把整个任务拆开发包给子智能体",
+    "每个阶段做完就交付并说明",
+    "审查记录必须落盘",
+    "全部阶段做完再做一次汇总",
+  ]) {
+    assert.ok(body.includes(must), `「长任务要分阶段」这节里缺一句：${must}`);
+  }
 });
 
 test("the extractor also picks up strings passed as arguments", () => {
@@ -5172,29 +5190,40 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   // 文档：release.ps1 要拿 git tag 全量核 README（只核「这次要发的版本」漏掉过 V1.4.0 整节）
   const releaseScript = readProjectFile("release.ps1");
   assert.match(releaseScript, /Invoke-Native \$Git @\('tag'\)/, "release.ps1 要全量比对 tag 与 README 小节");
-  assert.match(releaseScript, /个已打 tag 的版本小节/, "缺小节时要报出缺哪几版");
+  assert.match(releaseScript, /docs\/HISTORY\.md 里缺/, "缺小节时要报出缺哪几版（现在核的是 docs/HISTORY.md）");
+  assert.match(releaseScript, /README 只放最新一版/, "release.ps1 要拦住「README 里堆了多个版本小节」");
 
-  // README：每一版都要有小节，且必须从新到旧排（V1.4.0 / V1.3.1 的标题都被误删过）
+  // 版本历史分两处：README 只留最新一版，完整历史在 docs/HISTORY.md
+  // （README 曾经从 V1.7.31 一路写到 V1.0.0 + 36 个测试版，1800 行，和 HISTORY 大量重复；
+  //   V1.4.0 / V1.3.1 的标题都被误删过，所以下面这几条不变式都要钉住。）
   const readme = readProjectFile("README.md");
-  for (const version of ["V1.4.0", "V1.3.1"]) {
-    assert.match(readme, new RegExp(`^## ${version.replace(/\./g, "\\.")}[：:]`, "m"),
-      `${version} 的小节标题不能再丢`);
+  const historyDoc = readProjectFile("docs/HISTORY.md");
+  const readmeSections = [...readme.matchAll(/^## V(\d+(?:\.\d+){0,3})[：:]/gm)].map((m) => m[1]);
+  const manifestVersion = JSON.parse(readProjectFile("manifest.json")).version;
+  assert.equal(readmeSections.length, 1,
+    `README 只放最新一版，现在有 ${readmeSections.length} 个版本小节：${readmeSections.join("、")}`);
+  assert.equal(readmeSections[0], manifestVersion,
+    `README 里那一节应该是当前版本 V${manifestVersion}，实际是 V${readmeSections[0]}`);
+  const histSections = [...historyDoc.matchAll(/^## V(\d+(?:\.\d+){0,3})[：:]/gm)].map((m) => m[1]);
+  assert.ok(histSections.length >= 100, `docs/HISTORY.md 的版本小节太少：${histSections.length}`);
+  for (const version of ["1.0.0", "1.3.1", "1.4.0", "1.7.8", "1.7.24", "1.7.31"]) {
+    assert.ok(histSections.includes(version), `docs/HISTORY.md 里缺 V${version} 的小节`);
   }
-  const sections = [...readme.matchAll(/^## V(\d+(?:\.\d+)*)[：:]/gm)].map((m) => m[1]);
-  assert.ok(sections.length >= 40, `README 的「## V…」小节数不对：${sections.length}`);
   const toNumbers = (v) => v.split(".").map(Number);
   const compare = (a, b) => {
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 4; i += 1) {
       const x = a[i] || 0;
       const y = b[i] || 0;
       if (x !== y) return x - y;
     }
     return 0;
   };
-  for (let i = 1; i < sections.length; i += 1) {
-    assert.ok(compare(toNumbers(sections[i - 1]), toNumbers(sections[i])) > 0,
-      `README 版本小节必须从新到旧：${sections[i - 1]} 之后出现了 ${sections[i]}`);
+  for (let i = 1; i < histSections.length; i += 1) {
+    assert.ok(compare(toNumbers(histSections[i - 1]), toNumbers(histSections[i])) > 0,
+      `docs/HISTORY.md 的版本小节必须从新到旧：${histSections[i - 1]} 之后出现了 ${histSections[i]}`);
   }
+  assert.ok(historyDoc.includes("## 测试版版本说明"), "测试版的历史也在 docs/HISTORY.md 里");
+  assert.ok(!readme.includes("## 测试版版本说明"), "README 不再放测试版历史");
 });
 
 test("上线前审查第二批：保留目录名、导入残影、队列文案、报告轮转、封面出网都钉住了（V1.4.3）", () => {

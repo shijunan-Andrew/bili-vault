@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **251** 项里<!-- test-count:251 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **252** 项里<!-- test-count:252 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -76,7 +76,7 @@
 ## V1.7.28 新增的几条
 
 1. 打开 `SMOKE_TEST.md`：标题下的「当前全量验收清单」应在「前置条件」之后、各版本「新增的几条」之前，14 条都带复选框。
-2. 打开 `docs/HISTORY.md`：第二节应是「关于 1.7.8 – 1.7.24」，表里 17 行、从 1.7.8 到 1.7.24 不缺号。
+2. 打开 `docs/HISTORY.md`：最新一节是当前版本，往下依次变旧、一直排到 `V1.0.0`，文末是 36 个测试版的记录；`git tag` 里每个 `V*` 都能在里面找到一节。
 3. `AI_HANDOFF.md` 的「已知限制与历史背景」里不该再有「4.1 实测一个上千条的档案」那段长文（已挪进 HISTORY），只留一行指针。
 4. `git status` 干净；`node test/status.cjs --check` 打印 `[OK]`。
 
