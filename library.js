@@ -445,7 +445,25 @@ function keepBestDownloadMatch(index, key, candidate) {
   if (!current || (!current.hasMedia && candidate.hasMedia) || (!current.hasFiles && candidate.hasFiles)) index.set(key, candidate);
 }
 
-async function scanDownloadedDirectories(archiveRoot) {
+/* 1.8.4：下载目录索引的缓存。整棵 000视频下载 树每轮扫描都要递归枚举一遍（每个下载目录
+   一次 inspectDownloadDirectory，里面还要往下递归看文件），和读归档记录是同一量级的
+   FS 往返，而它只在「下载目录真的变了」时才需要重算。失效方式：
+     ① 本页自己删除 / 搬运下载目录后调 invalidateDownloadIndex(rootHandle)；
+     ② 手动「刷新」（forceFullScan）与 downloadRevision 变化时强制重算；
+     ③ 兜底 TTL —— downloadRevision 这条订阅在 1.3.0 删掉下载功能之后就没人写了。 */
+const DOWNLOAD_INDEX_TTL_MS = 2 * 60 * 1000;
+const downloadIndexCache = new Map(); // rootKey -> { index, at }
+
+function invalidateDownloadIndex(handle) {
+  if (handle) downloadIndexCache.delete(rootCacheKey(handle));
+  else downloadIndexCache.clear();
+}
+
+async function scanDownloadedDirectories(archiveRoot, options = {}) {
+  const force = options.force === true;
+  const indexCacheKey = rootCacheKey(archiveRoot);
+  const cachedIndex = downloadIndexCache.get(indexCacheKey);
+  if (!force && cachedIndex && Date.now() - cachedIndex.at < DOWNLOAD_INDEX_TTL_MS) return cachedIndex.index;
   let parent;
   try { parent = await getDownloadParentHandle(archiveRoot); }
   catch (_) { return null; }
@@ -478,6 +496,7 @@ async function scanDownloadedDirectories(archiveRoot) {
         }
       }
     }
+    downloadIndexCache.set(indexCacheKey, { index, at: Date.now() });
     return index;
   } catch (_) { return null; }
 }
@@ -498,8 +517,24 @@ function matchDownloadedDirectory(video, index) {
    5. 读取失败（权限被撤、文件被占用）不写进缓存，避免把一次偶发失败固化下来。
    缓存只在内存里，页面关掉就没了，不写 localStorage / chrome.storage。 */
 /* 1.7.7（P2-4）：封面缓存上限。原来 4000 是按"最多 4000 个视频目录"设的，而页面同时
-   最多显示 25 张卡 —— 上限太高等于让整库的 blob: URL 常驻内存。 */
-const ARCHIVE_CACHE_MAX_PER_ROOT = 600;
+   最多显示 25 张卡 —— 上限太高等于让整库的 blob: URL 常驻内存。
+   1.8.4：上限不再写死 600，而是按「上次扫描到的记录数 + 余量」算（archive-core.js 的
+   archiveCacheCapacity()）。写死 600 的后果是：630 条的库正好卡在「顺序扫描 + LRU 逐条
+   淘汰」的抖动里 —— 每插入一条就淘汰掉下一条马上要读的条目，命中率实测为 0%。 */
+const archiveCacheLimit = new Map(); // rootKey -> 这个根目录的缓存上限
+
+function archiveCacheLimitFor(rootKey) {
+  return archiveCacheLimit.get(rootKey) || BcaArchiveCore.archiveCacheCapacity(0);
+}
+
+// 扫完一轮就把真实条数记下来，下一轮的容量按它算（删了记录也会跟着缩）
+function rememberArchiveCacheLimit(rootKey, recordCount) {
+  const next = BcaArchiveCore.archiveCacheCapacity(recordCount);
+  archiveCacheLimit.set(rootKey, next);
+  const store = archiveCache.get(rootKey);
+  if (store) store.cacheLimit = next;
+  return next;
+}
 // 1.7.12（perf PF-4）：上面那条是「每个根目录」的上限，根目录个数本身一直没有上限。
 // rootCacheKey 靠 WeakMap 计数发号，而句柄对象一旦不再被引用就会回收 —— 用户重选一次目录
 // （选错再选回来、换一个备份文件夹）就是一个新 key，旧 key 的条目要等到关页面才清。
@@ -531,6 +566,8 @@ function dropRootCaches(rootKey) {
   archiveCache.delete(rootKey);
   storageUsageCache.delete(rootKey);
   lastScanRecordCount.delete(rootKey);
+  archiveCacheLimit.delete(rootKey); // 1.8.4：容量与下载索引也按根目录记，别留孤儿
+  downloadIndexCache.delete(rootKey);
   const at = archiveCacheOrder.indexOf(rootKey);
   if (at >= 0) archiveCacheOrder.splice(at, 1);
 }
@@ -544,7 +581,7 @@ function touchArchiveCacheRoot(rootKey) {
 
 function archiveCacheFor(rootKey) {
   let store = archiveCache.get(rootKey);
-  if (!store) { store = new Map(); archiveCache.set(rootKey, store); }
+  if (!store) { store = new Map(); store.cacheLimit = archiveCacheLimitFor(rootKey); archiveCache.set(rootKey, store); }
   // "root:none" 是「没有句柄」的占位，不该占一个根目录名额
   if (rootKey !== "root:none") touchArchiveCacheRoot(rootKey);
   return store;
@@ -570,11 +607,18 @@ function storeCacheEntry(store, name, size, lastModified, record) {
   if (existing) { store.delete(name); dropCacheEntry(existing); }
   // 4.9：这里原来是 store.clear()，有两个问题：① 4000 条以上的库每轮扫描都会从零重读，
   // 缓存等于没有；② 被清掉的条目再也没人 revoke 它们的封面 blob: URL —— 正是下面那句
-  // 注释想避免的泄漏。改成按 Map 的插入序淘汰**最旧的一条**（配合 cacheEntryFor 的
-  // 「命中即刷新位置」构成 LRU）。上限仍然是 ARCHIVE_CACHE_MAX_PER_ROOT。
-  if (store.size >= ARCHIVE_CACHE_MAX_PER_ROOT) {
-    const oldestKey = store.keys().next().value;
-    if (oldestKey !== undefined) {
+  // 注释想避免的泄漏。改成按 Map 的插入序淘汰**最旧的**（配合 cacheEntryFor 的
+  // 「命中即刷新位置」构成 LRU）。
+  // 1.8.4：一次淘汰一批（25%），容量按库大小算 —— 逐条淘汰在「集合只比容量大一点」时会
+  // 每次都丢掉下一条要读的条目（630 条 / 上限 600 = 命中率 0%，真机复现过）。
+  const cacheLimit = store.growing
+    ? BcaArchiveCore.archiveCacheCapacity(store.size + 1) // 扫描中：跟着已读条数长，先不淘汰
+    : store.cacheLimit || BcaArchiveCore.archiveCacheCapacity(0);
+  if (store.size >= cacheLimit) {
+    const dropCount = BcaArchiveCore.archiveCacheDropCount(cacheLimit);
+    for (let dropIndex = 0; dropIndex < dropCount; dropIndex += 1) {
+      const oldestKey = store.keys().next().value;
+      if (oldestKey === undefined) break;
       const oldest = store.get(oldestKey);
       store.delete(oldestKey);
       dropCacheEntry(oldest);
@@ -812,37 +856,37 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   // 1.7.24（facet-compat §3.2）：度量。收藏夹段 + 视频目录段合起来超过预算的目录，
   // 拼上根目录与记录目录里的文件名就贴着 Windows 的 260 字符上限了 —— 以前没人提。
   const longNames = [];
-  const downloadIndex = await scanDownloadedDirectories(handle);
+  const downloadIndex = await scanDownloadedDirectories(handle, { force: forceFullScan });
   const previousVideos = new Map(preserveDownloadStatuses ? allVideos().map((video) => [video.id, video]) : []);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
   // 强制全量（「刷新」按钮）时先丢掉这个根目录的缓存
   const cacheKey = rootCacheKey(handle);
   if (forceFullScan) clearArchiveCache(handle);
   const cache = archiveCacheFor(cacheKey);
-  const stats = { hits: 0, reads: 0, processed: 0, total: 0 };
+  // 1.8.4：第一次扫一个库时还不知道有多少条，容量会先卡在下限（600）。这时候一边读
+  // 一边把上限接到「已读条数 + 余量」上，别在半路上淘汰掉下一条马上要读的条目。
+  cache.growing = true;
+  // 1.8.4：总数不再靠「把每个收藏夹多枚举一遍」得到（630 条 = 630 次多余往返）。
+  // 进度分母先用上次扫描的条数，估少了就跟着 processed 长；真值在读完时收口。
+  const knownTotal = lastScanRecordCount.get(cacheKey) || 0;
+  const stats = { hits: 0, reads: 0, processed: 0, total: knownTotal };
   // 目录列表本身每次重新枚举，缓存只省文件读取，所以新增/删除目录一定反映得出来
   const collections = [];
   for await (const collectionEntry of handle.values()) {
     if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"].includes(collectionEntry.name)) continue;
     collections.push(collectionEntry);
   }
-  for (const collectionEntry of collections) {
-    const records = [];
-    for await (const recordEntry of collectionEntry.values()) {
-      if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
-      records.push(recordEntry);
-      const relative = collectionEntry.name.length + 1 + recordEntry.name.length;
-      if (relative > BcaArchiveCore.PATH_SEGMENT_BUDGET_CHARS) longNames.push(`${collectionEntry.name}/${recordEntry.name}`);
-    }
-    stats.total += records.length;
-  }
+  // 1.7.24 的路径长度度量顺路在读那一遍里做，不再为它单独枚举（1.8.4）。
   const progress = progressNotifier(scanNoticeText, (value) => scanProgressText(value));
   try {
     for (const collectionEntry of collections) {
       const videos = [];
       for await (const recordEntry of collectionEntry.values()) {
         if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
+        const relative = collectionEntry.name.length + 1 + recordEntry.name.length;
+        if (relative > BcaArchiveCore.PATH_SEGMENT_BUDGET_CHARS) longNames.push(`${collectionEntry.name}/${recordEntry.name}`);
         stats.processed += 1;
+        if (stats.total < stats.processed) stats.total = stats.processed;
         if (stats.processed % 8 === 0) progress.update({ done: stats.processed, total: stats.total });
         try {
           const record = await readArchiveRecord(collectionEntry.name, recordEntry, cache, stats);
@@ -860,11 +904,15 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
       scanned.push({ name: collectionEntry.name, videos });
     }
   } finally {
+    cache.growing = false;
     progress.flush();
   }
   scanned.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  // 1.8.4：读完才知道真条数；顺手把下一轮的缓存容量定下来
+  stats.total = stats.processed;
+  rememberArchiveCacheLimit(cacheKey, stats.total);
   // hits/reads/total 挂在返回值上，界面用它显示「本次命中缓存多少条」
-  return { collections: scanned, issues, unfinished, stats: { hits: stats.hits, reads: stats.reads, total: stats.total } };
+  return { collections: scanned, issues, unfinished, longNames, stats: { hits: stats.hits, reads: stats.reads, total: stats.total } };
 }
 
 function parseDate(value, fallback) {
@@ -3435,6 +3483,7 @@ async function removeVideoDownloadDirectories(downloadParent, video) {
     try { await match.collectionHandle.removeEntry(match.directory.name, { recursive: true }); }
     catch (error) { failures.push(`${match.collectionName}/${match.directory.name}：${error.message}`); }
   }
+  if (matches.length) invalidateDownloadIndex(rootHandle); // 1.8.4：下载索引缓存跟着作废
   return failures;
 }
 
@@ -3466,7 +3515,7 @@ async function removeCollectionDownloadDirectory(downloadParent, collectionName)
   if (!await collectionDownloadDirectoryLooksManaged(handle)) {
     return [`${collectionName}：目录里有不是本插件写入的内容，为了安全没有删除。`];
   }
-  try { await downloadParent.removeEntry(collectionName, { recursive: true }); return []; }
+  try { await downloadParent.removeEntry(collectionName, { recursive: true }); invalidateDownloadIndex(rootHandle); return []; }
   catch (error) {
     if (error?.name === "NotFoundError") return [];
     return [`${collectionName}：${error.message}`];
@@ -3501,6 +3550,7 @@ async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null
       if (duplicateSets?.has(targetName)) wantedKeys.forEach((key) => duplicateSets.get(targetName).add(key));
     }
     downloadTransfer = await copyDownloadDirectories(downloadParent, video, targets);
+    if (downloadTransfer.created.length) invalidateDownloadIndex(rootHandle); // 1.8.4：新下载目录得能被扫到
     if (!targets.includes(video.collection)) await removeMovedSource(video);
   } catch (error) {
     for (const entry of downloadTransfer.created.reverse()) await entry.collection.removeEntry(entry.name, { recursive: true }).catch(() => {});
@@ -3519,6 +3569,7 @@ async function moveVideoRecordToTargets(video, targetNames, duplicateSets = null
       try { await source.collectionHandle.removeEntry(source.directory.name, { recursive: true }); }
       catch (error) { downloadCleanupFailures.push(`${source.collectionName}/${source.directory.name}：${error.message}`); }
     }
+    if (downloadTransfer.sources.length) invalidateDownloadIndex(rootHandle); // 1.8.4：源目录已删，索引要重算
   }
   return { moved: !targets.includes(video.collection), copied: missingTargets.length, duplicateTargets, downloadCleanupFailures };
 }
@@ -4303,6 +4354,9 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
     reads: result.stats?.reads || 0,
     total: result.stats?.total || 0,
     issues: result.issues,
+    // 1.8.4：这条度量 1.7.24 就算出来了，却一直没带回界面 —— 于是 refreshScanNotice()
+    // 里那段「目录名太长」的提示永远不会出现。顺手接上。
+    longNames: result.longNames || [],
     unfinished: result.unfinished || []
   };
   if (result.stats?.total) lastScanRecordCount.set(rootCacheKey(handle), result.stats.total);
@@ -4588,7 +4642,7 @@ async function refreshDownloadStatuses(force = false) {
   lastDownloadStatusCheckAt = now;
   downloadStatusCheckRunning = true;
   try {
-    const index = await scanDownloadedDirectories(rootHandle);
+    const index = await scanDownloadedDirectories(rootHandle, { force });
     // A denied custom-folder permission means the status is unknown, not that files vanished.
     if (!index) return;
     let changed = false;

@@ -968,6 +968,25 @@
     };
   }
 
+  /* 1.8.4：收藏库扫描缓存的容量与「一次丢一批」。
+     缓存按 lastModified + size 命中就复用，容量原来在 library.js 里写死 600 条。
+     库比容量大一点时最坏：顺序扫描边走边插入，每条都淘汰「最旧的」，而最旧的恰好是
+     下一条马上要读的 —— 630 条 / 上限 600 实测命中率 0%。所以容量按记录数 + 余量算，
+     淘汰一次丢掉 25%，别一条一条丢。 */
+  const ARCHIVE_CACHE_MIN_CAPACITY = 600;
+  const ARCHIVE_CACHE_HEADROOM = 256;
+  const ARCHIVE_CACHE_MAX_CAPACITY = 20000;
+
+  function archiveCacheCapacity(recordCount) {
+    const count = Number.isFinite(recordCount) && recordCount > 0 ? Math.ceil(recordCount) : 0;
+    return Math.min(ARCHIVE_CACHE_MAX_CAPACITY, Math.max(ARCHIVE_CACHE_MIN_CAPACITY, count + ARCHIVE_CACHE_HEADROOM));
+  }
+
+  function archiveCacheDropCount(capacity) {
+    const limit = Number.isFinite(capacity) && capacity > 0 ? Math.floor(capacity) : ARCHIVE_CACHE_MIN_CAPACITY;
+    return Math.max(1, Math.ceil(limit * 0.25));
+  }
+
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,
@@ -1037,7 +1056,13 @@
     parseShareStats,
     patchVolatileFields,
     // 1.8.3：刷新已有记录时的「不许降级」合并（background.js 的更新链路用）
-    mergeInfoText
+    mergeInfoText,
+    // 1.8.4：扫描缓存的容量与批量淘汰（library.js 不再写死 600）
+    ARCHIVE_CACHE_MIN_CAPACITY,
+    ARCHIVE_CACHE_HEADROOM,
+    ARCHIVE_CACHE_MAX_CAPACITY,
+    archiveCacheCapacity,
+    archiveCacheDropCount
   });
   global.BcaArchiveCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

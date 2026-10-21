@@ -6057,3 +6057,53 @@ test("「更新视频状态」只改接口真给了的互动数据（V1.8.3）",
     "更新视频状态只把接口回了的字段塞进 stats"
   );
 });
+
+// ---- 1.8.4：库比缓存大一点时的抖动（命中率 0%），以及少枚举一遍 / 下载索引缓存 ----
+
+test("收藏库扫描缓存的容量跟着库大小走，超了要一批一批淘汰（V1.8.4）", () => {
+  const library = readProjectFile("library.js");
+  const core = readProjectFile("archive-core.js");
+  assert.equal(/ARCHIVE_CACHE_MAX_PER_ROOT/.test(library), false, "容量不该再是写死的常数");
+  assert.match(library, /const archiveCacheLimit = new Map\(\);/, "每个根目录一份动态上限");
+  assert.match(library, /return archiveCacheLimit\.get\(rootKey\) \|\| BcaArchiveCore\.archiveCacheCapacity\(0\);/);
+  assert.match(library, /function rememberArchiveCacheLimit\(rootKey, recordCount\) \{/);
+  assert.match(library, /store\.cacheLimit = archiveCacheLimitFor\(rootKey\);/);
+  assert.match(library, /archiveCacheLimit\.delete\(rootKey\);/, "换根目录时别留孤儿");
+  // 淘汰必须成批，不能再一条一条丢
+  const start = library.indexOf("function storeCacheEntry");
+  assert.ok(start > 0, "找不到 storeCacheEntry");
+  const body = library.slice(start, library.indexOf("\n}", start));
+  assert.match(body, /const dropCount = BcaArchiveCore\.archiveCacheDropCount\(cacheLimit\);/);
+  assert.match(body, /for \(let dropIndex = 0; dropIndex < dropCount; dropIndex \+= 1\) \{/);
+  assert.equal((body.match(/dropCacheEntry\(oldest\)/g) || []).length, 1, "批里循环丢，不是丢一条");
+  // 判据只有一份，在 archive-core.js
+  assert.match(core, /function archiveCacheCapacity\(recordCount\) \{/);
+  assert.match(core, /function archiveCacheDropCount\(capacity\) \{/);
+  assert.equal(typeof require(path.join(projectRoot, "archive-core.js")).archiveCacheCapacity, "function");
+});
+
+test("扫描不再为了先知道总数多枚举一遍，下载索引也有缓存（V1.8.4）", () => {
+  const library = readProjectFile("library.js");
+  const start = library.indexOf("async function scanRoot(");
+  const end = library.indexOf("function parseDate(", start);
+  assert.ok(start > 0 && end > start, "找不到 scanRoot 的边界");
+  const body = library.slice(start, end);
+  assert.equal((body.match(/for await \(const recordEntry of collectionEntry\.values\(\)\)/g) || []).length, 1,
+    "每个收藏夹只该枚举一遍（原来为了数总数枚举两遍）");
+  assert.equal(/stats\.total \+= records\.length;/.test(body), false, "数总数那一遍已经删掉");
+  assert.match(body, /const knownTotal = lastScanRecordCount\.get\(cacheKey\) \|\| 0;/);
+  assert.match(body, /if \(stats\.total < stats\.processed\) stats\.total = stats\.processed;/, "估少了就地扩容");
+  assert.match(body, /rememberArchiveCacheLimit\(cacheKey, stats\.total\);/, "扫完把真条数记下来");
+  assert.match(body, /return \{ collections: scanned, issues, unfinished, longNames, stats:/, "longNames 要带回界面");
+  assert.match(body, /scanDownloadedDirectories\(handle, \{ force: forceFullScan \}\)/, "手动刷新要强制重算下载索引");
+  // 下载索引缓存
+  assert.match(library, /const DOWNLOAD_INDEX_TTL_MS = \d+ \* 60 \* 1000;/);
+  assert.match(library, /const downloadIndexCache = new Map\(\);/);
+  assert.match(library, /function invalidateDownloadIndex\(handle\) \{/);
+  assert.match(library, /downloadIndexCache\.set\(indexCacheKey, \{ index, at: Date\.now\(\) \}\);/);
+  assert.match(library, /scanDownloadedDirectories\(rootHandle, \{ force \}\)/, "downloadRevision / 可见性刷新要能绕过缓存");
+  assert.ok((library.match(/invalidateDownloadIndex\(rootHandle\)/g) || []).length >= 3,
+    "本页删 / 搬完下载目录后要显式作废，不能等 TTL");
+  // 「目录名太长」这条度量 1.7.24 就算出来了，却一直没带回界面 —— 顺手接上
+  assert.match(library, /longNames: result\.longNames \|\| \[\],/);
+});

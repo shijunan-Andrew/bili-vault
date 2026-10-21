@@ -5,6 +5,18 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.4：收藏库扫描只读一遍，缓存装得下整个库
+
+**改了什么**：`archive-core.js` 新增 `archiveCacheCapacity(recordCount)` 与 `archiveCacheDropCount(capacity)`（缓存容量与批量淘汰的唯一判据）；`library.js` 的 `storeCacheEntry()` 改成「容量按库大小算 + 一次丢 25%」，扫描期间容量跟着已读条数长；`scanRoot()` 删掉「为了先知道总数把每个收藏夹多枚举一遍」那一遍；`scanDownloadedDirectories()` 加了按根目录的索引缓存（`DOWNLOAD_INDEX_TTL_MS` 2 分钟 + 显式失效）。
+
+**为什么**：用户在收藏库看到「本次扫描 630 条记录，其中 0 条直接复用缓存」。630 > 600 —— 上限写死 600 条，淘汰又是「插入一条、丢最旧一条」，而最旧的恰好是下一条马上要读的那一条，于是每轮都是 0 命中。用同一套逻辑写的模拟脚本：容量 600 / 630 条 → 0%；容量 ≥ 记录数 → 稳态 100%；容量 2000 / 3000 条 → 又是 0%。另外两处是纯浪费：`scanRoot()` 先把每个收藏夹枚举一遍只为数总数（630 条 = 630 次多余往返），`000视频下载` 整棵树每轮还要递归扫一遍。
+
+**现在的口径**：容量 = `max(600, 记录数 + 256)`，天花板 20000；超了丢 25%；扫描期间容量跟着已读条数长，所以第一次扫一个新库也不会半路丢掉下一条要读的条目。下载索引缓存 2 分钟，手动「刷新」与 `downloadRevision` 变化都强制重算，本页删 / 搬下载目录后立刻作废。
+
+**踩的坑**：① 第一版只把容量改成自适应、没处理「首轮还不知道总数」—— 630 条在起点 600 上照样丢 150 条，模拟轮到第二轮只命中 480 条（这条后来成了回归用例）；② `_editlib.save()` 是按 `doc.lines` 落盘的，脚本里改 `doc.text` 等于什么都没写 —— 报了 OK、文件一个字节没变，只能靠 `grep` 复核；③ `refreshScanNotice()` 里「目录名太长」那段提示从 1.7.24 起就永远不会出现：`scanRoot()` 算了 `longNames` 却一直没带进返回值，这次顺手接上。
+
+**没动的**：`directorySize()` 的整树遍历（只在空闲时跑，且要真数字）；把解析结果持久化到 IndexedDB 并先渲染快照（P2，本次不做）；老 PNG 封面转 WebP（P3，会动用户文件，要单独批准）。
+
 ## V1.8.3：更新不再把已知资料写成「未知」
 
 **改了什么**：`archive-core.js` 新增 `mergeInfoText(original, candidate)`（写盘前的最后一道闸门）与 `patchStatsLines(lines, stats)`（互动数据逐键更新）。`background.js` 的 `refreshImportedRecord()` 现在先 `buildInfo()` 重建、再 `mergeInfoText(original, rebuiltText)` 合并，最后才写盘；`refreshOneArchiveStatus()` 只把接口真返回了的 `stat` 键放进 `stats`。

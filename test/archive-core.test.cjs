@@ -907,6 +907,64 @@ test("patchVolatileFields：互动数据只改接口真给了的那几项（V1.8
   assert.equal(out.includes("弹幕量：未知"), false, "没给的键不许变成占位");
 });
 
+test("archiveCacheCapacity：容量跟着记录数走，小库给足下限、大库有天花板（V1.8.4）", () => {
+  // 1.7.7 起上限写死 600 条，而 630 条的库正好落进「顺序扫描 + LRU 逐条淘汰」的抖动：
+  // 每插入一条就淘汰掉下一条马上要读的条目，实测命中率 0%（真机复现过）。
+  assert.equal(core.archiveCacheCapacity(0), 600, "不知道条数时按下限起步");
+  assert.equal(core.archiveCacheCapacity(0), core.ARCHIVE_CACHE_MIN_CAPACITY);
+  assert.equal(core.archiveCacheCapacity(630), 630 + 256, "630 条必须装得下");
+  assert.equal(core.archiveCacheCapacity(10000), 10256);
+  assert.equal(core.archiveCacheCapacity(99999), core.ARCHIVE_CACHE_MAX_CAPACITY, "再大也有天花板");
+  assert.equal(core.archiveCacheCapacity(-5), 600, "非法输入退回下限");
+  assert.equal(core.archiveCacheCapacity("x"), 600, "非法输入退回下限");
+});
+
+test("archiveCacheDropCount：超容量时一次丢一批，不是一条一条丢（V1.8.4）", () => {
+  assert.equal(core.archiveCacheDropCount(600), 150, "600 的 25%");
+  assert.equal(core.archiveCacheDropCount(886), 222, "886 的 25% 向上取整");
+  assert.equal(core.archiveCacheDropCount(1), 1, "至少丢一条");
+  assert.equal(core.archiveCacheDropCount(0), 150, "非法容量退回下限的 25%");
+});
+
+test("旧策略抖动、新策略不抖：630 条记录在 1.8.4 的容量下第二轮全部命中（V1.8.4）", () => {
+  const total = 630;
+  // 旧策略：容量固定 600、超了逐条淘汰 —— 第二轮命中 0
+  const oldStore = new Map();
+  let oldHits = 0;
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (let index = 0; index < total; index += 1) {
+      if (oldStore.has(index)) { oldHits += 1; oldStore.delete(index); oldStore.set(index, true); continue; }
+      if (oldStore.size >= 600) oldStore.delete(oldStore.keys().next().value);
+      oldStore.set(index, true);
+    }
+  }
+  assert.equal(oldHits, 0, "旧策略第二轮也是 0 命中（这就是那条提示的来历）");
+  // 新策略：容量按库大小算 + 扫描期间跟着已读条数长（library.js 的 growing），第二轮全部命中
+  let capacity = core.archiveCacheCapacity(0);
+  let growing = true;
+  const store = new Map();
+  const scanOnce = () => {
+    let hits = 0;
+    for (let index = 0; index < total; index += 1) {
+      if (store.has(index)) { hits += 1; store.delete(index); store.set(index, true); continue; }
+      if (growing) capacity = core.archiveCacheCapacity(store.size + 1);
+      if (store.size >= capacity) {
+        for (let drop = 0; drop < core.archiveCacheDropCount(capacity); drop += 1) {
+          const oldest = store.keys().next().value;
+          if (oldest === undefined) break;
+          store.delete(oldest);
+        }
+      }
+      store.set(index, true);
+    }
+    growing = false;
+    capacity = core.archiveCacheCapacity(total);
+    return hits;
+  };
+  scanOnce();
+  assert.equal(scanOnce(), total, "第二轮应该全部复用缓存");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {
