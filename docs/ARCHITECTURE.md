@@ -95,7 +95,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 3. 按 BV/av 把远程条目分成「缺失的」和「已存在但 `recordNeedsRefresh()` 为真」的两类。
 4. 失效视频先走原有恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）。
 5. **对上面两类条目都抓一次完整资料**：`fetchImportDetails()` → `fetchVideoDetail()` 调 `/x/web-interface/view`（简介、发布时间、分区、时长、UP 主、`stat`）与 `/x/tag/archive/tags`（标签），再调 `/x/relation/stat` 取 UP 主粉丝数（`upFansCache` 按 mid 缓存，同一个 UP 只请求一次）。并发 1、间隔 800ms（4.3 起下调，见 [`AI_HANDOFF.md`](../AI_HANDOFF.md) 的「合规与安全红线」）。
-6. 已存在的记录用 `refreshImportedRecord()` 按新格式重写，**保留原来的收藏时间与目录名**，原文进回滚日志。
+6. 已存在的记录用 `refreshImportedRecord()` 按新格式重写，**保留原来的收藏时间与目录名**，原文进回滚日志。写盘前先过 `BcaArchiveCore.mergeInfoText(original, rebuiltText)`（1.8.3）：新值是占位而原值有真内容 → 保留原值，`【标签】` / `【视频简介】` 整块变成占位时整块换回，`【互动数据】` 逐键合并 —— **刷新链路不许把已知降级成「未知」**；`patchVolatileFields` 更新互动数据也只动 `stats` 里真出现的键（`patchStatsLines()`）。
 7. 缺失的条目批量下载封面后写入（`saveImportedItem(..., journal)`，目录句柄先登记再写）。
 
 **暂停 / 取消 / 回滚**：`bca-import-control` 消息设置 `importRun.paused/cancelled`；暂停时 `importWaitIfPaused()` 用 Promise 挂起，继续或取消时 `importReleaseWaiters()` 唤醒。取消会抛 `ImportCancelled`（`error.name`），在最外层捕获后调用 `rollbackImport(journal)`：先删 `createdRecords`、再按 `modifiedFiles` 还原原文、最后清掉本次新建且为空的收藏夹。进度通过 `chrome.storage.local.importState` 持久化，所以弹窗关掉再打开也能恢复按钮状态；`get-status` 会带上 `importState`。

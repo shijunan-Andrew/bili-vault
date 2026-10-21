@@ -428,6 +428,43 @@
     return ["【互动数据】", ...STAT_KEYS.map((key) => `${STAT_LABELS[key]}：${isPlaceholderValue(stats?.[key]) ? "未知" : String(stats[key])}`)];
   }
 
+  /* 1.8.3（存档完好性）：互动数据段只动「这次真给了数值」的那几项。
+     原来是整段替换（statsSectionLines），接口只回部分字段时，没回的那几项会被写成
+     「未知」——把已有的真实数字换成占位符，等于丢数据。现在逐行改：块里已有的键就地
+     更新，块里没有的键补在块尾，没给的键一个字符都不动；老档案整块缺失时才新建。 */
+  function patchStatsLines(lines, stats) {
+    const provided = {};
+    for (const key of STAT_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(stats, key)) {
+        provided[key] = isPlaceholderValue(stats[key]) ? "未知" : String(stats[key]);
+      }
+    }
+    if (!Object.keys(provided).length) return;
+    const label = (key) => `${STAT_LABELS[key]}：`;
+    const given = (key) => Object.prototype.hasOwnProperty.call(provided, key);
+    const headingIndex = lines.findIndex((line) => line.trim() === "【互动数据】");
+    if (headingIndex < 0) {
+      const block = ["【互动数据】", ...STAT_KEYS.filter(given).map((key) => label(key) + provided[key]), ""];
+      const tagIndex = lines.findIndex((line) => line.trim() === "【标签】");
+      lines.splice(tagIndex >= 0 ? tagIndex : lines.length, 0, ...block);
+      return;
+    }
+    let end = headingIndex + 1;
+    while (end < lines.length && !SECTION_HEADING_PATTERN.test(lines[end].trim())) end += 1;
+    const seen = new Set();
+    for (let index = headingIndex + 1; index < end; index += 1) {
+      const key = STAT_KEYS.find((candidate) => lines[index].startsWith(label(candidate)));
+      if (!key) continue;
+      seen.add(key);
+      if (given(key)) lines[index] = label(key) + provided[key];
+    }
+    const missing = STAT_KEYS.filter((key) => given(key) && !seen.has(key));
+    if (!missing.length) return;
+    let anchor = end - 1;
+    while (anchor > headingIndex && !lines[anchor].trim()) anchor -= 1;
+    lines.splice(anchor + 1, 0, ...missing.map((key) => label(key) + provided[key]));
+  }
+
   function patchVolatileFields(text, options = {}) {
     const source = String(text ?? "");
     const newline = source.includes("\r\n") ? "\r\n" : "\n";
@@ -455,19 +492,8 @@
       if (isPlaceholderValue(current)) setField("视频发布时间", String(options.pubdateText));
     }
 
-    if (options.stats && Object.keys(options.stats).length) {
-      const block = statsSectionLines(options.stats);
-      const headingIndex = lines.findIndex((line) => line.trim() === "【互动数据】");
-      if (headingIndex >= 0) {
-        let end = headingIndex + 1;
-        while (end < lines.length && !SECTION_HEADING_PATTERN.test(lines[end].trim())) end += 1;
-        // 连同块尾空行一起替换，保持与下一区块之间的空行
-        lines.splice(headingIndex, end - headingIndex, ...block, "");
-      } else {
-        const tagIndex = lines.findIndex((line) => line.trim() === "【标签】");
-        lines.splice(tagIndex >= 0 ? tagIndex : lines.length, 0, ...block, "");
-      }
-    }
+    // 1.8.3：逐键更新，只动这次真给了数值的那几项（见 patchStatsLines 的说明）
+    if (options.stats && Object.keys(options.stats).length) patchStatsLines(lines, options.stats);
 
     if (options.videoStatus) {
       if (!setField("视频状态", String(options.videoStatus))) {
@@ -476,6 +502,84 @@
       }
     }
 
+    return lines.join(newline);
+  }
+
+  /* 1.8.3（存档完好性）：刷新已有记录时的「不许降级」闸门。
+     导入的「更新」链路为了把老档案补齐成新格式，一直是拿这次抓到的资料整篇重建
+     （buildInfo）。但资料接口 / 标签接口任一失败，重建出来的就是一堆「未知」：
+     简介、标签、发布时间、分区、时长、互动数据会在一次「更新」里被换掉，而导入跑完
+     之后没有退路（回滚日志只在中途取消时才用）。
+     这里逐字段比对：新值是占位、原值不是占位 → 保留原值；区块（标签 / 简介 / 互动
+     数据）整体成了占位而原文有真内容 → 整块保留原文。其余以新值为准（真变了就该更新）。 */
+  const MERGE_LINE_FIELDS = ["视频标题", "视频链接", "BV号", "av号", "分区", "视频时长", "视频发布时间", "UP主昵称", "UP主UID", "UP主粉丝数", "UP主主页"];
+  const MERGE_SECTIONS = ["【标签】", "【视频简介】"];
+
+  function mergeInfoText(original, candidate) {
+    const source = String(original ?? "");
+    const next = String(candidate ?? "");
+    if (!source.trim()) return next;
+    if (!next.trim()) return source;
+    const newline = next.includes("\r\n") ? "\r\n" : "\n";
+    const oldLines = source.split(/\r?\n/);
+    const lines = next.split(/\r?\n/);
+    const valueOf = (list, key) => {
+      const index = list.findIndex((line) => line.startsWith(`${key}：`));
+      return index < 0 ? "" : list[index].slice(key.length + 1);
+    };
+    // ① 单行字段：新值是占位、原值不是 → 保留原值
+    for (const key of MERGE_LINE_FIELDS) {
+      const before = valueOf(oldLines, key);
+      const after = valueOf(lines, key);
+      if (!isPlaceholderValue(after) || isPlaceholderValue(before)) continue;
+      const index = lines.findIndex((line) => line.startsWith(`${key}：`));
+      if (index >= 0) lines[index] = `${key}：${before}`;
+    }
+    const sectionBody = (list, heading) => {
+      const start = list.findIndex((line) => line.trim() === heading);
+      if (start < 0) return null;
+      let end = start + 1;
+      while (end < list.length && !SECTION_HEADING_PATTERN.test(list[end].trim())) end += 1;
+      const body = list.slice(start + 1, end);
+      while (body.length && !body[body.length - 1].trim()) body.pop();
+      return { start, end, body };
+    };
+    const hasReal = (body) => body.some((line) => line.trim() && !isPlaceholderValue(line.trim()));
+    // ② 文本区块：新块整个是占位、原文有真内容 → 整块换回原文
+    for (const heading of MERGE_SECTIONS) {
+      const before = sectionBody(oldLines, heading);
+      const after = sectionBody(lines, heading);
+      if (!before || !after) continue;
+      if (!hasReal(before.body) || hasReal(after.body)) continue;
+      lines.splice(after.start + 1, after.end - after.start - 1, ...before.body, "");
+    }
+    // ③ 互动数据：新值是占位、原文有真实数字 → 用原值；新区块整个丢了就补回原文那一块
+    const oldStats = sectionBody(oldLines, "【互动数据】");
+    if (!oldStats) return lines.join(newline);
+    const fromOld = {};
+    for (const key of STAT_KEYS) {
+      const label = `${STAT_LABELS[key]}：`;
+      const line = oldStats.body.find((candidate) => candidate.startsWith(label));
+      const value = line === undefined ? "" : line.slice(label.length);
+      if (!isPlaceholderValue(value)) fromOld[key] = value;
+    }
+    if (!Object.keys(fromOld).length) return lines.join(newline);
+    const afterStats = sectionBody(lines, "【互动数据】");
+    if (!afterStats) {
+      const tagIndex = lines.findIndex((line) => line.trim() === "【标签】");
+      lines.splice(tagIndex >= 0 ? tagIndex : lines.length, 0, "【互动数据】", ...STAT_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(fromOld, key)).map((key) => `${STAT_LABELS[key]}：${fromOld[key]}`), "");
+      return lines.join(newline);
+    }
+    const fill = {};
+    for (const key of STAT_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(fromOld, key)) continue;
+      const label = `${STAT_LABELS[key]}：`;
+      const line = afterStats.body.find((candidate) => candidate.startsWith(label));
+      const value = line === undefined ? "" : line.slice(label.length);
+      // 只有新值是占位时才回填旧值：新值自己也是真数据（播放量涨了）就该以新值为准
+      if (isPlaceholderValue(value)) fill[key] = fromOld[key];
+    }
+    if (Object.keys(fill).length) patchStatsLines(lines, fill);
     return lines.join(newline);
   }
 
@@ -931,7 +1035,9 @@
     pageSequence,
     splitShareText,
     parseShareStats,
-    patchVolatileFields
+    patchVolatileFields,
+    // 1.8.3：刷新已有记录时的「不许降级」合并（background.js 的更新链路用）
+    mergeInfoText
   });
   global.BcaArchiveCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

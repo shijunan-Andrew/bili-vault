@@ -5,6 +5,21 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.3：更新不再把已知资料写成「未知」
+
+**改了什么**：`archive-core.js` 新增 `mergeInfoText(original, candidate)`（写盘前的最后一道闸门）与 `patchStatsLines(lines, stats)`（互动数据逐键更新）。`background.js` 的 `refreshImportedRecord()` 现在先 `buildInfo()` 重建、再 `mergeInfoText(original, rebuiltText)` 合并，最后才写盘；`refreshOneArchiveStatus()` 只把接口真返回了的 `stat` 键放进 `stats`。
+
+**为什么**：存档的完好性是这个插件唯一的前提。审计时发现「更新」这条路有个不可逆的窟窿：本地已有记录只要被 `recordNeedsRefresh()` 判为不完整（缺 `UP主粉丝数：` 行、缺 `【互动数据】` —— 1.6 / 1.7 早中期导入的存档普遍如此），导入时就会整篇重写。而重建用的资料来自 `/x/web-interface/view` 与标签接口，`fetchVideoDetail()` 把失败**只记进 `detail.errors`**、`applyVideoDetail()` 有值才写，于是接口一抖动（普通网络错误不受风控拦截）重建结果就是一堆「未知」：简介、标签、发布时间、粉丝数全丢，`【互动数据】` 整段消失。运行时探针复现过这件事，且 `importStableInfoText` 只抹「信息保存于」一行，「有变化 → 写盘」判定为真。
+
+**修法**：三处，都不改文件格式。
+1. `mergeInfoText()`：单行字段「新值是占位、原值不是」→ 保留原值；`【标签】` / `【视频简介】` 整块变成占位而原文有真内容 → 换回原文；`【互动数据】` 逐键处理，新区块整个丢了就补回原文那一块。
+2. `patchStatsLines()`：`patchVolatileFields` 更新互动数据时只看 `stats` 里**真的出现**的键；没出现的键一个字符都不动（原来是整块重写，缺的键会被写成「未知」）。
+3. `background.js` 两处调用点接上；`refreshOneArchiveStatus()` 的 `stats` 只装非 `undefined` / 非 `null` 的值。
+
+**踩的坑**：新加的 4 条 `archive-core.test.cjs` 用例一开始追加在文件末尾 —— 那个文件是**自带 runner**（`function test(name, fn)` + 末尾 `if (isMain) { … 打印汇总 }`），追加在汇总之后等于「跑了但不计入统计」，`ℹ tests` 还是 79。整段挪到汇总块之前才变成 83。另一条用例拿「降级样本」当底、再 replace 真简介 / 真播放量，可那两行早被降级换掉了，replace 命中 0 处 —— **用来验证升级的样本，必须是升级前的样子**。
+
+**没动的**：`001错误报告` / `002同步报告` 只保留最新 N 份（那是报告，不是存档）；`rollbackImport`、`discardFailedRecord`、`uniqueTimeFolder`、统计库的读取守卫都按原样保留 —— 审计里它们都算「有守卫」。
+
 ## V1.8.2：归档回到一秒内 —— 新文件就地写
 
 **改了什么**：`background.js` 的 `writeFile()` 与 `library.js` 的 `writeFileAtomically()` 都先判「目标文件是不是全新的」：新文件（归档时每个记录目录都是刚建出来的）直接就地写；只有覆盖一个已经存在的文件才走「临时文件 + `move()` 换名」。

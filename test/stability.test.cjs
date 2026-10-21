@@ -6019,3 +6019,41 @@ test("writeFile 真的对新文件就地写、对已存在的文件才建临时�
   const removed = existsLog.filter((line) => line.startsWith("removeEntry:"));
   assert.deepEqual(removed, [], "换名成功时临时文件已经变成正式文件了，不该再删一次");
 });
+
+// ---- 1.8.3：刷新的写盘路径先过「不许降级」合并 ----
+
+test("导入的「更新」链路写盘前先过「不许降级」合并（V1.8.3）", () => {
+  const backgroundCode = readProjectFile("background.js");
+  const at = backgroundCode.indexOf("async function refreshImportedRecord(");
+  assert.notEqual(at, -1, "background.js 里找不到 refreshImportedRecord");
+  const body = backgroundCode.slice(at, backgroundCode.indexOf("\r\n}\r\n", at));
+  assert.ok(body.length > 400, "refreshImportedRecord 的函数体没取到");
+  assert.match(body, /const rebuiltText = buildInfo\(/, "重建结果要先落到 rebuiltText 上");
+  assert.match(
+    body,
+    /const refreshedText = BcaArchiveCore\.mergeInfoText\(original, rebuiltText\);/,
+    "写盘前必须过 mergeInfoText，否则接口一失败就把真实简介/标签换成「未知」"
+  );
+  assert.ok(
+    body.indexOf("mergeInfoText(original, rebuiltText)") < body.indexOf('writeFile(directory, "视频信息.txt", refreshedText)'),
+    "合并必须在写盘之前"
+  );
+  // 别处也不许把 buildInfo 的结果直接写进一个已经存在的记录目录
+  assert.doesNotMatch(backgroundCode, /writeFile\(directory, "视频信息\.txt", buildInfo\(/, "重建结果不许绕过合并直接写盘");
+  const coreSource = readProjectFile("archive-core.js");
+  assert.equal((coreSource.match(/function mergeInfoText\(/g) || []).length, 1, "「不许降级」的判断只能有一份实现");
+  assert.equal(typeof require(path.join(projectRoot, "archive-core.js")).mergeInfoText, "function", "archive-core.js 要把 mergeInfoText 导出给 background.js");
+});
+
+test("「更新视频状态」只改接口真给了的互动数据（V1.8.3）", () => {
+  const coreSource = readProjectFile("archive-core.js");
+  assert.equal((coreSource.match(/function patchStatsLines\(/g) || []).length, 1, "互动数据的逐键更新只该有一份实现");
+  assert.match(coreSource, /if \(Object\.prototype\.hasOwnProperty\.call\(stats, key\)\) \{/, "只认接口真给了的键");
+  assert.doesNotMatch(coreSource, /const block = statsSectionLines\(options\.stats\);/, "别再整段替换互动数据");
+  const backgroundCode = readProjectFile("background.js");
+  assert.match(
+    backgroundCode,
+    /if \(stat\[key\] !== undefined && stat\[key\] !== null\) stats\[key\] = stat\[key\];/,
+    "更新视频状态只把接口回了的字段塞进 stats"
+  );
+});

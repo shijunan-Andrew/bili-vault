@@ -809,6 +809,104 @@ test("导出文件名带时间戳，004导出 是保留目录", () => {
   assert.equal(core.safeCollectionName("004导出"), "004导出", "保留名本身不该被改写");
 });
 
+const LIVE_ARCHIVE = [
+  "【基本信息】",
+  "视频收藏时间：2026年10月16日00时36分14秒 星期五",
+  "信息保存于：2026-10-16 00:36:15",
+  "所属收藏夹：游戏解说",
+  "视频标题：标题",
+  "视频链接：https://www.bilibili.com/video/BV1rsJX6vEMo/",
+  "视频状态：正常",
+  "BV号：BV1rsJX6vEMo",
+  "av号：av11312345678",
+  "分区：单机游戏",
+  "视频时长：05:12",
+  "视频发布时间：2026-10-15 20:00:00 星期四",
+  "",
+  "【UP主】",
+  "UP主昵称：狗哥yo",
+  "UP主UID：12345678",
+  "UP主粉丝数：3456",
+  "UP主主页：https://space.bilibili.com/12345678",
+  "",
+  "【互动数据】",
+  "播放量：1000",
+  "弹幕量：20",
+  "点赞数：30",
+  "投硬币枚数：4",
+  "收藏人数：5",
+  "转发人数：6",
+  "",
+  "【标签】",
+  "漫漫长夜、单机游戏、修改器",
+  "",
+  "【视频简介】",
+  "这是 UP 主自己写的一段简介。",
+  ""
+].join("\n");
+
+// 资料接口 / 标签接口都失败时，buildInfo 整篇重建出来的样子：简介、标签、发布时间
+// 全成了「未知」，【互动数据】整段消失，收藏时间也因为老格式被重排而变了一行。
+const DEGRADED_REBUILD = LIVE_ARCHIVE
+  .replace("视频收藏时间：2026年10月16日00时36分14秒 星期五", "视频收藏时间：2026年10月16日 00时36分14秒.15")
+  .replace("视频发布时间：2026-10-15 20:00:00 星期四", "视频发布时间：未知")
+  .replace("分区：单机游戏", "分区：未知")
+  .replace("视频时长：05:12", "视频时长：未知")
+  .replace("UP主粉丝数：3456", "UP主粉丝数：未知")
+  .replace(/【互动数据】[\s\S]*?\n\n/, "")
+  .replace("漫漫长夜、单机游戏、修改器", "未知")
+  .replace("这是 UP 主自己写的一段简介。", "未知");
+
+/* ───────────────────────── 1.8.3：刷新不许降级 ─────────────────────────
+   导入的「更新」链路为把老档案补齐成新格式，一直拿这次抓到的资料整篇重建（buildInfo）。
+   资料接口 / 标签接口任一失败，重建结果就是一堆「未知」。mergeInfoText 是写盘前的
+   最后一道闸门：新值是占位、原值不是 → 保留原值；其余以新值为准。 */
+
+test("mergeInfoText：接口失败导致的重建不许把已知内容换成「未知」（V1.8.3）", () => {
+  const merged = core.mergeInfoText(LIVE_ARCHIVE, DEGRADED_REBUILD);
+  for (const keep of [
+    "视频发布时间：2026-10-15 20:00:00 星期四",
+    "分区：单机游戏",
+    "视频时长：05:12",
+    "UP主粉丝数：3456",
+    "漫漫长夜、单机游戏、修改器",
+    "这是 UP 主自己写的一段简介。",
+    "播放量：1000",
+    "【互动数据】"
+  ]) {
+    assert.ok(merged.includes(keep), `被降级成占位了：${keep}`);
+  }
+  assert.equal(merged.includes("视频发布时间：未知"), false, "发布时间不该被写成未知");
+  assert.equal(merged.includes("【视频简介】\n未知"), false, "简介不该被写成未知");
+  assert.equal(merged.includes("【标签】\n未知"), false, "标签不该被写成未知");
+});
+
+test("mergeInfoText：新值是真数据时以新值为准（真变了就该更新）", () => {
+  // 以「这次真的联网抓到了新资料」为底：简介和播放量都是真数据，不该被旧值挡住
+  const candidate = LIVE_ARCHIVE
+    .replace("这是 UP 主自己写的一段简介。", "UP 主后来改了简介")
+    .replace("播放量：1000", "播放量：2000");
+  const merged = core.mergeInfoText(LIVE_ARCHIVE, candidate);
+  assert.ok(merged.includes("UP 主后来改了简介"), "新简介该写进去");
+  assert.ok(merged.includes("播放量：2000"), "新播放量该写进去");
+  assert.equal(merged.includes("播放量：1000"), false, "旧播放量该被换掉");
+});
+
+test("mergeInfoText：空原文 / 空候选都不抛错，也不编内容", () => {
+  assert.equal(core.mergeInfoText("", "x"), "x");
+  assert.equal(core.mergeInfoText("x", ""), "x");
+  assert.equal(core.mergeInfoText(null, null), "");
+});
+
+test("patchVolatileFields：互动数据只改接口真给了的那几项（V1.8.3）", () => {
+  const out = core.patchVolatileFields(LIVE_ARCHIVE, { stats: { view: "9999" } });
+  assert.ok(out.includes("播放量：9999"), "给了的键要更新");
+  for (const keep of ["弹幕量：20", "点赞数：30", "投硬币枚数：4", "收藏人数：5", "转发人数：6"]) {
+    assert.ok(out.includes(keep), `没给的键不该被写成未知：${keep}`);
+  }
+  assert.equal(out.includes("弹幕量：未知"), false, "没给的键不许变成占位");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

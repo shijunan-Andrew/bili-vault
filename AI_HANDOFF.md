@@ -72,9 +72,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 914 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 263 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
+| 测试基线 | stability 265 · archive-core 83 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-21 23:39，当时 HEAD `313d27e`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-22 00:19，当时 HEAD `5bf260b`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -390,7 +390,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:263 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:265 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -687,6 +687,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     4. **别用「读代码推演」代替证据**：这一次我把 URL、协议、CDN（curl 200 + `ACAO: *`）、`host_permissions`（Chrome 的 `Secure Preferences` 里确实有 `https://*.hdslb.com/*`）、函数顺序全部核过一遍，每一项都"应该没问题"，但真机就是不行 —— 缺的正是运行时的那一句失败原因。**核对清单全绿而现象依旧时，下一步是装眼睛，不是继续推演。**
     5. **1.7.34 起按三级分类判**：一档＝用户主动发起、失败必须说出来（throw / 弹窗 / 错误报告）；二档＝尽力而为的降级，行为不变但**必须留一条 `console.warn("原因（影响面）", error)`**；三档＝**是控制流或清理、不是吞掉失败**（探测文件是否存在、`writable.abort()` 之后重新抛、focus 释放、`chrome.runtime.lastError` 没有接收方、角标 best-effort、锁清理），保持 `catch (_) {}` 但补一行注释说明为什么可以静默。现数用 `grep -c "catch (_) {}" *.js`，**别把处数写进文档正文**；`test/stability.test.cjs` 给四个文件留着上界，涨了就先判档、再改上界。完整标准见 `docs/ARCHITECTURE.md`「已知限制」。
     6. **扩展上下文失效（`chrome.runtime` 变回 `undefined`）也属一档，必须说出来。**（1.8.1）重新加载 / 更新 / 停用扩展之后，已打开的标签页里那份**旧**内容脚本还活着 —— Chrome 不会给已打开的页面重新注入 —— 任何 `chrome.runtime.sendMessage` 都会抛 `Cannot read properties of undefined (reading 'sendMessage')`，界面却一片安静。判据是 `extensionAlive()`（`typeof chrome !== "undefined" && Boolean(chrome.runtime?.id)`），出口是「扩展刚更新过 / 刷新一下（F5）」那张卡。注意这种状态下 `archiveEnabled` 也是 `false`，所以**别把「读不到设置」当成「用户关了归档」而静默返回**。
+    7. **刷新已有记录也不许把已知降级成占位。**（1.8.3）「更新」用的是这次抓到的资料整篇重建，而资料接口失败只记 `detail.errors`、不中止 —— 所以重建结果可能全是「未知」（简介、标签、发布时间、粉丝数、互动数据一起丢）。写盘前必须过 `BcaArchiveCore.mergeInfoText(original, candidate)`（单行字段、`【标签】`、`【视频简介】`、`【互动数据】` 逐块合并，新值是占位就保留原值），互动数据只改接口真返回了的键（`patchStatsLines()`）。`test/stability.test.cjs` 有两条守卫盯着「写盘前有没有过合并」。
 
 29. **「等待方断了」不等于「被等的事失败了」—— 先问一句对方还在不在跑，再决定要不要报错。**（V1.4.7 修的就是这个：一次导入是「弹窗 → 收藏夹页面 → 后台」这样转手的，页面一关，弹窗的 `await` 立刻失败，于是把「后台正跑得好好的」当成失败。）
     1. **症状**：用户在导入途中关掉 B 站收藏夹页面（这是 1.4.3 起明确支持的用法）→ 后台正常跑完、报告与封面都正常，但弹窗既不弹完成提示，还可能显示「请先打开并刷新收藏夹页面，再试一次。」这种假错误。

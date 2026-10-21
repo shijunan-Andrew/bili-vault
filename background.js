@@ -1989,6 +1989,8 @@ async function refreshOneArchiveStatus(root, target, tabId) {
     return "invalid";
   }
 
+  // 1.8.3：只把接口真回了的字段放进来 —— patchVolatileFields 现在只更新这里出现的键，
+  // 没回的字段保持原值，不会被写成「未知」。
   const stats = {};
   const stat = view?.stat || {};
   for (const key of STAT_KEYS) {
@@ -2672,7 +2674,11 @@ async function refreshImportedRecord(collection, record, item, journal) {
   // 标记按"这次实际拿到了什么"决定去留：拿到真封面就清掉旧的待补标记，
   // 仍然只有占位图（或本来就缺封面但这次也没补上）就继续保留待补标记。
   metadata.coverMissing = cover ? cover.placeholder === true : record.coverMissing === true;
-  const refreshedText = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.directory, new Date());
+  // 1.8.3（存档完好性）：整篇重建的结果先过一道「不许降级」合并。
+  // 资料接口 / 标签接口任一失败时，重建出来的是一堆「未知」——直接写下去就是把真实的
+  // 简介、标签、发布时间、分区、时长、互动数据换成占位符，而且导入跑完之后没有退路。
+  const rebuiltText = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, record.directory, new Date());
+  const refreshedText = BcaArchiveCore.mergeInfoText(original, rebuiltText);
   let touched = false;
   if (cover) {
     // 先写封面、后写 txt：txt 始终是"这条记录写完了"的完成标记
