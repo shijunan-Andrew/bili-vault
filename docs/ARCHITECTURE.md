@@ -78,7 +78,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 扩展被重新加载 / 更新 / 停用之后，已打开页面里那份旧脚本的 `chrome.runtime` 会变回 `undefined`（Chrome 不给已打开的标签页重新注入内容脚本）。`content.js` 用 `extensionAlive()`（`typeof chrome !== "undefined" && Boolean(chrome.runtime?.id)`）认这件事：点击路径与 `sendFavorite()` 都先认一次，失效时弹「扩展刚更新过 / 刷新一下（F5）」的卡、不再往下走，因此也不会再抛 `Cannot read properties of undefined (reading 'sendMessage')`。
 
-后台串行执行保存操作（`saveQueue`），读取 IndexedDB 中的根目录句柄，检查写入权限，**先把封面取一次**，再在选中的收藏夹之间并行落盘（`Promise.allSettled`）；每个收藏夹内部仍然先写 `封面.webp`、后写 `视频信息.txt` —— txt 落盘才是这条记录的完成标记。部分收藏夹失败时其余照常保存，返回 `{ ok: true, partial: true }`，界面据此摆出「部分收藏夹没保存」的清单；只有全部失败才算整次失败，此时尝试写入 `001错误报告`。每次写入前会清掉同目录里超过 10 分钟的点号临时文件（`archive-core.js` 的 `isTempFileName` / `isStaleTempFile`）。最近状态、错误详情放入扩展存储供弹窗展示。
+后台串行执行保存操作（`saveQueue`），读取 IndexedDB 中的根目录句柄，检查写入权限，**先把封面取一次**，再在选中的收藏夹之间并行落盘（`Promise.allSettled`）；每个收藏夹内部仍然先写 `封面.webp`、后写 `视频信息.txt` —— txt 落盘才是这条记录的完成标记。部分收藏夹失败时其余照常保存，返回 `{ ok: true, partial: true }`，界面据此摆出「部分收藏夹没保存」的清单；只有全部失败才算整次失败，此时尝试写入 `001错误报告`。每次写入前会清掉同目录里超过 10 分钟的点号临时文件（`archive-core.js` 的 `isTempFileName` / `isStaleTempFile`）。最近状态、错误详情放入扩展存储供弹窗展示。写盘分两条路（1.8.2）：目标文件还不存在时直接就地写（归档的常态 —— 每个记录目录都是刚建出来的）；只有覆盖一个已经存在的文件才写「点号临时文件 + `move()` 换名」，原子性只在那里才有意义。
 
 ### B 站收藏夹导入
 

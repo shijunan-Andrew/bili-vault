@@ -500,6 +500,16 @@ async function removeStaleTempFiles(directory) {
   }
 }
 
+// 1.8.2：目标文件在不在 —— 新建与覆盖要走不同的写盘路径（理由见 writeFile 里那条注释）。
+async function fileExists(directory, name) {
+  try {
+    await directory.getFileHandle(name);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function writeFile(directory, name, content) {
   /* 1.7.1 曾在这里**完整退回** 1.7.0 之前的就地写，理由是「1.7.0 一上原子写，手动收藏和
      导入就都存不进本地」。1.7.16 重新上原子写，因为那条理由已经被真机探针推翻：
@@ -517,6 +527,28 @@ async function writeFile(directory, name, content) {
      （完整内容）保留并把两条原因一起报出去。 */
   // 1.8.0：先把同目录里的陈年临时文件清掉，免得目录越用越脏
   await removeStaleTempFiles(directory);
+  // 1.8.2（真机量出来的）：归档时每个记录目录都是刚建出来的，封面与视频信息.txt 全是
+  // 全新文件 —— 这时候「临时文件 + move() 换名」是纯开销。同一份 11 KB 封面：就地写
+  // 0.06 秒，绕一圈临时文件 7.1 秒（Chrome 155 上换名覆盖要 7 秒左右；1.6 用的是就地写，
+  // 所以当年一秒内就能完成）。原子性只在「覆盖一个已经存在的文件」时才有意义，所以：
+  // 新文件直接就地写，已存在的文件才走下面那条「临时文件 + 换名」。
+  if (!(await fileExists(directory, name))) {
+    const fresh = await directory.getFileHandle(name, { create: true });
+    let freshWritable;
+    try {
+      freshWritable = await fresh.createWritable();
+      await freshWritable.write(content);
+      await freshWritable.close();
+    } catch (error) {
+      try { await freshWritable?.abort(); } catch (_) {
+        // 三档：abort 只是清理，它自己失败没有下一步可做，也不该盖住上面真正的错误
+      }
+      const friendlyFresh = describeFileSystemError(error);
+      if (friendlyFresh) throw new Error(friendlyFresh);
+      throw error;
+    }
+    return;
+  }
   const tempName = `.${name}.${Date.now().toString(36)}.tmp`;
   let temp = null;
   let tempReady = false;

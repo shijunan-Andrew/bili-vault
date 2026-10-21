@@ -4055,6 +4055,19 @@ async function removeStaleTempFiles(directory) {
 async function writeFileAtomically(directory, file, text) {
   // 1.8.0：先把同目录里的陈年临时文件清掉，免得数据库目录越用越脏
   await removeStaleTempFiles(directory);
+  // 1.8.2：目标还是空的（刚建出来 / 0 字节）就没有「旧内容被截断」的风险，直接就地写。
+  // 走临时文件 + 换名在这台机器的 Chrome 155 上一次要多花 7 秒左右（background.js 的
+  // writeFile 里量过同一套数字：就地 0.06 秒 / 换名 7.1 秒），所以只对已有内容的文件用原子路径。
+  let hasContent = false;
+  try {
+    hasContent = (await file.getFile()).size > 0;
+  } catch (_) {
+    hasContent = true; // 读不出大小就别赌，按「已有内容」保守走原子路径
+  }
+  if (!hasContent) {
+    await writeFileInPlace(file, text);
+    return;
+  }
   const tempName = `.${file.name}.${Date.now().toString(36)}.tmp`;
   const temp = await directory.getFileHandle(tempName, { create: true });
   // 1.7.0（批次 B）：临时文件写成功之后，它就是**唯一完整副本** —— 后面任何一步失败

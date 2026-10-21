@@ -5931,3 +5931,91 @@ test("扩展重载后的旧页面会请用户刷新，而不是抛未捕获错�
     }
   }
 });
+
+// ---- 1.8.2：新文件就地写，只有覆盖已存在的文件才走「临时文件 + 换名」 ----
+test("新文件就地写，只有覆盖已存在的文件才走临时文件 + 换名（V1.8.2）", () => {
+  const background = readProjectFile("background.js");
+  const from = background.indexOf("async function writeFile(directory, name, content) {");
+  assert.ok(from > 0, "background.js 里找不到 writeFile");
+  const body = background.slice(from, background.indexOf("// 退回就地写", from));
+  assert.match(body, /if \(!\(await fileExists\(directory, name\)\)\) \{/, "writeFile 要先判目标文件在不在");
+  const fastAt = body.indexOf("if (!(await fileExists(directory, name))) {");
+  const tempAt = body.indexOf("const tempName =");
+  assert.ok(fastAt > 0 && tempAt > fastAt, "新文件那条就地写分支必须在创建临时文件之前");
+  const fast = body.slice(fastAt, tempAt);
+  assert.match(fast, /getFileHandle\(name, \{ create: true \}\)/, "新文件要自己建句柄");
+  assert.match(fast, /await fresh\.createWritable\(\);/, "新文件要就地 createWritable");
+  assert.match(fast, /await freshWritable\.close\(\);/, "写完要 close");
+  assert.doesNotMatch(fast, /move\(/, "新文件绝不该走换名那条路");
+
+  const page = readProjectFile("library.js");
+  const pageFrom = page.indexOf("async function writeFileAtomically(directory, file, text) {");
+  assert.ok(pageFrom > 0, "library.js 里找不到 writeFileAtomically");
+  const pageBody = page.slice(pageFrom, pageFrom + 3000);
+  assert.match(pageBody, /hasContent = \(await file\.getFile\(\)\)\.size > 0;/, "页面侧也要先判有没有旧内容");
+  assert.match(pageBody, /hasContent = true; \/\/ 读不出大小就别赌/, "读不出大小要保守按「已有内容」处理");
+  const emptyAt = pageBody.indexOf("if (!hasContent) {");
+  const pageTempAt = pageBody.indexOf("const tempName =");
+  assert.ok(emptyAt > 0 && pageTempAt > emptyAt, "空文件那条分支要在临时文件之前");
+  assert.match(pageBody.slice(emptyAt, pageTempAt), /await writeFileInPlace\(file, text\);/, "空文件直接就地写");
+});
+
+test("writeFile 真的对新文件就地写、对已存在的文件才建临时文件（V1.8.2）", async () => {
+  const bg = require("./harness.cjs").loadBackground();
+  const writeFile = bg.__test.writeFile;
+  assert.equal(typeof writeFile, "function", "harness 要能导出 background.js 的 writeFile");
+
+  function makeHandle(name, log) {
+    return {
+      name,
+      getFile: async () => ({ size: 1, lastModified: Date.now() }),
+      createWritable: async () => {
+        log.push(`createWritable:${name}`);
+        return {
+          write: async () => { log.push(`write:${name}`); },
+          close: async () => { log.push(`close:${name}`); },
+          abort: async () => { log.push(`abort:${name}`); }
+        };
+      },
+      move: async (directory, to) => { log.push(`move:${name}->${to}`); }
+    };
+  }
+
+  function makeDirectory(log, existing) {
+    return {
+      values: async function* () {},
+      getFileHandle: async (name, options) => {
+        log.push(`getFileHandle:${name}:${options && options.create ? "create" : "probe"}`);
+        if (!(options && options.create) && !existing.has(name)) {
+          throw Object.assign(new Error(`找不到 ${name}`), { name: "NotFoundError" });
+        }
+        return makeHandle(name, log);
+      },
+      removeEntry: async (name) => { log.push(`removeEntry:${name}`); }
+    };
+  }
+
+  // 1) 目标不存在（归档的常态）：探一次 → 就地写完就结束，一个临时文件都不建
+  const freshLog = [];
+  await writeFile(makeDirectory(freshLog, new Set()), "封面.webp", "fresh");
+  assert.deepEqual(freshLog, [
+    "getFileHandle:封面.webp:probe",
+    "getFileHandle:封面.webp:create",
+    "createWritable:封面.webp",
+    "write:封面.webp",
+    "close:封面.webp"
+  ], "新文件应该探一次、就地写完就结束（不建临时文件、不换名）");
+
+  // 2) 目标已存在（补写字段那类）：临时文件 → 写 → 换名 → 清临时文件
+  const existsLog = [];
+  await writeFile(makeDirectory(existsLog, new Set(["封面.webp"])), "封面.webp", "again");
+  assert.equal(existsLog[0], "getFileHandle:封面.webp:probe", "先探一次目标在不在");
+  const tempCreate = existsLog.find((line) => /^getFileHandle:\.封面\.webp\..*\.tmp:create$/.test(line));
+  assert.ok(tempCreate, "覆盖已存在的文件时要先建一个点号临时文件");
+  const moveCall = existsLog.find((line) => /^move:\.封面\.webp\..*\.tmp->封面\.webp$/.test(line));
+  assert.ok(moveCall, "临时文件写完之后要换名覆盖回去");
+  const inPlaceWrites = existsLog.filter((line) => line.startsWith("write:") && !line.startsWith("write:."));
+  assert.deepEqual(inPlaceWrites, [], "这条路径不许直接就地写正式文件（临时文件才是唯一完整副本）");
+  const removed = existsLog.filter((line) => line.startsWith("removeEntry:"));
+  assert.deepEqual(removed, [], "换名成功时临时文件已经变成正式文件了，不该再删一次");
+});

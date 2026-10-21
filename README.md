@@ -137,14 +137,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.7.30 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.8.1：认得出「扩展刚更新过」的旧页面
+## V1.8.2：归档回到一秒内（新文件就地写）
 
-这一版只修一个真机上报出来的问题：更新扩展之后，**已经开着的 B 站视频页**会报 `Uncaught TypeError: Cannot read properties of undefined (reading 'sendMessage')`，提示卡停在「正在归档视频…」。
+1.8.0 修了「封面重复下载」和「假报失败」，但归档还是要等十几秒。这一版把真正的大头找出来了：**写盘方式**。
 
-- **原因**：重新加载扩展会让已打开页面里那份旧内容脚本的 `chrome.runtime` 变回 `undefined`，而 Chrome 不会给已打开的标签页重新注入内容脚本。之前一点收藏就会抛未捕获错误，界面上什么都不说。
-- **现在**：认得出这种情况之后弹一张「扩展刚更新过 / 这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。」的提示卡，并且不再抛错。
+- **原因**：1.7.16 起，归档的每个文件都先写成点号临时文件、再 `move()` 换名覆盖。在 Chrome 155 上这条换名路径一次要 **7 秒左右**，一条记录两个文件就是 14 秒；而 1.6 是直接就地写，同样的文件只要 **0.06 秒**。同一台机器、同一个 Chrome，1.6 一秒内完成、新版要十几秒，差别就在这里。
+- **现在**：目标文件是全新的（归档时永远如此）就直接就地写；只有覆盖一个已经存在的文件才用「临时文件 + 换名」—— 那才是原子性真正有意义的场景。
 
-**这对你有什么影响**：以后在 `chrome://extensions` 点「重新加载」之后，直接刷新一下 B 站标签页就行；忘了刷新也不会再看到那条看不懂的报错，而是一句能照做的话。归档链路、目录格式、字段一个都没动。
+**这对你有什么影响**：单条收藏的归档从 14 秒回到**一秒内**，多选几个收藏夹也不再是几十秒；目录结构、字段、`视频信息.txt` 格式全部没动。
 
 ## 测试与文档
 
@@ -154,7 +154,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:261 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:263 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

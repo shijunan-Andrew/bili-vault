@@ -357,7 +357,8 @@ const BACKGROUND_EXPORTS = [
   "discardFailedRecord", "renameFailureNote", "statsPendingRecords",
   "readStatsMirror", "applyStatsMirror", "syncStatsMirror", "publishStatsSnapshot",
   "archiveBrokenStatsDatabase",
-  "createDirectoryOrExplain", "describeDirectoryCreateError"
+  "createDirectoryOrExplain", "describeDirectoryCreateError",
+  "writeFile", "fileExists"
 ];
 
 function loadBackground(options = {}) {

@@ -72,9 +72,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 914 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 261 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
+| 测试基线 | stability 263 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-21 23:25，当时 HEAD `0c1b4dc`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-21 23:39，当时 HEAD `313d27e`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -390,7 +390,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:261 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:263 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -528,7 +528,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 | 删除本地归档（单条 / 批量 / 整个收藏夹） | `library.js` 的 `askToDeleteVideo` / `askToDeleteBatch` / `askToDeleteCollection` | `removeEntry(..., { recursive: true })`，**不进回收站**；目录里无法识别的文件、用户自己放进去的东西也会一起删。删前必须二次确认并把目录名念出来 |
 | 清理 `000视频下载` 里的下载目录 | `library.js` 的下载清理链路 | 只删「能对上 BV / av 号」的那些；状态未知时**不许当成「没有」**，要如实报出来 |
 | 移动 / 搬运本地归档 | `library.js` 的 `confirmCollectionAction` / `copyVideoRecord` | 先复制 → 逐文件比字节 → 才删源。**任何一步失败都不许删源** |
-| 覆盖写 `视频信息.txt` | `background.js` 的 `writeFile` | 先写临时文件再改名；改名失败退回就地写；**写失败不许删记录**，有内容就留、空的才删 |
+| 覆盖写 `视频信息.txt` | `background.js` 的 `writeFile` | 目标文件不存在就就地写（1.8.2：换名覆盖在 Chrome 155 上要 7 秒，只有覆盖已有文件才值得）；覆盖已有文件才先写临时文件再改名，改名失败退回就地写；**写失败不许删记录**，有内容就留、空的才删 |
 | 统计库整份重写 | `background.js` 的 `writeStatsDatabase` | 读不出来就一个字节都不写（`statsDatabaseWriteBlocked`）；扫描结果明显缩水时先拦下来 |
 
 总规矩：**任何会删用户文件的路径，失败时必须保住现场，并把原因写进「最近状态」让用户看见 —— 不许 `catch` 掉。**

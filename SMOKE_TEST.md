@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **261** 项里<!-- test-count:261 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **263** 项里<!-- test-count:263 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -53,6 +53,13 @@
 
 ---
 
+## V1.8.2 新增的几条
+
+1. 收藏一个新视频：从「正在归档视频…」到「归档成功」应该在**一秒内**（封面下载慢的话两秒内），不再有十几秒的等待。
+2. 选 5 个收藏夹同时归档：成功提示应是「已保存到 5 个收藏夹。」，整个等待时间应在几秒内（封面取一次 + 就地写）。
+3. 打开收藏库，在「视频信息」里改一个字段再保存（覆盖已有 `视频信息.txt`）：仍然能正常写回，且不该出现「保留临时文件」之类的提示。
+4. `003database` 里不该再多出新的 `.database.json.xxxx.tmp`；已有的旧 `.tmp` 会在下一次写入时被清掉。
+
 ## V1.8.1 新增的几条
 
 1. 打开一个 B 站视频页 → `chrome://extensions` 点本扩展的「重新加载」→ 回到那个**没有刷新**的视频页点收藏并确认：应弹红色「扩展刚更新过」，正文是「这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。」，**不该**再在扩展的错误页里多出 `Cannot read properties of undefined (reading 'sendMessage')`。
@@ -80,7 +87,7 @@
 
 1. `chrome://extensions` 里确认版本显示 **V1.7.32**；收藏库、设置页各打开一次。
 2. 打开 `README.md`：「正式版更新」下面**只有 V1.7.32 一节**，且给出了指向 `docs/HISTORY.md` 的链接；再打开 `docs/HISTORY.md`，最新一节也是 V1.7.32，往下能一路排到 V1.0.0。
-3. `node test/stability.test.cjs` 应 261 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
+3. `node test/stability.test.cjs` 应 263 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
 
 ## V1.7.31 新增的几条
 
