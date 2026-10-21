@@ -72,9 +72,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 914 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 265 · archive-core 83 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
+| 测试基线 | stability 265 · archive-core 83 · stats-core 61 · background 25 · pages 21（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-22 00:19，当时 HEAD `5bf260b`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-22 00:33，当时 HEAD `057690c`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。

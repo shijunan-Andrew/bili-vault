@@ -302,6 +302,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **封面 URL 生命周期**：blob URL 现在由缓存持有、页面卸载时统一 revoke（不再每轮扫描重建）。好处是不再泄漏 objectURL；代价是记录被删或换根目录后，旧 URL 要等到 unload 才释放，超大库长时间开着页面内存占用比以前高。
 - **焦点陷阱**是手写栈（`trapFocus()`），目前注册了 `#confirmBackdrop` 与 `#detailPanel`。**再加第三层浮层时必须把它也注册进去**，否则 Tab 会穿透。
 - **配置导出**绝不能带上目录句柄、B 站数据或错误报告内容（测试会扫导出代码块里有没有这些标识符）。导入只校验结构与枚举值，`CONFIG_VERSION` 升级时需要补迁移。
+- **导入配置时「文件里没有的那一项就别动」**（1.8.4）：`sanitizeConfigPreferences()` 对缺失的 `filters` 返回 `null`，`applyConfigPreferences()` 见 `null` 就整段跳过。理由：「只导外观与档位」的文件本来就没有搜索词与筛选，导入它把用户正在用的筛选清成默认值，等于替用户做了他没要求的事。**新增可导入项时同样要遵守这条** —— 缺项返回 `null`，别补默认值。
 - **主题到内容脚本的链路**：扩展页写 `localStorage`（首屏同步防闪色）+ 镜像到 `chrome.storage.local`；`content.js` 读 `chrome.storage` 并监听 `onChanged`。卡片根节点的属性是 `data-bca-theme`，**故意不叫 `data-theme`**——它挂在 B 站页面上，避免和宿主页面的选择器撞车。
 
 ### 交互外壳（4.5.1）

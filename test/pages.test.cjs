@@ -313,6 +313,45 @@ async function suiteLibrary() {
     assert.deepEqual(order, ["全部收藏", "另一个夹", "小鲸鱼测试"], "收藏夹顺序按导入的来");
   });
 
+  await test("导入「只导外观与档位」不会清空当前的搜索词与筛选（1.8.4）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const doc = page.document;
+    const g = page.window;
+
+    // 先把界面调成「用户正在筛选」的样子：搜索词、视频筛选、排序都不是默认值
+    const search = doc.getElementById("searchInput");
+    search.value = "第二条";
+    g.applySearchNow();
+    const videoFilter = doc.getElementById("videoFilter");
+    videoFilter.value = "invalid";
+    videoFilter.dispatchEvent(new g.Event("change", { bubbles: true }));
+    const sort = doc.getElementById("sortSelect");
+    sort.value = "oldest";
+    sort.dispatchEvent(new g.Event("change", { bubbles: true }));
+    await settle(4);
+    assert.equal(doc.getElementById("searchInput").value, "第二条");
+
+    // 别人发来的「只导外观与档位」：preferences 里没有 filters 这一项
+    const slim = {
+      app: "bili-vault/library-settings",
+      version: 1,
+      preferences: { theme: "dark", locale: "zh-CN", pageSize: 25, viewMode: "grid" },
+      _containsPersonalData: false
+    };
+    g.confirm = () => true;
+    await g.importConfigFromText(JSON.stringify(slim));
+    await settle(6);
+
+    assert.equal(doc.getElementById("searchInput").value, "第二条", "文件里没有搜索词，就不许清空用户当前的搜索");
+    assert.equal(doc.getElementById("videoFilter").value, "invalid", "文件里没有筛选，就不许重置筛选");
+    assert.equal(doc.getElementById("sortSelect").value, "oldest", "文件里没有排序，就不许重置排序");
+    assert.equal(
+      page.document.documentElement.dataset.theme || page.document.documentElement.getAttribute("data-theme"),
+      "dark",
+      "外观与档位仍然要生效"
+    );
+  });
+
   await test("Alt+↑/↓ 在收藏夹行上换序，焦点跟着走（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;

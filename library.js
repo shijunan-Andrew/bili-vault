@@ -1785,7 +1785,11 @@ const MAX_CONFIG_BYTES = 256 * 1024;
 // 导入前逐项校验：任何一项不认识就退回默认值，不让坏文件把界面写成空白
 function sanitizeConfigPreferences(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
-  const filters = source.filters && typeof source.filters === "object" ? source.filters : {};
+  // 1.8.4：文件里到底有没有 filters —— 「只导外观与档位」的文件没有这一项。
+  // 没有就必须返回 null（而不是补一套默认值），否则导入会把用户此刻的搜索词、
+  // 筛选与排序一起清成默认 —— 那不是这个按钮承诺的事。
+  const hasFilters = Boolean(source.filters) && typeof source.filters === "object";
+  const filters = hasFilters ? source.filters : {};
   const pageSizeValue = Number(source.pageSize);
   const search = typeof filters.search === "string" ? BcaArchiveCore.sliceCodePoints(filters.search, 200) : "";
   const videoFilterValue = ["all", "invalid", "downloaded"].includes(filters.videoFilter) ? filters.videoFilter : "all";
@@ -1800,13 +1804,15 @@ function sanitizeConfigPreferences(raw) {
     collectionOrder: Array.isArray(source.collectionOrder)
       ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500).map((name) => BcaArchiveCore.sliceCodePoints(name, 120))
       : [],
-    filters: {
-      search,
-      videoFilter: videoFilterValue,
-      upFilter: typeof filters.upFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.upFilter, 120) : "all",
-      tagFilter: typeof filters.tagFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.tagFilter, 120) : "all",
-      sort: sortValue
-    }
+    filters: hasFilters
+      ? {
+          search,
+          videoFilter: videoFilterValue,
+          upFilter: typeof filters.upFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.upFilter, 120) : "all",
+          tagFilter: typeof filters.tagFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.tagFilter, 120) : "all",
+          sort: sortValue
+        }
+      : null
   };
 }
 
@@ -1839,12 +1845,16 @@ async function applyConfigPreferences(preferences, rawOrder) {
       }
     }
   }
-  searchInput.value = preferences.filters.search;
-  videoFilterSelect.value = preferences.filters.videoFilter;
-  videoFilter = videoFilterSelect.value;
-  upFilter = preferences.filters.upFilter;
-  tagFilter = preferences.filters.tagFilter;
-  sortSelect.value = preferences.filters.sort;
+  // 1.8.4：文件里没有 filters（例如「只导外观与档位」）时整段跳过 —— 用户此刻的
+  // 搜索词、三项筛选与排序保持原样，别被一份不含这些内容的文件清成默认值。
+  if (preferences.filters) {
+    searchInput.value = preferences.filters.search;
+    videoFilterSelect.value = preferences.filters.videoFilter;
+    videoFilter = videoFilterSelect.value;
+    upFilter = preferences.filters.upFilter;
+    tagFilter = preferences.filters.tagFilter;
+    sortSelect.value = preferences.filters.sort;
+  }
   saveViewSettings();
   applyViewMode();
   resetPaging();
@@ -1886,10 +1896,11 @@ async function importConfigFromText(text) {
   else { renderCollections(); refreshVideoFilterOptions(); renderVideos(); }
   // 1.7.10（facet-storage P2-2）：落回「全部」是 populateSelectOptions 的自愈行为，
   // 界面不会吭声，用户只看到「导入后列表空了」，很容易以为数据被删了。这里补一句。
-  if (preferences.filters.upFilter !== "all" && upFilter === "all") {
+  // 1.8.4：文件里没有 filters 时这两条「落回全部」的提醒也不成立（我们压根没动筛选）。
+  if (preferences.filters && preferences.filters.upFilter !== "all" && upFilter === "all") {
     warnings.push(BcaI18n.t("配置里的 UP 主筛选在本机没有对应项，已落回「全部」。"));
   }
-  if (preferences.filters.tagFilter !== "all" && tagFilter === "all") {
+  if (preferences.filters && preferences.filters.tagFilter !== "all" && tagFilter === "all") {
     warnings.push(BcaI18n.t("配置里的标签筛选在本机没有对应项，已落回「全部」。"));
   }
   return warnings;
