@@ -305,7 +305,9 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **整库校准是 8 路并发**（1.8.5）：`SCAN_READ_CONCURRENCY = 8` 的 worker 池从同一个队列里取 `视频信息.txt` 来读，读完再按原顺序拼回收藏夹。并发只加在「读」上，写盘仍然是后台那条串行队列。
 - **体积统计复用扫描字节**（1.8.5）：`scanRoot()` 顺手把每条记录（`meta.size + coverBytes`）与下载树的字节累起来，`updateStorageUsage(handle, { total })` 有现成数字就不再递归整树。
 
-- **封面 URL 生命周期**：blob URL 现在由缓存持有、页面卸载时统一 revoke（不再每轮扫描重建）。好处是不再泄漏 objectURL；代价是记录被删或换根目录后，旧 URL 要等到 unload 才释放，超大库长时间开着页面内存占用比以前高。
+- **封面只在要显示时才读**（1.8.6）：扫描时只记下封面句柄与字节数（`coverEntry` / `coverBytes`），**不** `createObjectURL`；卡片渲染或详情打开时才 `hydrateCover()` 现读现造，blob 用 LRU 封顶 `COVER_LAZY_MAX = 300`，超了把最旧的那条 `video.cover` 清空并 `releaseCoverRef()`。缓存命中路径不碰封面文件，稳态每条记录只剩「枚举目录 + 读 txt」两次往返。
+- **UP 主粉丝数按 mid 记住 7 天**（1.8.6）：`chrome.storage.local` 的 `bcaUpFans`（`UP_FANS_TTL_MS`、封顶 `UP_FANS_MAX_ENTRIES = 2000`，写盘 2 秒合并）。`fetchUpFans(mid, tabId, options)` 默认查记忆，`{ fresh: true }` 才强制问接口 —— 「更新视频状态」是用户主动要最新数，必须走 fresh；「只缺粉丝数」的刷新用 `item.fansOnly` 快路，判据仍然是 `recordNeedsRefresh()` 一处。
+- **统计库攒批落盘**（1.8.6）：`statsFlushDue()` 只在「攒够 `STATS_FLUSH_EVERY_RECORDS = 200` 条」或「距上次落盘超过 `STATS_FLUSH_EVERY_MS = 30 秒`」时才 `flushStatsPendingRecords()`，导入收尾再强制补一次。**归档文件本身不受影响** —— 这条只减少统计库的整份重写次数。
 - **焦点陷阱**是手写栈（`trapFocus()`），目前注册了 `#confirmBackdrop` 与 `#detailPanel`。**再加第三层浮层时必须把它也注册进去**，否则 Tab 会穿透。
 - **配置导出**绝不能带上目录句柄、B 站数据或错误报告内容（测试会扫导出代码块里有没有这些标识符）。导入只校验结构与枚举值，`CONFIG_VERSION` 升级时需要补迁移。
 - **导入配置时「文件里没有的那一项就别动」**（1.8.4）：`sanitizeConfigPreferences()` 对缺失的 `filters` 返回 `null`，`applyConfigPreferences()` 见 `null` 就整段跳过。理由：「只导外观与档位」的文件本来就没有搜索词与筛选，导入它把用户正在用的筛选清成默认值，等于替用户做了他没要求的事。**新增可导入项时同样要遵守这条** —— 缺项返回 `null`，别补默认值。

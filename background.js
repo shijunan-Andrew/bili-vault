@@ -1997,7 +1997,8 @@ async function refreshOneArchiveStatus(root, target, tabId) {
     if (stat[key] !== undefined && stat[key] !== null) stats[key] = stat[key];
   }
   const mid = String(view?.owner?.mid || "");
-  const upFans = mid ? await fetchUpFans(mid, tabId) : "";
+  // 1.8.6：这条路径是用户主动要最新数字，绕过 upFansStore 的记忆（fresh）
+  const upFans = mid ? await fetchUpFans(mid, tabId, { fresh: true }) : "";
 
   // 之前被本功能标记过失效、现在又能正常访问的，把标记清掉
   const currentStatus = (text.match(/^视频状态：(.+)$/m)?.[1] || "").trim();
@@ -2091,6 +2092,81 @@ let importRun = { active: false, paused: false, cancelled: false, waiters: [] };
 let importPending = 0;
 let importState = { running: false, paused: false, text: "", startedAt: 0, finishedAt: 0, summary: "" };
 let upFansCache = new Map();
+
+/* 1.8.6（P0-2）：UP 主粉丝数按 mid 记住。
+
+   一条视频要 4 次请求，其中一次专为「UP主粉丝数」。同一轮导入里同一个 UP 主只问一次
+   （upFansCache），可 service worker 一被回收，下一轮又从头问一遍 —— 一个 200 条的
+   收藏夹常常只有十几个 UP 主，等于每轮白打一百多次请求。这里连「粉丝数 + 记录时间」
+   一起存进扩展存储（7 天过期）：同一 UP 主 7 天内只问一次，命中就整条跳过那次请求。
+   用户主动点「更新视频状态」要的是最新数字，走 fresh 参数绕过这份记忆。 */
+const UP_FANS_STORAGE_KEY = "bcaUpFans";
+const UP_FANS_TTL_MS = 7 * 24 * 60 * 60 * 1000;   // 7 天
+const UP_FANS_MAX_ENTRIES = 2000;                  // 只记最近的，别让存储无限长
+let upFansStore = null;        // Map<mid, { fans, at }>；null = 还没从存储读出来
+let upFansStoreDirty = false;
+let upFansPersistTimer = 0;
+
+async function loadUpFansStore() {
+  if (upFansStore) return upFansStore;
+  upFansStore = new Map();
+  try {
+    const saved = await chrome.storage.local.get(UP_FANS_STORAGE_KEY);
+    const stored = saved?.[UP_FANS_STORAGE_KEY];
+    if (stored && typeof stored === "object") {
+      for (const [mid, entry] of Object.entries(stored)) {
+        const fans = String(entry?.fans || "");
+        const at = Number(entry?.at) || 0;
+        if (/^\d+$/.test(mid) && fans && Date.now() - at < UP_FANS_TTL_MS) upFansStore.set(mid, { fans, at });
+      }
+    }
+  } catch (error) {
+    console.warn("读不到记住的 UP 主粉丝数（这一轮按没记住处理）", error);
+  }
+  return upFansStore;
+}
+
+// 攒一下再写：一轮导入里几十个 UP 主，不必每问一个就写一次存储
+function scheduleUpFansPersist() {
+  if (upFansPersistTimer) return;
+  upFansPersistTimer = setTimeout(() => {
+    upFansPersistTimer = 0;
+    persistUpFansStore().catch((error) => {
+      console.warn("记住的 UP 主粉丝数没能存下来（下次再问一遍）", error);
+    });
+  }, 2000);
+}
+
+async function persistUpFansStore() {
+  if (!upFansStoreDirty || !upFansStore) return;
+  upFansStoreDirty = false;
+  // 只留最近 UP_FANS_MAX_ENTRIES 个（Map 保持插入序，最旧的先丢）
+  while (upFansStore.size > UP_FANS_MAX_ENTRIES) {
+    upFansStore.delete(upFansStore.keys().next().value);
+  }
+  const payload = {};
+  for (const [mid, entry] of upFansStore) payload[mid] = entry;
+  await chrome.storage.local.set({ [UP_FANS_STORAGE_KEY]: payload });
+}
+
+async function rememberedUpFans(mid) {
+  const store = await loadUpFansStore();
+  const entry = store.get(mid);
+  if (!entry) return "";
+  if (Date.now() - entry.at >= UP_FANS_TTL_MS) {
+    store.delete(mid);
+    upFansStoreDirty = true;
+    return "";
+  }
+  return entry.fans;
+}
+
+function rememberUpFans(mid, fans) {
+  if (!fans || !upFansStore) return;
+  upFansStore.set(mid, { fans, at: Date.now() });
+  upFansStoreDirty = true;
+  scheduleUpFansPersist();
+}
 let importStatePublishAt = 0;
 
 /* ==========================================================================
@@ -2609,6 +2685,15 @@ function recordNeedsRefresh(record) {
 }
 
 // 查一次"这条记录的目录里到底有没有封面"，结果缓存在 record 上（同一次导入只查一次）
+// 1.8.6（P0-2）：只缺粉丝数吗？—— 给文本补一行假的「UP主粉丝数」，如果这样
+// recordNeedsRefresh 就不再要求刷新，说明缺的确实只有它（判断仍然只有 recordNeedsRefresh 一处）。
+function recordNeedsFansOnly(record) {
+  const text = String(record?.text || "");
+  if (!text) return false;
+  if (/^UP主粉丝数：/m.test(text)) return false;
+  return !recordNeedsRefresh({ text: text + "\nUP主粉丝数：0" });
+}
+
 async function recordMissingCover(collection, record) {
   if (!record) return false;
   if (typeof record.coverMissing === "boolean") return record.coverMissing;
@@ -2700,22 +2785,40 @@ async function refreshImportedRecord(collection, record, item, journal) {
 
 /* ---------- 视频详情抓取 ---------- */
 
-async function fetchUpFans(mid, tabId = null) {
+async function fetchUpFans(mid, tabId = null, options = {}) {
   const key = String(mid || "").trim();
   if (!/^\d+$/.test(key)) return "";
   if (upFansCache.has(key)) return upFansCache.get(key);
+  // 1.8.6：7 天内问过就直接用记住的，这一次 /x/relation/stat 整个省掉。
+  // options.fresh（「更新视频状态」那条用户主动路径）绕过它，取的是当下的数字。
+  if (options.fresh !== true) {
+    const remembered = await rememberedUpFans(key);
+    if (remembered) {
+      upFansCache.set(key, remembered);
+      return remembered;
+    }
+  }
   let fans = "";
   try {
     const data = await biliImportApiGet("/x/relation/stat", { vmid: key }, 9000, tabId);
     if (data && Number.isFinite(Number(data.follower))) fans = String(Number(data.follower));
   } catch (_) { fans = ""; }
   upFansCache.set(key, fans);
+  rememberUpFans(key, fans);
   return fans;
 }
 
 // 一条视频的完整资料：简介、发布时间、分区、时长、UP 主、互动数据、标签、粉丝数
 async function fetchVideoDetail(item, tabId = null) {
   const detail = { stats: {}, errors: [] };
+  /* 1.8.6（P0-2）：这条记录只缺「UP主粉丝数」时，只补 /x/relation/stat 这一下 ——
+     view 与 tags 都不打（4 次请求里省掉 2 次）。刷新写盘仍然过 mergeInfoText，
+     没抓到的简介/标签不会被写成「未知」（1.8.3 的保证）。 */
+  if (item.fansOnly === true && item.authorMid) {
+    const fans = await fetchUpFans(item.authorMid, tabId);
+    if (fans) detail.upFans = fans;
+    return detail;
+  }
   const query = item.bvid ? { bvid: item.bvid } : (item.aid ? { aid: String(item.aid).replace(/^av/i, "") } : null);
   // 已知失效的条目不再请求视频资料接口（必定返回“稿件不可见”），
   // 标签接口仍试一次：稿件不可见时标签有时还能取到。
@@ -3050,6 +3153,23 @@ function importIdentifierKeys(item) {
    塞进 chrome.storage.local.bcaStats 给宠物挂件和数据统计页读。
    数据库坏了、没权限、写不进去都不影响归档本身 —— 归档才是这个插件的正事。 */
 const statsPendingRecords = [];
+/* 1.8.6（P0-3）：统计库改成「攒够一批再写」。
+
+   原来每个收藏夹跑完就 flush 一次，而一次 flush 是「读整个 database.json →
+   JSON.parse → normalizeDatabase(全库) → JSON.stringify(全库) → 整份写回」。
+   十几条的小收藏夹也要把几百 KB 的库读写一遍，一轮导入下来几十次。
+   现在攒够 200 条或过了 30 秒才落一次，导入收尾再补一次；被取消的最多丢这最后一批
+   —— 统计库是派生数据，重新扫描收藏库就能补回来（归档文件本身不受影响）。 */
+const STATS_FLUSH_EVERY_RECORDS = 200;
+const STATS_FLUSH_EVERY_MS = 30 * 1000;
+let statsPendingSince = 0;
+
+function statsFlushDue() {
+  if (!statsPendingRecords.length) return false;
+  if (!statsPendingSince) statsPendingSince = Date.now();
+  return statsPendingRecords.length >= STATS_FLUSH_EVERY_RECORDS
+    || Date.now() - statsPendingSince >= STATS_FLUSH_EVERY_MS;
+}
 
 // 1.5.1（P1-12）：坏库留档的文件名前缀。
 // File System Access API 没有 rename，所以「改名留档」只能拆成两步：先把原文原样写进
@@ -3873,7 +3993,11 @@ async function importBiliFavoritesInner(data, tabId = null) {
         const record = existing.records.get(matched);
         // 4.9：除了文本判据，还要看"目录里有没有封面"（半截目录）。这个查盘只在
         // 文本判据说"完整"时才发生，正常路径不多付 IO。
-        if (record && await importRecordNeedsRefresh(collection, record)) refreshTargets.push({ item, record });
+        if (record && await importRecordNeedsRefresh(collection, record)) {
+          // 1.8.6（P0-2）：只缺粉丝数的旧记录，只补那一次请求
+          if (recordNeedsFansOnly(record)) item.fansOnly = true;
+          refreshTargets.push({ item, record });
+        }
       }
       // 无论有没有拦到都记一行：这一行能证明"守卫确实跑过了"。
       // 上一轮的报告里连备注都没有，我分不清是"守卫没生效"还是"根本没走到这里"。
@@ -3965,6 +4089,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
             savedPaths.push(result.path);
             // 1.5.0：数据库那一行跟着归档走 —— 这条已经落盘了才记
             statsPendingRecords.push(statsRecordForItem(item, folder.title, result.favoriteAtText));
+            if (!statsPendingSince) statsPendingSince = Date.now();
             publishImportRun({ journal, cursor: { folder: folder.title, saved: offset + index + 1, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
           } catch (error) {
             importRethrowIfAbort(error);
@@ -3990,8 +4115,11 @@ async function importBiliFavoritesInner(data, tabId = null) {
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
       // 1.5.0：一个收藏夹跑完就把数据库落一次盘（中途被取消也只丢最后这一小段）
       // 1.7.10（P2-4）：改走 flushStatsPendingRecords —— 写失败会把整批放回队列重试
-      if (statsPendingRecords.length) {
+      // 1.8.6（P0-3）：但每次落盘都是「读全库 → 改 → 整份写回」，十几条的小收藏夹也照做
+      //   一遍太亏。改成攒够 200 条或 30 秒才落（收尾再补一次，见下面那句 force）。
+      if (statsFlushDue()) {
         await flushStatsPendingRecords(root, importStatsKeys);
+        statsPendingSince = statsPendingRecords.length ? Date.now() : 0;
       }
     }
   } catch (error) {
@@ -4104,6 +4232,11 @@ async function importBiliFavoritesInner(data, tabId = null) {
     // 4.9.2：差额如实报出来，用户才能对照 B 站页面自行核对
     + (coverageNotes.length ? `（${coverageNotes.join("；")}。差额是 B 站收藏夹里的占位空槽：视频被删除后会留下空位，它计入总数但没有内容、接口也不返回，不是导入遗漏。）` : "");
   const pathText = savedPaths.slice(0, 10).join("\n");
+  // 1.8.6（P0-3）：收尾把最后不足一批的统计记录补落一次 —— 阈值批处理不能把尾巴留在内存里
+  if (statsPendingRecords.length) {
+    await flushStatsPendingRecords(root, importStatsKeys);
+    statsPendingSince = 0;
+  }
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
   await finishImportRunSnapshot();
   publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);

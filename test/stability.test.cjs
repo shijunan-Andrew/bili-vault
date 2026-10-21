@@ -1198,7 +1198,9 @@ test("covers are small WebP files, and both generations of the name are readable
   assert.match(background, /const COVER_FILE_NAMES = \["封面\.png", COVER_FILE_NAME\];/);
   assert.match(background, /for \(const name of COVER_FILE_NAMES\)/);
   assert.match(library, /optionalFileHandle\(recordEntry, "封面\.webp"\)/);
-  assert.match(library, /coverHandle = await optionalFileHandle\(recordEntry, "封面\.png"\)/);
+  // 1.8.6：两个名字的挑选挪进 coverEntryFor，真正读文件交给 hydrateCover（用到才读）
+  assert.match(library, /async function coverEntryFor\(recordEntry\) \{/);
+  assert.match(library, /return optionalFileHandle\(recordEntry, "封面\.png"\);/);
   // 绝不能再把 WebP 字节写进 .png：MIME 会按扩展名推断成 image/png，
   // 只能指望浏览器嗅探内容，那是审计点名的唯一跨文件语义风险。
   assert.equal(/COVER_FILE_NAME = "封面\.png"/.test(background), false);
@@ -6153,6 +6155,98 @@ test("体积统计复用扫描量到的字节，不再为它整树递归（V1.8.
   assert.match(library, /else if \(knownTotal\) \{/, "拿不到才退回递归");
   assert.match(library, /index\.bytes = totalBytes;/, "下载树字节挂在索引上");
   assert.match(library, /result\.bytes \+= \(await entry\.getFile\(\)\)\.size;/, "枚举下载目录时顺手量字节");
-  assert.match(library, /const record = \{ info, share, savedAt: field\(info, "信息保存于"\), cover, coverBytes, bytes: meta\.size \+ coverBytes \};/, "记录里带着自己的字节数");
+  // 1.8.6：扫描时 cover 是空串，只记封面句柄；字节数照旧带着（体积统计要用）
+  assert.match(library, /const record = \{ info, share, savedAt: field\(info, "信息保存于"\), cover: "", coverEntry, coverBytes, bytes: meta\.size \+ coverBytes \};/, "记录里带着自己的字节数");
 });
 
+// ---- 1.8.6：P0 三条性能优化（封面懒加载、粉丝数记住、统计库攒批） ----
+
+function sliceBetween(source, startText, endText) {
+  const start = source.indexOf(startText);
+  if (start < 0) return "";
+  const end = source.indexOf(endText, start + startText.length);
+  return end < 0 ? source.slice(start) : source.slice(start, end);
+}
+
+test("V1.8.6：封面只在要显示时才读，扫描阶段不再把整库封面挂成 blob: URL", () => {
+  const library = readProjectFile("library.js");
+  const readRecord = sliceBetween(library, "async function readArchiveRecord(", "// collections 被整批替换时");
+  assert.ok(readRecord, "readArchiveRecord 要还在");
+  // 一条记录目录只枚举一次：名字与封面存在性都在这一趟里拿到
+  assert.match(readRecord, /for await \(const child of recordEntry\.values\(\)\) children\.push\(child\);/, "目录只枚举一次");
+  assert.match(readRecord, /child\.name === "视频信息\.txt"/);
+  assert.match(readRecord, /child\.name === "封面\.webp"/);
+  assert.match(readRecord, /child\.name === "封面\.png"/);
+  assert.doesNotMatch(readRecord, /optionalFileHandle\(recordEntry, "视频信息\.txt"\)/, "别再一个个探文件");
+  // 扫描阶段不许建 blob: URL —— 这是 1.8.6 省内存的关键
+  assert.doesNotMatch(readRecord, /createObjectURL/, "扫描阶段不许建 blob: URL");
+  assert.doesNotMatch(readRecord, /readCover\(/, "扫描阶段不许读封面");
+  // 冷扫仍要量封面大小（体积统计要准），只是不建 URL
+  assert.match(readRecord, /const coverBytes = \(await coverEntry\.getFile\(\)\)\.size;/, "冷扫仍要量封面字节");
+  // 用到才读：句柄挂在 video 上，渲染时再读
+  assert.match(library, /const COVER_LAZY_MAX = 300;/, "封面 LRU 上限写在一处");
+  assert.match(library, /async function hydrateCover\(video\) \{/, "封面按需加载");
+  assert.match(library, /async function coverEntryFor\(recordEntry\) \{/);
+  assert.match(library, /function paintPageCovers\(pageCards\) \{/, "一页建好之后再去读封面");
+  assert.match(library, /paintPageCovers\(pageCards\);/, "renderVideos 要真的调它");
+  // videoFromArchiveRecord 不再持有扫描期 URL
+  const toVideo = sliceBetween(library, "function videoFromArchiveRecord(", "/* ---------------- 4.6：扫描进度提示");
+  assert.ok(toVideo, "videoFromArchiveRecord 要还在");
+  assert.doesNotMatch(toVideo, /addCoverRef\(/, "扫描时不再持有封面 URL");
+  assert.match(toVideo, /coverEntry: record\.coverEntry \|\| null/);
+});
+
+test("V1.8.6：UP 主粉丝数按 mid 记住 7 天，只缺粉丝的记录只补那一次请求", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const UP_FANS_STORAGE_KEY = "bcaUpFans";/);
+  assert.match(background, /const UP_FANS_TTL_MS = 7 \* 24 \* 60 \* 60 \* 1000;/);
+  assert.match(background, /const UP_FANS_MAX_ENTRIES = 2000;/, "别让存储无限长");
+  assert.match(background, /async function rememberedUpFans\(mid\) \{/);
+  assert.match(background, /function rememberUpFans\(mid, fans\) \{/);
+  assert.match(background, /if \(options\.fresh !== true\) \{/, "记忆可被用户主动刷新绕过");
+  assert.match(background, /const upFans = mid \? await fetchUpFans\(mid, tabId, \{ fresh: true \}\) : "";/, "「更新视频状态」要取最新数字");
+  // 只缺粉丝数：只打 relation，view / tags 都跳过
+  assert.match(background, /function recordNeedsFansOnly\(record\) \{/);
+  assert.match(background, /return !recordNeedsRefresh\(\{ text: text \+ "\\nUP主粉丝数：0" \}\);/, "判据仍然只有 recordNeedsRefresh 一处");
+  assert.match(background, /if \(item\.fansOnly === true && item\.authorMid\) \{/);
+  assert.match(background, /if \(recordNeedsFansOnly\(record\)\) item\.fansOnly = true;/);
+  // 真跑：只缺粉丝的文本认得出，别的都不算
+  const { recordNeedsFansOnly } = loadBackgroundFunctions(
+    ["importClean", "importIsPlaceholder", "importPlaceholderWorthRetry", "recordNeedsRefresh", "recordNeedsFansOnly"],
+    ["IMPORT_PLACEHOLDER_VALUES", "IMPORT_SYMBOL_PLACEHOLDER_VALUES", "COVER_PENDING_LINE"]
+  );
+  const complete = [
+    "【基本信息】",
+    "视频标题：拉面",
+    "视频状态：正常",
+    "",
+    "【标签】",
+    "拉面、治愈",
+    "",
+    "【视频简介】",
+    "真正的简介",
+    "",
+    "UP主粉丝数：123",
+    "【互动数据】",
+    "播放量：1",
+    "视频发布时间：2020-01-01 00:00:00 星期三"
+  ].join("\n");
+  assert.equal(recordNeedsFansOnly({ text: complete }), false, "完整的记录不用补");
+  assert.equal(recordNeedsFansOnly({ text: complete.replace("UP主粉丝数：123", "") }), true, "只缺粉丝数");
+  assert.equal(recordNeedsFansOnly({ text: complete.replace("UP主粉丝数：123", "").replace("2020-01-01 00:00:00 星期三", "未知") }), false, "还缺发布时间就不是只缺粉丝");
+});
+
+test("V1.8.6：统计库攒够 200 条或 30 秒才落盘，收尾补一次", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const STATS_FLUSH_EVERY_RECORDS = 200;/);
+  assert.match(background, /const STATS_FLUSH_EVERY_MS = 30 \* 1000;/);
+  assert.match(background, /function statsFlushDue\(\) \{/);
+  assert.match(background, /statsPendingRecords\.length >= STATS_FLUSH_EVERY_RECORDS/, "阈值判据：条数");
+  assert.match(background, /Date\.now\(\) - statsPendingSince >= STATS_FLUSH_EVERY_MS/, "阈值判据：时间");
+  assert.match(background, /if \(statsFlushDue\(\)\) \{\s*\n\s*await flushStatsPendingRecords\(root, importStatsKeys\);/, "收藏夹收尾按阈值落盘");
+  assert.match(background, /statsPendingSince = statsPendingRecords\.length \? Date\.now\(\) : 0;/, "落完要重置计时");
+  const tail = sliceBetween(background, "1.8.6（P0-3）：收尾把最后不足一批的统计记录补落一次", "await finishImportRunSnapshot();");
+  assert.ok(tail, "收尾补落那一段要还在");
+  assert.match(tail, /if \(statsPendingRecords\.length\) \{/, "收尾补落要看队列非空");
+  assert.match(tail, /await flushStatsPendingRecords\(root, importStatsKeys\);/, "收尾补落要真的写");
+});

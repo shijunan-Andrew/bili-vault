@@ -802,44 +802,103 @@ function storeCacheEntry(store, name, size, lastModified, record) {
   store.set(name, { size, lastModified, record });
 }
 
-// 命中缓存时必须复用同一个 blob: URL：重复 createObjectURL 会不断泄漏内存
-async function recordCover(recordEntry, cachedRecord) {
-  if (cachedRecord?.cover) return { cover: cachedRecord.cover, coverBytes: cachedRecord.coverBytes || 0 };
-  // 4.9：封面有两代文件名。优先读新的 WebP（小得多），退回老档案的真 PNG。
-  let coverHandle = await optionalFileHandle(recordEntry, "封面.webp");
-  if (!coverHandle) coverHandle = await optionalFileHandle(recordEntry, "封面.png");
-  if (!coverHandle) return { cover: "", coverBytes: 0 };
-  // 1.8.5：缓存条目可能来自 IndexedDB 快照 —— 它没有 blob: URL（那东西存不下来），
-  // 这时仍然要现读封面文件；前面的 size/lastModified 已经确认过 txt 没变。
-  return readCover(coverHandle);
+/* 1.8.6：封面改成「用到才读」。
+
+   扫描 630 条记录，原来要建 630 个 blob: URL；老档案的封面是真 PNG（平均 1.7 MB、
+   最大 7.3 MB），整库 219 MB 会一直挂在渲染进程里，只为了屏幕上这一页的几十张。
+   现在扫描只记下封面文件句柄（句柄很便宜），卡片/详情真正要显示时才 getFile +
+   createObjectURL；读过的最多留 COVER_LAZY_MAX 张，再读就把最旧的交还引用计数。 */
+
+const COVER_LAZY_MAX = 300;
+const coverLazyOrder = [];
+
+// 4.9：封面有两代文件名。优先读新的 WebP（小得多），退回老档案的真 PNG。
+async function coverEntryFor(recordEntry) {
+  const webp = await optionalFileHandle(recordEntry, "封面.webp");
+  if (webp) return webp;
+  return optionalFileHandle(recordEntry, "封面.png");
+}
+
+// 快照渲染出来的 video 没有句柄（IndexedDB 存不了句柄），按 收藏夹/目录名 现取一次
+async function resolveCoverEntry(video) {
+  if (video.coverEntry) return video.coverEntry;
+  if (!rootHandle || !video.collection || !video.directory) return null;
+  try {
+    const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
+    const recordEntry = await collectionHandle.getDirectoryHandle(video.directory);
+    video.coverEntry = await coverEntryFor(recordEntry);
+    return video.coverEntry;
+  } catch (error) {
+    if (error?.name !== "NotFoundError") console.warn("取不到这条记录的封面目录（先显示占位图）", error);
+    return null;
+  }
+}
+
+async function hydrateCover(video) {
+  if (!video) return "";
+  if (video.cover) return video.cover;
+  const entry = await resolveCoverEntry(video);
+  if (!entry) return "";
+  let result;
+  try {
+    result = await readCover(entry);
+  } catch (error) {
+    console.warn("这条记录的封面读不出来（先显示占位图）", error);
+    return "";
+  }
+  // 并发调用（卡片刚补完、详情又开了）：后来者把自己那份交还，用先读到的那张
+  if (video.cover) {
+    releaseCoverRef(result.cover);
+    return video.cover;
+  }
+  video.cover = result.cover;
+  video.coverBytes = result.coverBytes;
+  coverLazyOrder.push({ url: result.cover, video });
+  while (coverLazyOrder.length > COVER_LAZY_MAX) {
+    const oldest = coverLazyOrder.shift();
+    if (oldest.video.cover !== oldest.url) continue; // 这条已经换成新 URL 了，别误清
+    oldest.video.cover = "";
+    releaseCoverRef(oldest.url);
+  }
+  return result.cover;
 }
 
 // 读一条归档记录。命中缓存时只取 File 的元数据（不读正文），未命中才 getFile().text()。
 async function readArchiveRecord(collectionName, recordEntry, cache, stats) {
   const cacheName = `${collectionName}/${recordEntry.name}`;
-  const infoHandle = await optionalFileHandle(recordEntry, "视频信息.txt");
+  /* 1.8.6：一条记录目录只枚举一次。原来「探 视频信息.txt、探 封面.webp、探 封面.png」
+     是三次 IPC，现在一趟 values() 把名字与存在性全拿到（630 条能省两千次往返）。 */
+  const children = [];
+  try {
+    for await (const child of recordEntry.values()) children.push(child);
+  } catch (error) {
+    console.warn("读不了这个记录目录（当作不是归档记录）", error);
+    return null;
+  }
+  const infoHandle = children.find((child) => child.kind === "file" && child.name === "视频信息.txt");
   if (!infoHandle) return null;
+  const coverEntry = children.find((child) => child.kind === "file" && child.name === "封面.webp")
+    || children.find((child) => child.kind === "file" && child.name === "封面.png");
   const meta = await (await infoHandle.getFile());
   const cachedRecord = cacheEntryFor(cache, cacheName, meta.size, meta.lastModified);
-  if (cachedRecord) {
-    const { cover, coverBytes } = await recordCover(recordEntry, cachedRecord);
-    if (cover) {
-      stats.hits += 1;
-      // 1.8.5：体积统计复用这一轮已经量到的字节（缓存条目里带着上次的）
-      stats.bytes += cachedRecord.bytes || meta.size + coverBytes;
-      return Object.assign({}, cachedRecord, { cover });
-    }
+  if (cachedRecord && coverEntry) {
+    stats.hits += 1;
+    // 1.8.5：体积统计复用这一轮已经量到的字节（缓存条目里带着上次的）；
+    // 1.8.6：命中缓存连封面文件都不碰，字节省下两次 IPC
+    stats.bytes += cachedRecord.bytes || meta.size;
+    return Object.assign({}, cachedRecord, { cover: "", coverEntry });
   }
   const raw = await meta.text();
   if (!raw.includes("【基本信息】")) return null;
   const info = parseInfo(raw);
   if (!field(info, "视频标题")) return null;
-  const { cover, coverBytes } = await recordCover(recordEntry, null);
   // 没有封面就不是一条合法归档，交给上层按「跳过」处理（和 4.5 的行为一致）
-  if (!cover) return null;
+  if (!coverEntry) return null;
+  // 1.8.6：冷扫只量封面大小（体积统计要准，不然 219 MB 会显示成 7 MB），不建 blob: URL
+  const coverBytes = (await coverEntry.getFile()).size;
   const share = splitInfoDescription(info);
   // bytes：这条记录在磁盘上占的字节（视频信息.txt + 封面），体积统计直接用
-  const record = { info, share, savedAt: field(info, "信息保存于"), cover, coverBytes, bytes: meta.size + coverBytes };
+  const record = { info, share, savedAt: field(info, "信息保存于"), cover: "", coverEntry, coverBytes, bytes: meta.size + coverBytes };
   storeCacheEntry(cache, cacheName, meta.size, meta.lastModified, record);
   stats.reads += 1;
   stats.bytes += record.bytes;
@@ -906,8 +965,8 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
   const id = `${collectionName}/${recordEntry.name}`;
   const previous = previousVideos.get(id);
   const downloadState = BcaArchiveCore.downloadStateFromIndex(collectionName, videoIdentifierKeys({ bvid, aid }), downloadIndex, previous);
-  // 这条 video 也会持有封面 URL：缓存条目即使被淘汰，只要它还在显示就不能 revoke
-  addCoverRef(record.cover);
+  // 1.8.6：扫描阶段不再持有封面 URL（卡片/详情见到才读，见 hydrateCover）；
+  // 这里只把句柄带过去，缓存条目被淘汰也不影响显示。
   // 4.9：搜索比对串在扫描时拼一次就够，不必每敲一个键给每条记录重新 join + toLocaleLowerCase。
   // 字段顺序与取值必须和原来 matchesBaseFilters 里那份完全一致（join 会把 undefined 写成 ""），
   // 否则搜索命中范围会悄悄变。
@@ -943,7 +1002,8 @@ function videoFromArchiveRecord(collectionName, recordEntry, record, downloadInd
     tags,
     searchIndex,
     info,
-    cover: record.cover
+    cover: record.cover || "",
+    coverEntry: record.coverEntry || null
   };
 }
 
@@ -1578,6 +1638,26 @@ function matchesVideoFilters(video, query) {
 // 否则「按搜索结果收窄选项」的语义就会和列表对不上。
 function searchQuery() { return searchInput.value.trim().toLocaleLowerCase(); }
 
+/* 1.8.6：当前页卡片建好之后再去读封面 —— 一页最多 100 张，翻页才有 IO。
+   读完只把占位图换成 <img>，不重画卡片（重画会把焦点、选中状态都弄丢）。 */
+function paintPageCovers(pageCards) {
+  for (const { card, video } of pageCards) {
+    if (video.cover) continue;
+    const holder = card.querySelector(".card-cover");
+    if (!holder) continue;
+    hydrateCover(video).then((url) => {
+      if (!url || !card.isConnected) return;
+      const fallback = holder.querySelector(".cover-fallback");
+      if (!fallback) return;
+      const image = document.createElement("img");
+      image.src = url;
+      image.alt = "";
+      image.loading = "lazy";
+      fallback.replaceWith(image);
+    }).catch(() => {});
+  }
+}
+
 function renderVideos() {
   const collectionName = selectedCollection === "*" ? BcaI18n.t("全部收藏") : selectedCollection;
   currentCollection.textContent = collectionName;
@@ -1628,7 +1708,8 @@ function renderVideos() {
     : query || upFilter !== "all" || tagFilter !== "all" ? BcaI18n.t("{shown} / {total} 个视频", { shown: formatCountText(matching.length), total: formatCountText(videos.length) }) : BcaI18n.t("{count} 个视频", { count: formatCountText(videos.length) });
   const pageLabel = pageCount > 1 ? ` · ${BcaI18n.t("第 {page}/{pages} 页", { page: currentPage, pages: pageCount })}` : "";
   resultSummary.textContent = (selectedCollection === "*" ? BcaI18n.t("{count}，来自 {collections} 个收藏夹", { count: countLabel, collections: formatCountText(collections.length) }) : countLabel) + pageLabel;
-  videoGrid.replaceChildren(...pageVideos.map((video) => {
+  // 1.8.6：先把卡片都建好，再一页一页地补封面（见 paintPageCovers）
+  const pageCards = pageVideos.map((video) => {
     const card = document.createElement("article");
     card.className = "video-card";
     card.classList.toggle("invalid-video", video.isInvalid);
@@ -1699,8 +1780,10 @@ function renderVideos() {
       if (!ARROW_KEYS.has(event.key)) return;
       if (moveCardFocus(event.key)) event.preventDefault();
     });
-    return card;
-  }));
+    return { card, video };
+  });
+  videoGrid.replaceChildren(...pageCards.map((entry) => entry.card));
+  paintPageCovers(pageCards);
   emptySearch.hidden = matching.length > 0 || videos.length === 0;
   if (!matching.length && videos.length) {
     emptySearch.querySelector("h2").textContent = videoFilter === "invalid" ? BcaI18n.t("没有已失效视频") : videoFilter === "downloaded" ? BcaI18n.t("没有已下载视频") : BcaI18n.t("没有找到相关视频");
@@ -3063,6 +3146,19 @@ function openDetail(video, restoreTo, options = {}) {
   detailContent.innerHTML = `${coverHtml}<span class="detail-collection"></span><h2 class="detail-title">${titleHtml}</h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}${video.isInvalid ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("将下载到本地的视频放入收藏夹中"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频状态"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span><p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · ${BcaI18n.t("已失效")}` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
+  // 1.8.6：详情封面同样「用到才读」；读完只替换占位图，不重画整个面板
+  if (!video.cover) {
+    hydrateCover(video).then((url) => {
+      if (!url || detailContent.dataset.videoId !== video.id) return;
+      const fallback = detailContent.querySelector(".detail-cover .cover-fallback");
+      if (!fallback) return;
+      const image = document.createElement("img");
+      image.src = url;
+      image.alt = "";
+      fallback.replaceWith(image);
+      retainDetailCover(url);
+    }).catch(() => {});
+  }
   // 标题文字写给链接（封面/标题可点时）或 h2 本身。
   // 只认 .detail-title 会把 <a> 里的文字连同链接一起抹掉，标题就变成空白。
   (detailContent.querySelector(".detail-title-link") || detailContent.querySelector(".detail-title")).textContent = video.title;

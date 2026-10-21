@@ -5,6 +5,19 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.6：封面用到才读、粉丝数记住、统计库攒批
+
+**改了什么**：`library.js` 与 `background.js` 各三处。① 扫描阶段不再为每条记录 `getFile()` + `createObjectURL` 封面 —— `readArchiveRecord()` 改成先把记录目录枚举一遍（一次拿到 `视频信息.txt` 与 `封面.webp`/`封面.png` 两个句柄），封面只量 `size`（体积统计要准），句柄留在内存排到卡片要显示时才 `hydrateCover()` 现读现造，blob 用 LRU 封顶 300 个；② UP 主粉丝数按 `mid` 记住 7 天（`chrome.storage.local` 的 `bcaUpFans`，封顶 2000 条，写盘 2 秒合并），「只缺粉丝数」的记录只打 `/x/relation/stat` 一次，不再白拉 view / tags；③ 统计库改成攒批落盘（200 条或 30 秒），每个收藏夹跑完不再整份重写一次，导入收尾补最后一次。
+
+**为什么**：① 630 条的库里，`封面.webp` 500 张 5.9 MB + 老 PNG 130 张 212.4 MB，扫描要把整库封面读成 blob URL 挂在缓存里 —— 用户真正看见的只有当前页那几十张；每条记录还多 2 次 FS 往返。② 「生存」那种一个 UP 主 232 条的收藏夹，同一份粉丝数被问了 232 次，而它只存在 service worker 内存里、SW 一回收就没了。③ 13 个收藏夹的导入会把整份统计库重写 13 次（`JSON.parse(全库)` → `normalizeDatabase(全库)` → `JSON.stringify(全库)`）。
+
+**现在的口径**：扫描只读「这条记录存在吗」必要的字节，封面的读与解码推迟到要显示的那一刻，内存里最多 300 个 blob；同一 UP 主 7 天内只问一次粉丝数（用户主动点「更新视频状态」时仍然取最新，走 `fresh: true` 绕过记忆）；统计库按「200 条或 30 秒」落盘，一条记录都不会少写 —— 只是把多次整份重写合并成一次。
+
+**踩的坑**：① `recordNeedsRefresh()` 里简介的正文正则是 `/【视频简介】[^
+]*\n([\s\S]*)$/`，一直抓到文件末尾，于是「简介变成占位」这一种在这条判据里其实识别不出来（拿它当反例的守卫会红）；② `loadBackgroundFunctions(names, consts)` 的第二参必须带上 `IMPORT_PLACEHOLDER_VALUES` 等常量，否则抽出来的函数一跑就 `ReferenceError`；③ 快速路径 `item.fansOnly` 一旦判错就会把整条记录写残 —— 所以判据仍然只有 `recordNeedsRefresh()` 一处，「只缺粉丝」是用「把粉丝数补成 0 之后再判一次」反推的。
+
+**没动的**：老 PNG 封面转 WebP（P3，会改用户磁盘上的文件，等单独批准）；快照增量写、搜索排序对当前页取 top-k、内存缓存与快照去重（P1/P2，未获批准）。
+
 ## V1.8.5：扫描结果存成快照，重开先显示再校准
 
 **改了什么**：`library.js` 三处。① 点「刷新」的强制全量重读不再复用普通扫描那句提示，改成「已按你的要求整库重读：N 条记录，缓存已清空重来。」（`scanRoot()` 多返回一个 `forced`，`displayRoot()` 传给 `lastScanInfo`）；② 一轮扫描结束把记录快照写进 IndexedDB（`bca-archive-snapshot`），下次打开收藏库先用快照渲染（`paintSnapshot()`），再去整库校准；③ 整库校准改成 8 路并发的 worker 池（`SCAN_READ_CONCURRENCY = 8`），并且体积统计复用扫描时量到的字节（`updateStorageUsage(handle, { total })`），不再为它递归整棵树。
