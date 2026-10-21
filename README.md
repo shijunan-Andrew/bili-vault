@@ -1,5 +1,7 @@
 # 哔哩藏库 Bili Vault
 
+[![CI](https://github.com/shijunan-Andrew/bili-vault/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shijunan-Andrew/bili-vault/actions/workflows/ci.yml)
+
 > 把 B 站收藏夹备份本地，启用后，收藏成功自动保存视频资料到本地，支持已有收藏夹视频的本地归档与失效视频恢复，支持本地收藏夹浏览、搜索与筛选。
 
 这是一个 Chrome Manifest V3 扩展。它监听 B 站视频页的收藏夹弹窗；用户确认后，等弹窗成功关闭，再将视频信息和封面写入你选择的本地目录。扩展不拦截或改写 B 站页面的网络请求。
@@ -148,7 +150,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
 - **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 953 条**<!-- i18n-count:953 -->，缺一条就失败。
-- **持续集成**：每次推送 / PR 上 GitHub Actions 跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）。
+- **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
 - **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:254 -->
 
