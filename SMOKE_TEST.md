@@ -92,7 +92,7 @@
 1. 打开 `AI_HANDOFF.md`，第二节「当前状态」应有一张表；表里 `stability` 的项数与 `node test/stability.test.cjs` 打印的 `ℹ tests` 一致。
 2. 故意把表里那个数字改错，跑 `node test/stability.test.cjs` 应变红；再跑 `node test/status.cjs --write` 应恢复变绿（这条就是验「手写必漂、脚本才靠得住」）。
 3. `node test/status.cjs --check` 单独跑应打印 `[OK] 「当前状态」与仓库实际一致`。
-4. 看「同一判断的权威位置」表，`patchVolatileFields` 那行应明确写着「没有逐字守卫」。
+4. 看「同一判断的权威位置」表，`patchVolatileFields` 那行应明确写着**已在 V1.7.33 合并**（`background.js` 静态 `import "./archive-core.js"`），不再是「两份必须保持一致」；同理 `background.js` 里 `grep -n "function patchVolatileFields"` 应该没有命中。
 
 ## V1.7.26 新增的几条
 

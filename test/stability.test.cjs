@@ -827,28 +827,23 @@ const LEGACY_INFO = [
   ""
 ].join("\n");
 
-test("the volatile-field patcher in background.js matches the shared implementation", () => {
-  // background.js 是模块化 service worker，不能 require archive-core.js，所以有两份等价实现
-  const local = loadBackgroundFunctions(
-    ["importClean", "importIsPlaceholder", "statsSectionLines", "patchVolatileFields"],
-    ["IMPORT_PLACEHOLDER_VALUES", "STAT_KEYS", "STAT_LABELS", "SECTION_HEADING_PATTERN"]
-  );
-  const optionsList = [
-    { upFans: "999", stats: { view: 10, danmaku: 20, like: 30, coin: 40, favorite: 50, share: 60 }, pubdateText: "2026-08-14 06:00:00 星期五" },
-    { videoStatus: "已失效视频（更新状态时检测到）" },
-    { stats: { view: 1 } },
-    { upFans: "", stats: {}, videoStatus: "正常" },
-    {}
-  ];
-  for (const text of [FULL_INFO, LEGACY_INFO, "", "【视频简介】\n-\n"]) {
-    for (const options of optionsList) {
-      assert.equal(
-        local.patchVolatileFields(text, options),
-        core.patchVolatileFields(text, options),
-        `patchVolatileFields 不一致：options=${JSON.stringify(options)}`
-      );
-    }
-  }
+test("易变字段只有一份实现：background.js 直接用 archive-core.js 的，不再各抄一份（V1.7.33）", () => {
+  // V1.7.33：以前 background.js 抄了一份 patchVolatileFields，靠「多组输入逐个比对两边输出」兜着 ——
+  // 那只证明此刻两边碰巧一样，改一边照样不会红，是交接文档自认的最后一个双份实现。
+  // 现在后台和 stats-core.js 同一套做法：静态 import 经典脚本，从 globalThis 取，副本删掉。
+  const bgSource = readProjectFile("background.js");
+  assert.match(bgSource, /^import "\.\/archive-core\.js";$/m, "background.js 要静态 import archive-core.js");
+  assert.match(bgSource, /const BcaArchiveCore = globalThis\.BcaArchiveCore;/, "要从 globalThis 取共享实现");
+  assert.doesNotMatch(bgSource, /^function patchVolatileFields\(/m, "background.js 不许再有 patchVolatileFields 的副本");
+  assert.doesNotMatch(bgSource, /^function statsSectionLines\(/m, "连它的助手 statsSectionLines 也不许留副本");
+  assert.doesNotMatch(bgSource, /^const SECTION_HEADING_PATTERN/m, "副本专用的常量也不许留");
+  assert.match(bgSource, /BcaArchiveCore\.patchVolatileFields\(/, "调用点要显式走共享实现，别让名字又长回本地函数");
+  // 真执行：vm 里跑起来的 background.js 拿到的必须是同一个函数对象 —— 不是「算出同样结果的另一份」
+  const bg = require("./harness.cjs").loadBackground();
+  assert.equal(bg.BcaArchiveCore.patchVolatileFields, core.patchVolatileFields, "后台拿到的必须是共享实现本身");
+  // 行为仍然对（细节用例在 archive-core.test.cjs，这里只留一条冒烟，防共享实现被换掉）
+  assert.match(core.patchVolatileFields(FULL_INFO, { upFans: "123" }), /^UP主粉丝数：123$/m);
+  assert.match(core.patchVolatileFields(LEGACY_INFO, { videoStatus: "正常" }), /^视频状态：正常$/m);
 });
 
 test("updating the volatile numbers leaves everything else untouched", () => {
@@ -3188,10 +3183,12 @@ test("交接文档列出「同一判断的两份实现」的权威位置（V1.7.
   for (const name of ["patchVolatileFields", "identifiersOverlap", "STAT_KEYS", "describeFileSystemError"]) {
     assert.ok(doc.includes(name), "权威位置表要覆盖 " + name);
   }
-  assert.match(doc, /没有逐字守卫/, "没有守卫的那几行要明确写出来，别让人以为有守卫");
+  assert.match(doc, /无守卫 —— 改名要全仓 grep/, "没有守卫的那几行要明确写出来，别让人以为有守卫");
   // 表里点到的双份实现必须真的还在两份文件里；哪天合并成一份，这张表就该改了
   assert.match(readProjectFile("archive-core.js"), /function patchVolatileFields\(/, "archive-core.js 要有 patchVolatileFields");
-  assert.match(readProjectFile("background.js"), /function patchVolatileFields\(/, "background.js 要有 patchVolatileFields 的等价实现");
+  // V1.7.33：这一条已经合并掉了 —— 后台不许再有副本，表里要写明合并在哪一版
+  assert.doesNotMatch(readProjectFile("background.js"), /^function patchVolatileFields\(/m, "background.js 不该再有 patchVolatileFields 的副本");
+  assert.match(doc, /patchVolatileFields[\s\S]{0,400}?V1\.7\.33/, "权威位置表要写明 patchVolatileFields 已在 V1.7.33 合并");
   assert.match(readProjectFile("background.js"), /function identifiersOverlap\(/, "background.js 要有 identifiersOverlap");
   assert.match(readProjectFile("library.js"), /function identifiersOverlap\(/, "library.js 要有 identifiersOverlap 的副本");
 });

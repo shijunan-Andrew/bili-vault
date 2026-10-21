@@ -3,10 +3,16 @@
 // 静态 import 一个经典脚本是合法的：它执行时把 BcaStatsCore 挂在 globalThis 上，
 // 所以后台、收藏库页面、数据统计页用的是同一份实现，不会各写一套。
 import "./stats-core.js";
+// 1.7.33：视频信息里的易变字段（UP主粉丝数 / 互动数据 / 发布时间 / 失效标记）全仓只有一份实现，
+// 就在 archive-core.js 里。这里以前抄了一份副本，靠行为用例逐个输入比对两边输出 ——
+// 改一边不会红，是交接文档里自认的最后一个双份实现。现在和上面 stats-core.js 同一套做法：
+// service worker 是模块，静态 import 一个经典脚本是合法的，它把 BcaArchiveCore 挂在 globalThis 上。
+import "./archive-core.js";
 
 const DB_NAME = "bili-fav-archiver";
 const DB_STORE = "settings";
 const BcaStatsCore = globalThis.BcaStatsCore;
+const BcaArchiveCore = globalThis.BcaArchiveCore;
 let saveQueue = Promise.resolve();
 
 // 4.9：后台是模块化 service worker。i18n.js 虽然是经典脚本、静态 import 得了，但它的词条是
@@ -1815,65 +1821,9 @@ function splitShareText(text) {
 }
 
 /* ---------- 更新易变字段（4.4） ----------
-   与 archive-core.js 的 patchVolatileFields 等价：service worker 无法 require 经典脚本，
-   所以这里保留一份实现，测试会逐个输入比对两边输出必须一致。
-   只覆盖 UP主粉丝数、互动数据、缺失的发布时间与失效标记，其余内容逐字不动。 */
-
-const SECTION_HEADING_PATTERN = /^【.+?】\s*$/;
-
-function statsSectionLines(stats) {
-  return ["【互动数据】", ...STAT_KEYS.map((key) => `${STAT_LABELS[key]}：${importIsPlaceholder(stats?.[key]) ? "未知" : String(stats[key])}`)];
-}
-
-function patchVolatileFields(text, options = {}) {
-  const source = String(text ?? "");
-  const newline = source.includes("\r\n") ? "\r\n" : "\n";
-  const lines = source.split(/\r?\n/);
-
-  const fieldIndex = (key) => lines.findIndex((line) => line.startsWith(`${key}：`));
-  const setField = (key, value) => {
-    const index = fieldIndex(key);
-    if (index < 0) return false;
-    lines[index] = `${key}：${value}`;
-    return true;
-  };
-
-  if (!importIsPlaceholder(options.upFans)) {
-    // 老档案没有「UP主粉丝数」这一行，要补在 UID 后面
-    if (!setField("UP主粉丝数", String(options.upFans))) {
-      const anchor = fieldIndex("UP主UID") >= 0 ? fieldIndex("UP主UID") : fieldIndex("UP主昵称");
-      if (anchor >= 0) lines.splice(anchor + 1, 0, `UP主粉丝数：${options.upFans}`);
-    }
-  }
-
-  // 发布时间只补空缺
-  if (options.pubdateText) {
-    const current = (lines[fieldIndex("视频发布时间")] || "").replace(/^视频发布时间：/, "");
-    if (importIsPlaceholder(current)) setField("视频发布时间", String(options.pubdateText));
-  }
-
-  if (options.stats && Object.keys(options.stats).length) {
-    const block = statsSectionLines(options.stats);
-    const headingIndex = lines.findIndex((line) => line.trim() === "【互动数据】");
-    if (headingIndex >= 0) {
-      let end = headingIndex + 1;
-      while (end < lines.length && !SECTION_HEADING_PATTERN.test(lines[end].trim())) end += 1;
-      lines.splice(headingIndex, end - headingIndex, ...block, "");
-    } else {
-      const tagIndex = lines.findIndex((line) => line.trim() === "【标签】");
-      lines.splice(tagIndex >= 0 ? tagIndex : lines.length, 0, ...block, "");
-    }
-  }
-
-  if (options.videoStatus) {
-    if (!setField("视频状态", String(options.videoStatus))) {
-      const linkIndex = fieldIndex("视频链接");
-      if (linkIndex >= 0) lines.splice(linkIndex + 1, 0, `视频状态：${options.videoStatus}`);
-    }
-  }
-
-  return lines.join(newline);
-}
+   patchVolatileFields 与它的助手 statsSectionLines 现在只有一份，在 archive-core.js 里
+   （1.7.33 合并：这里以前抄了一份副本，改一边不会红）。调用时走 BcaArchiveCore。
+   它只覆盖 UP主粉丝数、互动数据、缺失的发布时间与失效标记，其余内容逐字不动。 */
 
 /* ---------- 4.4：更新视频状态 ---------- */
 
@@ -1912,7 +1862,7 @@ async function refreshOneArchiveStatus(root, target, tabId) {
     // 已经标记过失效的就不再改写：导入时写的「已失效视频（已尝试恢复）」比
     // 「更新状态时检测到」更具体，重复改写只会丢信息、还多做一次无谓的写入
     if (/^视频状态：.*失效/m.test(text)) return "unchanged";
-    const patched = patchVolatileFields(text, { videoStatus: STATUS_INVALID_MARKER });
+    const patched = BcaArchiveCore.patchVolatileFields(text, { videoStatus: STATUS_INVALID_MARKER });
     if (patched === text) return "unchanged";
     await writeFile(directory, "视频信息.txt", patched);
     return "invalid";
@@ -1928,7 +1878,7 @@ async function refreshOneArchiveStatus(root, target, tabId) {
 
   // 之前被本功能标记过失效、现在又能正常访问的，把标记清掉
   const currentStatus = (text.match(/^视频状态：(.+)$/m)?.[1] || "").trim();
-  const patched = patchVolatileFields(text, {
+  const patched = BcaArchiveCore.patchVolatileFields(text, {
     upFans,
     stats,
     pubdateText: Number(view?.pubdate) > 0 ? formatPublishDate(view.pubdate) : "",

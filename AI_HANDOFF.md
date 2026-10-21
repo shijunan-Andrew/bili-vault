@@ -323,11 +323,13 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 ## 同一判断的权威位置（改一处就要同步另一处）
 
-这个项目里有些判断**同时存在于两个上下文**：service worker 是 ES module、`import` 不了经典脚本，而内容脚本与页面脚本又跑在别的上下文里，所以同一份逻辑不得不写两份。这些地方是最容易被新 agent 改漏的：
+这个项目里有些判断**同时存在于两个上下文**：内容脚本与页面脚本跑在页面里，service worker 跑在后台，两边取不到同一份作用域，所以同一份逻辑有时不得不写两份。这些地方是最容易被新 agent 改漏的：
+
+> 顺带记一条容易误判的规矩：后台是 ES module，**`require` 不了经典脚本，但 `import` 可以** —— `background.js` 从 V1.7.x 起就对 `stats-core.js` 这么干，V1.7.33 起对 `archive-core.js` 也一样。经典脚本只要不碰 `window` / `document` / `chrome`，就两边都能跑；`archive-core.js` 只把 API 挂在 `globalThis` 上，属于这一类。**所以「后台」不是留副本的理由，上下文不同才是。**
 
 | 判断 | 权威位置 | 副本 / 镜像 | 谁在守 |
 |---|---|---|---|
-| `patchVolatileFields`（视频信息里的易变字段） | `archive-core.js` | `background.js` 的等价实现（形态不同：后台那份把 `isPlaceholderValue` 叫 `importIsPlaceholder`，13 处引用） | **没有逐字守卫**，只有 `archive-core.test.cjs` 的行为用例 —— 改一处必须手工同步另一处 |
+| `patchVolatileFields`（视频信息里的易变字段） | `archive-core.js` | ~~`background.js` 的等价实现~~ → **V1.7.33 已合并**：`background.js` 静态 `import "./archive-core.js"`，调用点写 `BcaArchiveCore.patchVolatileFields()`，副本连同助手 `statsSectionLines` 与常量 `SECTION_HEADING_PATTERN` 一起删了 | 「易变字段只有一份实现：background.js 直接用 archive-core.js 的（V1.7.33）」—— 把后台脚本载进 vm，断言拿到的**就是**共享实现那个函数对象，不是「算出同样结果的另一份」 |
 | `identifiersOverlap`（BV / av 标识符交集） | `background.js` | `library.js` | 「判断标识符交集的两份副本必须同名同体（V1.7.8）」 |
 | `STAT_KEYS` / `STAT_LABELS`（互动数据六键与中文标签） | `archive-core.js`（并导出） | `background.js` 一份字面量；`library.js` 只做别名，不写字面量 | 「互动数据的六键与六个标签全仓只有一份（V1.7.8）」 |
 | `FILE_SYSTEM_ERROR_HINTS` / `describeFileSystemError` | `archive-core.js` | `background.js` 逐字一份 | 「文件系统错误的分类表与处理函数，两份必须逐字相同（V1.7.15）」 |
@@ -344,7 +346,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 2. 改完再 `grep` 一遍，确认都改了；
 3. 跑 `node test/stability.test.cjs` —— 带版本号的那些守卫就是为这件事存在的。
 
-表里写「没有逐字守卫」的几行是**已知缺口**：给它们补一条守卫，比补一句注释有用得多。
+表里「谁在守」一栏写着「无守卫」的行是**已知缺口**：给它们补一条守卫，比补一句注释有用得多。反过来，哪天把某一行合并成一份了（像 V1.7.33 的 `patchVolatileFields`），记得把这一行从「副本 / 镜像」改成「已合并」，别让表继续说两份 —— 文档与代码对不上比没有表更糟。
 
 ## 常用验证
 

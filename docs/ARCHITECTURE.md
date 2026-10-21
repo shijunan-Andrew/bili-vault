@@ -107,7 +107,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 - **有效视频**：调用 `/x/web-interface/view` 拿 `stat`，按 UP 缓存调用 `/x/relation/stat` 拿粉丝数，然后用 `patchVolatileFields()` **只替换** UP主粉丝数、`【互动数据】` 整块，以及原值为「未知」时的发布时间。标题、简介、标签、收藏时间、所属收藏夹、目录结构全部逐字不动（测试会核对行数与逐行差异）。
 - **失效视频**：`biliImportApiGet()` 把接口错误码挂在 `error.apiCode` 上；只有 `typeof error.apiCode === "number"` 才判定为失效（网络/超时错误保持原样、记为失败），此时**只写一行** `视频状态：已失效视频（更新状态时检测到）`，其余内容一个字都不改。网页端 `isInvalid` 的依据是 `/失效/.test(视频状态)`，因此标记后立即表现为「已失效」徽标 + 红色标题 + 灰色封面，与导入时识别的失效视频一致。若该记录又能正常访问，更新时会把标记改回「正常」。
 
-**关键约束**：`patchVolatileFields()` 在 `archive-core.js` 与 `background.js` 各有一份（service worker 无法 require 经典脚本），**两份必须保持一致**——`test/stability.test.cjs` 会从 background.js 抽出真实函数、用多组输入与共享实现逐个比对。改其中一份必须同步改另一份。
+**关键约束**：`patchVolatileFields()` **只有一份**，在 `archive-core.js`。`background.js` 静态 `import "./archive-core.js";` 后从 `globalThis.BcaArchiveCore` 取，调用点写 `BcaArchiveCore.patchVolatileFields(...)`。**（V1.7.33 之前这里两边各一份，靠「多组输入逐个比对输出」的测试兜着；那只证明此刻碰巧一样，改一边不会红，所以合并了。）**后台是 ES module，`require` 不了经典脚本，但 `import` 可以 —— 以及 `archive-core.js` 不碰任何浏览器全局，service worker 里跑得动。`test/stability.test.cjs` 的守卫会把 `background.js` 载进 vm，断言它拿到的就是 `archive-core.js` 的同一个函数对象，并禁止副本重长回来。
 
 **请求密度**：复用 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，与导入同级限速，同样分批（10/20/40）并由用户点击推进。**不要为了提高刷新速度而调高频率**。
 

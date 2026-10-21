@@ -356,7 +356,7 @@ const BACKGROUND_EXPORTS = [
   "statsRecordForItem", "maskLocalUserPaths", "storageReportLabel",
   "discardFailedRecord", "renameFailureNote", "statsPendingRecords",
   "readStatsMirror", "applyStatsMirror", "syncStatsMirror", "publishStatsSnapshot",
-  "archiveBrokenStatsDatabase", "statsSectionLines",
+  "archiveBrokenStatsDatabase",
   "createDirectoryOrExplain", "describeDirectoryCreateError"
 ];
 
@@ -383,10 +383,12 @@ function loadBackground(options = {}) {
   sandbox.self = sandbox;
   sandbox.globalThis = sandbox;
   sandbox.BcaStatsCore = require("../stats-core.js");
+  sandbox.BcaArchiveCore = require("../archive-core.js");
   const context = vm.createContext(sandbox);
-  // module 类型的 service worker 里那条 import 在 vm 里跑不了：stats-core 已经在上面注进去了。
-  const source = readSource("background.js").replace(/^import\s+"\.\/stats-core\.js";\s*$/m, "");
-  if (source.includes('import "./stats-core.js"')) throw new Error("background.js 的 import 没被剥掉");
+  // module 类型的 service worker 里那两条 import 在 vm 里跑不了：两份经典脚本已经在上面注进去了。
+  // 1.7.33 起 archive-core.js 也走这条路（易变字段的实现在那边，不再各抄一份）。
+  const source = readSource("background.js").replace(/^import\s+"\.\/(?:stats-core|archive-core)\.js";\s*$/gm, "");
+  if (/^import\s+"\.\/(?:stats-core|archive-core)\.js";/m.test(source)) throw new Error("background.js 的 import 没被剥掉");
   const tail = BACKGROUND_EXPORTS.filter((name) => new RegExp(`(?:function|const|let|var)\\s+${name}\\b`).test(source));
   vm.runInContext(`${source}\n;globalThis.__test = { ${tail.join(", ")} };\n`, context, { filename: "background.js" });
   sandbox.__missing = BACKGROUND_EXPORTS.filter((name) => !tail.includes(name));

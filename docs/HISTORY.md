@@ -5,6 +5,22 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.7.33：易变字段只剩一份实现
+
+**改了什么**：删掉 `background.js` 里 `patchVolatileFields()` 的副本，后台改成和 `stats-core.js` 同一套做法 —— 静态 `import "./archive-core.js";`、从 `globalThis.BcaArchiveCore` 取函数、两个调用点写 `BcaArchiveCore.patchVolatileFields(...)`。副本专用的助手 `statsSectionLines` 与常量 `SECTION_HEADING_PATTERN` 一起删掉，`background.js` 少 1730 字符，行为不变。
+
+**为什么现在才做**：以前不敢合并的理由是「service worker 是 ES module，`import` 不了经典脚本」。这句话只对 `require` 成立 —— 经典脚本在模块里 `import` 完全合法，`background.js` 早就对 `stats-core.js` 这么干了。而 `archive-core.js` 也确实没有 `window` / `document` / `chrome` / `fetch` 之类的浏览器全局，只把 API 挂在 `globalThis` 上、并在 `module.exports` 存在时兼容 node，属于「两边都能跑」的经典脚本。**也就是说这个缺口一直是假的，缺的只是有人去核一遍。**
+
+**为什么值得做**：在此之前，两份实现靠「多组输入逐个比对两边输出」的测试兜着 —— 它只能证明此刻碰巧一样，改一边照样不会红，是交接文档自认的最后一个双份实现。现在没有第二份可改。
+
+**踩的坑**：
+
+- `test/harness.cjs` 的 `loadBackground()` 靠正则剥掉 `import "./stats-core.js";` 再往 sandbox 里注入 `BcaStatsCore`。新增一条 import 之后必须同步剥、同步注入 `BcaArchiveCore`，否则 vm 里执行到 `import` 直接报错。删掉副本后 `BACKGROUND_EXPORTS` 里的 `statsSectionLines` 也要去掉 —— 否则「导出的名字都真的导出来了」那条守卫（`assert.deepEqual(bg.__missing, [])`）会红，而那正是它该做的事。
+- 新守卫特意不只查字符串：它真的把 `background.js` 载进 vm，断言拿到的 `patchVolatileFields` 和 `require("./archive-core.js")` 是**同一个函数对象**。只比输出的话，「又抄一份但恰好一致」照样能过，那就白合并了。
+- `test/harness.cjs` 是全仓少见的纯 LF 文件（其余文本都是 CRLF），改它别顺手把行尾统一掉。
+
+**没动的**：权威位置表里别的行仍是两份 —— `identifiersOverlap`（`background.js` / `library.js`）、`STAT_KEYS` / `STAT_LABELS`、`FILE_SYSTEM_ERROR_HINTS`、路径预算常量、保留目录名 —— 它们各有逐字守卫，且**确实需要两个上下文**，不属于这次的「假缺口」。
+
 ## V1.7.32：交接前的最后一次一致性体检
 
 这一版是「文档与规矩能不能真的交出去」的收口，不改运行逻辑。
