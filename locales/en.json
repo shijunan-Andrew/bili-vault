@@ -277,6 +277,8 @@
   "归档目录": "Archive folder",
   "归档失败": "Archive failed",
   "部分收藏夹没保存": "Some collections weren't saved",
+  "已按你的要求整库重读：{count} 条记录，缓存已清空重来。": "Re-read the whole library as you asked: {count} records, cache cleared.",
+  "已显示上次的 {count} 条记录，正在核对文件…": "Showing the {count} records from last time — checking the files now…",
   "扩展刚更新过": "The extension was just updated",
   "这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。": "This page is still running the old copy of the script. Reload it (F5) and archiving works again.",
   "归档文件只在本地管理<br>添加视频时向 B 站查询资料": "Archive files stay local<br>Video info is fetched from Bilibili when you add a video",

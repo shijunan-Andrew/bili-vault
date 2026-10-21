@@ -301,6 +301,10 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
   **三个必须守住的点**：① 缓存键含 `lastModified`，但外部工具若保留原 mtime 改写文件会漏判 —— 所以「刷新」按钮走 `forceFullScan = true` + `clearArchiveCache()`，**这条退路不能删**；② 缓存里的记录对象被 `video.info` **共享引用**，将来任何代码都不许就地修改它，要改就赋新对象；③ 单根目录缓存上限**不是常数**（1.8.4）：容量 = `archiveCacheCapacity(记录数)` = `max(600, 记录数 + 256)`，天花板 20000；超了用 `archiveCacheDropCount()` 一次丢 25%。**写死 600 + 逐条淘汰会让「库只比容量大一点」的库命中率归零**（630 条 / 上限 600 实测 0%）；扫描期间容量跟着已读条数长，别在半路上丢掉下一条要读的条目。
 - **扫描只读一遍**（1.8.4）：`scanRoot()` 不再「先枚举一遍数总数、再枚举一遍读记录」—— 进度分母先用上次扫描的条数（`lastScanRecordCount`），估少了跟着 `stats.processed` 长，真值在读完时收口。`longNames`（1.7.24 的路径长度度量）就在这一遍里算，并带回 `lastScanInfo` 显示。
 - **下载目录索引有缓存**（1.8.4）：`scanDownloadedDirectories()` 的结果按根目录缓存 2 分钟（`DOWNLOAD_INDEX_TTL_MS`）；手动「刷新」与 `downloadRevision` 变化强制重算，本页删除 / 搬运下载目录后调 `invalidateDownloadIndex(rootHandle)` 立刻作废。**`downloadRevision` 自 1.3.0 删掉下载功能之后已经没人写**，别指望它兜底。
+- **扫描结果会存成快照**（1.8.5）：一轮扫描结束后把每条记录的元数据写进 IndexedDB（`bca-archive-snapshot`），下次打开收藏库先按快照把列表画出来（`paintSnapshot()`），再去整库校准。**快照里不许存 `blob:` URL**（那个 URL 的生命周期只到页面关闭），记录对象的封面留空、需要时现读现造。手动「刷新」必须绕过快照 —— 它存在的意义就是不信缓存。
+- **整库校准是 8 路并发**（1.8.5）：`SCAN_READ_CONCURRENCY = 8` 的 worker 池从同一个队列里取 `视频信息.txt` 来读，读完再按原顺序拼回收藏夹。并发只加在「读」上，写盘仍然是后台那条串行队列。
+- **体积统计复用扫描字节**（1.8.5）：`scanRoot()` 顺手把每条记录（`meta.size + coverBytes`）与下载树的字节累起来，`updateStorageUsage(handle, { total })` 有现成数字就不再递归整树。
+
 - **封面 URL 生命周期**：blob URL 现在由缓存持有、页面卸载时统一 revoke（不再每轮扫描重建）。好处是不再泄漏 objectURL；代价是记录被删或换根目录后，旧 URL 要等到 unload 才释放，超大库长时间开着页面内存占用比以前高。
 - **焦点陷阱**是手写栈（`trapFocus()`），目前注册了 `#confirmBackdrop` 与 `#detailPanel`。**再加第三层浮层时必须把它也注册进去**，否则 Tab 会穿透。
 - **配置导出**绝不能带上目录句柄、B 站数据或错误报告内容（测试会扫导出代码块里有没有这些标识符）。导入只校验结构与枚举值，`CONFIG_VERSION` 升级时需要补迁移。

@@ -343,10 +343,12 @@ function revokeAllCoverRefs() {
 
 // 封面 blob: URL 由扫描缓存持有（见 readArchiveRecord），引用计数归零时才 revoke
 async function readCover(fileHandle) {
-  const url = URL.createObjectURL(await fileHandle.getFile());
+  const file = await fileHandle.getFile();
+  const url = URL.createObjectURL(file);
   // 缓存条目先持有一份；派生出的 video 对象在 videoFromArchiveRecord 里再加一份
   addCoverRef(url);
-  return url;
+  // 1.8.5：顺手把封面字节数带出去 —— 体积统计就不用再为它单独 getFile 一遍
+  return { cover: url, coverBytes: file.size };
 }
 
 function field(info, key) { return info.fields[key] || ""; }
@@ -412,17 +414,20 @@ const DOWNLOAD_MARKER_FILE = "请将视频放到这里.txt";
 const DOWNLOAD_MARKER_TEXT = "请将别的地方下载的视频复制或移动到此处";
 
 async function inspectDownloadDirectory(directory) {
-  const result = { hasFiles: false, hasMedia: false, marked: false };
+  // 1.8.5：顺带累加字节数 —— 这个函数本来就要把每个文件过一遍，volume 统计跟着免费拿到
+  const result = { hasFiles: false, hasMedia: false, marked: false, bytes: 0 };
   for await (const entry of directory.values()) {
     if (entry.kind === "file") {
       result.hasFiles = true;
       result.hasMedia ||= BcaArchiveCore.isMediaFileName(entry.name);
       result.marked ||= entry.name === DOWNLOAD_MARKER_FILE;
+      result.bytes += (await entry.getFile()).size;
     } else if (entry.kind === "directory") {
       const child = await inspectDownloadDirectory(entry);
       result.hasFiles ||= child.hasFiles;
       result.hasMedia ||= child.hasMedia;
       result.marked ||= child.marked;
+      result.bytes += child.bytes;
     }
   }
   return result;
@@ -459,6 +464,172 @@ function invalidateDownloadIndex(handle) {
   else downloadIndexCache.clear();
 }
 
+/* 1.8.5：读归档记录是这条链路上最贵的一段 —— 每条记录要 2~3 次 FS 往返
+   （视频信息.txt 的 getFile + text、封面的 getFile），630 条就是 1500 次左右。
+   串行读的时候这些往返完全排着队，所以改成固定 8 路并发：每个 worker 从队列里
+   取一条读一条。8 是折中 —— 再高对 File System Access 没什么帮助，反而让
+   「同时打开的文件句柄」变多。顺序不靠并发保证：先按收藏夹分组收集，最后各自
+   按收藏时间排序，和串行读的结果一致。 */
+const SCAN_READ_CONCURRENCY = 8;
+
+/* 1.8.5：把上一次扫描的结果存进 IndexedDB，重开页面先按快照把界面填起来，
+   再照常整库校准（读到什么就是什么，快照永远不是最终真相）。
+   快照里绝不存 blob: URL —— 它们的生命周期跟着页面走，存下来下次打开就是一串死链；
+   封面在命中的那一次现读现造。只存「解析结果 + size/lastModified」，也就是判断
+   「这份 txt 还是不是那一份」所需要的全部。 */
+const SNAPSHOT_DB_NAME = "bca-archive-snapshot";
+const SNAPSHOT_STORE = "records";
+const SNAPSHOT_VERSION = 1;
+let snapshotDbPromise = null;
+
+function openSnapshotDb() {
+  if (snapshotDbPromise) return snapshotDbPromise;
+  snapshotDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") { reject(new Error("这个环境没有 IndexedDB")); return; }
+    const request = indexedDB.open(SNAPSHOT_DB_NAME, SNAPSHOT_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (db.objectStoreNames.contains(SNAPSHOT_STORE)) return;
+      const store = db.createObjectStore(SNAPSHOT_STORE, { keyPath: "key" });
+      store.createIndex("root", "rootKey");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("打不开快照库"));
+  }).catch((error) => { snapshotDbPromise = null; throw error; });
+  return snapshotDbPromise;
+}
+
+async function snapshotLoad(rootKey) {
+  try {
+    const db = await openSnapshotDb();
+    const entries = await new Promise((resolve, reject) => {
+      const request = db.transaction(SNAPSHOT_STORE, "readonly").objectStore(SNAPSHOT_STORE).index("root").getAll(rootKey);
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error || new Error("读快照失败"));
+    });
+    return entries;
+  } catch (error) {
+    console.warn("读不到上次扫描的快照（这次按整库重读处理）", error);
+    return [];
+  }
+}
+
+async function snapshotSave(rootKey, entries) {
+  if (!entries.length) return;
+  try {
+    const db = await openSnapshotDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(SNAPSHOT_STORE, "readwrite");
+      const store = transaction.objectStore(SNAPSHOT_STORE);
+      // 整根目录重写：先按 root 索引把上一轮的条目删干净，再写这一轮的
+      
+      const cursorRequest = store.index("root").openKeyCursor(rootKey);
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        if (!cursor) return;
+        store.delete(cursor.primaryKey);
+        cursor.continue();
+      };
+      for (const entry of entries) store.put(entry);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error("写快照失败"));
+      transaction.onabort = () => reject(transaction.error || new Error("写快照被取消"));
+    });
+  } catch (error) {
+    console.warn("这次扫描结果没能存成快照（下次打开仍然是整库重读）", error);
+  }
+}
+
+// 扫描完把这一轮的结果写成快照（只写「这次真的进了列表」的那些）
+function saveScanSnapshot(handle, scannedCollections) {
+  if (!handle) return;
+  const rootKey = rootCacheKey(handle);
+  const cache = archiveCache.get(rootKey);
+  if (!cache?.size) return;
+  const videoById = new Map();
+  for (const collection of scannedCollections || []) {
+    for (const video of collection.videos || []) videoById.set(video.id, video);
+  }
+  const entries = [];
+  for (const [cacheName, entry] of cache) {
+    const record = entry.record;
+    if (!record?.info) continue;
+    const video = videoById.get(cacheName);
+    if (!video) continue;
+    entries.push({
+      key: `${rootKey}\u0000${cacheName}`,
+      rootKey,
+      collection: video.collection,
+      directory: video.directory,
+      size: entry.size,
+      lastModified: entry.lastModified,
+      bytes: record.bytes || 0,
+      savedAt: record.savedAt || "",
+      info: record.info,
+      share: record.share,
+      downloaded: video.downloaded === true,
+      hasFiles: video.hasDownloadFiles === true,
+      downloadDirectoryName: video.downloadDirectoryName || "",
+      downloadCollectionName: video.downloadCollectionName || ""
+    });
+  }
+  // 扫描结果是异步写进去的，调用方不等它（界面已经画完了）
+  snapshotSave(rootKey, entries);
+}
+
+/* 先按快照把界面填起来。任何一步出问题都退回「什么都不画」，由随后的整库扫描兜住。 */
+async function paintSnapshot(handle) {
+  // 「刷新」按钮就是「别信缓存」，快照也不该抢在它前面把旧结果画出来
+  if (forceFullScan) return false;
+  const rootKey = rootCacheKey(handle);
+  const entries = await snapshotLoad(rootKey);
+  if (!entries.length) return false;
+  if (rootHandle !== handle) return false;
+  const cache = archiveCacheFor(rootKey);
+  const previousVideos = new Map();
+  const byCollection = new Map();
+  for (const entry of entries) {
+    if (!entry?.collection || !entry?.directory || !entry?.info) continue;
+    const cacheName = `${entry.collection}/${entry.directory}`;
+    const record = { info: entry.info, share: entry.share || { description: "", stats: {} }, savedAt: entry.savedAt || "", cover: "", bytes: entry.bytes || 0 };
+    // 灌进内存缓存：随后的扫描只要 size/lastModified 对得上，就只补封面、不重解析 txt
+    if (!cache.has(cacheName)) cache.set(cacheName, { size: entry.size, lastModified: entry.lastModified, record });
+    previousVideos.set(cacheName, {
+      downloaded: entry.downloaded === true,
+      hasDownloadFiles: entry.hasFiles === true,
+      downloadDirectoryName: entry.downloadDirectoryName || "",
+      downloadCollectionName: entry.downloadCollectionName || "",
+      downloadDirectoryHandle: null
+    });
+    const video = videoFromArchiveRecord(entry.collection, { name: entry.directory }, record, null, previousVideos);
+    if (!byCollection.has(entry.collection)) byCollection.set(entry.collection, []);
+    byCollection.get(entry.collection).push(video);
+  }
+  const scanned = [];
+  for (const [name, videos] of byCollection) {
+    videos.sort((a, b) => b.timestamp - a.timestamp);
+    scanned.push({ name, videos });
+  }
+  if (!scanned.length) return false;
+  scanned.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  releaseVideoCoverRefs();
+  collections = applyCollectionOrder(scanned);
+  selectedCollection = "*";
+  statusDot.classList.add("ready");
+  refreshLibraryButton.disabled = false;
+  setDynamicText(rootLabel, handle.name);
+  if (breadcrumbRoot) setDynamicText(breadcrumbRoot, handle.name);
+  welcome.hidden = true;
+  library.hidden = false;
+  if (retroEntryWrap) retroEntryWrap.hidden = false;
+  renderCollections();
+  refreshVideoFilterOptions();
+  renderVideos();
+  // 这条提示会被扫描收尾时的 refreshScanNotice() 换掉
+  setScanNotice(BcaI18n.t("已显示上次的 {count} 条记录，正在核对文件…", { count: formatCountText(allVideos().length) }));
+  return true;
+}
+
 async function scanDownloadedDirectories(archiveRoot, options = {}) {
   const force = options.force === true;
   const indexCacheKey = rootCacheKey(archiveRoot);
@@ -481,12 +652,14 @@ async function scanDownloadedDirectories(archiveRoot, options = {}) {
     const permission = await parent.queryPermission({ mode: "read" });
     if (permission !== "granted") return null;
     const index = new Map();
+    let totalBytes = 0;
     for await (const collection of parent.values()) {
       if (collection.kind !== "directory") continue;
       for await (const entry of collection.values()) {
         if (entry.kind !== "directory") continue;
         const identifiers = BcaArchiveCore.identifiersFromDirectoryName(entry.name);
         const contents = await inspectDownloadDirectory(entry);
+        totalBytes += contents.bytes;
         if (!identifiers.size || !contents.hasFiles) continue;
         for (const identifier of identifiers) {
           const match = { name: entry.name, collectionName: collection.name, handle: entry, hasFiles: contents.hasFiles, hasMedia: contents.hasMedia, marked: contents.marked };
@@ -496,6 +669,8 @@ async function scanDownloadedDirectories(archiveRoot, options = {}) {
         }
       }
     }
+    // 1.8.5：整棵下载树的字节数挂在索引上（Map 上带个属性，调用方用它算占用）
+    index.bytes = totalBytes;
     downloadIndexCache.set(indexCacheKey, { index, at: Date.now() });
     return index;
   } catch (_) { return null; }
@@ -629,11 +804,13 @@ function storeCacheEntry(store, name, size, lastModified, record) {
 
 // 命中缓存时必须复用同一个 blob: URL：重复 createObjectURL 会不断泄漏内存
 async function recordCover(recordEntry, cachedRecord) {
-  if (cachedRecord) return cachedRecord.cover || "";
+  if (cachedRecord?.cover) return { cover: cachedRecord.cover, coverBytes: cachedRecord.coverBytes || 0 };
   // 4.9：封面有两代文件名。优先读新的 WebP（小得多），退回老档案的真 PNG。
   let coverHandle = await optionalFileHandle(recordEntry, "封面.webp");
   if (!coverHandle) coverHandle = await optionalFileHandle(recordEntry, "封面.png");
-  if (!coverHandle) return "";
+  if (!coverHandle) return { cover: "", coverBytes: 0 };
+  // 1.8.5：缓存条目可能来自 IndexedDB 快照 —— 它没有 blob: URL（那东西存不下来），
+  // 这时仍然要现读封面文件；前面的 size/lastModified 已经确认过 txt 没变。
   return readCover(coverHandle);
 }
 
@@ -645,9 +822,11 @@ async function readArchiveRecord(collectionName, recordEntry, cache, stats) {
   const meta = await (await infoHandle.getFile());
   const cachedRecord = cacheEntryFor(cache, cacheName, meta.size, meta.lastModified);
   if (cachedRecord) {
-    const cover = await recordCover(recordEntry, cachedRecord);
+    const { cover, coverBytes } = await recordCover(recordEntry, cachedRecord);
     if (cover) {
       stats.hits += 1;
+      // 1.8.5：体积统计复用这一轮已经量到的字节（缓存条目里带着上次的）
+      stats.bytes += cachedRecord.bytes || meta.size + coverBytes;
       return Object.assign({}, cachedRecord, { cover });
     }
   }
@@ -655,13 +834,15 @@ async function readArchiveRecord(collectionName, recordEntry, cache, stats) {
   if (!raw.includes("【基本信息】")) return null;
   const info = parseInfo(raw);
   if (!field(info, "视频标题")) return null;
-  const cover = await recordCover(recordEntry, null);
+  const { cover, coverBytes } = await recordCover(recordEntry, null);
   // 没有封面就不是一条合法归档，交给上层按「跳过」处理（和 4.5 的行为一致）
   if (!cover) return null;
   const share = splitInfoDescription(info);
-  const record = { info, share, savedAt: field(info, "信息保存于"), cover };
+  // bytes：这条记录在磁盘上占的字节（视频信息.txt + 封面），体积统计直接用
+  const record = { info, share, savedAt: field(info, "信息保存于"), cover, coverBytes, bytes: meta.size + coverBytes };
   storeCacheEntry(cache, cacheName, meta.size, meta.lastModified, record);
   stats.reads += 1;
+  stats.bytes += record.bytes;
   return record;
 }
 
@@ -809,7 +990,13 @@ function refreshScanNotice() {
   const info = lastScanInfo;
   if (!info) return;
   const lines = [];
-  if (info.total) lines.push(BcaI18n.t("本次扫描 {count} 条记录，其中 {reused} 条直接复用缓存。", { count: info.total, reused: info.hits }));
+  // 1.8.5：「刷新」按钮会把缓存清空重读（那是唯一的退路），命中数永远是 0 ——
+  // 再写「其中 0 条直接复用缓存」看着像缓存坏了。分开说：那一次是「按你的要求整库重读」。
+  if (info.total) {
+    lines.push(info.forced
+      ? BcaI18n.t("已按你的要求整库重读：{count} 条记录，缓存已清空重来。", { count: info.total })
+      : BcaI18n.t("本次扫描 {count} 条记录，其中 {reused} 条直接复用缓存。", { count: info.total, reused: info.hits }));
+  }
   if (info.issues.length) {
     lines.push(BcaI18n.t("有 {count} 个目录未能读取：{list}", {
       count: info.issues.length,
@@ -856,6 +1043,8 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   // 1.7.24（facet-compat §3.2）：度量。收藏夹段 + 视频目录段合起来超过预算的目录，
   // 拼上根目录与记录目录里的文件名就贴着 Windows 的 260 字符上限了 —— 以前没人提。
   const longNames = [];
+  // 1.8.5：这次是不是「刷新」按下来的强制全量重读（提示文案要用）
+  const forced = forceFullScan === true;
   const downloadIndex = await scanDownloadedDirectories(handle, { force: forceFullScan });
   const previousVideos = new Map(preserveDownloadStatuses ? allVideos().map((video) => [video.id, video]) : []);
   const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
@@ -869,39 +1058,67 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   // 1.8.4：总数不再靠「把每个收藏夹多枚举一遍」得到（630 条 = 630 次多余往返）。
   // 进度分母先用上次扫描的条数，估少了就跟着 processed 长；真值在读完时收口。
   const knownTotal = lastScanRecordCount.get(cacheKey) || 0;
-  const stats = { hits: 0, reads: 0, processed: 0, total: knownTotal };
+  const stats = { hits: 0, reads: 0, processed: 0, total: knownTotal, bytes: Number(downloadIndex?.bytes) || 0 };
   // 目录列表本身每次重新枚举，缓存只省文件读取，所以新增/删除目录一定反映得出来
   const collections = [];
   for await (const collectionEntry of handle.values()) {
-    if (collectionEntry.kind !== "directory" || ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"].includes(collectionEntry.name)) continue;
-    collections.push(collectionEntry);
+    if (collectionEntry.kind !== "directory") continue;
+    if (!["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"].includes(collectionEntry.name)) {
+      collections.push(collectionEntry);
+      continue;
+    }
+    // 1.8.5：体积统计复用扫描。固定目录（报告 / 数据库 / 导出）都是扁平的、文件很少，
+    // 顺手量一下；000视频下载 那棵树的字节由下载索引给出（它本来就要递归枚举那一遍）。
+    if (collectionEntry.name === "000视频下载" || collectionEntry.name === "视频下载") continue;
+    stats.bytes += await directorySize(collectionEntry);
   }
   // 1.7.24 的路径长度度量顺路在读那一遍里做，不再为它单独枚举（1.8.4）。
   const progress = progressNotifier(scanNoticeText, (value) => scanProgressText(value));
   try {
+    // 1.8.5：先把「要读哪些记录」列出来，再 8 路并发读 —— 见 SCAN_READ_CONCURRENCY 的注释。
+    const jobs = [];
     for (const collectionEntry of collections) {
-      const videos = [];
+      const targets = [];
       for await (const recordEntry of collectionEntry.values()) {
         if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
         const relative = collectionEntry.name.length + 1 + recordEntry.name.length;
         if (relative > BcaArchiveCore.PATH_SEGMENT_BUDGET_CHARS) longNames.push(`${collectionEntry.name}/${recordEntry.name}`);
+        targets.push(recordEntry);
+      }
+      jobs.push({ name: collectionEntry.name, targets, videos: [] });
+    }
+    const queue = [];
+    jobs.forEach((job, jobIndex) => {
+      for (const recordEntry of job.targets) queue.push({ jobIndex, recordEntry });
+    });
+    let cursor = 0;
+    const readOne = async () => {
+      while (cursor < queue.length) {
+        const task = queue[cursor];
+        cursor += 1;
+        const job = jobs[task.jobIndex];
+        const collectionName = job.name;
+        const recordEntry = task.recordEntry;
         stats.processed += 1;
         if (stats.total < stats.processed) stats.total = stats.processed;
         if (stats.processed % 8 === 0) progress.update({ done: stats.processed, total: stats.total });
         try {
-          const record = await readArchiveRecord(collectionEntry.name, recordEntry, cache, stats);
+          const record = await readArchiveRecord(collectionName, recordEntry, cache, stats);
           if (!record) {
             // 1.7.10（P2-6）：读不出内容的目录里，只有「没写完」这一类要单独报出来
-            if (await isUnfinishedRecord(recordEntry)) unfinished.push(`${collectionEntry.name}/${recordEntry.name}`);
+            if (await isUnfinishedRecord(recordEntry)) unfinished.push(`${collectionName}/${recordEntry.name}`);
             continue;
           }
-          videos.push(videoFromArchiveRecord(collectionEntry.name, recordEntry, record, downloadIndex, previousVideos));
+          job.videos.push(videoFromArchiveRecord(collectionName, recordEntry, record, downloadIndex, previousVideos));
         } catch (error) {
-          issues.push(`${collectionEntry.name}/${recordEntry.name}：${error.message || BcaI18n.t("读取失败")}`);
+          issues.push(`${collectionName}/${recordEntry.name}：${error.message || BcaI18n.t("读取失败")}`);
         }
       }
-      videos.sort((a, b) => b.timestamp - a.timestamp);
-      scanned.push({ name: collectionEntry.name, videos });
+    };
+    await Promise.all(Array.from({ length: Math.min(SCAN_READ_CONCURRENCY, queue.length) }, () => readOne()));
+    for (const job of jobs) {
+      job.videos.sort((a, b) => b.timestamp - a.timestamp);
+      scanned.push({ name: job.name, videos: job.videos });
     }
   } finally {
     cache.growing = false;
@@ -912,7 +1129,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   stats.total = stats.processed;
   rememberArchiveCacheLimit(cacheKey, stats.total);
   // hits/reads/total 挂在返回值上，界面用它显示「本次命中缓存多少条」
-  return { collections: scanned, issues, unfinished, longNames, stats: { hits: stats.hits, reads: stats.reads, total: stats.total } };
+  return { collections: scanned, issues, unfinished, longNames, forced, stats: { hits: stats.hits, reads: stats.reads, total: stats.total, bytes: stats.bytes } };
 }
 
 function parseDate(value, fallback) {
@@ -2741,7 +2958,7 @@ function whenIdle() {
 
 // 统计放在 displayRoot() 渲染之后异步跑，先出界面再慢慢算。
 // 同一时刻只允许一次递归扫描：期间再来请求只记下最新根目录，等本轮结束后补算。
-async function updateStorageUsage(handle) {
+async function updateStorageUsage(handle, options = {}) {
   if (!storageUsage) return;
   if (!handle) { storageUsage.textContent = "—"; return; }
   // 页面在后台：不打盘，回到前台时 visibilitychange 会再调一次
@@ -2754,9 +2971,16 @@ async function updateStorageUsage(handle) {
     const key = rootCacheKey(handle);
     const signature = archiveSignature();
     const cached = storageUsageCache.get(key);
+    // 1.8.5：扫描那一遍已经量到了每条记录里的文件（视频信息.txt + 封面）、下载目录
+    // （下载索引本来就要递归枚举那棵树）和几个固定目录 —— 直接拿来用，不再整树递归。
+    // 拿不到（比如页面刚打开还没扫过）才退回递归，宁可慢也不给一个编出来的数字。
+    const knownTotal = Number(options.total) > 0 ? Number(options.total) : 0;
     let total;
     if (cached && cached.signature === signature) {
       total = cached.total; // 同一份档案：直接复用上次的结果
+    } else if (knownTotal) {
+      total = knownTotal;
+      storageUsageCache.set(key, { total, signature: archiveSignature() });
     } else {
       total = await directorySize(handle);
       storageUsageCache.set(key, { total, signature: archiveSignature() });
@@ -4347,12 +4571,18 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   lastScanInfo = null;
   scanNoticeRefresh = progressNotifier(scanNoticeText, (value) => scanProgressText(value));
   scanNoticeRefresh.update({ done: 0, total: lastScanRecordCount.get(rootCacheKey(handle)) || 0 });
+  // 1.8.5：上一次的快照先顶上（毫秒级），随后这次扫描照常整库校准并覆盖它。
+  // 快照出任何问题都不影响主流程 —— 大不了就是多等一次整库读取。
+  try { await paintSnapshot(handle); }
+  catch (error) { console.warn("按上次的快照先渲染失败（这次直接整库读）", error); }
   const result = await scanRoot(handle, preserveDownloadStatuses);
   forceFullScan = false;
   lastScanInfo = {
     hits: result.stats?.hits || 0,
     reads: result.stats?.reads || 0,
     total: result.stats?.total || 0,
+    forced: result.forced === true,
+    bytes: result.stats?.bytes || 0,
     issues: result.issues,
     // 1.8.4：这条度量 1.7.24 就算出来了，却一直没带回界面 —— 于是 refreshScanNotice()
     // 里那段「目录名太长」的提示永远不会出现。顺手接上。
@@ -4360,6 +4590,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
     unfinished: result.unfinished || []
   };
   if (result.stats?.total) lastScanRecordCount.set(rootCacheKey(handle), result.stats.total);
+  // 1.8.5：把这一轮结果写成快照，下次打开先把界面填起来（异步，不等）
+  saveScanSnapshot(handle, result.collections);
   // 扫描成功、确定要换掉 collections 了：上一批 video 对象交还它们持有的封面 URL。
   // 放在这里（而不是扫描开始时）是为了让扫描期间的旧卡片继续正常显示封面。
   releaseVideoCoverRefs();
@@ -4388,7 +4620,8 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   // 真机上导入期间每写一批就弹一次，很吵。手动刷新照旧提示。
   if (options.silentToast !== true) showToast(BcaI18n.t("{verb} {count} 个视频", { verb: toastVerb, count: formatCountText(allVideos().length) }));
   // 大目录的递归体积统计很慢，放在渲染之后异步跑，不阻塞界面
-  updateStorageUsage(handle);
+  // 1.8.5：体积统计直接用这一轮量到的字节，不再为它整树递归一遍
+  updateStorageUsage(handle, { total: result.stats?.bytes });
   // 1.5.0：数据库同步也放在渲染之后，同样是「慢活不挡界面」
   syncStatsDatabase(handle, options);
 }

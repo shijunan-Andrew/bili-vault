@@ -6094,7 +6094,7 @@ test("扫描不再为了先知道总数多枚举一遍，下载索引也有缓�
   assert.match(body, /const knownTotal = lastScanRecordCount\.get\(cacheKey\) \|\| 0;/);
   assert.match(body, /if \(stats\.total < stats\.processed\) stats\.total = stats\.processed;/, "估少了就地扩容");
   assert.match(body, /rememberArchiveCacheLimit\(cacheKey, stats\.total\);/, "扫完把真条数记下来");
-  assert.match(body, /return \{ collections: scanned, issues, unfinished, longNames, stats:/, "longNames 要带回界面");
+  assert.match(body, /return \{ collections: scanned, issues, unfinished, longNames, forced, stats:/, "longNames（和 1.8.5 的 forced 标记）要带回界面");
   assert.match(body, /scanDownloadedDirectories\(handle, \{ force: forceFullScan \}\)/, "手动刷新要强制重算下载索引");
   // 下载索引缓存
   assert.match(library, /const DOWNLOAD_INDEX_TTL_MS = \d+ \* 60 \* 1000;/);
@@ -6107,3 +6107,52 @@ test("扫描不再为了先知道总数多枚举一遍，下载索引也有缓�
   // 「目录名太长」这条度量 1.7.24 就算出来了，却一直没带回界面 —— 顺手接上
   assert.match(library, /longNames: result\.longNames \|\| \[\],/);
 });
+
+// ---- 1.8.5：刷新文案、体积统计复用扫描字节、快照先渲染 + 并发校准 ----
+
+test("「刷新」按整库重读时，提示不再说「0 条复用缓存」（V1.8.5）", () => {
+  const library = readProjectFile("library.js");
+  // 强制全量扫描 = 缓存被自己清空，命中数必然是 0，那句话必须换一种说法
+  assert.match(library, /forced: result\.forced === true,/, "要把「这次是强制全量」带回界面");
+  assert.match(library, /const forced = forceFullScan === true;/, "scanRoot 要记住这次是不是强制全量");
+  assert.match(library, /info\.forced/, "提示要按 forced 分开说");
+  assert.match(library, /已按你的要求整库重读：\{count\} 条记录，缓存已清空重来。/, "强制全量要有一句自己的说法");
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = JSON.parse(readProjectFile(`locales/${locale}.json`));
+    assert.ok(dictionary["已按你的要求整库重读：{count} 条记录，缓存已清空重来。"], `${locale} 词典缺「整库重读」文案`);
+    assert.ok(dictionary["已显示上次的 {count} 条记录，正在核对文件…"], `${locale} 词典缺「按快照先显示」文案`);
+  }
+});
+
+test("先按上次的快照渲染，再 8 路并发整库校准（V1.8.5）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const SNAPSHOT_DB_NAME = "bca-archive-snapshot";/, "快照库名");
+  assert.match(library, /indexedDB\.open\(SNAPSHOT_DB_NAME, SNAPSHOT_VERSION\)/, "要真的开 IndexedDB");
+  assert.match(library, /async function snapshotLoad\(rootKey\)/, "读快照");
+  assert.match(library, /async function snapshotSave\(rootKey, entries\)/, "写快照");
+  // 快照里绝不能存 blob: URL —— 那个 URL 的生命周期只到这次页面关闭
+  const paint = library.slice(library.indexOf("async function paintSnapshot("), library.indexOf("async function scanDownloadedDirectories("));
+  assert.ok(paint.length > 0, "要有 paintSnapshot");
+  assert.doesNotMatch(paint, /cover:\s*"blob:/, "快照不许存 blob: URL");
+  assert.match(paint, /cover: ""/, "快照记录里的封面留空，扫描时现读现造");
+  // 先画快照，再整库扫
+  const display = library.slice(library.indexOf("async function displayRoot("), library.indexOf("function syncDetailDownloadAction()"));
+  const paintAt = display.indexOf("await paintSnapshot(handle)");
+  const scanAt = display.indexOf("await scanRoot(handle, preserveDownloadStatuses)");
+  assert.ok(paintAt > 0 && scanAt > paintAt, "快照要先画，扫描在后");
+  assert.match(display, /saveScanSnapshot\(handle, result\.collections\);/, "扫完要把结果存成快照");
+  // 8 路并发读
+  assert.match(library, /const SCAN_READ_CONCURRENCY = 8;/, "并发度写在一处");
+  assert.match(library, /await Promise\.all\(Array\.from\(\{ length: Math\.min\(SCAN_READ_CONCURRENCY, queue\.length\) \}/, "worker 池要真的跑起来");
+});
+
+test("体积统计复用扫描量到的字节，不再为它整树递归（V1.8.5）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /updateStorageUsage\(handle, \{ total: result\.stats\?\.bytes \}\);/, "扫描完把字节交给体积统计");
+  assert.match(library, /const knownTotal = Number\(options\.total\) > 0 \? Number\(options\.total\) : 0;/, "有现成字节就直接用");
+  assert.match(library, /else if \(knownTotal\) \{/, "拿不到才退回递归");
+  assert.match(library, /index\.bytes = totalBytes;/, "下载树字节挂在索引上");
+  assert.match(library, /result\.bytes \+= \(await entry\.getFile\(\)\)\.size;/, "枚举下载目录时顺手量字节");
+  assert.match(library, /const record = \{ info, share, savedAt: field\(info, "信息保存于"\), cover, coverBytes, bytes: meta\.size \+ coverBytes \};/, "记录里带着自己的字节数");
+});
+

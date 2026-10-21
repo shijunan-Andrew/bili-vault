@@ -5,6 +5,19 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.5：扫描结果存成快照，重开先显示再校准
+
+**改了什么**：`library.js` 三处。① 点「刷新」的强制全量重读不再复用普通扫描那句提示，改成「已按你的要求整库重读：N 条记录，缓存已清空重来。」（`scanRoot()` 多返回一个 `forced`，`displayRoot()` 传给 `lastScanInfo`）；② 一轮扫描结束把记录快照写进 IndexedDB（`bca-archive-snapshot`），下次打开收藏库先用快照渲染（`paintSnapshot()`），再去整库校准；③ 整库校准改成 8 路并发的 worker 池（`SCAN_READ_CONCURRENCY = 8`），并且体积统计复用扫描时量到的字节（`updateStorageUsage(handle, { total })`），不再为它递归整棵树。
+
+**为什么**：用户贴了两张截图 —— 普通扫描 628/628 全部命中，点「刷新」却是 0/628。后者不是 bug：「刷新」的语义就是把缓存清空重来（`forceFullScan = true` + `clearArchiveCache()`），是文件被外部工具改写后唯一的退路。真正该修的是 ① 它借着普通扫描的提示语，看起来像缓存坏了；② 库大到一定规模时，每次打开都要把整库读一遍才出列表。
+
+**现在的口径**：打开先出列表（快照，封面留空、需要时现读现造），后台 8 路并发校准，校准完把新快照写回；点「刷新」绕过快照、照旧清缓存重读，提示如实说「缓存已清空重来」；占用体积有扫描量到的字节就不再递归。
+
+**踩的坑**：① 快照里不能存 `blob:` URL —— 那个 URL 的生命周期只到页面关闭，存进去第二天全是裂图；② DOM 测试环境没有 `indexedDB`，快照路径必须能安静降级（`snapshotLoad()` 打一条 warn、返回空数组）；③ 并发只加在读上，写盘仍然走后台那条串行队列，否则会和归档抢目录。
+
+**没动的**：老 PNG 封面转 WebP（P3，会改用户磁盘上的文件，等单独批准）；`directorySize()` 的整树递归（只有快照和扫描都拿不到数字时才跑）。
+
+
 ## V1.8.4：收藏库扫描只读一遍，缓存装得下整个库
 
 **改了什么**：`archive-core.js` 新增 `archiveCacheCapacity(recordCount)` 与 `archiveCacheDropCount(capacity)`（缓存容量与批量淘汰的唯一判据）；`library.js` 的 `storeCacheEntry()` 改成「容量按库大小算 + 一次丢 25%」，扫描期间容量跟着已读条数长；`scanRoot()` 删掉「为了先知道总数把每个收藏夹多枚举一遍」那一遍；`scanDownloadedDirectories()` 加了按根目录的索引缓存（`DOWNLOAD_INDEX_TTL_MS` 2 分钟 + 显式失效）。
