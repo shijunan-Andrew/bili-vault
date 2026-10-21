@@ -4,6 +4,8 @@
   let lastConfirmAt = 0;
   let archiveEnabled = false;
   let enabledStateUpdated = false;
+  // 1.8.1：扩展重载后只提醒一次 —— 用户在收藏弹窗上点「确定」时给一句话，别每点一下都弹。
+  let staleContextNotified = false;
 
   /* 下面三个常量认的是 B 站自己的界面文字，不是扩展的界面语言 —— B 站有简体/繁體两套，
      用户把 B 站切成繁體后，只认简体会让「点收藏自动归档」静默失效（收藏成功但归档没触发）。
@@ -262,6 +264,28 @@
     @media (prefers-reduced-motion: reduce) { .notice { animation: none; } }
   `;
 
+  /* 1.8.1：扩展被重新加载 / 更新 / 停用之后，页面里这份旧脚本还活着，但 chrome.runtime 已经
+     变回 undefined —— 真实报错是「Uncaught TypeError: Cannot read properties of undefined
+     (reading 'sendMessage')」，用户在扩展的「错误」页里看到一堆，却不知道只要刷新一下。
+     Chrome 不会给已打开的标签页重新注入内容脚本，所以这里能做的只有三件事：认出来、
+     说清楚、请用户刷新（刷新之后注入的就是新版本了）。 */
+  function extensionAlive() {
+    try {
+      return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function showStaleContextNotice() {
+    showNotice(
+      BcaI18n.t("扩展刚更新过"),
+      BcaI18n.t("这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。"),
+      "",
+      true
+    );
+  }
+
   // 4.3：不再用 window.open 直接打开扩展页（那要求 library.html 对 B 站页面可见），
   // 改为请后台用 chrome.tabs.create 打开，扩展页因此不必暴露给任何网页。
   function openLocalLibrary() {
@@ -357,6 +381,13 @@
   }
 
   function sendFavorite(data, signature) {
+    // 1.8.1：等弹窗关闭最多 10 秒，这期间扩展可能被重新加载（用户点「重新加载」、或后台自动更新）。
+    // 真断了就说明白，别让下面的 sendMessage 抛未捕获错误。
+    if (!extensionAlive()) {
+      staleContextNotified = true;
+      showStaleContextNotice();
+      return;
+    }
     showNotice(BcaI18n.t("正在归档视频…"), BcaI18n.t("B站已完成收藏，正在保存视频信息和封面。"), "", false);
     // 1.7.4：先问一句后台有没有导入在跑。有就**当场取消这次手动归档**并说清楚，
     // 不让用户看着「正在归档视频…」等下去（真机上等过几分钟，最长那次提示都没回来）。
@@ -422,9 +453,19 @@
     // 签名去重 —— 页面里任何脚本 dispatch 一次 click，就能替用户按下「确认收藏」，
     // 而归档是往本地磁盘写东西的副作用，不该由不可信事件触发。
     if (!event.isTrusted) return;
-    if (!archiveEnabled) return;
+    // 1.8.1：扩展重载后这份旧脚本的 chrome.runtime 会变回 undefined，启动期那次 storage.get
+    // 也早就被掐断了 —— archiveEnabled 因此永远是 false。先认上下文：失效了就不必往下走，
+    // 但用户真的点到收藏弹窗的「确定」时，要给一句能照做的话（而且只给一次）。
+    const alive = extensionAlive();
+    if (!alive && staleContextNotified) return;
+    if (alive && !archiveEnabled) return;
     const dialog = findFavoriteDialog(event);
     if (!dialog || !clickedConfirm(event, dialog)) return;
+    if (!alive) {
+      staleContextNotified = true;
+      showStaleContextNotice();
+      return;
+    }
     if (Date.now() - lastConfirmAt < 700) return;
     lastConfirmAt = Date.now();
     const folders = selectedFolders(dialog);

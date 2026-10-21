@@ -137,28 +137,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.7.30 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.8.0：归档变快、不再假报失败
+## V1.8.1：认得出「扩展刚更新过」的旧页面
 
-这一版只改「B 站收藏后自动归档」那一条链路，目标是让等待变短、让提示说实话。
+这一版只修一个真机上报出来的问题：更新扩展之后，**已经开着的 B 站视频页**会报 `Uncaught TypeError: Cannot read properties of undefined (reading 'sendMessage')`，提示卡停在「正在归档视频…」。
 
-- **封面只取一次**：以前选几个收藏夹，同一张封面就被下载、编码几遍；现在只取一次，循环里只写文件。
-- **收藏夹之间并行落盘**：以前一个一个串行写，现在并行写；每个收藏夹内部仍然是「先封面、后 `视频信息.txt`」（txt 落盘才算这条记录完成，目录格式没变）。
-- **不再假报失败**：以前「保存本身太慢」会被当成「排队等太久」，于是弹「本地队列正忙…这次没有执行」——可磁盘上其实已经存好了。现在期限只用于「排队等待」，超时是真的没执行；保存本身的耗时不再有上限。
-- **部分成功会如实说**：几个收藏夹里有一个失败时，不再整次报「归档失败」，而是红色提示「部分收藏夹没保存」，并列出已经存好的路径。
+- **原因**：重新加载扩展会让已打开页面里那份旧内容脚本的 `chrome.runtime` 变回 `undefined`，而 Chrome 不会给已打开的标签页重新注入内容脚本。之前一点收藏就会抛未捕获错误，界面上什么都不说。
+- **现在**：认得出这种情况之后弹一张「扩展刚更新过 / 这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。」的提示卡，并且不再抛错。
 
-**这对你有什么影响**：归档的等待从十几秒降到几秒（多选收藏夹的差距更明显：实测 5 个从 68 秒降到十几秒），「弹失败但其实已保存」的情况没有了。归档目录的结构、`视频信息.txt` 的字段一个都没变。
-
-> 这一版慢的根子在浏览器：Chrome 155（2026-10-20 升级）的 File System Access 提交一个文件约 7 秒，同一套写法在旧版只要 0.06 秒。所以能做的是「少写、并行写」，不是把单次写变快。
+**这对你有什么影响**：以后在 `chrome://extensions` 点「重新加载」之后，直接刷新一下 B 站标签页就行；忘了刷新也不会再看到那条看不懂的报错，而是一句能照做的话。归档链路、目录格式、字段一个都没动。
 
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 912 条**<!-- i18n-count:912 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 914 条**<!-- i18n-count:914 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:260 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:261 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

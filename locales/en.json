@@ -277,6 +277,8 @@
   "归档目录": "Archive folder",
   "归档失败": "Archive failed",
   "部分收藏夹没保存": "Some collections weren't saved",
+  "扩展刚更新过": "The extension was just updated",
+  "这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。": "This page is still running the old copy of the script. Reload it (F5) and archiving works again.",
   "归档文件只在本地管理<br>添加视频时向 B 站查询资料": "Archive files stay local<br>Video info is fetched from Bilibili when you add a video",
   "过滤收藏夹": "Filter collections",
   "还没有数据，导入一次收藏夹就能看到统计了。": "No data yet — import a collection once and the stats will show up.",

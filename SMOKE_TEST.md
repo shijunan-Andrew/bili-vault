@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **260** 项里<!-- test-count:260 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **261** 项里<!-- test-count:261 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -53,6 +53,12 @@
 
 ---
 
+## V1.8.1 新增的几条
+
+1. 打开一个 B 站视频页 → `chrome://extensions` 点本扩展的「重新加载」→ 回到那个**没有刷新**的视频页点收藏并确认：应弹红色「扩展刚更新过」，正文是「这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。」，**不该**再在扩展的错误页里多出 `Cannot read properties of undefined (reading 'sendMessage')`。
+2. 同一个页面再点一次收藏并确认：**不该**反复弹卡（只提醒一次）。
+3. 刷新该页面后正常收藏一次：应回到「正在归档视频…」→「归档成功」。
+
 ## V1.8.0 新增的几条
 
 1. 单收藏夹归档：从「正在归档视频…」到「归档成功」应在几秒内（本机实测约 7 秒，那一下基本是 Chrome 落盘）。
@@ -74,7 +80,7 @@
 
 1. `chrome://extensions` 里确认版本显示 **V1.7.32**；收藏库、设置页各打开一次。
 2. 打开 `README.md`：「正式版更新」下面**只有 V1.7.32 一节**，且给出了指向 `docs/HISTORY.md` 的链接；再打开 `docs/HISTORY.md`，最新一节也是 V1.7.32，往下能一路排到 V1.0.0。
-3. `node test/stability.test.cjs` 应 260 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
+3. `node test/stability.test.cjs` 应 261 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
 
 ## V1.7.31 新增的几条
 

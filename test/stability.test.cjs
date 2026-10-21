@@ -5895,3 +5895,39 @@ test("临时文件的形状与年龄判据本身是对的（V1.8.0）", () => {
   assert.equal(core.isStaleTempFile(now - 60 * 1000, now), false, "刚创建的那个正在写，绝不能删");
   assert.equal(core.isStaleTempFile(0, now), false, "拿不到修改时间就不要删");
 });
+
+// ---- 1.8.1：扩展重载之后，旧页面里的内容脚本要认得出上下文已经失效 ----
+test("扩展重载后的旧页面会请用户刷新，而不是抛未捕获错误（V1.8.1）", () => {
+  // 真机报错：chrome://extensions 的「错误」页里一条
+  // Uncaught TypeError: Cannot read properties of undefined (reading 'sendMessage')
+  // 堆叠指向 content.js 的 chrome.runtime.sendMessage —— 扩展重新加载后，旧标签页里那份
+  // 内容脚本的 chrome.runtime 变回 undefined，而 Chrome 不会给已打开的页面重新注入。
+  const content = readProjectFile("content.js");
+  assert.match(content, /function extensionAlive\(\)/, "content.js 要有一只判断上下文还在不在的手");
+  assert.match(content, /typeof chrome !== "undefined" && Boolean\(chrome\.runtime\?\.id\)/, "判据是 chrome.runtime.id");
+  assert.match(content, /function showStaleContextNotice\(\)/, "失效时要有一张专门说清楚的提示卡");
+  // 点击路径：认出来以后就绝不能再往下走到 sendMessage
+  const clickAt = content.indexOf('document.addEventListener("click"');
+  assert.ok(clickAt > 0, "找不到点击监听");
+  const clickBody = content.slice(clickAt, content.indexOf("}, true);", clickAt));
+  const aliveAt = clickBody.indexOf("const alive = extensionAlive();");
+  const waitAt = clickBody.indexOf("waitForSuccessfulClose(dialog, data);");
+  assert.ok(aliveAt > 0 && waitAt > 0 && aliveAt < waitAt, "上下文检查要在「等弹窗关闭」之前");
+  const noticeAt = clickBody.indexOf("showStaleContextNotice();", aliveAt);
+  assert.ok(noticeAt > 0 && noticeAt < waitAt, "失效的那一路要有说清楚的出口，而不是直接往下走");
+  // 发送路径：等弹窗关闭最多 10 秒，这期间扩展也可能被重新加载
+  const sendAt = content.indexOf("function sendFavorite(data, signature) {");
+  assert.ok(sendAt > 0, "找不到 sendFavorite");
+  const sendBody = content.slice(sendAt, sendAt + 900);
+  const sendGuardAt = sendBody.indexOf("if (!extensionAlive()) {");
+  const firstNoticeAt = sendBody.indexOf("正在归档视频…");
+  assert.ok(sendGuardAt > 0 && firstNoticeAt > 0 && sendGuardAt < firstNoticeAt, "sendFavorite 开头就要先认上下文");
+  // 提示文案必须两本词典都有，否则英文界面会原样显示中文
+  const { readDictionary } = require("./i18n-extract.cjs");
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = readDictionary(locale);
+    for (const key of ["扩展刚更新过", "这个页面还在跑旧的那一份脚本，刷新一下（F5）就能继续归档。"]) {
+      assert.ok(dictionary[key], `${locale} 词典里缺「${key}」`);
+    }
+  }
+});

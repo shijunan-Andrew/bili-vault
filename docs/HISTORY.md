@@ -5,6 +5,21 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.1：认得出「扩展刚更新过」的旧页面
+
+**改了什么**：`content.js` 加了一只 `extensionAlive()`（判据 `typeof chrome !== "undefined" && Boolean(chrome.runtime?.id)`）与一张专门的提示卡；点击路径与 `sendFavorite()` 两处都先用它认一次上下文，失效时只警告、不再往下走。
+
+**为什么**：1.8.0 发布后用户在 `chrome://extensions` 的「错误」页里看到一条 `Uncaught TypeError: Cannot read properties of undefined (reading 'sendMessage')`，堆叠指向 `content.js:363` 的 `chrome.runtime.sendMessage({ type: "bca-import-status" }, …)`。那一行是 V1.7.4 就有的代码，1.8.0 一个字没动。
+
+**根因**：用户刚按了「重新加载」更新到 1.8.0，而 B 站视频页是更新之前就开着的 —— 页面里跑的还是**旧的那份内容脚本**。Chrome 重新加载扩展时会把旧的内容脚本上下文作废，但**不会**给已打开的标签页重新注入：脚本还活着，`chrome.runtime` 却已经变回 `undefined`，于是任何 `sendMessage` 都抛未捕获 TypeError。扩展卡片上那个「Service Worker（无效）」是重载瞬间的正常状态（旧注册失效、新 worker 还没被叫醒）。
+
+**踩的坑**：
+
+- 这类失败一直被当成「用户该知道要刷新」，可界面上没有任何地方说过 —— 用户看到的是「正在归档视频…」卡住 + 错误页里一条看不懂的 TypeError。按三级分档这属于**一档**（用户主动发起、失败必须说出来），给一张「刷新一下就好」的卡才是对的出口。
+- 失效时 `archiveEnabled` 永远是 `false`（启动期那次 `storage.get` 早就被掐断了），所以顺手的 `if (!archiveEnabled) return;` 会**静默**吞掉整件事。现在改成「先认上下文」，失效那一路只在用户真的点到收藏弹窗的「确定」时才提示，且只提示一次，别每点一下都弹。
+
+**没动的**：`document_start` 那两处 `chrome.storage.local.get` 一个都没加守卫 —— 内容脚本被注入的那一刻扩展必然活着，加守卫只会让代码更难读；真正会断的是「注入之后、用户交互之前」这段，也就是这次补的两处。
+
 ## V1.8.0：归档变快、不再假报失败
 
 **改了什么**：四处，全都围绕「B 站收藏后自动归档」这一条链路。
