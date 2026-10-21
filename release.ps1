@@ -9,7 +9,7 @@
     1. 检查工作区是否干净
     2. 检查代理（Clash 没开就提醒你去开，然后退出，不动任何东西）
     3. 改 3 处版本号（manifest.json / 测试断言 / library.html）
-    4. 跑全部检查：语法 → 回归测试 → 词典覆盖
+    4. 跑全部检查（scripts/check-all.cjs，与 GitHub Actions 是同一套）
     5. 任何一步不过，自动回滚版本号改动并退出
     6. 提交 → 打 tag（V<版本>）→ 推送
 
@@ -216,145 +216,16 @@ try {
 
 # ───────── 4. 检查 ─────────
 Say "`n【4/6】跑检查" $C_DIM
-$failed = $false
 
-Say "  语法检查…" $C_DIM
-# _ref 下的 *.pretty.js 是互联网档案馆导出的 pretty-print JSON 转储（整份文件以一个 { 开头），
-# 不是可执行脚本，node --check 必然报错；它们只作对照资料，不参与扩展运行。
-$jsFiles = @(Get-ChildItem -Recurse -File -Include *.js, *.cjs | Where-Object { $_.FullName -notlike '*\.git\*' -and $_.FullName -notlike '*\_ref\*' })
-foreach ($f in $jsFiles) {
-  Invoke-Native $Node @('--check', $f.FullName) | Out-Null
-  if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] $($f.Name) 语法错误" $C_RED; $failed = $true }
-}
-if (-not $failed) { Say "    [$([char]0x2713)] $($jsFiles.Count) 个 JS 文件全部通过" $C_GREEN }
-
-Say "  回归测试（静态断言）…" $C_DIM
-Invoke-Native $Node @('test/stability.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
-if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 测试未全过" $C_RED; $failed = $true }
-
-Say "  纯函数单元测试（真执行 archive-core.js）…" $C_DIM
-Invoke-Native $Node @('test/archive-core.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
-if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 单元测试未全过" $C_RED; $failed = $true }
-
-# 1.5.0 起本地数据库的纯逻辑单独一套：它不碰浏览器 API，可以在 node 里真跑。
-Say "  纯函数单元测试（真执行 stats-core.js）…" $C_DIM
-Invoke-Native $Node @('test/stats-core.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
-if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 数据库单元测试未全过" $C_RED; $failed = $true }
-
-# 1.7.22：这一套把 background.js 整份丢进 vm 跑起来（配上内存版 chrome.storage 与内存版
-# 目录树），真调 readStatsDatabase / writeStatsDatabase / flushStatsPendingRecords /
-# rollbackStatsRecords / 三个写入口的互斥链 / 归档写锁，外加从 library.js 抠出来的
-# nativeHostRequest。以前这一整块只有静态断言盖着 —— 静态断言能证明「写着 canWrite=false」，
-# 证明不了「读不出来的时候真的一字节都没写」，1.7.0 的 P0 就是这么漏过去的。
-Say "  浏览器环境单元测试（真执行 background.js 与 library.js 的原生消息）…" $C_DIM
-Invoke-Native $Node @('test/background.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
-if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 浏览器环境单元测试未全过" $C_RED; $failed = $true }
-
-# 1.7.23：页面脚本（library.js / popup.js / content.js）也进真执行测试 —— 最小 DOM + 影子
-# DOM + 真 MutationObserver，把「点确认收藏 → 弹层关上 → 发归档消息」整条链跑完。
-# 之前这三份文件只有静态文本断言，「点了之后到底发没发消息」是测不到的。
-Say "  页面脚本单元测试（真执行 library.js / popup.js / content.js）…" $C_DIM
-Invoke-Native $Node @('test/pages.test.cjs') | Select-String -Pattern '^ℹ (tests|pass|fail)' | ForEach-Object { Say "    $_" $C_DIM }
-if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 页面脚本单元测试未全过" $C_RED; $failed = $true }
-
-# 1.7.27：交接文档里的「当前状态」必须是脚本生成的，手写必漂。--check 只读不跑测试，
-# 对不上就说明文档落后了 —— 跑 node test/status.cjs --write 刷新，而不是去改数字。
-Say "  交接文档的「当前状态」…" $C_DIM
-Invoke-Native $Node @('test/status.cjs', '--check') | ForEach-Object { Say "    $_" $C_DIM }
-if ($LASTEXITCODE -ne 0) { Say "    [$([char]0x2716)] 交接文档的「当前状态」与仓库实际不一致" $C_RED; $failed = $true }
-
-Say "  词典覆盖…" $C_DIM
-$i18nOut = Invoke-Native $Node @('test/i18n-extract.cjs', '--check')
-$i18nOut | Select-String -Pattern '词条 \d+ 条' | ForEach-Object { Say "    $_" $C_DIM }
-if ($i18nOut -match '缺 [1-9]') { Say "    [$([char]0x2716)] 有词条缺翻译" $C_RED; $failed = $true }
-
-# 1.7.21：上面只拦「缺」不拦「多余」，结果就是一个数字都不报 —— 作者删掉的旧词条
-# 会一直留在两本词典里没人知道（当前各 52 条）。它不影响用户看到什么，所以仍然不
-# 拦发布，但每次发版把它打出来，涨了看得见；两本不一致才说明是真的记账出错。
-$orphanCounts = @()
-foreach ($line in $i18nOut) {
-  if ("$line" -match '多余\s+(\d+)') { $orphanCounts += [int]$Matches[1] }
-}
-$orphanCounts = @($orphanCounts | Select-Object -Unique | Sort-Object)
-if ($orphanCounts.Count -eq 1) {
-  Say "    作者已删的旧词条（不影响界面）：$($orphanCounts[0]) 条" $C_DIM
-} elseif ($orphanCounts.Count -gt 1) {
-  Say "    [$([char]0x2716)] 两本词典的多余条数不一致：$($orphanCounts -join ' / ')" $C_YELLOW
-}
-
-# 文档里写的词典条数也必须和词典实际条数一致。README 里那句「两本词典各 … 条」以前
-# 没人核对，加过词之后就停在旧数字上（847），而词典实际早就涨到 859 条了 —— 和下面
-# 的测试项数是同一类问题：数字写死在文档里，就一定会过期。
-# 条数直接从上面 i18n-extract --check 的输出里读；文档侧的锚点同样写成 HTML 注释。
-Say "  文档里的词典条数…" $C_DIM
-$dictCounts = @()
-foreach ($line in $i18nOut) {
-  if ("$line" -match '词条\s+(\d+)\s+条') { $dictCounts += [int]$Matches[1] }
-}
-$dictCounts = @($dictCounts | Select-Object -Unique)
-if ($dictCounts.Count -ne 1) {
-  Say "    [$([char]0x2716)] 没能从词典检查的输出里读出唯一的条数（读到 $($dictCounts.Count) 种）" $C_RED
-  $failed = $true
-} else {
-  $realDictCount = $dictCounts[0]
-  $dictMarkers = 0
-  $staleDict = @()
-  foreach ($doc in @('README.md', 'AI_HANDOFF.md', 'SMOKE_TEST.md')) {
-    $docPath = Join-Path $PSScriptRoot $doc
-    if (-not (Test-Path -LiteralPath $docPath)) { continue }
-    $docText = Get-Content -LiteralPath $docPath -Raw -Encoding UTF8
-    foreach ($m in [regex]::Matches($docText, '<!--\s*i18n-count:(\d+)\s*-->')) {
-      $dictMarkers++
-      if ([int]$m.Groups[1].Value -ne $realDictCount) {
-        $staleDict += "$doc 写的是 $($m.Groups[1].Value) 条，实际是 $realDictCount 条"
-      }
-    }
-  }
-  if ($dictMarkers -eq 0) {
-    Say "    [$([char]0x2716)] 三处文档里都找不到 <!-- i18n-count:N --> 标记" $C_RED
-    $failed = $true
-  } elseif ($staleDict.Count -gt 0) {
-    foreach ($line in $staleDict) { Say "    [$([char]0x2716)] $line" $C_RED }
-    Say "    改法：把上面这几个文件里的词典条数改成 $realDictCount（连同 i18n-count 标记一起改，只改数字）。" $C_YELLOW
-    $failed = $true
-  } else {
-    Say "    [$([char]0x2713)] 文档里的词典条数与词典一致（$realDictCount 条）" $C_GREEN
-  }
-}
-
-# 文档里写的测试项数必须和真实数量一致。这三处以前各写各的（141 / 141 / 127），
-# 实际早就涨到 163 了，读文档的人会以为测试规模还是原来那点 —— 和 README 版本历史
-# 是同一类问题：数字写死在文档里，就一定会过期。
-# 标记写成 HTML 注释，渲染出来看不见，但脚本能核对。
-Say "  文档里的测试项数…" $C_DIM
-$stabilitySrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'test/stability.test.cjs') -Raw -Encoding UTF8
-$realTestCount = ([regex]::Matches($stabilitySrc, '(?m)^test\(')).Count
-$staleDocs = @()
-foreach ($doc in @('SMOKE_TEST.md', 'README.md', 'AI_HANDOFF.md')) {
-  $docPath = Join-Path $PSScriptRoot $doc
-  if (-not (Test-Path -LiteralPath $docPath)) { $staleDocs += "$doc 不存在"; continue }
-  $docText = Get-Content -LiteralPath $docPath -Raw -Encoding UTF8
-  $markers = [regex]::Matches($docText, '<!--\s*test-count:(\d+)\s*-->')
-  if ($markers.Count -eq 0) { $staleDocs += "$doc 里找不到 <!-- test-count:N --> 标记"; continue }
-  foreach ($m in $markers) {
-    if ([int]$m.Groups[1].Value -ne $realTestCount) {
-      $staleDocs += "$doc 写的是 $($m.Groups[1].Value) 项，实际是 $realTestCount 项"
-    }
-  }
-}
-if ($staleDocs.Count -gt 0) {
-  foreach ($line in $staleDocs) { Say "    [$([char]0x2716)] $line" $C_RED }
-  Say "    改法：把这三处文档里的 test-count 标记统一改成 $realTestCount（只改数字）。" $C_YELLOW
-  $failed = $true
-} else {
-  Say "    [$([char]0x2713)] 三处文档都记着 $realTestCount 项" $C_GREEN
-}
-
-if ($failed) {
+# 检查逻辑不写在这里 —— 全部在 scripts/check-all.cjs。CI（.github/workflows/ci.yml）跑
+# 的是同一个脚本，所以本地发版与 GitHub 上只有一套真相：全仓 node --check、五套测试、
+# status.cjs --check、词典覆盖（多余词条只播报不拦）、三份文档的 i18n-count / test-count
+# 标记。Windows 专属自检（原生目录打开助手、csc 编译）不在里面，它们只能在真机上跑。
+Invoke-Native $Node @('scripts/check-all.cjs') | ForEach-Object { Say "  $_" }
+if ($LASTEXITCODE -ne 0) {
   & $rollback
   Die "检查未通过，版本号改动已回滚。修好之后重新运行。"
 }
-Say "  [$([char]0x2713)] 全部检查通过" $C_GREEN
 
 # ───────── 5. 确认 ─────────
 $msg = if ($说明) { "$Tag：$说明" } else { $Tag }

@@ -236,8 +236,11 @@ test("stripComments 不许把字符串里的块注释起止符当成注释（P3-
     "注释体只换成空白，行数必须一致（否则带 m 的断言会整体错位）");
   assert.equal(stripped.length, raw.length,
     "注释体换成等长空白，长度必须一致（否则区间断言会整体前移）");
-  // 换行本身不能被子串替换吃掉：拿一个真实块注释确认它内部的 \r\n 还在
-  assert.ok(/\/\*[\s\S]{0,80}\r\n[\s\S]{0,80}\*\//.test(raw), "前提：仓库里块注释确实跨行");
+  // 换行本身不能被子串替换吃掉：拿一个真实块注释确认它内部的换行还在。
+  // 换行符按「实际检出的样子」判，不写死成 CRLF —— Windows 工作区是 CRLF，而
+  // GitHub Actions 的 ubuntu 检出（`.gitattributes` 是 `* text=auto`）是 LF，
+  // 写死 \r\n 会让这条断言在 CI 上假红。
+  assert.ok(/\/\*[\s\S]{0,80}\r?\n[\s\S]{0,80}\*\//.test(raw), "前提：仓库里块注释确实跨行");
   assert.ok(/[^\s]/.test(stripped), "剥离后不该变成全空白");
 });
 
@@ -3021,15 +3024,18 @@ test("批量搬运有进度也能中止，中止后不许再往下搬（V1.7.21�
   assert.match(lib, /BcaI18n\.t\("移动或复制已中止"\)/, "标题要区分「中止」与「部分完成」");
 });
 
-test("release.ps1 每次发版都要把「多余词条」的条数打出来（V1.7.21）", () => {
-  const script = readProjectFile("release.ps1");
+test("检查脚本每次都要把「多余词条」的条数打出来（V1.7.21）", () => {
+  // P0 工程（加 CI）起，检查逻辑从 release.ps1 抽进 scripts/check-all.cjs（CI 跑同一份），
+  // 这条守卫跟着权威位置走，钉住的三件事不变：读得出多余条数、要打给人看、只播报不做闸门。
+  const script = readProjectFile("scripts/check-all.cjs");
   assert.match(script, /多余\\s\+\(\\d\+\)/, "要从 i18n 输出里读出多余条数");
   assert.match(script, /作者已删的旧词条（不影响界面）：/, "要把条数打给发版的人看");
-  const at = script.indexOf("$orphanCounts = @()");
+  const at = script.indexOf("function reportOrphans");
   assert.ok(at > 0, "找不到多余条数那一段");
-  const block = script.slice(at, script.indexOf("# 文档里写的词典条数", at));
+  const block = script.slice(at, script.indexOf("文档里写的词典条数", at));
   assert.ok(block.length > 0, "多余条数那一段要落在文档条数检查之前");
-  assert.doesNotMatch(block, /\$failed = \$true/, "多余只播报，不做闸门");
+  assert.doesNotMatch(block, /\bbad\(/, "多余只播报，不做闸门");
+  assert.match(readProjectFile("release.ps1"), /scripts\/check-all\.cjs/, "release.ps1 第 4 步要跑这个脚本");
 });
 
 // ---- V1.7.24（facet-compat §3.2：Windows 260 字符路径上限的度量与报错分类）----
@@ -5225,7 +5231,7 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   assert.match(backgroundCode, /budgetExhausted \|\| rateLimitedAbort/);
 
   // P2-21：打包白名单脚本在，且排除清单里确实有开发文件
-  for (const name of [".node-path", "test", "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1", "docs"]) {
+  for (const name of [".node-path", "test", "scripts", ".github", "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1", "docs"]) {
     assert.ok(pack.includes(`"${name}"`), `pack.ps1 要排除 ${name}`);
   }
 
@@ -5698,7 +5704,9 @@ test("新的执行级测试不许重写一份被测实现，且必须接进发�
   assert.match(testSrc, /carveFunction\(source, "nativeHostRequest"\)/);
 
   const release = readProjectFile("release.ps1");
-  assert.match(release, /test\/background\.test\.cjs/, "发版第 4 步要真的跑它，否则这套测试是摆设");
+  assert.match(release, /scripts\/check-all\.cjs/, "发版第 4 步要跑共用检查脚本，否则这套测试是摆设");
+  assert.match(readProjectFile("scripts/check-all.cjs"), /test\/background\.test\.cjs/,
+    "共用检查脚本要真的跑这一套，否则这套测试是摆设");
   assert.ok(fs.existsSync(path.join(projectRoot, "test", "harness.cjs")), "test/harness.cjs 要在包里");
 
   // 变异测试打的那几行必须是可执行语句，不是注释 —— 打在注释上会得出"守卫有效"的错误结论（1.7.16 踩过）
@@ -5719,4 +5727,42 @@ test("新的执行级测试不许重写一份被测实现，且必须接进发�
       assert.doesNotMatch(line.trim(), /^(\/\/|\*|\/\*)/, "变异锚点落在注释里了：" + label + " —— 变异会变成假绿");
     }
   }
+});
+
+// ---- P0 工程：加 CI（发版与 GitHub Actions 共用一套检查）----
+//
+// 以前所有校验只在 release.ps1 里、只在发版时跑：推到 main 的代码在下次发版之前没人验证过，
+// 交接给多个 agent 时最大的风险就是「有人把 main 推红而无人发现」。现在 CI 与发版跑的是同一个
+// scripts/check-all.cjs —— 下面几条断言钉住「检查清单只有一份」和「Windows 专属自检不进 CI」，
+// 免得下一个人顺手在 workflow 里再列一遍各套测试，两套真相就是从那里开始漂的。
+
+test("CI 与发版跑同一套检查，检查清单只有一份（P0 工程）", () => {
+  const workflowPath = path.join(projectRoot, ".github", "workflows", "ci.yml");
+  assert.ok(fs.existsSync(workflowPath), "仓库要有 .github/workflows/ci.yml");
+  const workflow = fs.readFileSync(workflowPath, "utf8");
+  const shared = readProjectFile("scripts/check-all.cjs");
+  const release = readProjectFile("release.ps1");
+
+  // CI 侧：ubuntu + Node 22，只跑一个入口
+  assert.match(workflow, /runs-on:\s*ubuntu-latest/, "CI 跑在 ubuntu-latest 上（Windows 专属自检不进来）");
+  assert.match(workflow, /node-version:\s*["']?22["']?/, "CI 用 Node 22");
+  assert.match(workflow, /push:/, "推 main 就要跑");
+  assert.match(workflow, /pull_request:/, "PR 也要跑");
+  assert.match(workflow, /run:\s*node scripts\/check-all\.cjs/, "CI 要跑 scripts/check-all.cjs");
+  assert.doesNotMatch(workflow, /test\/[a-z-]+\.test\.cjs/, "workflow 里不许再列各套测试 —— 清单在 check-all.cjs");
+  assert.doesNotMatch(workflow, /test-native-folder-opener|csc/, "Windows 专属自检不许塞进 CI（ubuntu 上跑不了）");
+
+  // 共用脚本：TODO 里点名的那五样都要真的跑到
+  for (const file of ["stability", "archive-core", "stats-core", "background", "pages"]) {
+    assert.ok(shared.includes("test/" + file + ".test.cjs"), "check-all.cjs 要跑 " + file + ".test.cjs");
+  }
+  assert.ok(shared.includes("test/status.cjs"), "check-all.cjs 要跑 status.cjs --check");
+  assert.ok(shared.includes("test/i18n-extract.cjs"), "check-all.cjs 要跑 i18n-extract.cjs --check");
+  assert.ok(shared.includes("i18n-count") && shared.includes("test-count"), "check-all.cjs 要核三处文档标记");
+  assert.match(shared, /function listScripts/, "check-all.cjs 要遍历全仓 .js / .cjs");
+  assert.match(shared, /"--check", path\.join\(root, file\)/, "每个脚本都要过 node --check");
+
+  // 发版侧：只调用共用脚本，不许自己再列一遍测试
+  assert.match(release, /Invoke-Native \$Node @\('scripts\/check-all\.cjs'\)/, "release.ps1 第 4 步要跑这个脚本");
+  assert.doesNotMatch(release, /Invoke-Native \$Node @\('test\//, "release.ps1 里不许再单独列测试项 —— 那样又会漂");
 });

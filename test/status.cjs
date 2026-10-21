@@ -23,7 +23,12 @@ const SUITES = [
 ];
 
 function nodeRun(file) {
-  return execFileSync(process.execPath, [path.join(root, file)], { cwd: root, encoding: "utf8" });
+  // 和 scripts/check-all.cjs 一样写死 spec reporter：Node 22 在非 TTY（CI、管道）下
+  // 默认吐 TAP（`# tests 254`），而下面按 `ℹ tests 254` 解析。输出格式不能随终端漂。
+  return execFileSync(process.execPath, ["--test-reporter=spec", path.join(root, file)], {
+    cwd: root,
+    encoding: "utf8"
+  });
 }
 
 function git(args) {

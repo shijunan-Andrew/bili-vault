@@ -9,7 +9,7 @@
 | [`docs/HISTORY.md`](docs/HISTORY.md) | 1.3.0 到现在逐版本改了什么、根因是什么、踩过哪些坑 | 想知道「为什么当初这么做」时查 |
 | [`README.md`](README.md) | 面向使用者的安装与功能说明，**只放最新一版的版本说明** | 要改用户可见行为时看 |
 
-> **别把本文当唯一真相。** 版本号、测试项数、词典条数一律以 `manifest.json`、`git`、测试实际输出为准。本文里带 `<!-- test-count -->` / `<!-- i18n-count -->` 标记的数字会被 `release.ps1` 自动核对，没标记的数字可能已经过期。
+> **别把本文当唯一真相。** 版本号、测试项数、词典条数一律以 `manifest.json`、`git`、测试实际输出为准。本文里带 `<!-- test-count -->` / `<!-- i18n-count -->` 标记的数字会被 `scripts/check-all.cjs` 自动核对（发版第 4 步与 GitHub Actions 跑的是同一个脚本），没标记的数字可能已经过期。
 
 **目录**
 
@@ -43,6 +43,7 @@
 | 新踩到一个「不看就会再犯」的坑 | `AI_HANDOFF.md`「修改原则」 | 先写结论（该怎么做），再写一句来由（哪个版本踩的、错在哪） |
 | 用法 / 步骤变了 | `README.md`（用户侧）+ `SMOKE_TEST.md`（发版侧） | 两边都要改；只改一处等于留了个假动作 |
 | 冒烟清单要覆盖新功能 | `SMOKE_TEST.md` | 加在对应版本小节里，写清「怎么做 / 看到什么算对」 |
+| 要加 / 改一条检查项 | `scripts/check-all.cjs`（CI 的 `.github/workflows/ci.yml` 只在平台或 Node 版本变时动） | 检查逻辑只写一份：发版第 4 步与 GitHub Actions 调的都是这个脚本 |
 | 待办有增减、做完了、换方向了 | `Desktop\bili_vault_ref\TODO.md` | 做完的**从待办里删掉**，在「已完成」记一行版本号；别把做完的事留在待办里 |
 | 任何一份文档的数字 / 路径 / 命令过期 | 就地改 | 优先改成「读法」而不是写死的值（指向 `manifest.json`、`git`、`test/status.cjs` 的输出） |
 | `AI_HANDOFF.md`「当前状态」要与仓库对账 | `AI_HANDOFF.md` | 跑 `node test/status.cjs --write`（它会真跑五套测试），**不要手改数字** |
@@ -51,7 +52,7 @@
 **维护时不要做的四件事**
 
 1. 不要在 `AI_HANDOFF.md` 写逐版本小节，也不要把历史堆回 `README.md` —— 逐版本记录（含用户可见的旧版说明）全部归 `docs/HISTORY.md`，`README.md` 只留最新一版。
-2. 不要写死版本号、测试项数、tag 数量、代码行号 —— 都会漂。测试项数与词典条数用 `<!-- test-count:N -->` / `<!-- i18n-count:N -->` 标记，`release.ps1` 每次发版自动核对。
+2. 不要写死版本号、测试项数、tag 数量、代码行号 —— 都会漂。测试项数与词典条数用 `<!-- test-count:N -->` / `<!-- i18n-count:N -->` 标记，`scripts/check-all.cjs` 每次发版、每次 CI 都自动核对。
 3. 不要把「当时的临时状态」写成永久结论。已解决的写「已定性（x.y.z 处理完）」，没做的写「未修」或「已知欠账」，不要含糊其辞。
 4. 不要重复描述代码里已经有的守卫细节 —— 给判断标准和守卫测试名就够了，实现看代码。
 
@@ -71,15 +72,15 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 953 条（`zh-TW` / `en` 各一份；缺 0，作者已删的旧词条 52） |
-| 测试基线 | stability 253 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
+| 测试基线 | stability 254 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-18 14:49，当时 HEAD `a62561f`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-21 21:39，当时 HEAD `9ab80f0`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
 
 ```powershell
-node test/status.cjs --check   # 只核对，不跑测试；release.ps1 第 4 步会跑
+node test/status.cjs --check   # 只核对，不跑测试；发版第 4 步与 CI 都会跑
 node test/status.cjs --write   # 跑完五套测试再刷新本表
 ```
 
@@ -106,7 +107,7 @@ node test/i18n-extract.cjs --check
 pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 ```
 
-它会：检查工作区干净与能不能到 GitHub → 改写 3 处版本号 → 跑全部测试与文档标记核对 → 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
+它会：检查工作区干净与能不能到 GitHub → 改写 3 处版本号 → 跑全部检查（`node scripts/check-all.cjs`，与 GitHub Actions 同一套）→ 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
 
 **十条不能破的硬规则**（来由见「修改原则」）
 
@@ -193,7 +194,7 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 
 判断标准只有一句：**少了这个文件，别人 clone 下来就做不成项目** —— 是，就进仓库；**只是这次排查 / 审查 / 调试用得上的** —— 进 `bili_vault_ref`。
 
-- **进仓库** `Desktop\bili-vault\`：扩展代码（`*.js` / `*.html` / `*.css`）、`manifest.json`、`test/`、`docs/`、`native/`、`locales/`、`pack.ps1` / `release.ps1` / `test-native-*.ps1`、`README.md` / `SMOKE_TEST.md` / `AI_HANDOFF.md`。
+- **进仓库** `Desktop\bili-vault\`：扩展代码（`*.js` / `*.html` / `*.css`）、`manifest.json`、`test/`、`docs/`、`native/`、`locales/`、`scripts/`（`check-all.cjs`：发版与 CI 共用的检查）、`.github/`（`workflows/ci.yml`）、`pack.ps1` / `release.ps1` / `test-native-*.ps1`、`README.md` / `SMOKE_TEST.md` / `AI_HANDOFF.md`。
 - **进** `Desktop\bili_vault_ref\`：审查报告与分面材料、一次性补丁脚本、探针与反编译脚本、调试用的临时 `.cjs` / `.ps1`、截图与取证数据、批次简报、页面试验台，以及**待办清单 `TODO.md`**。
 - **不要往扩展根目录丢临时文件。** Chrome 拒绝加载任何以 `_` 开头的文件或目录（`Filenames starting with "_" are reserved`），插件会整个加载不了；`release.ps1` 第 1 步也会因为这类条目直接拒绝发版。排查脚本一律写在 `bili_vault_ref` 里，需要跑就用绝对路径调用。
 - `bili_vault_ref` **不是仓库的一部分**，没有 git 历史；里面的脚本大多写死了当时的绝对路径、补丁也早已应用，只能当参考读，别直接重跑。
@@ -359,7 +360,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | `native/*.ps1`、`native/*.cs`、安装/卸载脚本 | `pwsh -NoProfile -File test-native-folder-opener.ps1` 自检 |
 | 任何 `.ps1` / `.cs` | **确认仍是 UTF-8 带 BOM**（`edit` / `write` 会剥掉它） |
 | 任何 `.js` | `node --check` 该文件（静态断言看不见语法错误） |
-| 发版相关（`release.ps1` / `pack.ps1`） | 全量 —— `release.ps1` 第 4 步跑的就是全量 |
+| 发版相关（`release.ps1` / `pack.ps1` / `.github/workflows/ci.yml`） | 全量 —— `node scripts/check-all.cjs`；发版第 4 步与 GitHub Actions 调的都是它 |
 
 **五套测试各管什么、挂了通常意味着什么**
 
@@ -371,9 +372,9 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | `background.test.cjs` | 在 vm 里跑 `background.js`：内存版 `chrome.*` + FileSystem，覆盖统计库写入 / 回队 / 回滚 / 互斥、归档写锁 | service worker 的契约破了 |
 | `pages.test.cjs` | 在最小 DOM 里跑 `library.js` / `popup.js` / `content.js` | 页面交互、选择器或事件链破了 |
 
-各套的项数**不写死在这里**（会漂）：五套的当前值见上面「当前状态」那张脚本生成的表，`stability.test.cjs` 的总数另有三处 `<!-- test-count:N -->` 标记由 `release.ps1` 核对。
+各套的项数**不写死在这里**（会漂）：五套的当前值见上面「当前状态」那张脚本生成的表，`stability.test.cjs` 的总数另有三处 `<!-- test-count:N -->` 标记由 `scripts/check-all.cjs` 核对。
 
-在项目根目录执行。**下面五套都要跑**，`release.ps1` 第 4 步跑的也是这五套，任一退出码非 0 就算失败：
+在项目根目录执行。**下面五套都要跑**；`node scripts/check-all.cjs` 把「这五套 + 语法 + 词典 + 状态块 + 文档标记」一次跑完（发版第 4 步与 GitHub Actions 用的都是它），任一退出码非 0 就算失败：
 
 ```powershell
 node test/stability.test.cjs      # 静态回归断言为主（项数以实际输出为准，别写死）
@@ -385,7 +386,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:253 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:254 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -396,6 +397,10 @@ node test/i18n-extract.cjs --check
 其中多项是**从生产文件里抽源码执行的**（`loadBackgroundFunctions` / 沙箱加载 `theme.js`、`i18n.js`、`formatCount`），测的是真正跑起来的那份实现，不是复制品。
 
 **另外要清楚这套测试的盲区**：「每个脚本能否真正解析」那一项会用 `new vm.Script()` 把每个 JS 真编译一遍——文本级正则断言看不见语法错误，这条是专门补那个盲区的（4.8.2 真的靠它拦下过一次）。其余断言绝大多数是**读文件比对文本**，不是执行代码，所以它们能证明「约定没被违反」，不能证明「功能真的能跑」。改动逻辑之后仍然要在真机上验证。
+
+**CI（GitHub Actions）**：`.github/workflows/ci.yml` 在每次 `push` 到 `main`、每次 PR 上跑 `ubuntu-latest` + Node 22，唯一的命令是 `node scripts/check-all.cjs` —— **和 `release.ps1` 第 4 步是同一个脚本**，检查清单只有一份，不要往 workflow 里另写命令（`test/stability.test.cjs` 有断言拦这个）。Windows 专属自检（`test-native-folder-opener.ps1`、原生助手的 `csc` 编译）只能在真机上跑，**不进 CI**。仓库零 npm 依赖，所以 CI 里没有任何 `npm install`。本地想复现 CI 的红：直接跑 `node scripts/check-all.cjs`（差别只在 LF 检出与 Node 22 版本）。
+
+**这也是一条写断言的坑**：`.gitattributes` 是 `* text=auto`，所以 CI 的 ubuntu 检出里 `*.js` / `*.md` 是 **LF**，而 Windows 工作区是 CRLF。把换行符写死成 `\r\n` 的断言只有 Windows 能过（P0 加 CI 时就抓到一条：`stripComments` 那条断言原本写死 `\r\n`，在 LF 检出里假红）。判换行请用 `\r?\n`，或者按实际检出的样子推。
 
 另外在本地归档上跑一次体检（统计有多少条记录其实没有标签或简介）：
 
@@ -451,11 +456,12 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 1. 改过的每个 `.js` 都过了 `node --check`（改得多就跑全仓）。
 2. 五套测试全绿，不是「只有相关的那套绿」。
 3. 动过词典键：`node test/i18n-extract.cjs --check` 缺 0 条。
-4. 动过测试项数或词典条数：三处 `<!-- test-count:N -->` / `<!-- i18n-count:N -->` 与实际一致（`release.ps1` 会卡，但别等它卡）。
+4. 动过测试项数或词典条数：三处 `<!-- test-count:N -->` / `<!-- i18n-count:N -->` 与实际一致（`node scripts/check-all.cjs` 会卡，CI 也会卡，但别等它卡）。
 5. 动过「当前状态」相关的东西：`node test/status.cjs --write` 刷新过。
 6. 动过界面：真机预览走过改动的页面（`C:\Users\Maxwell\Desktop\bili_vault_ref\_appearance-preview.cjs`，端口 8792）。
 7. `git status` 干净；**没发版就明说「还没发版」**，不要把「代码写完」说成「已经上线」。
 8. 回复里报清楚：改了哪些文件、测试数字、还剩什么没做。
+9. 推上 `main` 之后看一眼 GitHub Actions：CI 要是绿的（本地 `node scripts/check-all.cjs` 通过基本就等于绿，差别只在 LF 检出与 Node 22）。
 
 **别用「应该没问题」「理论上可以」代替上面任何一条。**
 
@@ -623,7 +629,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     3. **凡是跨页面/跨进程等待的队列，等待必须有上限，并且要能说清为什么没执行。**（P1-3）`runInSaveQueueWithDeadline()` 超时返回 `{ok:false, busy:true, message:"本地队列正忙…"}`，同时把这条收藏记进 `pendingFavorite` 以便重试。MV3 的 Service Worker 随时会被回收，**挂在队列里等着的条目等于已经丢了**。
     4. **凡是收尾（成功 / 取消 / 风控）都要先把「已经跑完」写进持久状态，再清理。**（P0-1）`finishImportRunSnapshot()` 先写 `{active:false, finished:true}` 再删键 —— 否则收尾那几个 `await` 之间被回收，快照会停在「有一轮正在进行」，下次启动就把**已经成功**的那一轮当成中断。判据侧同理：`leftover.active !== true` 时不能宣告中断。
     5. **纯本地的长循环也要保活**（P1-4：`keepServiceWorkerAlive("scan"/"refresh")`），`uniqueTimeFolder` 撞到同名**文件**（`TypeMismatchError`）要换后缀继续而不是抛错（P1-6），风控码 `IMPORT_RATE_LIMIT_CODES` 是 `{-412, -352, -509, -799}` 而恢复扫描撞上要整轮停（P1-8）。
-    6. **发分发包用 `pack.ps1`，别手工压 zip**（P2-21）：它排掉 `.git` / `test/` / 三份 md / `release.ps1` / `pack.ps1` / `.node-path`，并在打包前断言「清单完整、开发文件没混进去」。
+    6. **发分发包用 `pack.ps1`，别手工压 zip**（P2-21）：它排掉 `.git` / `.gitattributes` / `.gitignore` / `.github` / `.node-path` / `test/` / `scripts/` / `docs/` / 三份 md / `release.ps1` / `pack.ps1`，并在打包前断言「清单完整、开发文件没混进去」。
     7. **`release.ps1` 的 README 小节守卫是拿 `git tag` 全量比对的**（不只是本次要发的版本）—— 起因是 V1.4.0 的整节标题被一次编辑误删，而当时发的是 V1.4.1，隔了两个版本才发现。**编辑 README 时不要动 `## V<版本>：` 这一整行**；`test/stability.test.cjs` 里另有一条断言要求这些小节从新到旧排列、且 `## V1.4.0：` 必须存在。
     8. **开发阶段只要代码，不要 Release、不要桌面 zip**（用户 2026-10-14 明确要求，原话「现在插件还在测试开发阶段，不用上传 release，只需要上传代码就行了，以后不用在我桌面上生成 zip 了」）：`release.ps1` 照跑（它就是「提交 + 打 tag + 推送」＝上传代码），**不往 GitHub 建 Release、不把安装包传进 Release、也不再跑 `pack.ps1` 往桌面写 `bili-vault-<版本>.zip`**。注意 `release.ps1` 本身不建 Release（`api.github.com/.../releases` 一直是空的，V1.6.0–V1.6.5 都只有 tag），所以别再提醒用户「把 zip 传到 Release 页」—— 只有用户当面要安装包时才 `pack.ps1`，打完当场交给他。
     9. **收工要关掉临时起的浏览器与预览进程**（用户 2026-10-15 要求，原话「下次在你完成工作后关掉浏览器后台任务」）：验收用的预览服务器（`C:\Users\Maxwell\Desktop\bili_vault_ref\_appearance-preview.cjs`，端口 **8792**；查询参数 `locale=` / `theme=` / `glass=` / `wallpaper=` / `veiled=` / `bad=1`）和 `bsk` 浏览器会话都是临时脚手架 —— 交付／答复之前用 `job_kill` 停掉后台作业、`bsk_session stop` 关掉会话（`bsk_session list` 确认没有残留），别把它们留在用户的任务面板和会话列表里。
@@ -666,7 +672,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     1. **service worker 里没有词典**：`background.js` 拿不到 `BcaI18n` 的词典（它只管 storage 与网络），所以宠物互动这条消息只回 `{ ok, lineIndex, affinity, todayTouch, totalTouch, capped }`，四句台词写在 `pet.js` 里逐个 `translate("…")`。**后台一旦自己拼中文，等于绕过整套 i18n**；而且后台拼的字符串也没法随切语言更新。
     2. **台词必须写成一条条 `translate("…")` 调用**：`pet.js` 一开始把四句塞进 `const TOUCH_LINES = [...]` 数组字面量，`test/i18n-extract.cjs` 只认调用点，这四句就永远不进词典（缺了不报错，只是切语言那四句不翻译）。抽取器现在也认 `translate(` 这层包装 —— 但**新写的包装函数要同步告诉抽取器**，否则又是一个静默漏翻。
     3. **数据库只存明细**：`003database/database.json` 里只有「一条视频一条记录」，总数 / 今日 / 近 7 天 / 排行榜 / 柱状图全部由 `stats-core.js` 现算（`snapshot()`）。存了汇总就一定要同步更新，早晚会出现「图表和列表对不上」这类无法解释的 bug。
-    4. **纯函数模块要能被 node `require`**：`stats-core.js` 与 `archive-core.js` 一样，IIFE 挂 `globalThis` 给浏览器、末尾 `module.exports = api` 给 node —— 这样 `test/stats-core.test.cjs` 能在 node 里真跑（61 条），而不是只做文本断言。`release.ps1` 里这两套都要跑。
+    4. **纯函数模块要能被 node `require`**：`stats-core.js` 与 `archive-core.js` 一样，IIFE 挂 `globalThis` 给浏览器、末尾 `module.exports = api` 给 node —— 这样 `test/stats-core.test.cjs` 能在 node 里真跑（61 条），而不是只做文本断言。`scripts/check-all.cjs` 里这两套都要跑（发版第 4 步与 CI 都会调它）。
     5. **整份重建而不是增量合并**：收藏库扫描完调 `syncStatsDatabase()`，用 `databaseFromVideos(videos, { previous })` 把数据库整份重写（只保留 `createdAt` 与宠物状态）。扫描看得到的才算数 —— 用户在收藏库里删掉的视频不该继续留在统计里。
 
 ## 已知限制与历史背景

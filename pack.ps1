@@ -31,7 +31,7 @@ $version = $manifest.version
 # $actual 必须完全一致）—— 排除多了会把运行期文件一起丢掉，脚本会当场报错，
 # 而不是悄悄打出一个残缺的包。
 $excludeNames = @(
-  ".git", ".gitattributes", ".gitignore", ".node-path", "test",
+  ".git", ".gitattributes", ".gitignore", ".github", ".node-path", "test", "scripts",
   "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1", "pack.ps1",
   "bili-old-2015", "_ref", "docs"
 )
@@ -66,7 +66,7 @@ try {
   foreach ($required in @("manifest.json", "background.js", "content.js", "popup.html", "library.html", "settings.html", "locales/zh-TW.json", "locales/en.json")) {
     if (-not ($actual -contains $required)) { throw "运行期文件 $required 不在打包结果里" }
   }
-  foreach ($dev in @("test", "README.md", "AI_HANDOFF.md", "SMOKE_TEST.md", "release.ps1", "bili-old-2015", "_ref", "docs")) {
+  foreach ($dev in @("test", "scripts", ".github", "README.md", "AI_HANDOFF.md", "SMOKE_TEST.md", "release.ps1", "bili-old-2015", "_ref", "docs")) {
     if ($actual | Where-Object { $_ -eq $dev -or $_ -like "$dev/*" }) { throw "开发文件 $dev 混进打包结果了" }
   }
 

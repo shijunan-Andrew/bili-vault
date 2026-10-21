@@ -1,0 +1,37 @@
+# 哔哩藏库 Bili Vault · CI
+#
+# 目的：main 上每次推送、每个 PR 都跑一遍「本地发版时跑的那套检查」，别等下次发版才发现
+# 已经红了。检查逻辑不写在这里 —— 全在 scripts/check-all.cjs（release.ps1 第 4 步跑的
+# 也是它），所以 CI 与本地只有一套真相。要加检查项就改那个脚本，别在 workflow 里另写命令。
+#
+# 平台：ubuntu-latest + Node 22。Windows 专属自检（原生目录打开助手、原生助手编译）只能在
+# 真机上跑，不进 CI —— 人工清单见 SMOKE_TEST.md。仓库零 npm 依赖，所以没有任何安装步骤。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 五套测试 + 词典 + 语法 + 状态 + 文档标记
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+      - name: 装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 跑检查（与 release.ps1 第 4 步同一套）
+        run: node scripts/check-all.cjs
