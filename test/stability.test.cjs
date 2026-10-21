@@ -3019,18 +3019,23 @@ test("批量搬运有进度也能中止，中止后不许再往下搬（V1.7.21�
   assert.match(lib, /BcaI18n\.t\("移动或复制已中止"\)/, "标题要区分「中止」与「部分完成」");
 });
 
-test("检查脚本每次都要把「多余词条」的条数打出来（V1.7.21）", () => {
-  // P0 工程（加 CI）起，检查逻辑从 release.ps1 抽进 scripts/check-all.cjs（CI 跑同一份），
-  // 这条守卫跟着权威位置走，钉住的三件事不变：读得出多余条数、要打给人看、只播报不做闸门。
+test("多余的词典词条不再是「只播报」：1.7.34 清零之后，多余非 0 就是失败", () => {
+  // V1.7.21 立的规矩是「多余只播报不拦」，因为当时两本词典各囤了 52 条作者删掉的旧词条，
+  // 当闸门会让每次发版都红。1.7.34 把这 52 条清干净了，「多余」这个数字从此只有一个含义：
+  // 有人删了界面文案却没删词典条目（或者词典里混进了没在用的词）。所以现在必须当失败。
   const script = readProjectFile("scripts/check-all.cjs");
-  assert.match(script, /多余\\s\+\(\\d\+\)/, "要从 i18n 输出里读出多余条数");
-  assert.match(script, /作者已删的旧词条（不影响界面）：/, "要把条数打给发版的人看");
+  assert.match(script, /多余\s+(\d+)/, "要从 i18n 输出里读出多余条数");
+  assert.match(script, /作者已删的旧词条/, "失败信息要说清「多余」指的是什么");
   const at = script.indexOf("function reportOrphans");
   assert.ok(at > 0, "找不到多余条数那一段");
   const block = script.slice(at, script.indexOf("文档里写的词典条数", at));
   assert.ok(block.length > 0, "多余条数那一段要落在文档条数检查之前");
-  assert.doesNotMatch(block, /\bbad\(/, "多余只播报，不做闸门");
-  assert.match(readProjectFile("release.ps1"), /scripts\/check-all\.cjs/, "release.ps1 第 4 步要跑这个脚本");
+  assert.match(block, /\bbad\(/, "多余非 0 必须当失败，不能只播报（1.7.34 已把多余清零）");
+  // 清零这件事本身也要有守卫：否则词典里悄悄囤回几十条，只能等下次发版看数字才发现。
+  const { collect, readDictionary } = require("./i18n-extract.cjs");
+  const keys = new Set(collect().keys());
+  const extra = ["zh-TW", "en"].flatMap((locale) => Object.keys(readDictionary(locale)).filter((key) => !keys.has(key)));
+  assert.deepEqual(extra, [], "两本词典都不许有多余词条（作者删了 UI 就把条目一起删掉）");
 });
 
 // ---- V1.7.24（facet-compat §3.2：Windows 260 字符路径上限的度量与报错分类）----
@@ -5762,4 +5767,67 @@ test("CI 与发版跑同一套检查，检查清单只有一份（P0 工程）",
   // 发版侧：只调用共用脚本，不许自己再列一遍测试
   assert.match(release, /Invoke-Native \$Node @\('scripts\/check-all\.cjs'\)/, "release.ps1 第 4 步要跑这个脚本");
   assert.doesNotMatch(release, /Invoke-Native \$Node @\('test\//, "release.ps1 里不许再单独列测试项 —— 那样又会漂");
+});
+
+// ---- 静默吞错分档与性能基准的守卫（V1.7.34）----
+
+test("静默吞错按三级分档：二档必须留原因，三档要写明为什么可以静默（V1.7.34）", () => {
+  // 一档（用户主动发起、失败必须说出来）早就不是空 catch 了，所以裸 catch (_) {} 只可能是二档或三档。
+  // 二档：行为不变，但必须留下「为什么还能继续」的原因 —— 没有原因记录的降级，
+  // 等于把排查成本转嫁给下一次真机复现。
+  const background = readProjectFile("background.js");
+  for (const reason of [
+    "统计镜像写不进去（统计页会停在上一版数字）",
+    "归档写锁没立起来（这一次的跨上下文互斥失效）",
+    "归档写锁没清掉（下一轮操作可能被它挡住，30 分钟后才自动失效）",
+    "收尾快照没写进去（中断记录可能停在上一轮）",
+    "读已有归档的 BV / av 号失败（那条记录可能被重复导入）"
+  ]) {
+    assert.ok(background.includes(reason), `background.js 的二档降级要留原因：${reason}`);
+  }
+
+  const library = readProjectFile("library.js");
+  for (const reason of [
+    "归档写锁没立起来（这一次的跨上下文互斥失效）",
+    "归档写锁没清掉（下一轮操作可能被它挡住，30 分钟后才自动失效）",
+    "恢复界面视图设置失败（用默认的列表与每页数量）",
+    "读下载根目录失败（按没设置处理）",
+    "侧栏版本号没取到（这一处会留空）"
+  ]) {
+    assert.ok(library.includes(reason), `library.js 的二档降级要留原因：${reason}`);
+  }
+
+  // 三档是控制流与清理（探测文件是否存在、abort 之后重新抛、focus 释放、
+  // chrome.runtime.lastError 没有接收方、角标 best-effort），保持空 catch 是对的。
+  // 所以这里只给上界（棘轮）：数字涨了说明新写了一处，先判档、再决定要不要改这个上界。
+  for (const [file, limit] of [
+    ["background.js", 7],
+    ["library.js", 10],
+    ["popup.js", 3],
+    ["content.js", 1]
+  ]) {
+    const count = (readProjectFile(file).match(/catch \(_\) \{\}/g) || []).length;
+    assert.ok(
+      count <= limit,
+      `${file} 里裸 catch (_) {} 多了（${count} > ${limit}）：新的那一处先从三档里选一档，再改这个上界`
+    );
+  }
+
+  const architecture = readProjectFile("docs/ARCHITECTURE.md");
+  for (const tier of ["一档", "二档", "三档"]) {
+    assert.ok(architecture.includes(tier), `docs/ARCHITECTURE.md 要写清${tier}是怎么定的`);
+  }
+});
+
+test("数据层有了可复现的性能基准，且它不进门禁（V1.7.34）", () => {
+  const bench = readProjectFile("test/bench.cjs");
+  assert.ok(bench.includes("固定种子"), "bench.cjs 要说明数据来自固定种子 —— 否则两次结果没法比");
+  assert.doesNotMatch(bench, /Math\.random\(/, "bench.cjs 不许用 Math.random：样本一变，数字就没法比较");
+  for (const size of ["1000", "3000", "10000"]) {
+    assert.ok(bench.includes(size), `bench.cjs 要跑 ${size} 条记录这一档`);
+  }
+  assert.ok(bench.includes("--quick"), "bench.cjs 要有 --quick（改完代码随手量一遍）");
+
+  // 绝对耗时跟机器与 GC 绑定，进 CI 只会变成偶发假红 —— 它必须留在门禁外面。
+  assert.doesNotMatch(readProjectFile("scripts/check-all.cjs"), /bench\.cjs/, "bench.cjs 不许接进 check-all.cjs");
 });

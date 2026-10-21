@@ -14,7 +14,7 @@
  *   1. node --check 全仓 *.js / *.cjs（跳过 .git/ 与 _ref/）
  *   2. 五套测试：stability / archive-core / stats-core / background / pages
  *   3. test/status.cjs --check（「当前状态」那张表与实际一致）
- *   4. test/i18n-extract.cjs --check（缺词条即失败；多余词条只播报，不做闸门）
+ *   4. test/i18n-extract.cjs --check（缺词条、多余词条都算失败；1.7.34 已把多余清零）
  *   5. 三份文档的 <!-- i18n-count:N --> 与实际词典条数一致
  *   6. 三份文档的 <!-- test-count:N --> 与 stability.test.cjs 的 test() 项数一致
  *
@@ -172,18 +172,23 @@ function checkDictionary() {
   return undefined;
 }
 
-// 1.7.21 起：上面只拦「缺」不拦「多余」，结果就是一个数字都不报 —— 作者删掉的旧词条
-// 会一直留在两本词典里没人知道（当前各 52 条）。它不影响用户看到什么，所以仍然不拦
-// 发版，但每次检查都把它打出来，涨了看得见；两本不一致才说明是真的记账出错。
-// 注意：这一段**只播报不做闸门**，别在里面调 bad() 或置 failed。
+// 1.7.21 起先只播报不拦：当时两本词典各囤了 52 条作者删掉的旧词条，当闸门会让每次发版都红。
+// 1.7.34 把这 52 条清干净了（多余 0），于是「多余」这个数字只剩一个含义 —— 有人删了界面文案
+// 却没删词典条目，或者词典里混进了没在用的词。从这一版起它跟「缺」一样是闸门。
+// 两本数字不一致另说：那说明其中一本记错了，先查清楚再谈条数。
 function reportOrphans() {
   const counts = [...i18nOutput.matchAll(/多余\s+(\d+)/g)].map((match) => Number(match[1]));
   const unique = [...new Set(counts)].sort((a, b) => a - b);
-  if (unique.length === 1) {
-    note(`作者已删的旧词条（不影响界面）：${unique[0]} 条`);
-  } else if (unique.length > 1) {
-    note(`[!] 两本词典的多余条数不一致：${unique.join(" / ")}`);
+  if (!unique.length) {
+    return bad("没能从词典检查的输出里读出多余条数");
   }
+  if (unique.length > 1) {
+    return bad(`两本词典的多余条数不一致：${unique.join(" / ")}，先查清哪一本记错了`);
+  }
+  if (unique[0] !== 0) {
+    return bad(`词典里有 ${unique[0]} 条多余词条（作者已删的旧词条）：跑 node test/i18n-extract.cjs --check 看是哪些，删掉`);
+  }
+  return ok("词典里没有多余词条（多余 0 条）");
 }
 
 // ───────── 5. 文档里写的词典条数 ─────────

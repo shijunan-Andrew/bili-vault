@@ -256,7 +256,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **原生宿主名仍是 `com.bcatch.folder_opener`**（`b_catch` 时代的名字），宿主版本号 `3.9.0`（1.7.13 起每个响应都带 `protocol: 3`，扩展侧会校验）。**改名会让所有已安装用户的注册失效**，所以要么不改，要么改的时候写迁移脚本。
 - **扩展 ID 推不出来，只能读**。解压扩展的 ID 与加载时的绝对路径有关，改文件夹名后**以 `chrome://extensions` 显示的 ID 为准**；ID 变了就重跑 `install-native-folder-opener.ps1`。1.7.13 试过四种编码都算不出已装 ID，所以别写任何「从路径算 ID」的脚本。
 - **`openDb` 有三份**（`background.js`、`library.js`、`popup.js`；`download.js` 那一份已随 1.3.0 删除），三份都缺少 `objectStoreNames.contains` 守卫（当前版本号都是 1、升级只跑一次，所以没暴露；一旦有人把版本号改成 2 就会抛 `ConstraintError`）。
-- **全项目有一批静默吞错**（`catch (_) {}`），`library.js` 与 `background.js` 最多；用户可见的失败路径里大约一半是静默的。**处数别写死**，要数字现数：`grep -c "catch (_) {}" *.js`。
+- **静默吞错按三级分档（1.7.34 起）**。一档＝用户主动发起、失败必须说出来（throw / 弹窗 / 错误报告）；二档＝尽力而为的降级，**行为不变但必须留一条带原因的 `console.warn("原因（影响面）", error)`**；三档＝**是控制流或清理、不是吞掉失败**（探测文件是否存在、`writable.abort()` 之后重新抛、focus 释放、`chrome.runtime.lastError` 没有接收方、角标 best-effort、锁清理），保持 `catch (_) {}` 并写一行注释说明为什么可以静默。**处数别写死**，要数字现数：`grep -c "catch (_) {}" *.js`；`test/stability.test.cjs` 给 `background.js` / `library.js` / `popup.js` / `content.js` 各留了一个上界（棘轮），加一处新的就先从这三档里选一档，再改上界。1.7.34 只动了二档：统计镜像写入、归档写锁的立与清、收尾快照、读已有归档的 BV/av 号，以及收藏库侧的同类路径。
 - **归档路径仍要盯着 Windows 的 `MAX_PATH`（260）**。1.7.24 起改成「两段共用预算」：收藏夹段仍最多 120 字符，视频目录段按 `recordSegmentMax(collectionName)` 自动收紧，两段合计不超过 `PATH_SEGMENT_BUDGET_CHARS = 168`（= 260 − 假定根 60 − 预留 32）；`pathBudgetReport()` 能算出还差多少，`scanRoot` 碰到超长目录名会在扫描提示里报出来。**FSA 只给句柄不给真实路径**，所以根那 60 是假定值 —— 下载根放得极深时仍可能撞上限，撞上时报的是「路径过长」而不是「目录不存在」（`describeDirectoryCreateError`）。
 
 ### 图标与外链（4.8.1）

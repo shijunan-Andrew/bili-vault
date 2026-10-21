@@ -155,7 +155,12 @@ const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
 const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
 
 async function setArchiveWriteLock(kind) {
-  try { await chrome.storage.session.set({ [ARCHIVE_WRITE_LOCK_KEY]: { kind, since: Date.now() } }); } catch (_) {}
+  try {
+    await chrome.storage.session.set({ [ARCHIVE_WRITE_LOCK_KEY]: { kind, since: Date.now() } });
+  } catch (error) {
+    // 锁没立起来：这一次的跨上下文互斥退化成「各写各的」，统计库可能留下对不上的行。
+    console.warn("归档写锁没立起来（这一次的跨上下文互斥失效）", error);
+  }
 }
 
 // 只清自己那一把：别人后写进来的锁不能被顺手抹掉
@@ -164,7 +169,10 @@ async function clearArchiveWriteLock(kind) {
     const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
     const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
     if (!lock || !kind || lock.kind === kind) await chrome.storage.session.remove(ARCHIVE_WRITE_LOCK_KEY);
-  } catch (_) {}
+  } catch (error) {
+    // 没清掉：这把锁会挡下一次操作，30 分钟后才算陈旧遗留自动失效。
+    console.warn("归档写锁没清掉（下一轮操作可能被它挡住，30 分钟后才自动失效）", error);
+  }
 }
 
 function publishLibraryWriteLock() {
@@ -1606,7 +1614,10 @@ async function restoreViewSettings() {
     if (saved.libraryViewMode === "list" || saved.libraryViewMode === "grid") viewMode = saved.libraryViewMode;
     const size = Number(saved.libraryPageSize);
     if (PAGE_SIZES.includes(size)) pageSize = size;
-  } catch (_) {}
+  } catch (error) {
+    // 读不回来就用默认的视图模式与每页数量，界面上看不出来，但得留一条原因。
+    console.warn("恢复界面视图设置失败（用默认的列表与每页数量）", error);
+  }
 }
 
 /* ---------------- 4.6：配置导出 / 导入 ----------------
@@ -3303,7 +3314,11 @@ async function readDownloadRootPath() {
     // 老值用一次就从磁盘上抹掉，不给它继续明文常驻的机会
     try { await chrome.storage.local.remove("downloadRootPath"); } catch (_) {}
     return value;
-  } catch (_) { return ""; }
+  } catch (error) {
+    // 读不到就按「没设置过」处理（走默认目录）；这条老值可能还留在 storage 里没抹掉。
+    console.warn("读下载根目录失败（按没设置处理）", error);
+    return "";
+  }
 }
 
 async function getWritableDownloadParent({ create = false } = {}) {
@@ -5107,4 +5122,8 @@ BcaI18n.init().catch(() => {}).then(() => Promise.all([
 try {
   const sideVersion = document.getElementById("sideVersion");
   if (sideVersion) sideVersion.textContent = displayVersion(chrome.runtime.getManifest().version);
-} catch (_) {}
+} catch (error) {
+  // 侧栏版本号留空不影响任何功能，但「界面版本号不对」正是当初要修的那个问题，
+  // 所以失败要留痕，别让它静默地又错一次。
+  console.warn("侧栏版本号没取到（这一处会留空）", error);
+}

@@ -2211,7 +2211,12 @@ async function finishImportRunSnapshot() {
     ...importRunSnapshot, active: false, paused: false, finished: true, finishedAt: Date.now()
   };
   importRunPublishAt = Date.now();
-  try { await writeImportRunSnapshot(); } catch (_) {}
+  try {
+    await writeImportRunSnapshot();
+  } catch (error) {
+    // 收尾快照写不进去：中断记录会停在上一轮的状态（不会误判成可回滚，但会不准）。
+    console.warn("收尾快照没写进去（中断记录可能停在上一轮）", error);
+  }
   return clearImportRunSnapshot();
 }
 
@@ -2798,7 +2803,10 @@ async function readExistingImportIdentifiers(collection) {
         const derivedBvid = importAidToBv(aid);
         if (derivedBvid) identifiers.add(`bvid:${derivedBvid}`);
       }
-    } catch (_) {}
+    } catch (error) {
+      // 这一条读不出来就当它不存在：那条记录可能被当成新视频再导入一次。
+      console.warn("读已有归档的 BV / av 号失败（那条记录可能被重复导入）", error);
+    }
   }
   return identifiers;
 }
@@ -3044,7 +3052,11 @@ async function syncStatsMirror(database) {
   if (current && JSON.stringify(current) === JSON.stringify(next)) return next;
   try {
     await chrome.storage.local.set({ [STATS_MIRROR_KEY]: next });
-  } catch (_) {}
+  } catch (error) {
+    // 镜像写不进去不影响这一次扫描，但统计页会停在上一版数字上 —— 留个原因，
+    // 别让下一个人对着不动的数字猜是「数据没变」还是「写失败了」。
+    console.warn("统计镜像写不进去（统计页会停在上一版数字）", error);
+  }
   return next;
 }
 
@@ -3999,7 +4011,12 @@ const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
 const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
 
 async function setArchiveWriteLock(kind) {
-  try { await chrome.storage.session.set({ [ARCHIVE_WRITE_LOCK_KEY]: { kind, since: Date.now() } }); } catch (_) {}
+  try {
+    await chrome.storage.session.set({ [ARCHIVE_WRITE_LOCK_KEY]: { kind, since: Date.now() } });
+  } catch (error) {
+    // 锁没立起来：这一次的跨上下文互斥退化成「各写各的」，统计库可能留下对不上的行。
+    console.warn("归档写锁没立起来（这一次的跨上下文互斥失效）", error);
+  }
 }
 
 // 只清自己那一把：别人后写进来的锁不能被顺手抹掉
@@ -4008,7 +4025,10 @@ async function clearArchiveWriteLock(kind) {
     const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
     const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
     if (!lock || !kind || lock.kind === kind) await chrome.storage.session.remove(ARCHIVE_WRITE_LOCK_KEY);
-  } catch (_) {}
+  } catch (error) {
+    // 没清掉：这把锁会挡下一次操作，30 分钟后才算陈旧遗留自动失效。
+    console.warn("归档写锁没清掉（下一轮操作可能被它挡住，30 分钟后才自动失效）", error);
+  }
 }
 
 async function archiveWriteLockHeldBy(kind) {

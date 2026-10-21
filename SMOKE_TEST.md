@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **254** 项里<!-- test-count:254 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **256** 项里<!-- test-count:256 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -53,11 +53,20 @@
 
 ---
 
+## V1.7.34 新增的几条
+
+1. 切到 English / 繁體中文，打开设置页：点「更换背景图片」→ 取消，状态行要跟着换语言；背景图上传失败时的两种错误文案、「忘记记住的 UID」成功后那行提示同理（这一版修的三元实参 + 收 key 包装两个抽取器盲区）。
+2. 打开任一视频详情，看「打开 UP 主主页」那一行：中文 / 英文都该在（这一版修的注释正则误判；以前英文界面这里会原样显示中文）。
+3. 触发一次「对比收藏夹」失败（把 B 站那边收藏夹改名后再对比），弹窗里的失败文案要跟着当前语言走。
+4. 跑 `node scripts/check-all.cjs`：词典那几行应该是「多余 0 条」；往 `locales/en.json` 里随手加一条没在用的中文词条再跑，应该**变红**（以前只播报），记得改回来。
+5. 跑 `node test/bench.cjs --quick`：应该 0.1 秒级打出一张 N=1000 的表并退出 0。
+6. 正常导入 / 删除 / 标记一遍，DevTools 控制台**不该多出**新的 `console.warn` 噪音 —— 只有真出问题（写锁没立起来、镜像写不进等）才该有那一行。
+
 ## V1.7.32 新增的几条
 
 1. `chrome://extensions` 里确认版本显示 **V1.7.32**；收藏库、设置页各打开一次。
 2. 打开 `README.md`：「正式版更新」下面**只有 V1.7.32 一节**，且给出了指向 `docs/HISTORY.md` 的链接；再打开 `docs/HISTORY.md`，最新一节也是 V1.7.32，往下能一路排到 V1.0.0。
-3. `node test/stability.test.cjs` 应 254 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
+3. `node test/stability.test.cjs` 应 256 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
 
 ## V1.7.31 新增的几条
 

@@ -72,7 +72,7 @@ function buildBlock() {
   return [
     "| 项 | 值 |",
     "|---|---|",
-    `| 词典 | ${dict.entries} 条（\`zh-TW\` / \`en\` 各一份；缺 ${dict.missing}，作者已删的旧词条 ${dict.extra}） |`,
+    `| 词典 | ${dict.entries} 条（\`zh-TW\` / \`en\` 各一份；缺 ${dict.missing}，多余 ${dict.extra}） |`,
     `| 测试基线 | ${suiteLine}（后四套是真执行） |`,
     "| 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |",
     `| 生成 | ${when}，当时 HEAD \`${head}\`；重跑 \`node test/status.cjs --write\` 刷新 |`

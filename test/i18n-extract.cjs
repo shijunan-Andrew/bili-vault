@@ -44,6 +44,28 @@ const NEVER_TRANSLATE = new Set([
   "本地收藏库", "LOCAL VIDEO LIBRARY"
 ]);
 
+// 抽取器看不出来、但确实要翻的词条。两类：
+//   ① 整条都是占位符、不含汉字（“{name}” 这种），被「没有汉字就不用翻」那条规则挡掉；
+//   ② 后台 / 内容脚本抛给界面翻的文案（throw new Error("…")、message: "…"），界面上是
+//      BcaI18n.t(error.message) 翻的 —— 抽取器只认 t("…") 的调用点，认不出这条链。
+// 只能显式列出来。新增同类文案时把原文加进这张表，否则它在英文界面里会原样显示中文。
+const EXTRA_KEYS = [
+  "“{name}”",
+  "没有找到要对比的收藏夹。如果本地归档改过名，请先在 B 站核对名称。",
+  "后台没有回应（超过 15 秒）。请重新加载 B 站页面或重启浏览器再试一次。"
+];
+
+// 调用点把「中文原文」当 key 传进去、函数体里再 BcaI18n.t(key) 的助手函数。
+// window 是「从函数名往后看多少个字符」，够覆盖一次调用的实参即可。
+const KEY_ARGUMENT_HELPERS = [
+  // content.js 的提示卡：文字通过 showNotice(...) 传进去、再挂到 dataset.i18n 上
+  { source: "showNotice", window: 400 },
+  // settings.js 的背景图与 UID 状态：函数体第一件事都是 BcaI18n.t(key)
+  { source: "showWallpaperStatus", window: 300 },
+  { source: "showWallpaperError", window: 300 },
+  { source: "showForgetUidStatus", window: 300 }
+];
+
 function decodeEntities(text) {
   return text
     .replace(/&quot;/g, '"')
@@ -63,7 +85,9 @@ function extractFrom(file) {
   // 先剥掉注释：文档里举例写的 t("...") 会被当成真词条，产生查不到的“幽灵词条”
   const source = raw
     .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, " "))
-    .replace(/(^|[^:])\/\/[^\n]*/g, (match, lead) => lead + " ".repeat(match.length - lead.length));
+    // 反斜杠后面那两个斜杠是正则字面量的一部分（/^https?:\/\//i 这种写法不是注释），
+    // 不排除的话整行后半截会被当成注释清空，那些词条就永远扫不到（P2 清理时踩到）。
+    .replace(/(^|[^:\\])\/\/[^\n]*/g, (match, lead) => lead + " ".repeat(match.length - lead.length));
   const keys = new Map(); // key -> 出现次数
 
   const add = (raw, decoded) => {
@@ -85,14 +109,28 @@ function extractFrom(file) {
     // 不认它的话挂件那 5 条词条永远扫不到。
     for (const match of source.matchAll(/(?:\bBcaI18n\.)?(?:\bt|translate)\(\s*"((?:[^"\\]|\\.)*)"/g)) add(match[1], false);
     for (const match of source.matchAll(/(?:\bBcaI18n\.)?(?:\bt|translate)\(\s*'((?:[^'\\]|\\.)*)'/g)) add(match[1], false);
+    // t(条件 ? "甲" : "乙")：三元表达式落在 t( 里面，上面两条只认 t( 后紧跟引号的形态。
+    // 两个分支都是可翻译文案，都收（settings.js 的「更换背景图片 / 选择背景图片」就是这种）。
+    for (const match of source.matchAll(/(?:\bBcaI18n\.)?\bt\(\s*[^()]*?\?\s*"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+      add(match[1], false);
+      add(match[2], false);
+    }
+    for (const match of source.matchAll(/(?:\bBcaI18n\.)?\bt\(\s*[^()]*?\?\s*'((?:[^'\\]|\\.)*)'\s*:\s*'((?:[^'\\]|\\.)*)'/g)) {
+      add(match[1], false);
+      add(match[2], false);
+    }
     // HTML 字符串模板里的 data-i18n="..."
     for (const match of source.matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?=\\?"([^"\\]*)"/g)) add(match[1], true);
 
-    // content.js 特例：提示卡的文字是通过 showNotice(...) 传进去、再挂到
-    // dataset.i18n 上的（值来自参数变量），照上面的规则一条都扫不到。
-    // 不收的话提示卡就永远不会被翻译。
-    for (const match of source.matchAll(/showNotice\(([\s\S]{0,400}?)\);/g)) {
-      for (const literal of match[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)) add(literal[1], false);
+    // 「收 key 再翻译」的助手函数：函数体里写的是 BcaI18n.t(key)，调用点传的是字面量，
+    // 照上面的规则一条都扫不到。这类包装函数只能在这里显式登记 —— **新写一个就把名字加进
+    // 下面那张表**，否则它的文案永远进不了词典（缺了不报错，只是切语言时不翻译）。
+    // 窗口内的双引号字面量全收，所以 showWallpaperError(条件 ? "甲" : "乙") 这种也能拿到。
+    for (const helper of KEY_ARGUMENT_HELPERS) {
+      const callPattern = new RegExp(helper.source + "\\(([\\s\\S]{0," + helper.window + "}?)\\);", "g");
+      for (const match of source.matchAll(callPattern)) {
+        for (const literal of match[1].matchAll(/"((?:[^"\\\\]|\\\\.)*)"/g)) add(literal[1], false);
+      }
     }
     for (const match of source.matchAll(/dataset\.i18n[A-Za-z]*\s*=\s*"((?:[^"\\]|\\.)*)"/g)) add(match[1], false);
   }
@@ -106,6 +144,7 @@ function collect() {
       all.set(key, (all.get(key) || 0) + count);
     }
   }
+  for (const key of EXTRA_KEYS) all.set(key, (all.get(key) || 0) + 1);
   return all;
 }
 
