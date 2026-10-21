@@ -477,6 +477,29 @@ async function discardFailedRecord(parent, name, error) {
   return kept;
 }
 
+// 1.8.0：写「临时文件 + 换名」这条路被中途杀掉时，换名没机会跑，
+// `.<名字>.<时间戳>.tmp` 就躺在目录里再没人管（真机在 003database 里留过两个）。
+// 每次写入前扫一遍同目录，只删「形状像临时文件 + 超过 10 分钟没动过」的 ——
+// 刚创建的那个正在写，不会被误删；形状/年龄的规则只在 archive-core.js 一处。
+async function removeStaleTempFiles(directory) {
+  try {
+    for await (const entry of directory.values()) {
+      if (entry.kind !== "file") continue;
+      if (!BcaArchiveCore.isTempFileName(entry.name)) continue;
+      let lastModified = 0;
+      try {
+        lastModified = (await entry.getFile()).lastModified;
+      } catch (_) {
+        continue; // 取不到修改时间就当它不老，宁可不删
+      }
+      if (!BcaArchiveCore.isStaleTempFile(lastModified, Date.now())) continue;
+      await directory.removeEntry(entry.name);
+    }
+  } catch (_) {
+    // 清陈年临时文件是顺手做的事（三档）：失败绝不能影响这次真正的写入
+  }
+}
+
 async function writeFile(directory, name, content) {
   /* 1.7.1 曾在这里**完整退回** 1.7.0 之前的就地写，理由是「1.7.0 一上原子写，手动收藏和
      导入就都存不进本地」。1.7.16 重新上原子写，因为那条理由已经被真机探针推翻：
@@ -492,6 +515,8 @@ async function writeFile(directory, name, content) {
      「提示正在保存，然后本地归档里什么都没有」。
      现在：换名失败一律退回就地写，只把错误名记下来备查；就地写也失败时，临时文件
      （完整内容）保留并把两条原因一起报出去。 */
+  // 1.8.0：先把同目录里的陈年临时文件清掉，免得目录越用越脏
+  await removeStaleTempFiles(directory);
   const tempName = `.${name}.${Date.now().toString(36)}.tmp`;
   let temp = null;
   let tempReady = false;
@@ -862,9 +887,7 @@ function identifiersOverlap(left, right) {
 }
 
 function addManualVideoInOrder(data) {
-  const task = saveQueue.then(() => addManualVideo(data));
-  saveQueue = task.catch(() => undefined);
-  return task;
+  return enqueueSaveTask(() => addManualVideo(data));
 }
 
 // 4.3：错误报告里会带本地目录路径、视频链接和堆栈，提醒用户不要外发
@@ -999,11 +1022,28 @@ async function saveFavorite(data) {
     const favoriteAt = new Date(Number(data.favoriteAt) || Date.now());
     const dateFolderName = timestampFolder(favoriteAt);
     const savedAt = new Date();
-    const savedFolders = [];
+    // 1.8.0：封面只取一次。原来它在下面的收藏夹循环里，选 5 个收藏夹就把同一张封面
+    // 下载 + 缩放 + 编码 5 遍（fetch 还带 cache: "no-store"，等于每次都重新走网络），
+    // 每遍都要排一次限速队列；真机上 5 个收藏夹里的 封面.webp 是同一份 11046 字节。
+    // 放在建目录之前：拿不到封面就整次失败，磁盘上一个半截目录都不留。
+    const cover = await loadCoverPng(metadata.cover);
+    // 1.8.0：收藏夹之间并行落盘。每个收藏夹内部仍然严格「先封面、后 txt」——
+    // txt 是完成标记（4.9 协议），这个顺序不能动；但收藏夹彼此独立，串行跑等于
+    // 把每个文件的落盘等待乘上收藏夹数量。真机对照：5 个收藏夹串行 68 秒
+    // （Chrome 155 上每次文件提交约 7 秒），并行之后只等最慢的那一个。
+    // 名字重复时只留第一个：并行写同一个目录会互相抢时间戳后缀。
+    const uniqueFolders = [];
+    const seenNames = new Set();
     for (const folder of folders) {
+      const folderName = safeSegment(folder.name);
+      if (seenNames.has(folderName)) continue;
+      seenNames.add(folderName);
+      uniqueFolders.push({ name: folderName });
+    }
+    const settled = await Promise.allSettled(uniqueFolders.map(async (folder) => {
+      const folderName = folder.name;
       // V1.4.3（P2-3）：自动归档这条链路原来漏了保留目录名的检查 ——
       // 收藏夹真叫「001错误报告」时，视频会被写进报告目录里。
-      const folderName = safeSegment(folder.name);
       if (collectionNameIsReserved(folderName)) {
         throw new Error(`收藏夹名「${folderName}」和插件自己用的目录重名，为免写乱本地文件，这次没有保存到本地。`);
       }
@@ -1011,7 +1051,6 @@ async function saveFavorite(data) {
       const recordFolder = await uniqueTimeFolder(collectionFolder, dateFolderName);
       try {
         // 4.9：先封面、后 txt（txt 即完成标记），失败时把整个目录清掉，不留半截记录
-        const cover = await loadCoverPng(metadata.cover);
         await writeFile(recordFolder, COVER_FILE_NAME, cover);
         // buildInfo 也必须在这个 try 内：它一旦抛错，目录已经建出来了，
         // 下面的 catch 负责把这个空目录清掉（否则每失败一次就留一个空目录）
@@ -1022,7 +1061,29 @@ async function saveFavorite(data) {
         await discardFailedRecord(collectionFolder, recordFolder.name, error);
         throw error;
       }
-      savedFolders.push(`${root.name}/${safeSegment(folder.name)}/${recordFolder.name}`);
+      return `${root.name}/${folderName}/${recordFolder.name}`;
+    }));
+    // allSettled 保持 uniqueFolders 的顺序，路径排列仍然与用户在收藏夹弹窗里的选择一致
+    const savedFolders = [];
+    const failures = [];
+    settled.forEach((item, index) => {
+      if (item.status === "fulfilled") savedFolders.push(item.value);
+      else failures.push({ name: uniqueFolders[index].name, error: item.reason });
+    });
+    if (!savedFolders.length) throw failures[0]?.error || new Error("这次没有保存到任何收藏夹。");
+
+    // 1.8.0：部分成功必须如实说 —— 磁盘上确实写进去了，整次报「归档失败」是假红灯
+    // （用户报过「弹归档失败，但其实已经保存」）。把没成的收藏夹名字和原因摆出来。
+    if (failures.length) {
+      const failure = failures[0];
+      await logError(failure.error, { metadata, folders });
+      const partialMessage = `已保存到 ${savedFolders.length} 个收藏夹；另有 ${failures.length} 个没保存（${failures.map((item) => item.name).join("、")}）：${failure.error?.message || "未知错误"}`;
+      try {
+        await chrome.storage.local.set({ lastResult: { message: partialMessage, path: maskLocalUserPaths(savedFolders.join("\n")), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+      } catch (storageError) {
+        console.warn("写入最近结果失败（收藏已经保存成功）", storageError);
+      }
+      return { ok: true, partial: true, message: partialMessage, path: savedFolders.join("\n") };
     }
 
     const message = `已保存到 ${savedFolders.length} 个收藏夹。`;
@@ -1049,10 +1110,32 @@ async function saveFavorite(data) {
   }
 }
 
+// 1.8.0：把「排队等待」和「任务本身」拆成两根 promise。
+// 4.9.x 那个期限（withQueueDeadline）本来是为了「导入暂停时队列停几个小时、排在后面的
+// 请求既不执行也不报错」加的，可它当时拿到的是**整个任务**：一次归档 5 个收藏夹在真机上
+// 要 60 多秒（Chrome 155 每次文件提交约 7 秒），必然撞上 30 秒期限 —— 界面收到
+// 「本地队列正忙……这次没有执行」，而队列里那一份照常跑完、文件真的写进了磁盘。
+// 现在期限只管 turn（等前面那些任务跑完）：超时就把这一棒**作废**，任务自己会跳过，
+// 那句「这次没有执行」才不是假话；任务本体不再有上限。
+const SAVE_TASK_ABANDONED = Symbol("save-task-abandoned");
+
+function enqueueSaveTask(run) {
+  const previous = saveQueue;
+  let abandoned = false;
+  const turn = previous.then(() => undefined, () => undefined);
+  const task = turn.then(() => (abandoned ? SAVE_TASK_ABANDONED : run()));
+  saveQueue = task.then(() => undefined, () => undefined);
+  return {
+    turn,
+    task,
+    abandon: () => {
+      abandoned = true;
+    }
+  };
+}
+
 function saveFavoriteInOrder(data) {
-  const task = saveQueue.then(() => saveFavorite(data));
-  saveQueue = task.catch(() => undefined);
-  return task;
+  return enqueueSaveTask(() => saveFavorite(data));
 }
 
 // 4.9.x：给"排在串行队列后面"的非归档请求一个有上限的等待。
@@ -1078,7 +1161,8 @@ async function withQueueDeadline(queue, timeoutMs, label) {
 // 1.4.2（P1-3）：导入进行中（尤其是暂停时）saveQueue 可能停几个小时，排在后面的
 // 「这次收藏」「手动添加」「补存」会一直等到导入结束，界面就永久停在「保存中」。
 // 给它们同一套上限：超时如实回 busy，让界面当场讲清楚"现在没做、等导入结束后重试"。
-// 注意队列里那一份仍然会照常跑完（withQueueDeadline 只放弃等待，不取消任务）。
+// 1.8.0：超时作废的是**这一棒**（见 enqueueSaveTask），所以队列里不会再有「界面说没执行、
+// 磁盘上却写进去了」的那种假红灯。
 /* 1.7.3：导入要跑几分钟，用户多半已经切走页面、弹窗也关了 —— 只把结果写进 storage
    等于没有提示（真机反馈：「导入结束后不显示已完成的弹窗，要点开插件才看到」）。
    这里补一条系统通知：成功、失败各一条。通知失败不影响导入结果，所以整段都吞异常。 */
@@ -1098,18 +1182,23 @@ function notifyImportOutcome(title, message) {
   }
 }
 
-async function runInSaveQueueWithDeadline(task, label) {
-  const result = await withQueueDeadline(task, IMPORT_QUEUE_WAIT_TIMEOUT_MS, label);
-  if (result === WITH_QUEUE_DEADLINE_EXPIRED) {
+async function runInSaveQueueWithDeadline(handle, label) {
+  const waited = await withQueueDeadline(handle.turn, IMPORT_QUEUE_WAIT_TIMEOUT_MS, label);
+  if (waited === WITH_QUEUE_DEADLINE_EXPIRED) {
+    // 只放弃等待：把这一棒作废，任务自己会跳过，所以下面这句「这次没有执行」是真的
+    handle.abandon();
     return {
       ok: false,
       busy: true,
       message: "本地队列正忙（很可能有一轮导入正在暂停或进行中），这次没有执行。等导入结束或取消后再试一次就好。"
     };
   }
-  return result;
+  try {
+    return await handle.task;
+  } catch (error) {
+    throw new Error(error?.message || `${label}失败。`);
+  }
 }
-
 const IMPORT_INVALID_TITLES = new Set(["已失效视频", "该视频已失效"]);
 const IMPORT_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
 // attr → 「失效原因」文案。0 是「有效」，不在表里（importAttrReason 返回空串，调用方据此不写这一行）。

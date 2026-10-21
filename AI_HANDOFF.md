@@ -71,10 +71,10 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 <!-- status:begin -->
 | 项 | 值 |
 |---|---|
-| 词典 | 911 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 256 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
+| 词典 | 912 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
+| 测试基线 | stability 260 · archive-core 79 · stats-core 61 · background 25 · pages 20（后四套是真执行） |
 | 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-21 22:17，当时 HEAD `6043320`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-21 23:08，当时 HEAD `33793f9`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -390,7 +390,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:256 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:260 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -649,7 +649,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 24. **「删除 / 中断 / 超时 / 限流」这四类边界要在写的时候就一起想，别等审查。**（V1.4.2 修上线前审查第一批时定，八处都是这四类的变体。）
     1. **凡是递归删除用户看得见的目录，删之前先确认那是插件自己写的。**（P1-1）判据是 `collectionDownloadDirectoryLooksManaged()`：里面每一项都必须是 `xxx - BV号` / `xxx - av号` 形式的子目录（用 `archive-core.js` 的 `identifiersFromDirectoryName`），认不出来就整个不删、并计入 `downloadCleanupFailures`。**宁可留着让用户自己删，也不能误删别人的东西** —— 后端的 `removeEntry` 不进回收站，删了就没了。
     2. **凡是给用户看的承诺，不能指向一个点不到或已经过期的能力。**（P1-2）「回滚日志已保存在本次浏览器会话中」这句话在 V1.4.2 被删掉：日志只存在 `chrome.storage.session`、关掉浏览器就没了，而回滚入口早就不存在（没有调用者的死代码）。**改掉行为时，连带把承诺一起改。**
-    3. **凡是跨页面/跨进程等待的队列，等待必须有上限，并且要能说清为什么没执行。**（P1-3）`runInSaveQueueWithDeadline()` 超时返回 `{ok:false, busy:true, message:"本地队列正忙…"}`，同时把这条收藏记进 `pendingFavorite` 以便重试。MV3 的 Service Worker 随时会被回收，**挂在队列里等着的条目等于已经丢了**。
+    3. **凡是跨页面/跨进程等待的队列，等待必须有上限，并且要能说清为什么没执行。**（P1-3）`runInSaveQueueWithDeadline()` 超时返回 `{ok:false, busy:true, message:"本地队列正忙…"}`，同时把这条收藏记进 `pendingFavorite` 以便重试。MV3 的 Service Worker 随时会被回收，**挂在队列里等着的条目等于已经丢了**。（**1.8.0 起期限只套排队那一段**：保存链路走 `enqueueSaveTask()`，超时把这一棒作废，见 25.3。）
     4. **凡是收尾（成功 / 取消 / 风控）都要先把「已经跑完」写进持久状态，再清理。**（P0-1）`finishImportRunSnapshot()` 先写 `{active:false, finished:true}` 再删键 —— 否则收尾那几个 `await` 之间被回收，快照会停在「有一轮正在进行」，下次启动就把**已经成功**的那一轮当成中断。判据侧同理：`leftover.active !== true` 时不能宣告中断。
     5. **纯本地的长循环也要保活**（P1-4：`keepServiceWorkerAlive("scan"/"refresh")`），`uniqueTimeFolder` 撞到同名**文件**（`TypeMismatchError`）要换后缀继续而不是抛错（P1-6），风控码 `IMPORT_RATE_LIMIT_CODES` 是 `{-412, -352, -509, -799}` 而恢复扫描撞上要整轮停（P1-8）。
     6. **发分发包用 `pack.ps1`，别手工压 zip**（P2-21）：它排掉 `.git` / `.gitattributes` / `.gitignore` / `.github` / `.node-path` / `test/` / `scripts/` / `docs/` / 三份 md / `release.ps1` / `pack.ps1`，并在打包前断言「清单完整、开发文件没混进去」。
@@ -659,7 +659,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 25. **「同一件判断散在多处」与「给用户看的假状态」是第二批审查里两种反复出现的病。**（V1.4.3 修上线前审查第二批时定。）
     1. **同一份名单/同一类判断只能有一处。**（P2-3）「保留目录名」原来在手动添加、导入两处各写一遍，自动归档那条链路就漏了 —— B 站收藏夹真叫「001错误报告」时，视频会被写进报告目录。现在只有 `RESERVED_COLLECTION_NAMES` + `collectionNameIsReserved()` 一处，**新增任何「写进用户备份文件夹」的入口时，先 grep 这个函数**。
     2. **判断「某件事还在不在跑」要用最紧的那条依据，不要用时间窗口。**（P2-6）内存里的 `importRun.active` 才是真相，`chrome.storage.local` 里的 `running: true` 只是残影。原来要求残影的 `updatedAt` 超过 90 秒才复位，于是浏览器重启后的前 90 秒里，弹窗一直显示「导入中」、暂停/取消按钮都在，点了却只回「当前没有正在进行的导入」—— **恰恰在最需要自愈的那段时间里给用户看假状态**。现在的判据是「`chrome.storage.session` 里有没有 `active: true` 的快照」，没有就立刻复位。
-    3. **文案不许把「不再等待」说成「已取消」。**（P2-7）`withQueueDeadline` 超时只是不等了，任务仍然在队列里、仍然会写回 `视频信息.txt`。原来说「本次状态更新已取消」，用户以为没发生，其实稍后就改了盘。**凡是「放弃等待但任务还在」的情况，文案必须写清它还会继续。**
+    3. **文案不许把「不再等待」说成「已取消」，也不许把「还在跑」说成「没执行」。**（P2-7，1.8.0 补全）保存链路（`saveFavoriteInOrder` / `addManualVideoInOrder`）走 `enqueueSaveTask()`：期限只套 `handle.turn`（排队那一段），超时立刻 `handle.abandon()` 把这一棒作废，此后 `run()` 不会再被执行 —— 所以「这次没有执行」必须是真的没执行。`bca-refresh-video-stats` 那条仍然直接调 `withQueueDeadline`，超时只是不等了、任务还在队列里、稍后仍会写回 `视频信息.txt`，它的文案必须写清「还会继续」。**凡是「放弃等待但任务还在」，文案必须写清它还会继续；凡是「已经作废」，文案不许暗示它还会跑。**
     4. **一条注定无效的提示等于没有提示，而且比没有更糟。**（P2-18）对比差异缺 UID 时，原来的提示是「请先打开一次自己的 B 站收藏夹页面」——但 `chrome.tabs.query({url})` 在 manifest 没有 `tabs` 权限时拿不到标签页 URL，照做也没用。**提示必须指向一个真的能改变结果的动作**（现在是「先做一次导入，那一步会记住 UID」）。同类问题别用「加权限」解决，除非那条权限本身就是必需的。
     5. **凡是「每次失败就新建一个文件」的地方都要有上限。**（P2-19）`001错误报告` 与 `002同步报告` 都属于这类：正文截断到 16000 字符撑不爆磁盘，但用户没有清理入口。现在统一走 `trimReportDirectory(directory, REPORT_KEEP_FILES, "…报告.txt")`，按文件名里 `_<毫秒时间戳>_` 保留最新 50 份，删不掉就下次再试。
     6. **唯一一条不限速的出网路径，迟早会变成最危险的那条。**（P2-15 / P2-16 / P2-17）封面下载原来「不限速 + 无超时 + 并发 4 + 域名来者不拒」，而全仓只有它这样：现在 `loadCoverPng` 与 B 站接口**共用同一个 `biliThrottleWait()` 限速器**、带 `COVER_FETCH_TIMEOUT_MS` 的 `AbortController`，并且 `coverUrlAllowed()` 只放行 `COVER_HOST_SUFFIXES`（`.hdslb.com` / `.bilibili.com`；1.3.0 删掉的那三条视频流域名权限不在里面，也不许加回来）。跨进程等待同理：`biliImportPageApiGet` 加了后台侧兜底超时，否则关掉/刷新收藏夹标签页会让详情抓取的 `await` 永远挂着、整轮导入卡死且取消无效。

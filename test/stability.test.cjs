@@ -5207,7 +5207,13 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
     "identifiersFromDirectoryName 必须带 BcaArchiveCore. 前缀（局部别名行除外）");
 
   // P1-3：排队等待加上限；去重表只在真的归档成功之后才记
-  assert.match(backgroundCode, /async function runInSaveQueueWithDeadline\(task, label\)/);
+  // 1.8.0：期限只套「排队等待」那一段（handle.turn）—— 原来套的是整个任务，
+  // 一次归档 5 个收藏夹要 60 多秒，必然撞上 30 秒期限，界面收到「这次没有执行」，
+  // 而队列里那一份照常跑完、文件真的写进了磁盘（用户报的假红灯）。
+  assert.match(backgroundCode, /async function runInSaveQueueWithDeadline\(handle, label\)/);
+  assert.match(backgroundCode, /await withQueueDeadline\(handle\.turn, IMPORT_QUEUE_WAIT_TIMEOUT_MS, label\)/, "期限只能套 handle.turn");
+  assert.match(backgroundCode, /handle\.abandon\(\);/, "超时要把这一棒作废，才配说「这次没有执行」");
+  assert.match(backgroundCode, /const SAVE_TASK_ABANDONED = Symbol\("save-task-abandoned"\);/);
   assert.equal((backgroundCode.match(/runInSaveQueueWithDeadline\(/g) || []).length, 4,
     "定义 1 处 + 保存收藏 / 手动添加 / 补存三个入口各 1 处");
   assert.match(contentCode, /function rememberSeen\(signature\) \{[\s\S]{0,160}seen\.add\(signature\);/);
@@ -5830,4 +5836,62 @@ test("数据层有了可复现的性能基准，且它不进门禁（V1.7.34）"
 
   // 绝对耗时跟机器与 GC 绑定，进 CI 只会变成偶发假红 —— 它必须留在门禁外面。
   assert.doesNotMatch(readProjectFile("scripts/check-all.cjs"), /bench\.cjs/, "bench.cjs 不许接进 check-all.cjs");
+});
+
+
+// ---- 1.8.0：归档链路的三处性能/误报修复 ----
+
+test("归档只取一次封面，收藏夹之间并行落盘（V1.8.0）", () => {
+  const script = readProjectFile("background.js");
+  const body = script.slice(script.indexOf("async function saveFavorite(data) {"), script.indexOf("function saveFavoriteInOrder"));
+  assert.ok(body.length > 0, "要能抠出 saveFavorite 的函数体");
+  // 封面原来在收藏夹循环里：选 5 个收藏夹就把同一张封面下载 + 缩放 + 编码 5 遍，
+  // 真机上 5 个目录里的 封面.webp 是同一份 11046 字节。
+  assert.equal((body.match(/loadCoverPng\(/g) || []).length, 1, "封面只能取一次");
+  assert.match(body, /const cover = await loadCoverPng\(metadata\.cover\);/, "取到的封面要在循环外复用");
+  assert.match(body, /await Promise\.allSettled\(uniqueFolders\.map\(/, "收藏夹之间要并行落盘");
+  assert.ok(body.indexOf("await Promise.allSettled(") < body.indexOf("await writeFile(recordFolder,"), "落盘必须发生在并行分支里，不能在串行 for 里");
+  // 并行只发生在收藏夹之间：每个收藏夹内部仍然是「先封面、后 txt」，txt 是完成标记（4.9）
+  const coverAt = body.indexOf("await writeFile(recordFolder, COVER_FILE_NAME, cover);");
+  const infoAt = body.indexOf("await writeFile(recordFolder, \"视频信息.txt\"");
+  assert.ok(coverAt > 0 && infoAt > coverAt, "每个收藏夹内部仍然先封面、后 txt");
+  // 全部失败才算失败；部分成功要如实返回，不许整次报「归档失败」（那是用户报过的假红灯）
+  assert.match(body, /if \(!savedFolders\.length\) throw/, "一个都没存上才算失败");
+  assert.match(body, /partial: true/, "部分成功要单独返回");
+});
+
+test("部分收藏夹没保存时不再整次报「归档失败」（V1.8.0）", () => {
+  const content = readProjectFile("content.js");
+  assert.match(content, /result\?\.partial/, "界面要认 partial 这个分支");
+  assert.match(content, /BcaI18n\.t\("部分收藏夹没保存"\)/, "新文案要进词典、走 t()");
+  const en = JSON.parse(readProjectFile("locales/en.json"));
+  const zh = JSON.parse(readProjectFile("locales/zh-TW.json"));
+  assert.ok(en["部分收藏夹没保存"], "两本词典都要有这一条");
+  assert.ok(zh["部分收藏夹没保存"], "两本词典都要有这一条");
+});
+
+test("陈年临时文件会自己清掉，形状与年龄只在 archive-core 里判一次（V1.8.0）", () => {
+  const coreScript = readProjectFile("archive-core.js");
+  const bg = readProjectFile("background.js");
+  const lib = readProjectFile("library.js");
+  // 判断只许有一份：background.js 与 library.js 都要用核心里的同一个函数
+  for (const name of ["isTempFileName", "isStaleTempFile"]) {
+    assert.equal((coreScript.match(new RegExp("function " + name + "\\(", "g")) || []).length, 1, `${name} 只能有一份实现`);
+    assert.ok(coreScript.includes(`    ${name},`), `${name} 要从 archive-core.js 导出`);
+  }
+  assert.ok(bg.includes("BcaArchiveCore.isTempFileName(entry.name)"), "background.js 要用核心的判断");
+  assert.ok(lib.includes("BcaArchiveCore.isTempFileName(entry.name)"), "library.js 要用核心的判断");
+  assert.match(bg, /await removeStaleTempFiles\(directory\);\r?\n/, "background.js 每次写入前要清一次");
+  assert.match(lib, /await removeStaleTempFiles\(directory\);\r?\n/, "library.js 每次写入前要清一次");
+});
+
+test("临时文件的形状与年龄判据本身是对的（V1.8.0）", () => {
+  const now = 1_700_000_000_000;
+  // 像我们的临时文件：点号开头、.tmp 结尾，而且够老（10 分钟以上）
+  assert.equal(core.isTempFileName(".封面.webp.mvi5c6tl.tmp"), true);
+  assert.equal(core.isTempFileName("封面.webp"), false);
+  assert.equal(core.isTempFileName(".tmp"), false, "光有前后缀、中间没有名字的不算");
+  assert.equal(core.isStaleTempFile(now - 11 * 60 * 1000, now), true);
+  assert.equal(core.isStaleTempFile(now - 60 * 1000, now), false, "刚创建的那个正在写，绝不能删");
+  assert.equal(core.isStaleTempFile(0, now), false, "拿不到修改时间就不要删");
 });

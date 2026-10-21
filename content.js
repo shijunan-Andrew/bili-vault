@@ -374,6 +374,10 @@
           // 1.7.3：后台发现队列里正在导入时会立刻回 busyImport（兜住「问的时候还没开始、
           // 发出去的时候已经开始了」这种抢跑），这里给一句用户能照做的话。
           showNotice(BcaI18n.t("导入进行中"), BcaI18n.t("目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。"), "", true);
+        } else if (result?.partial) {
+          // 1.8.0：部分收藏夹没保存。整次报「归档失败」是骗人的（磁盘上确实写进去了），
+          // 只报「归档成功」又会把那几个没成的藏起来 —— 用错误样式把清单摆出来。
+          showNotice(BcaI18n.t("部分收藏夹没保存"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.path || "", true, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
         } else if (!result?.ok) {
           // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
           showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);

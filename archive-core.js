@@ -239,6 +239,29 @@
     };
   }
 
+  /* ---------- 1.8.0：点号临时文件的形状与年龄（写入路径的清理共用这一份判断） ---------- */
+
+  // 写「临时文件 + 换名」这条路（1.5.9 的数据库、1.7.16 的归档记录）在进程被中途杀掉时，
+  // 换名那一步没机会跑，`.<名字>.<时间戳>.tmp` 就永久留在目录里 —— 真机在 003database
+  // 里留过两个（.database.json.mvi5c6tl.tmp / .mvi7qt2w.tmp），而且没人再看它们一眼。
+  // 清理条件是「看起来像我们的临时文件」+「够老」：刚创建的那个正在写，
+  // 同一个进程的另一次清理绝不能把它删掉。
+  const TEMP_FILE_PREFIX = ".";
+  const TEMP_FILE_SUFFIX = ".tmp";
+  const STALE_TEMP_FILE_MS = 10 * 60 * 1000;
+
+  function isTempFileName(name) {
+    const fileName = String(name ?? "");
+    if (fileName.length <= TEMP_FILE_PREFIX.length + TEMP_FILE_SUFFIX.length) return false;
+    return fileName.startsWith(TEMP_FILE_PREFIX) && fileName.endsWith(TEMP_FILE_SUFFIX);
+  }
+
+  function isStaleTempFile(lastModified, now) {
+    const at = Number(lastModified);
+    if (!Number.isFinite(at) || at <= 0) return false;
+    return Number(now) - at > STALE_TEMP_FILE_MS;
+  }
+
   function isMediaFileName(name) {
     const extension = String(name || "").split(".").pop().toLowerCase();
     return MEDIA_EXTENSIONS.has(extension);
@@ -878,6 +901,10 @@
     findDownloadMatch,
     downloadStateFromIndex,
     isMediaFileName,
+    // 1.8.0：点号临时文件的形状与年龄（background.js / library.js 的写入路径共用）
+    isTempFileName,
+    isStaleTempFile,
+    STALE_TEMP_FILE_MS,
     downloadPathLabel,
     joinDownloadPath,
     isPlaceholderValue,

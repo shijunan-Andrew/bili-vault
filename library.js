@@ -4029,7 +4029,32 @@ function renameFailureNote(error) {
   return lastRenameFailureNote;
 }
 
+// 1.8.0：写「临时文件 + 换名」这条路被中途杀掉时，换名没机会跑，
+// `.<名字>.<时间戳>.tmp` 就永远躺在 003database 里（真机留过两个）。
+// 每次写入前扫一遍同目录，只删「形状像临时文件 + 超过 10 分钟没动过」的；
+// 形状/年龄的规则只在 archive-core.js 一处，这里只负责遍历目录。
+async function removeStaleTempFiles(directory) {
+  try {
+    for await (const entry of directory.values()) {
+      if (entry.kind !== "file") continue;
+      if (!BcaArchiveCore.isTempFileName(entry.name)) continue;
+      let lastModified = 0;
+      try {
+        lastModified = (await entry.getFile()).lastModified;
+      } catch (_) {
+        continue; // 取不到修改时间就当它不老，宁可不删
+      }
+      if (!BcaArchiveCore.isStaleTempFile(lastModified, Date.now())) continue;
+      await directory.removeEntry(entry.name);
+    }
+  } catch (_) {
+    // 清陈年临时文件是顺手做的事（三档）：失败绝不能影响这次真正的写入
+  }
+}
+
 async function writeFileAtomically(directory, file, text) {
+  // 1.8.0：先把同目录里的陈年临时文件清掉，免得数据库目录越用越脏
+  await removeStaleTempFiles(directory);
   const tempName = `.${file.name}.${Date.now().toString(36)}.tmp`;
   const temp = await directory.getFileHandle(tempName, { create: true });
   // 1.7.0（批次 B）：临时文件写成功之后，它就是**唯一完整副本** —— 后面任何一步失败
