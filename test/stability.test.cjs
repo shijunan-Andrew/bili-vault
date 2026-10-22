@@ -6752,12 +6752,12 @@ test("收藏库页构建完就把库交给后台提交，自己不再写盘（V1
   const start = library.indexOf("async function syncStatsDatabaseLocked(");
   assert.ok(start > 0, "要能找到页面侧的同步函数");
   const body = library.slice(start, library.indexOf("\nasync function displayRoot(", start));
-  assert.ok(body.includes("const committed = await commitStatsDatabaseViaBackground(database);"),
-    "构建完要交给后台提交");
-  const sentAt = body.indexOf("commitStatsDatabaseViaBackground(database)");
+  assert.ok(body.includes("const committed = await commitStatsDatabaseViaBackground(database, { pageArchivedBroken: previousArchived });"),
+    "构建完要交给后台提交（1.8.19 起还要告诉后台「坏原文我已经留过档了」）");
+  const sentAt = body.indexOf("commitStatsDatabaseViaBackground(database, {");
   const fallbackAt = body.indexOf('await writeFileAtomically(directory, file, JSON.stringify(database));');
   assert.ok(fallbackAt > sentAt, "本页写盘只能当兜底，必须排在交后台之后");
-  assert.match(library, /chrome\.runtime\.sendMessage\(\{ type: "bca-stats-commit", database \}\)/,
+  assert.match(library, /chrome\.runtime\.sendMessage\(\{\s*type: "bca-stats-commit",\s*database,/,
     "交给后台走消息，消息类型不能改");
   assert.match(library, /async function primeStatsFingerprint\(\) \{/, "指纹初值要先从 storage 补");
   assert.match(library, /chrome\.storage\.local\.get\("bcaStats"\)/, "补初值读的就是上一份快照");
@@ -6772,7 +6772,9 @@ test("后台只有一个写者：页面交回的提交也走备份、就地写�
   const start = background.indexOf("async function commitStatsDatabaseFromPage(payload) {");
   const body = background.slice(start, background.indexOf("async function writeStatsDatabaseInner(", start));
   assert.match(body, /return withStatsWriteSlot\(async \(\) => \{/, "要排进同一条写槽（内存链 + 跨上下文锁）");
-  assert.match(body, /const blocked = statsDatabaseWriteBlocked\(read\);/, "读不出来就一个字节都不写");
+  assert.match(body, /const pageReplacedBroken = payload\?\.pageArchivedBroken === true;/, "要认出「页面已经留过档」");
+  assert.match(body, /const read = await readStatsDatabase\(root, \{ archiveBroken: !pageReplacedBroken \}\);/, "页面留过档就别再归档一份");
+  assert.match(body, /const blocked = statsDatabaseWriteBlocked\(read\) && !pageReplacedBroken;/, "读不出来就一个字节都不写（除非页面手里有一份补好的）");
   assert.match(body, /BcaStatsCore\.applyStatsMirror\(incoming, BcaStatsCore\.statsMirrorOf\(read\.database\)\)/,
     "只前进的标量要取后台这一份，别被页面构建期的旧值拨回去");
   assert.match(body, /await commitStatsDatabase\(root, read, database\)/, "备份 + 就地写 + 自检都在这条路上");
@@ -6785,7 +6787,7 @@ test("后台只有一个写者：页面交回的提交也走备份、就地写�
 test("后台明确拒绝写库时，页面不许退回那条 7 秒的换名路（V1.8.18）", () => {
   const library = readProjectFile("library.js");
   const background = readProjectFile("background.js");
-  const body = functionBodyOf(library, "async function commitStatsDatabaseViaBackground(database) {");
+  const body = functionBodyOf(library, "async function commitStatsDatabaseViaBackground(database, options = {}) {");
   assert.match(body, /if \(result && result\.ok\) return "ok";/, "成功要单独一个状态");
   assert.match(body, /if \(result && result\.declined\) \{/, "「明确拒绝」要认出来");
   assert.match(body, /return "declined";/, "拒绝就回 declined，不许当失败处理");
@@ -6811,4 +6813,33 @@ test("后台明确拒绝写库时，页面不许退回那条 7 秒的换名路�
       `${locale} 要有「扩展刚刚更新过」这条提示`,
     );
   }
+});
+
+
+// ---- 1.8.19：同一份坏库只留一次档、临时残骸顺手清 ----
+test("坏库由页面留档时，后台不再重复留档也不再宣称重建空库（V1.8.19）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /async function readStatsDatabase\(root, options = \{\}\) \{/,
+    "读库要给一个「这次别归档」的开关");
+  assert.match(background, /const archiveBroken = options\.archiveBroken !== false;/,
+    "默认仍然归档，只有页面已留档时才关掉");
+  assert.match(background, /const backupName = archiveBroken \? await archiveBrokenStatsDatabase\(directory, text\) : "";/,
+    "关掉时一份新档都不许写");
+  assert.match(background, /本次的坏原文由收藏库页留档，后台只负责把它算好的那一份写进去。/,
+    "日志要说清楚这次是谁留的档");
+  const start = background.indexOf("async function commitStatsDatabaseFromPage(payload) {");
+  const body = background.slice(start, background.indexOf("async function writeStatsDatabaseInner(", start));
+  assert.doesNotMatch(body, /await publishStatsSnapshot\(read\.database\);/,
+    "拒绝时不许先发一份空库快照 —— 页面手上那份才是真的");
+  assert.match(body, /await cleanStatsTempFiles\(root\);/, "提交时顺手清陈年临时文件");
+});
+
+test("临时文件残骸在写库路径上也会被清掉，判据仍然只有 archive-core 一份（V1.8.19）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /async function cleanStatsTempFiles\(root\) \{/, "要有专门的清理入口");
+  assert.match(background, /await removeStaleTempFiles\(directory\);/, "判据复用 removeStaleTempFiles");
+  assert.match(background, /root\.getDirectoryHandle\(BcaStatsCore\.DATABASE_FOLDER_NAME, \{ create: false \}\)/,
+    "只在 003database 目录里清，别去动归档目录");
+  const core = readProjectFile("archive-core.js");
+  assert.match(core, /function isStaleTempFile\(lastModified, now\) \{/, "形状与年龄判据仍只有一份");
 });

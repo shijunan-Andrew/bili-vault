@@ -4854,9 +4854,15 @@ async function primeStatsFingerprint() {
    读不出来）时**本页也不许写**：那条兜底是「临时文件 + 换名」，一次 7 秒，换名完还要
    写一份 bcaStats 把回声打回来，白闪就是这么来的；更要紧的是它会拿重建结果盖掉读不
    出来的旧库。只有「消息通道本身断了」（扩展被重载、SW 没醒）才允许退回本页写。 */
-async function commitStatsDatabaseViaBackground(database) {
+async function commitStatsDatabaseViaBackground(database, options = {}) {
   try {
-    const result = await chrome.runtime.sendMessage({ type: "bca-stats-commit", database });
+    /* 1.8.19：本页已经替这次坏库留过档了，让后台别再留一份，也别把这次提交当成
+       「读不到库」拦下来 —— 否则坏库永远没人修，每次打开都要重建一遍。 */
+    const result = await chrome.runtime.sendMessage({
+      type: "bca-stats-commit",
+      database,
+      pageArchivedBroken: options.pageArchivedBroken === true,
+    });
     if (result && result.ok) return "ok";
     if (result && result.declined) {
       console.warn(`后台没有接管这次写库（${result.reason || "declined"}），本页也不自己写。`);
@@ -4891,6 +4897,8 @@ async function syncStatsDatabaseLocked(handle, options = {}) {
        失效的 —— 也就是说，一次 JSON 解析失败就足够把历史统计与亲密度清零，而用户
        只会看到统计页数字变小。坏文件的现场还要先留下来，否则「为什么清零」永远查不出。 */
     let previousBroken = false;
+    /* 1.8.19：这次坏库的原文是不是本页已经留过档了（留过就让后台别再留一份）。 */
+    let previousArchived = false;
     let previousBytes = 0;
     let previousUnreadable = false;
     let previousText = "";
@@ -4922,6 +4930,7 @@ async function syncStatsDatabaseLocked(handle, options = {}) {
         const writable = await backup.createWritable();
         await writable.write(brokenText);
         await writable.close();
+        previousArchived = true;
         console.warn("旧数据库解析失败，已另存为 database.bad.<时间戳>.json，下面整份重建。");
       } catch (error) {
         // 连现场都留不下来：宁可不写，也不能把唯一一份证据抹掉
@@ -4981,7 +4990,7 @@ async function syncStatsDatabaseLocked(handle, options = {}) {
       showToast(BcaI18n.t("扩展刚刚更新过，刷新这个页面才会继续写统计。"));
       return;
     }
-    const committed = await commitStatsDatabaseViaBackground(database);
+    const committed = await commitStatsDatabaseViaBackground(database, { pageArchivedBroken: previousArchived });
     if (committed === "declined") {
       publishedStatsFingerprint = fingerprint;
       return;

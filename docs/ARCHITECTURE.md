@@ -329,6 +329,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **逐日明细只有 180 天**（1.8.10）：`stats.js` 的 `dailyRowsCover()` 判区间有没有被明细盖住，没盖住就退到按周 / 按月，并在图下说明粒度变粗的原因 —— 头部「区间内新增」与柱子必须同一个粒度。
 
 - **写库只有一个写者，且「拒绝」不等于「失败」**（1.8.18）：`003database/database.json` 只有 `background.js` 的 `commitStatsDatabaseFromPage` 会写（`bca-stats-commit`）。回话三态 —— `ok` / `declined`（后台明确拒绝：旧库读不出来、写失败、载荷不对）/ 通道断了。页面只在**通道断了**时才退回自己的 `writeFileAtomically`；`declined` 时连 `bcaStats` 都不发。另外扩展重载后残留的旧页面（`chrome.runtime?.id` 已失效）一个字节都不写，只提示刷新 —— 否则它会用 7 秒的换名路径把读不出来的旧库盖掉，并把回声打回来触发整树重扫。
+- **坏库只有一次留档，临时残骸跟着写库清**（1.8.19）：`database.json` 解析失败时，由「先读到它的那一方」留一份 `database.bad.<时间戳>.json`；收藏库页提交时带 `pageArchivedBroken`，`readStatsDatabase(root, { archiveBroken: false })` 据此不再归档、也不把这次提交当成读不到库。拒绝提交时**不许** `publishStatsSnapshot` 一份空库 —— 页面手上那份（已经过 `applyStatsMirror`）才是真的。`003database` 里超过 10 分钟的点号 `.tmp` 由 `cleanStatsTempFiles()` 在每次提交前清掉，形状与年龄判据仍只有 `archive-core.js` 的 `isStaleTempFile` 一份。
 - **统计快照只用来「触发必要的刷新」**（1.8.15，1.8.16 收窄）：收藏库页听到 `bcaStats` 变化时**只比条数** —— 快照的 `videos` 与界面上的记录数。相等就是自己的回声（本页写完统计库会收到，写盘原子换名要几秒，所以回声总在几秒后才到），**一条重扫都不做**。别再拿「整份快照的指纹」或「收藏夹分布」当触发条件：前者任何一处字段不同就误判，后者的两个来源排序规则不同（侧栏是用户自定义顺序、快照是名字顺序），永远不相等。同一个收藏夹内部挪记录不改变总数，这类改动由本页写入路径自己重画，跨页面改动下次打开自愈。
 - **统计库只有一个写者：后台**（1.8.17）。收藏库页只做「读 + 构建」，构建完用 `bca-stats-commit`
   消息把整份库交给后台的 `commitStatsDatabaseFromPage()`，由 `commitStatsDatabase()` 统一

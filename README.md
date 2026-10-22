@@ -137,13 +137,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.7.30 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.8.18：后台说「别写」的时候页面真的不写了
+## V1.8.19：坏库只留一次档，临时残骸顺手清
 
-上一版把写库交给后台时，留了一个布尔判断兜底：后台回话说「没写成」就自己写一遍。可后台还会回话说「**这一份不能写**」——比如这次的旧库读不出来，页面那条兜底是「临时文件 + 换名」，一次七秒，写完还会把回声打回来，于是你看到「过几秒白闪两下」，而且它会把读不出来的旧库盖掉。
+上一版之后，把 `database.json` 改成乱码再打开收藏库，会发现两件事：`003database` 里躺着**两份**内容完全一样的 `database.bad.*.json`（收藏库页留了一份，后台又留了一份），日志里还写「重建空库」；而一个 23:07 留下的 `.database.json.xxxx.tmp` 一直没被清掉。
 
-现在这类回话单独成一态（`declined`）：页面不但不写，还不会再发 `bcaStats`。另外，扩展刚被重载过、这个标签页还在跑旧脚本时，页面一个字节都不写，只提示「扩展刚刚更新过，刷新这个页面才会继续写统计。」
+现在：坏库只由「先读到它的那一方」留档，后台收到这类提交时就照着页面那份重建结果写，不再重复归档、也不先发一份空快照（统计页不会再闪一下 0）；临时残骸改在写库路径上顺手清掉（超过十分钟才动）。
 
-**这对你有什么影响**：重载扩展后忘了刷新收藏库页，不会再安静地跑七秒然后白闪两下；旧库读不出来时，也不会被页面顺手盖掉。写完请照旧刷新一下页面。
+**这对你有什么影响**：手滑改坏 `database.json` 时只多一份 126 KB 的留档，恢复后统计页不会短暂显示 0，`003database` 也不会越积越多 `.tmp`。
 
 
 ## 测试与文档
@@ -154,7 +154,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:304 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:306 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

@@ -3347,7 +3347,11 @@ async function archivePreviousStatsDatabase(read) {
   }
 }
 
-async function readStatsDatabase(root) {
+/* 1.8.19：archiveBroken 为 false 时只读不归档，也不宣称「重建空库」——
+   收藏库页已经留过档了，它手里还有一份用镜像补好的重建结果；
+   后台这时再归档一次只会多留一份一模一样的坏文件。 */
+async function readStatsDatabase(root, options = {}) {
+  const archiveBroken = options.archiveBroken !== false;
   const directory = await root.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: true });
   let file = await directory.getFileHandle(BcaStatsCore.DATABASE_FILE_NAME, { create: true });
   let text = "";
@@ -3391,7 +3395,7 @@ async function readStatsDatabase(root) {
     // 现在：先把原文留档成 database.bad.<时间戳>.json，留档成功才删原文件，然后才重建空库，
     // 并且把这件事同时写进控制台和弹窗「最近状态」（lastResult）——
     // 用户看到的是"数据没了但原文还在 003database/数据库留档文件"，而不是无声归零。
-    const backupName = await archiveBrokenStatsDatabase(directory, text);
+    const backupName = archiveBroken ? await archiveBrokenStatsDatabase(directory, text) : "";
     if (backupName) {
       try {
         await directory.removeEntry(BcaStatsCore.DATABASE_FILE_NAME);
@@ -3406,9 +3410,11 @@ async function readStatsDatabase(root) {
         console.warn("本地数据库重建文件句柄失败，沿用旧句柄继续。", reopenError);
       }
     }
-    const trace = backupName
-      ? `原文已留档为 ${BcaStatsCore.DATABASE_FOLDER_NAME}/${backupName}，并重建空库。`
-      : "留档副本写入失败，原文件未改动，本次仍会整份重写它（历史统计可能丢失）。";
+    const trace = !archiveBroken
+      ? "本次的坏原文由收藏库页留档，后台只负责把它算好的那一份写进去。"
+      : backupName
+        ? `原文已留档为 ${BcaStatsCore.DATABASE_FOLDER_NAME}/${backupName}，并重建空库。`
+        : "留档副本写入失败，原文件未改动，本次仍会整份重写它（历史统计可能丢失）。";
     console.warn(`本地数据库解析失败（${error?.message || error}）：${trace}`);
     chrome.storage.local.set({
       lastResult: { message: `本地数据库损坏：${trace}`, createdAt: Date.now() }
@@ -3467,6 +3473,17 @@ async function writeStatsDatabase(root, records, insertedKeys = null) {
    write + close + syncStatsMirror + publishStatsSnapshot」这六步在
    writeStatsDatabaseInner / touchPetInDatabaseInner / rollbackStatsRecordsInner
    里各抄了一遍，自检与回滚只能一处一处加，迟早漏一处。 */
+/* 1.8.19：只清「点号开头 + .tmp 结尾 + 超过 10 分钟」的文件，判据在 archive-core 里，
+   与 writeFile 用的是同一套。 */
+async function cleanStatsTempFiles(root) {
+  try {
+    const directory = await root.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: false });
+    await removeStaleTempFiles(directory);
+  } catch (_) {
+    // 三档：清陈年残骸是顺手做的事，目录还不存在或权限刚变都不该影响这次写库。
+  }
+}
+
 async function commitStatsDatabase(root, read, database) {
   await archivePreviousStatsDatabase(read);
   const text = JSON.stringify(database);
@@ -3530,18 +3547,24 @@ async function commitStatsDatabaseFromPage(payload) {
   // 页面构建期间这边可能又写过（摸宠物、导入收尾）：只前进的标量取新的那一份，
   // 别让一次「顺带同步」把亲密度与累计保存往回拨。
   return withStatsWriteSlot(async () => {
-    const read = await readStatsDatabase(root);
-    const blocked = statsDatabaseWriteBlocked(read);
+    /* 1.8.19：页面已经把坏原文留档了，它手里那份「用镜像补好的重建结果」就是唯一
+       该落盘的版本：后台不用再归档一遍，也不该把这次提交当成「读不到库」拦下来。 */
+    const pageReplacedBroken = payload?.pageArchivedBroken === true;
+    const read = await readStatsDatabase(root, { archiveBroken: !pageReplacedBroken });
+    const blocked = statsDatabaseWriteBlocked(read) && !pageReplacedBroken;
     if (blocked) {
       // 读不到库就一个字节都不写 —— 页面那份是「按扫描结果重建」的，拿它盖未知现场不安全。
+      // 1.8.19：也不发布空库快照 —— 页面手上有一份补好的，先发空库只会让统计页闪一下 0。
       console.warn(blocked);
       reportStatsWriteBlocked(blocked);
-      await publishStatsSnapshot(read.database);
       /* 1.8.18：declined 是「我知道该怎么写，但这一份不能写」。页面看到它就不许再退回
          自己那条「临时文件 + 换名」的路 —— 那条路一次 7 秒，换名完还会写一份 bcaStats
          把自己的回声打回来，白闪就是这么来的；更要紧的是它会把读不出来的旧库盖掉。 */
       return { ok: false, declined: true, reason: "unreadable" };
     }
+    /* 1.8.19：顺手清掉同目录里超过 10 分钟的点号临时文件。1.8.17 之后页面不再自己写库，
+       「写前清理」那条路就再也没人走，崩一次留下的 .database.json.xxxx.tmp 会一直躺着。 */
+    await cleanStatsTempFiles(root);
     const database = BcaStatsCore.applyStatsMirror(incoming, BcaStatsCore.statsMirrorOf(read.database));
     if (!(await commitStatsDatabase(root, read, database))) return { ok: false, declined: true, reason: "write-failed" };
     return { ok: true };

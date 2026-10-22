@@ -5,6 +5,18 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.19：同一份坏库只留一次档，临时残骸顺手清掉
+
+改了什么：`readStatsDatabase(root, { archiveBroken })` 多一个开关；收藏库页提交时带上 `pageArchivedBroken`，后台据此「不再归档、也不把这次提交当成读不到库」。`commitStatsDatabaseFromPage` 里拒绝分支不再 `publishStatsSnapshot(空库)`。新增 `cleanStatsTempFiles(root)`，在每次页面提交前清掉 `003database` 里超过 10 分钟的点号 `.tmp`。
+
+为什么：用户把 `database.json` 改成乱码再打开收藏库，页面先留了档（`database.bad.233155.json`），后台收到提交又读了一遍坏文件、又留了一份完全相同的档（md5 一样），日志里还写着「重建空库」并先发了一份空快照 —— 统计页会闪一下 0，磁盘上多一份 126 KB 垃圾。另外 `003database/.database.json.mvjockq8.tmp` 从 23:07 一直躺到 23:34：清理只挂在写盘路径上，而 1.8.17 起页面不写库、后台是就地写，那条清理再也没人走。
+
+现在的口径：坏库只有一个留档者（先读到它的那一方）；后台拒绝提交时不再发布空快照；临时残骸在写库路径上顺手清，判据仍是 `archive-core.js` 的 `isStaleTempFile`。
+
+踩的坑：`readStatsDatabase` 的 `blocked` 判断被 1.8.18 的注释包着，补丁按整行匹配连注释一起没命中的那次是空的 —— 最终按「函数入口 + 局部变量」两段锚点切开才稳；`_editlib` 的 CRLF 拆分必须用 `split(/\r?\n/)`。
+
+没动的：`database.bak.json` 的备份与写后自检、`stats-core.js` 的锁与镜像、三档静默吞错的分工，全部不碰。
+
 ## V1.8.18：后台说「别写」的时候，页面真的不写了
 
 改了什么：`bca-stats-commit` 的回话从布尔值改成三态 —— `ok` / `declined`（后台明确拒绝）/ 通道断了；`library.js` 只在最后一种情况下退回本页写盘，`declined` 时连 `bcaStats` 都不发。另加一道：扩展刚被重载过、本页 `chrome.runtime?.id` 已经没了时，一个字节都不写，只提示「扩展刚刚更新过，刷新这个页面才会继续写统计。」
