@@ -143,16 +143,16 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 **4.4 删掉的是「无确认的单条刷新」，不是批量入口。** 详情面板那个点一下就提交、不先弹确认框的 `refreshOneVideoStatus(video)` 确实没了（`test/stability.test.cjs` 有一条断言它的名字不许回到 `library.js`）；现在**所有**刷新都先过确认框：
 
-- **统一入口**：`openStatusConfirm(videos, source)`（`source` 是 `"detail"` 或 `"batch"`）→ 用户点「开始更新」→ `runStatusRefresh()` 提交：
+- **统一入口**：`openStatusConfirm(videos, source)`（`source` 是 `"detail"` 或 `"batch"`）→ 用户点「同步最近收藏」→ `runStatusRefresh()` 提交：
 
 ```
 chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets, limit: STATUS_BATCH_LIMIT } })
 ```
 
-- **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频状态」（`library.html:138` 的 `#updateSelected`），`library.js:3302` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:789-798` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
-- **上限**：`library.js:1446` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
+- **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频状态」（`library.html:144` 的 `#updateSelected`），`library.js:5572` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:957` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
+- **上限**：`library.js:2477` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
 - **后台实现**（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。风控的顾虑不是靠「不做批量」解决的，而是靠**确认框 + 80 条上限 + 串行间隔**（`IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`）。**不要再把无确认的单条刷新加回来。**
-- 上面几处行号是 V1.2.0 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
+- 上面几处行号是 V1.8.19 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
 ### CSS 覆盖顺序（4.8.3 的教训）
 
 **同一组件的规则必须写在它的基础规则之后。** 4.7 给 `.import-card` 加橘黄时把新规则写在了 `.import-card > summary { … }` 前面，结果：
@@ -235,7 +235,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 对 约 8800 行 JS 做过一次三路只读审计（导入链路规模化 / 本地加载性能 / 安全与误操作）。安全侧**未发现致命或高危漏洞**，41 项防护经核实到位；修的是导入链路与加载性能上的真问题。下面记的是**改动背后的约束**，改这些地方之前先读懂。
 
-- **导入的保活是显式行为，不是副作用**：`keepServiceWorkerAlive()`（background.js:1357，调 `chrome.runtime.getPlatformInfo()`，内部 20 秒节流）。MV3 的 Service Worker 只认"扩展 API 调用/事件"来重置空闲计时器，**纯 `await` 不算**。原来唯一的"保活"是 `publishImportState` 每 500ms 写 storage 的副作用——没有任何一行声明这个意图，暂停态与超长 `await` 段都会失去保护。**改导入主循环时不要把这个调用删掉。**
+- **导入的保活是显式行为，不是副作用**：`keepServiceWorkerAlive()`（background.js:2219，调 `chrome.runtime.getPlatformInfo()`，内部 20 秒节流）。MV3 的 Service Worker 只认"扩展 API 调用/事件"来重置空闲计时器，**纯 `await` 不算**。原来唯一的"保活"是 `publishImportState` 每 500ms 写 storage 的副作用——没有任何一行声明这个意图，暂停态与超长 `await` 段都会失去保护。**改导入主循环时不要把这个调用删掉。**
 - **`IMPORT_KEEPALIVE_INTERVAL_MS` 的余量很紧**：20 秒是审计给的保守值，而单次 `biliImportApiGet` 最坏是"页面代取 15s + 直连 15s"。已在每次请求结束补一次保活，把最坏间隙压到 15+20 秒内。**若真机上出现后台被回收，优先把这个常量调到 12000~15000**（一个常量，不影响任何测试）。
 - **`importRun` 是内存态，`importState` 是落盘态，两者会不同步**。判据只有一条：**内存里的 `importRun.active` 才算"真的在跑"**。`importState.running === true` 只是残影，必须复位。复位有三重入口（`get-status` 自愈 / `bca-import-probe` / `onStartup`·`onInstalled`），**新增任何读取导入状态的地方都要走同一套复位**，否则又会锁死 UI。
 - **残影复位不需要再等时间窗**（1.4.3 起）：判据是「session 里有没有 `active: true` 的快照」——没有就是上一轮的进程已经没了，立刻复位。**不要**再引入「`updatedAt` 超过 N 秒才算残影」那类时间窗口，那会让浏览器重启后的前 N 秒里弹窗一直显示"导入中"、暂停/取消按钮点了只回"当前没有正在进行的导入"（1.4.3 修的就是这个）。

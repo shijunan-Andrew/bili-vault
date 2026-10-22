@@ -73,8 +73,8 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 |---|---|
 | 词典 | 936 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
 | 测试基线 | stability 306 · archive-core 89 · stats-core 65 · background 25 · pages 29（后四套是真执行） |
-| 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |
-| 生成 | 2026-10-22 23:39，当时 HEAD `ca6d545`；重跑 `node test/status.cjs --write` 刷新 |
+| 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
+| 生成 | 2026-10-23 00:14，当时 HEAD `f50ec90`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -95,7 +95,7 @@ node test/status.cjs --write   # 跑完五套测试再刷新本表
 ```powershell
 node test/stability.test.cjs      # 静态回归断言（最快；改文档、常量后必跑）
 node test/background.test.cjs     # 真执行：chrome.* / FileSystem / 导入回写
-node test/pages.test.cjs          # 真执行：library / popup / content 三个页面
+node test/pages.test.cjs          # 真执行：library / popup / stats / content 四个页面
 node test/i18n-extract.cjs --check
 ```
 
@@ -206,7 +206,7 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 **什么时候提醒用户换会话**：下面三条都成立，也就是「随时可以交接」的时候——
 
 1. 当前批次已经收尾：代码改完、五套测试 + `i18n --check` 全绿、该发版的发完（HEAD 干净，本地与 `origin/main` 一致）。
-2. 状态已经落到文件里：`fix-p2-checklist.md`（或 `TODO.md`）与 `docs/HISTORY.md` 都写完，不靠对话记忆。
+2. 状态已经落到文件里：待办与审查结论在交接方的 `Desktop\bili_vault_ref\TODO.md`（**不进仓库**，`fix-p2-checklist.md` 也在那里），版本历史在 `docs/HISTORY.md`；都写完，不靠对话记忆。
 3. 屏幕上「轮」的计数**约 50 轮**就开始留意，到 **80 轮**必须处理；上下文占用环超过 **60%** 也一样。
 
 **这两种时候不要提**：活干到一半（改了没测、发了没推）；或者刚被打断、状态不明——先把收尾做完再提。
@@ -375,7 +375,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | `archive-core.test.cjs` | 真执行 `archive-core.js`：目录命名、`视频信息.txt` 解析、配置形状、路径预算 | 纯函数语义变了 |
 | `stats-core.test.cjs` | 真执行 `stats-core.js`：数据库模型、快照、区间计算 | 统计口径变了 |
 | `background.test.cjs` | 在 vm 里跑 `background.js`：内存版 `chrome.*` + FileSystem，覆盖统计库写入 / 回队 / 回滚 / 互斥、归档写锁 | service worker 的契约破了 |
-| `pages.test.cjs` | 在最小 DOM 里跑 `library.js` / `popup.js` / `content.js` | 页面交互、选择器或事件链破了 |
+| `pages.test.cjs` | 在最小 DOM 里跑 `library.js` / `popup.js` / `stats.js` / `content.js` | 页面交互、选择器或事件链破了 |
 
 各套的项数**不写死在这里**（会漂）：五套的当前值见上面「当前状态」那张脚本生成的表，`stability.test.cjs` 的总数另有三处 `<!-- test-count:N -->` 标记由 `scripts/check-all.cjs` 核对。
 
@@ -386,7 +386,7 @@ node test/stability.test.cjs      # 静态回归断言为主（项数以实际�
 node test/archive-core.test.cjs   # 真执行：归档命名、文本解析、配置形状
 node test/stats-core.test.cjs     # 真执行：数据库模型、快照、区间
 node test/background.test.cjs     # 真执行：内存版 chrome.* + FileSystem，background.js 丢进 vm
-node test/pages.test.cjs          # 真执行：dom-harness 里加载 library.html / popup.html / content.js
+node test/pages.test.cjs          # 真执行：dom-harness 里加载 library.html / popup.html / stats.html / content.js
 node test/i18n-extract.cjs --check
 ```
 

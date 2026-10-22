@@ -74,7 +74,7 @@ function buildBlock() {
     "|---|---|",
     `| 词典 | ${dict.entries} 条（\`zh-TW\` / \`en\` 各一份；缺 ${dict.missing}，多余 ${dict.extra}） |`,
     `| 测试基线 | ${suiteLine}（后四套是真执行） |`,
-    "| 审查欠账 | P0 2/2 · P1 24 条 · P2 清单内 63/63 已全部处理完；P3 按约定不修 |",
+    "| 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |",
     `| 生成 | ${when}，当时 HEAD \`${head}\`；重跑 \`node test/status.cjs --write\` 刷新 |`
   ].join("\n");
 }
