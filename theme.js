@@ -219,6 +219,9 @@
   // 读一次就画上。失败（没有图 / IndexedDB 不可用）时静默保持纯色背景，
   // 背景图从来不是「能用」的前提。
   function loadWallpaper() {
+    /* 1.8.11：弹窗根本不铺背景图（ensureWallpaperLayer 对它直接返回 null），
+       别再为了一个用不上的对象地址去读一次 IndexedDB。 */
+    if (document.documentElement.dataset.wallpaperScope === "popup") return Promise.resolve(null);
     if (!global.indexedDB) return Promise.resolve(null);
     return readWallpaperBlob()
       .then((blob) => { applyWallpaperUrl(blob); return blob; })
@@ -236,6 +239,13 @@
     const BYPASS_BYTES = 1.5 * 1024 * 1024;
     if (typeof global.createImageBitmap !== "function") return Promise.resolve(file);
     return global.createImageBitmap(file)
+      .catch((error) => {
+        /* 1.8.11：字节像图片、像素解不出来（文件损坏 / 编码不支持）—— 这和「存不进去」
+           是两件事，得让上层能分开说，否则用户会跑去清磁盘。 */
+        const decodeError = new Error("image decode failed");
+        decodeError.cause = error;
+        throw decodeError;
+      })
       .then((bitmap) => {
         // 从这里开始到 toBlob 走完，bitmap 由本函数负责释放（每一条出口都要 close）：
         // 解码出来的是原始像素，一张 5000 万像素的图占着内存不放，多试两次就卡机器。
@@ -285,8 +295,18 @@
     } catch (_) {}
   }
 
+  let wallpaperSaveChain = Promise.resolve();
+
   function saveWallpaper(file) {
     if (!file) return Promise.reject(new Error("no file"));
+    /* 1.8.11：连着选两张图时，两次「压缩 → 存 → 铺」会交错落地 —— 先选的那张
+       如果慢，最后留在库里反而是它。串成一条链，后选的永远后落地。 */
+    const task = wallpaperSaveChain.then(() => saveWallpaperOnce(file), () => saveWallpaperOnce(file));
+    wallpaperSaveChain = task.then(() => undefined, () => undefined);
+    return task;
+  }
+
+  function saveWallpaperOnce(file) {
     return prepareWallpaper(file)
       .then((prepared) => withWallpaperStore("readwrite", (store) => store.put(prepared, WALLPAPER_KEY))
         .then(() => { applyWallpaperUrl(prepared); announceWallpaperChange(); requestDurableStorage(); return prepared; }));

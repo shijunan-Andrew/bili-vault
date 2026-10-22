@@ -358,14 +358,15 @@ html.bca-pet-suspended .bca-pet-dock {
   pointer-events: auto;
 }
 
-/* 渐入（透明度 + 轻微位移）：hidden 时整块不参与渲染，所以给 hidden 收尾 */
+/* 渐入（只动透明度）：1.8.11 去掉了 keyframe 里的 translateY —— 那段位移会和 JS 按行内
+   clamp 算出来的 transform 打架，动画一结束就横跳一下。 */
 .bca-pet-bubble:not([hidden]) {
   animation: bca-pet-bubble-in 260ms var(--ease);
 }
 
 @keyframes bca-pet-bubble-in {
-  0%   { opacity: 0; transform: translateY(6px); }
-  100% { opacity: 1; transform: translateY(0); }
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
 }
 
 .bca-pet-bubble-text {

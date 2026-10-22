@@ -68,7 +68,13 @@
   function dayKeyToTime(key) {
     const match = String(key || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return NaN;
-    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const dayNumber = Number(match[3]);
+    const date = new Date(year, month - 1, dayNumber);
+    /* 1.8.11：`2026-02-30` 这种「看起来像日键」的输入不算数 —— JS 会把它滚到 03-02，
+       用户输入 2 月 30 日会得到一段他从没选过的区间。回比年月日，滚过一天就判坏。 */
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== dayNumber) return NaN;
     const time = date.getTime();
     return Number.isFinite(time) ? time : NaN;
   }
@@ -238,14 +244,35 @@
      用户主动删视频**不走这里**：那个计数按设计只增不减（见 addRecord 里的注释）。
      传进来的 key 用 videoKey() 算，调用方负责保证那是本次导入新建的行；
      已经不在库里的 key 直接跳过，不会把别人的行算掉。 */
+/* 1.8.11：按 key 删不掉时，按 bvid / 标题再认一次 —— 老库里的 key 可能是
+   `title:标题|收藏夹`，也可能已经是 `bvid:…`，两个方向都要认。 */
+function fallbackRowKey(videos, key) {
+  const wanted = String(key);
+  const bvid = wanted.startsWith("bvid:") ? wanted.slice(5).trim() : "";
+  const titleParts = wanted.startsWith("title:") ? wanted.slice(6).split("\u0000") : [];
+  for (const rowKey of Object.keys(videos)) {
+    const row = videos[rowKey];
+    if (!row || typeof row !== "object") continue;
+    if (bvid && String(row.bvid || "").trim() === bvid) return rowKey;
+    if (titleParts.length === 2) {
+      const [collection, title] = titleParts;
+      if (String(row.title || "") === title && String(row.collection || "") === collection) return rowKey;
+    }
+  }
+  return "";
+}
+
   function removeRecords(database, keys) {
     if (!database || typeof database !== "object" || !database.videos) return 0;
     const list = Array.isArray(keys) ? keys : [];
     let removed = 0;
     for (const key of list) {
       if (typeof key !== "string" || !key) continue;
-      if (!Object.prototype.hasOwnProperty.call(database.videos, key)) continue;
-      delete database.videos[key];
+      /* 1.8.11：key 算法改过之后（目录名 / 标题 / bvid 之间切换过），老 key 删不掉 ——
+         按 bvid、再按「标题+收藏夹」兜一次，否则用户删了视频、统计里还留着。 */
+      const hit = Object.prototype.hasOwnProperty.call(database.videos, key) ? key : fallbackRowKey(database.videos, key);
+      if (!hit) continue;
+      delete database.videos[hit];
       removed += 1;
     }
     if (removed) {
@@ -887,6 +914,7 @@
     normalizeDatabase,
     addRecord,
     removeRecords,
+    fallbackRowKey,
     recordFromVideo,
     databaseFromVideos,
     needsRebuild,

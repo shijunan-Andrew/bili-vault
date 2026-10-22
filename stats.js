@@ -118,8 +118,8 @@
     updated: document.getElementById("statsUpdated"),
     updatedValue: document.getElementById("statsUpdatedValue"),
     videos: document.getElementById("statVideos"),
-    savedToday: document.getElementById("statSavedToday"),
-    savedLast7: document.getElementById("statSavedLast7"),
+    savedToday: document.getElementById("statRangeTotal"),
+    savedLast7: document.getElementById("statRangeDays"),
     collections: document.getElementById("statCollections")
   };
 
@@ -2216,6 +2216,19 @@
      脚本填进去的正文得在它换完词典之后再画一遍。 */
   /* 1.7.7（P1-1）：快照的「实质指纹」——不算 updatedAt。收藏库每秒写一次 bcaStats
      （1.7.6 之前那个环路）时，这一页原来也跟着每秒整页重绘一次图表。 */
+  /* 1.8.11：以前指纹只比数组长度 —— 同一天删一条、另一天加一条，长度不变，
+     统计页就停在旧图上。改用「行数 + 内容滚动和」：180 行以内算一次几乎不花时间，
+     但内容一改指纹就变。 */
+  function rowSignature(rows) {
+    if (!Array.isArray(rows) || !rows.length) return 0;
+    let sum = 0;
+    for (const row of rows) {
+      const key = String(row?.day || row?.week || row?.month || "");
+      sum = (sum * 31 + (Number(row?.count) || 0) + key.length * 7) % 1000000007;
+    }
+    return `${rows.length}:${sum}`;
+  }
+
   function snapshotFingerprint(snapshot) {
     if (!snapshot) return "";
     try {
@@ -2227,9 +2240,9 @@
         snapshot.collections,
         snapshot.topCollection,
         Array.isArray(snapshot.daily) ? snapshot.daily.length : 0,
-        Array.isArray(snapshot.dailyRows) ? snapshot.dailyRows.length : 0,
-        Array.isArray(snapshot.weekly) ? snapshot.weekly.length : 0,
-        Array.isArray(snapshot.monthly) ? snapshot.monthly.length : 0
+        rowSignature(snapshot.dailyRows),
+        rowSignature(snapshot.weekly),
+        rowSignature(snapshot.monthly)
       ]);
     } catch (_) { return ""; }
   }

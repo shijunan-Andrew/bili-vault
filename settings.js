@@ -209,7 +209,7 @@ function selectWallpaperFile(file) {
     .catch((error) => {
       // 非图片会被 theme.js 直接 reject；存储写不进去（配额、无痕）是另一种原因，
       // 两者的提示不一样，别把「存不下」说成「这不是图片」
-      const notImage = /not an image|no file/i.test(String(error?.message || ""));
+      const notImage = /not an image|no file|image decode failed/i.test(String(error?.message || ""));
       showWallpaperError(notImage ? "这张图片读不出来，换一张试试。" : "浏览器不让存背景图片，可能是空间不够。");
     });
 }

@@ -943,6 +943,37 @@ test("removeRecords 认得 addRecord 用过的三种 key（BV / av / 标题+收�
   assert.equal(db.totals.savedTotal, 0);
 });
 
+test("非法日键不许被 JS 悄悄滚动（1.8.11）", () => {
+  assert.ok(Number.isFinite(core.dayKeyToTime("2026-02-28")), "正常日键仍然要认");
+  assert.ok(Number.isNaN(core.dayKeyToTime("2026-02-30")), "2 月没有 30 号");
+  assert.ok(Number.isNaN(core.dayKeyToTime("2026-13-01")), "13 月不存在");
+  assert.ok(Number.isNaN(core.dayKeyToTime("2026-04-31")), "4 月没有 31 号");
+  assert.ok(Number.isNaN(core.dayKeyToTime("2026-00-00")), "0 月 0 日不存在");
+  /* 闰年 2-29 要认：2024 是闰年 */
+  assert.ok(Number.isFinite(core.dayKeyToTime("2024-02-29")), "闰年 2 月 29 日合法");
+  assert.ok(Number.isNaN(core.dayKeyToTime("2025-02-29")), "平年没有 2 月 29 日");
+});
+
+test("removeRecords：老 key 删不掉时按 bvid / 标题再认一次（1.8.11）", () => {
+  /* 目录名时代的老 key 是 title:收藏夹\u0000标题，新 key 是 bvid:… —— 换过算法之后
+     交叉删除必须还能删掉，否则「删了视频，统计里还留着」。 */
+  const left = core.emptyDatabase(1000);
+  left.videos["title:C\u0000甲"] = { title: "甲", collection: "C", bvid: "BV1xx411c7mD", at: 1000 };
+  left.totals.savedTotal = 1;
+  assert.equal(core.removeRecords(left, ["bvid:BV1xx411c7mD"]), 1, "按 bvid 删老 title 行");
+  assert.deepEqual(Object.keys(left.videos), []);
+
+  const right = core.emptyDatabase(1000);
+  right.videos["bvid:BV1xx411c7mD"] = { title: "甲", collection: "C", bvid: "BV1xx411c7mD", at: 1000 };
+  right.totals.savedTotal = 1;
+  assert.equal(core.removeRecords(right, ["title:C\u0000甲"]), 1, "按标题删 bvid 行");
+  assert.deepEqual(Object.keys(right.videos), []);
+
+  const unrelated = core.emptyDatabase(1000);
+  unrelated.videos["bvid:BV1zz411c7mD"] = { title: "乙", collection: "C", bvid: "BV1zz411c7mD", at: 1000 };
+  assert.equal(core.removeRecords(unrelated, ["bvid:BV1xx411c7mD"]), 0, "别的视频不能被误删");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

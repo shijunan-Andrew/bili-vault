@@ -309,6 +309,12 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **老 PNG 封面转 WebP（1.8.8）**：只走用户连上的 `rootHandle`，只碰记录目录里的 `封面.png`，先写 `封面.webp`、`close()` 之后才删原 PNG；保留目录与 `视频信息.txt` 一律不动；判断走 `archive-core.js` 的 `coverConvertAction()`，动手前先过 `archiveWriteLockedByImport()`。
 - **`004导出` 只留最近 5 份（1.8.8）**：导出成功后按 `exportPruneList()` 删多余（同秒撞名的 `-2` 排在本体之后），删旧失败只记日志，不影响本次导出；用户自己放进去的文件不匹配命名规则，不会被删。
 
+- **统计快照的指纹按内容算**（1.8.11）：`stats.js` 的 `rowSignature()` 对逐日/周/月行做「行数 + 内容滚动和」，同数量不同分布的改动也会触发整页重绘。
+- **删行有三条路**（1.8.11）：`removeRecords()` 先按 key 精确删，删不掉按 `bvid:`、再按 `title:收藏夹\u0000标题` 兜底 —— key 算法换过，老行也得删得掉。
+- **日键要回比**（1.8.11）：`dayKeyToTime()` 只认「年月日回比一致」的输入，`2026-02-30` 返回 `NaN` 而不是被 JS 滚到 3 月 2 日。
+- **宠物封顶后合写**（1.8.11）：每天摸到上限之后，`PET_CAPPED_WRITE_MS`（60 秒）内不再整库重写，只涨内存里的 `totalTouch`。
+- **背景图的错误分两类**（1.8.11）：`image decode failed`（图坏了）与存储失败（空间/无痕）提示不同；连选两张时用 `wallpaperSaveChain` 串行落地。
+
 - **统计库的判据只有一份**（1.8.10）：`stats-core.js` 的 `STATS_MIRROR_KEY` / `statsMirrorOf` / `applyStatsMirror` 同时被后台与收藏库页使用；页面侧「读不出来」只跳过并提示，永远不会拿空结果覆盖原文。
 - **统计库的写入要跨上下文串行**（1.8.10）：`withStatsDatabaseLock()`（`stats-core.js`）用 Web Locks，锁名 `bili-vault-stats-database`；后台的 `withStatsWriteSlot()` 只负责本上下文排队，跨上下文交给这把锁。没有 `navigator.locks` 时直接跑。
 - **写完统计库要读回自检**（1.8.10）：三个写入口共用 `commitStatsDatabase()`（留上一版 → 整份写 → 逐字节比对），不合格用 `database.bak.json` 顶回。

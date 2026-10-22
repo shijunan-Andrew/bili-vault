@@ -6591,3 +6591,41 @@ test("后台写完统计库要读回自检，不合格就用上一版顶回去�
   assert.equal((background.match(/await archivePreviousStatsDatabase\(read\);/g) || []).length, 1,
     "留上一版只在 commitStatsDatabase 里做一次，别又抄回三处");
 });
+
+// ---- 1.8.11：P2/P3 收尾（指纹按内容、id 与语义对齐、宠物封顶合写、背景三处）----
+
+test("统计页的实质指纹按内容算，不再只比数组长度（V1.8.11）", () => {
+  const stats = readProjectFile("stats.js");
+  assert.match(stats, /function rowSignature\(rows\) \{/, "指纹要按「行数 + 内容滚动和」算");
+  assert.match(stats, /rowSignature\(snapshot\.dailyRows\),/, "逐日明细要参与指纹");
+  assert.match(stats, /rowSignature\(snapshot\.weekly\),/, "周汇总要参与指纹");
+  assert.match(stats, /rowSignature\(snapshot\.monthly\)/, "月汇总要参与指纹");
+  assert.doesNotMatch(stats, /Array\.isArray\(snapshot\.dailyRows\) \? snapshot\.dailyRows\.length : 0,/, "别再退回「只比长度」：同一天删一条、另一天加一条，长度不变，图就停在旧数据上");
+});
+
+test("两张瓷砖的 id 和它现在显示的东西对得上（V1.8.11）", () => {
+  const html = readProjectFile("stats.html");
+  const stats = readProjectFile("stats.js");
+  assert.match(html, /id="statRangeTotal"/, "「区间内新增」那一格不是「今天」的量，id 别叫 SavedToday");
+  assert.match(html, /id="statRangeDays"/, "「区间天数」同理");
+  assert.match(stats, /savedToday: document\.getElementById\("statRangeTotal"\)/, "JS 要跟着改");
+  assert.match(stats, /savedLast7: document\.getElementById\("statRangeDays"\)/, "JS 要跟着改");
+  assert.doesNotMatch(html, /statSavedToday|statSavedLast7/, "旧 id 不许留一半");
+  assert.doesNotMatch(stats, /statSavedToday|statSavedLast7/, "旧 id 不许留一半");
+});
+
+test("宠物封顶后不再整库重写、气泡渐入不再和 clamp 打架、背景三处小坑（V1.8.11）", () => {
+  const background = readProjectFile("background.js");
+  const petCss = readProjectFile("pet.css");
+  const theme = readProjectFile("theme.js");
+  const settings = readProjectFile("settings.js");
+  assert.match(background, /const PET_CAPPED_WRITE_MS = 60 \* 1000;/, "封顶后合写的窗口要写在这里");
+  assert.match(background, /if \(touched\.capped && Date\.now\(\) - petCappedWriteAt < PET_CAPPED_WRITE_MS\) \{/,
+    "封顶之后的摸不该每次都整库重写");
+  assert.doesNotMatch(petCss, /transform: translateY\(6px\)/, "气泡渐入的位移会和行内 clamp 打架");
+  assert.match(petCss, /@keyframes bca-pet-bubble-in \{\r?\n  0%   \{ opacity: 0; \}/, "渐入只动透明度");
+  assert.match(theme, /if \(document\.documentElement\.dataset\.wallpaperScope === "popup"\) return Promise\.resolve\(null\);/, "弹窗不铺背景图，就别去读 IndexedDB");
+  assert.match(theme, /wallpaperSaveChain = task\.then\(\(\) => undefined, \(\) => undefined\);/, "连选两张要串行落地");
+  assert.match(theme, /const decodeError = new Error\("image decode failed"\);/, "解码失败要和「存不进去」分开报");
+  assert.match(settings, /not an image\|no file\|image decode failed/i, "坏图的提示得和空间不足分开");
+});

@@ -411,6 +411,45 @@ async function suiteLibrary() {
     assert.equal(html.classList.contains("bca-pet-suspended"), false, "抽屉关掉后宠物要回来");
   });
 
+  await test("统计页能用回调式 storage 真跑起来：有数据画卡片、空库显示空态（1.8.11）", async () => {
+    /* stats.js 读快照用的是 chrome.storage.local.get(key, cb) 回调式，而 harness
+       只有 Promise 版 —— 不补这一层，统计页的 init 永远不完成（这也正是它此前零覆盖的原因）。 */
+    const wrap = (chrome) => {
+      const area = chrome.storage.local;
+      const rawGet = area.get.bind(area);
+      area.get = function (keys, callback) {
+        if (typeof callback !== "function") return rawGet(keys);
+        return rawGet(keys).then((result) => callback(result));
+      };
+      return chrome;
+    };
+    const snapshot = {
+      videos: 12,
+      days: 3,
+      totals: { savedTotal: 12 },
+      firstSeen: "2026-05-01",
+      collections: 2,
+      topCollection: { name: "默认收藏夹", count: 9 },
+      dailyRows: [{ day: "2026-05-19", count: 4 }, { day: "2026-05-20", count: 8 }],
+      weekly: [{ week: "2026-05-18", count: 12 }],
+      monthly: [{ month: "2026-05", count: 12 }],
+      yearly: [{ year: "2026", count: 12 }]
+    };
+    const page = dom.loadPage({
+      htmlFile: "stats.html",
+      chrome: wrap(harness.makeChrome({ localData: { bcaStats: snapshot } }))
+    });
+    page.document.dispatchEvent({ type: "DOMContentLoaded" });
+    await settle(12);
+    assert.equal(page.document.getElementById("statVideos").textContent.trim(), "12", "视频总数要画出来");
+    assert.equal(page.document.getElementById("statsEmpty").hidden, true, "有数据时不该显示空态");
+
+    const emptyPage = dom.loadPage({ htmlFile: "stats.html", chrome: wrap(harness.makeChrome()) });
+    emptyPage.document.dispatchEvent({ type: "DOMContentLoaded" });
+    await settle(12);
+    assert.equal(emptyPage.document.getElementById("statsEmpty").hidden, false, "空库要显示空态");
+  });
+
   await test("Alt+↑/↓ 在收藏夹行上换序，焦点跟着走（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;
