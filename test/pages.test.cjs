@@ -452,10 +452,11 @@ async function suiteLibrary() {
     assert.equal(emptyPage.document.getElementById("statsEmpty").hidden, false, "空库要显示空态");
   });
 
-  await test("统计快照变了但记录集没变时，收藏库不再整树重扫（1.8.15）", async () => {
+  await test("统计快照变了但记录集没变时，收藏库不再整树重扫（1.8.16）", async () => {
     /* 真机症状：打开收藏库约 8 秒后整页闪两下。根因是本页自己写完统计库（原子换名约 7 秒）
        收到自己的回声，旧判据把「每日明细长度/收藏夹顺序变了」当成「有新记录」→ 再扫一遍。
-       这里断言：记录集没变 → 一条重扫都不发生；记录集变了 → 照常重扫。 */
+       这里断言：记录集没变 → 一条重扫都不发生（连收藏夹分布变了也不扫，1.8.16）；
+       记录集变了 → 照常重扫。 */
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;
     const notice = doc.getElementById("scanNotice");
@@ -474,13 +475,8 @@ async function suiteLibrary() {
       totals: { videos: cardsBefore.length, downloaded: 0, invalid: 0 },
       firstSeen: "",
       collections: 2,
-      collectionCounts: [...doc.querySelectorAll(".collection-row")]
-        .filter((row) => row.querySelector(".collection-button")?.dataset.collectionKey !== "*")
-        .map((row) => ({
-          name: textOf(row.querySelector(".collection-name")) || "",
-          count: Number(textOf(row.querySelector(".collection-count"))) || 0
-        }))
-        .sort((left, right) => left.name.localeCompare(right.name, "zh-CN")),
+      /* 1.8.16：不再看收藏夹分布 —— 侧栏按用户自定义顺序排、快照按名字排，
+         两边永远对不上，「自己的回声」就被当成「新记录」了（真机 8 秒后闪两下）。 */
       daily: [],
       dailyRows: []
     };

@@ -6724,13 +6724,21 @@ test("统计快照只比「记录集」，不再让本页自己的回声触发�
   const at = library.indexOf("if (changes.bcaStats) {");
   assert.ok(at > 0, "要保留对 bcaStats 的监听");
   const block = library.slice(at, at + 1800);
-  assert.match(block, /const recordSetChanged = incomingCount !== shownCount \|\| \(collectionsKnown && incomingCollections !== shownCollections\);/, "判据只看条目数与收藏夹分布");
-  assert.match(block, /Array\.isArray\(incoming\.collectionCounts\)/, "分布取快照的 collectionCounts");
-  assert.match(readProjectFile("stats-core.js"), /collectionCounts,\r?\n/, "stats-core 的 snapshot 要带出 collectionCounts");
+  assert.match(block, /const recordSetChanged = incomingCount !== shownCount;/, "判据只看条目数");
+  assert.doesNotMatch(block, /collectionCounts/, "不再比收藏夹分布（侧栏是自定义顺序，快照是名字顺序，永远对不上）");
+  assert.doesNotMatch(readProjectFile("stats-core.js"), /collectionCountss*[,}]/, "stats-core 不再产出那份分布");
   assert.match(block, /const incomingCount = Number\(incoming\.videos\) \|\| 0;/, "条目数取快照的 videos");
   assert.match(block, /const shownCount = allVideos\(\)\.length;/, "拿界面上真实显示的条数比");
   assert.match(block, /if \(recordSetChanged && !importIsRunning\) scheduleArchiveRefresh\(\);/, "只有记录集变了才重扫");
   /* 写统计库时「内容没变就不写」的指纹要留着 —— 那是另一个环路（每秒重写磁盘）的闸门。 */
   assert.match(library, /let publishedStatsFingerprint = "";/, "发布指纹本身还要留着（防止每秒重写）");
   assert.match(library, /if \(fingerprint && fingerprint === publishedStatsFingerprint\) return;/, "写之前的去重不能丢");
+  /* 1.8.16：换 collections 之前先把同一条记录的封面带过去 ——
+     扫描结果里每条记录都是新对象，若直接换掉再重建网格，卡片会先白一下（列表闪一下）。 */
+  assert.match(library, /const carriedCovers = new Map\(\);/, "换代前要先记下旧封面");
+  assert.match(library, /addCoverRef\(url\);\s*\r?\n\s*video\.cover = url;/, "带过去时要把引用计数加上");
+  const carryAt = library.indexOf("const carriedCovers = new Map();");
+  const releaseAt = library.indexOf("releaseVideoCoverRefs();", carryAt);
+  const assignAt = library.indexOf("collections = applyCollectionOrder(result.collections);", carryAt);
+  assert.ok(carryAt > 0 && releaseAt > carryAt && assignAt > releaseAt, "顺序：记旧封面 → 交还旧对象 → 换成本轮结果");
 });

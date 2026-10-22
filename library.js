@@ -4986,8 +4986,27 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   if (result.stats?.total) lastScanRecordCount.set(rootCacheKey(handle), result.stats.total);
   // 1.8.5：把这一轮结果写成快照，下次打开先把界面填起来（异步，不等）
   saveScanSnapshot(handle, result.collections);
-  // 扫描成功、确定要换掉 collections 了：上一批 video 对象交还它们持有的封面 URL。
-  // 放在这里（而不是扫描开始时）是为了让扫描期间的旧卡片继续正常显示封面。
+  // 扫描成功、确定要换掉 collections 了。
+  /* 1.8.16：先把「同一条记录」的封面带过去。扫描结果里每条记录都是新对象、cover 为空，
+     若直接换掉再重建网格，卡片会先白一下再异步补图 —— 真机表现就是「列表闪一下」。
+     封面 URL 的引用计数还挂在旧对象上，所以先给新对象加一次，再让旧对象交还。 */
+  const carriedCovers = new Map();
+  for (const video of allVideos()) {
+    if (video.cover) carriedCovers.set(`${video.collection}\u0000${video.directory}`, video.cover);
+  }
+  if (carriedCovers.size) {
+    for (const collection of result.collections) {
+      for (const video of collection.videos) {
+        if (video.cover) continue;
+        const url = carriedCovers.get(`${video.collection}\u0000${video.directory}`);
+        if (!url) continue;
+        addCoverRef(url);
+        video.cover = url;
+      }
+    }
+  }
+  // 上一批 video 对象交还它们持有的封面 URL（放在这里而不是扫描开始时，
+  // 是为了让扫描期间的旧卡片继续正常显示封面）。
   releaseVideoCoverRefs();
   collections = applyCollectionOrder(result.collections);
   const existingVideoIds = new Set(allVideos().map((video) => video.id));
@@ -5779,24 +5798,19 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   /* 1.7.7（P0-1）：本页自己写的快照会被自己收到。指纹相同就是自己的回声 —— 不重扫。
      这一条与 syncStatsDatabase 的「没变不写」一起把那个每秒一轮的环路彻底断掉；
      后台写进来的（导入 / 手动收藏）实质字段一定变了，照旧刷新。 */
-  /* 1.8.15：bcaStats 只是统计快照，**它变不表示列表里多了记录**。
+  /* 1.8.16：bcaStats 只是统计快照，**它变不表示列表里多了记录**。
      本页自己写完统计库也会收到一条回声 —— 写盘走原子换名，本机要 7 秒，所以回声总在
-     7 秒后才到。旧判据比的是整份快照的实质字段，只要有一处对不上（每日明细长度、
-     收藏夹顺序、镜像顶回来的标量），就会被当成「新记录落盘了」，于是 paintSnapshot +
-     整树重扫 + 两次重绘全来一遍：真机表现就是「打开收藏库 8 秒后闪两下」。
-     现在只比**记录集**：条目数或收藏夹分布变了才值得重扫。摸宠物、写统计这类
-     「只动数字」的写入不会再让整页重画。 */
+     7 秒后才到。1.8.15 拿「条数 + 收藏夹分布」判，分布这一半是错的：侧栏按用户自己
+     排的顺序，快照按名字排，两边永远对不上，于是回声照样被当成「新记录落盘」——
+     真机仍是「打开收藏库 8 秒后闪两下」。现在只比**条数**。
+     代价：同一个收藏夹之间挪记录（总数不变）不会立刻重扫；那种操作本来就走本页的
+     写入路径自己重画，跨页面的改动下次打开会自愈。摸宠物、写统计这类只动数字的写入
+     一条重扫都不做。 */
   if (changes.bcaStats) {
     const incoming = changes.bcaStats.newValue || {};
     const incomingCount = Number(incoming.videos) || 0;
-    // 快照里的 collectionCounts 是 1.8.15 加的；老快照没有它，那就只比条数
-    const incomingCollections = Array.isArray(incoming.collectionCounts)
-      ? incoming.collectionCounts.map((item) => `${item?.name}:${item?.count}`).join("|")
-      : "";
     const shownCount = allVideos().length;
-    const shownCollections = collections.map((item) => `${item.name}:${item.videos.length}`).join("|");
-    const collectionsKnown = incomingCollections.length > 0;
-    const recordSetChanged = incomingCount !== shownCount || (collectionsKnown && incomingCollections !== shownCollections);
+    const recordSetChanged = incomingCount !== shownCount;
     if (recordSetChanged && !importIsRunning) scheduleArchiveRefresh();
   }
   // P2-8：后台把导入状态写在 importState 上，订阅它就能在收藏库里给出「导入进行中」的提示
