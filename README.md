@@ -137,11 +137,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.7.30 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.8.14：打开收藏库不再「闪两下」
+## V1.8.15：闪两下的真因找到了
 
-打开收藏库是两段式：先用上次的结果铺一屏，再整库扫一遍校准。以前两段都会把整页卡片重建一遍，即使内容一模一样 —— 真机上的表现就是打开几秒后页面闪两下、布局跟着重排。现在重建前会先比「内容签名」（当前页的记录、侧栏条数、筛选排序与页码），一样就只补封面，网格原地不动。
+1.8.14 之后你还在报「第一次打开收藏库约 8 秒后闪两下」，这次抓到日志了：
 
-**这对你有什么影响**：点开收藏库、等它扫完，页面不会再莫名其妙抖两下；扫描结束后封面照样补齐。
+- 那 7 秒是页面自己在写统计库（原子换名在这台机器上要 7 秒）；写完之后页面收到自己的回声，被当成「有新记录落盘」，于是 900 毫秒后端端正正经经又扫了一遍、还重画了两次网格。
+- 现在只比「记录集」：条目数和收藏夹分布都没变，一条重扫都不做；真的导入、手动收藏、别处删了东西，条数会变，照常刷新。
+- 顺带修掉一个隐性的：摸一下宠物也会触发整库重扫（它只改数字、不改记录集），现在不会了。
+
+**这对你有什么影响**：第一次打开收藏库，扫描结束后列表就是最终样子，不会再闪；其他行为一个没变。
 
 ## 测试与文档
 
@@ -151,7 +155,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:300 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:301 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

@@ -6709,3 +6709,28 @@ test("内容没变就不重建网格：快照画完再扫一遍时页面不该�
   assert.ok(shortAt > 0 && rebuildAt > shortAt, "短路必须发生在重建网格之前");
 });
 
+
+// ---- 1.8.15：统计快照变了不等于列表里多了记录 ----
+test("统计快照只比「记录集」，不再让本页自己的回声触发整树重扫（V1.8.15）", () => {
+  const library = readProjectFile("library.js");
+  /* 旧判据把整份快照的实质字段当触发条件 —— 每日明细长度、收藏夹顺序任何一处不同，
+     本页自己写的回声（写盘 7 秒后才收到）就会触发 paintSnapshot + 整树重扫，
+     真机表现是「打开收藏库 8 秒后闪两下」。 */
+  assert.doesNotMatch(
+    library,
+    /incomingFingerprint !== publishedStatsFingerprint && !importIsRunning\) scheduleArchiveRefresh\(\);/,
+    "监听器别再拿整份快照的指纹判「有新记录」"
+  );
+  const at = library.indexOf("if (changes.bcaStats) {");
+  assert.ok(at > 0, "要保留对 bcaStats 的监听");
+  const block = library.slice(at, at + 1800);
+  assert.match(block, /const recordSetChanged = incomingCount !== shownCount \|\| \(collectionsKnown && incomingCollections !== shownCollections\);/, "判据只看条目数与收藏夹分布");
+  assert.match(block, /Array\.isArray\(incoming\.collectionCounts\)/, "分布取快照的 collectionCounts");
+  assert.match(readProjectFile("stats-core.js"), /collectionCounts,\r?\n/, "stats-core 的 snapshot 要带出 collectionCounts");
+  assert.match(block, /const incomingCount = Number\(incoming\.videos\) \|\| 0;/, "条目数取快照的 videos");
+  assert.match(block, /const shownCount = allVideos\(\)\.length;/, "拿界面上真实显示的条数比");
+  assert.match(block, /if \(recordSetChanged && !importIsRunning\) scheduleArchiveRefresh\(\);/, "只有记录集变了才重扫");
+  /* 写统计库时「内容没变就不写」的指纹要留着 —— 那是另一个环路（每秒重写磁盘）的闸门。 */
+  assert.match(library, /let publishedStatsFingerprint = "";/, "发布指纹本身还要留着（防止每秒重写）");
+  assert.match(library, /if \(fingerprint && fingerprint === publishedStatsFingerprint\) return;/, "写之前的去重不能丢");
+});

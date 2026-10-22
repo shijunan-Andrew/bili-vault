@@ -695,11 +695,26 @@ function fallbackRowKey(videos, key) {
     );
     const firstSeen = localDayKey(firstSeenTime);
     const firstSeenDays = Math.max(1, numberOr(dayCountBetween(dayStartOf(firstSeenTime), dayStartOf(time)), NaN) || 1);
+    /* 1.8.15：收藏库页要靠它判断「列表里的记录集变没变」—— 上面的 collections 只是个数，
+       光看个数分不出「A 夹少一条、B 夹多一条」，而本页自己写完统计库收到的回声必须能被
+       准确认出来（认不出来就会整树重扫，真机表现是「打开收藏库 8 秒后闪两下」）。
+       名字排序固定，免得两个写者因为 Map 顺序不同而永远对不上。 */
+    const collectionCounts = [];
+    {
+      const counts = new Map();
+      for (const entry of entries) {
+        const name = entry.collection || "未分类收藏";
+        counts.set(name, (counts.get(name) || 0) + 1);
+      }
+      for (const [name, count] of counts) collectionCounts.push({ name, count });
+      collectionCounts.sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+    }
     return {
       version: DATABASE_VERSION,
       updatedAt: time,
       videos: entries.length,
       collections: collections.size,
+      collectionCounts,
       savedToday,
       savedLast7,
       topCollection,

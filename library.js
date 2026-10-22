@@ -5779,9 +5779,25 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   /* 1.7.7（P0-1）：本页自己写的快照会被自己收到。指纹相同就是自己的回声 —— 不重扫。
      这一条与 syncStatsDatabase 的「没变不写」一起把那个每秒一轮的环路彻底断掉；
      后台写进来的（导入 / 手动收藏）实质字段一定变了，照旧刷新。 */
+  /* 1.8.15：bcaStats 只是统计快照，**它变不表示列表里多了记录**。
+     本页自己写完统计库也会收到一条回声 —— 写盘走原子换名，本机要 7 秒，所以回声总在
+     7 秒后才到。旧判据比的是整份快照的实质字段，只要有一处对不上（每日明细长度、
+     收藏夹顺序、镜像顶回来的标量），就会被当成「新记录落盘了」，于是 paintSnapshot +
+     整树重扫 + 两次重绘全来一遍：真机表现就是「打开收藏库 8 秒后闪两下」。
+     现在只比**记录集**：条目数或收藏夹分布变了才值得重扫。摸宠物、写统计这类
+     「只动数字」的写入不会再让整页重画。 */
   if (changes.bcaStats) {
-    const incomingFingerprint = publishedStatsFingerprintOf(changes.bcaStats.newValue);
-    if (incomingFingerprint !== publishedStatsFingerprint && !importIsRunning) scheduleArchiveRefresh();
+    const incoming = changes.bcaStats.newValue || {};
+    const incomingCount = Number(incoming.videos) || 0;
+    // 快照里的 collectionCounts 是 1.8.15 加的；老快照没有它，那就只比条数
+    const incomingCollections = Array.isArray(incoming.collectionCounts)
+      ? incoming.collectionCounts.map((item) => `${item?.name}:${item?.count}`).join("|")
+      : "";
+    const shownCount = allVideos().length;
+    const shownCollections = collections.map((item) => `${item.name}:${item.videos.length}`).join("|");
+    const collectionsKnown = incomingCollections.length > 0;
+    const recordSetChanged = incomingCount !== shownCount || (collectionsKnown && incomingCollections !== shownCollections);
+    if (recordSetChanged && !importIsRunning) scheduleArchiveRefresh();
   }
   // P2-8：后台把导入状态写在 importState 上，订阅它就能在收藏库里给出「导入进行中」的提示
   if (changes.importState) applyImportState(changes.importState.newValue);

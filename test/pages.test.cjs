@@ -87,6 +87,8 @@ function sampleTree() {
 async function openLibrary(options = {}) {
   const chrome = makeChrome({ version: "1.7.23", localData: options.localData || {} });
   const page = dom.loadPage({ htmlFile: "library.html", chrome });
+  // 1.8.15：用例要主动制造 storage 变化（验证「记录集没变就不重扫」），把 chrome 挂到页面上
+  page.__chrome = chrome;
   await settle();
   const g = page.window;
   if (options.tree) {
@@ -448,6 +450,54 @@ async function suiteLibrary() {
     emptyPage.document.dispatchEvent({ type: "DOMContentLoaded" });
     await settle(12);
     assert.equal(emptyPage.document.getElementById("statsEmpty").hidden, false, "空库要显示空态");
+  });
+
+  await test("统计快照变了但记录集没变时，收藏库不再整树重扫（1.8.15）", async () => {
+    /* 真机症状：打开收藏库约 8 秒后整页闪两下。根因是本页自己写完统计库（原子换名约 7 秒）
+       收到自己的回声，旧判据把「每日明细长度/收藏夹顺序变了」当成「有新记录」→ 再扫一遍。
+       这里断言：记录集没变 → 一条重扫都不发生；记录集变了 → 照常重扫。 */
+    const page = await openLibrary({ tree: sampleTree() });
+    const doc = page.document;
+    const notice = doc.getElementById("scanNotice");
+    const seen = [];
+    const watcher = new page.window.MutationObserver(() => { seen.push(notice.textContent); });
+    watcher.observe(notice, { childList: true, characterData: true, subtree: true });
+
+    const cardsBefore = [...doc.querySelectorAll(".video-card")];
+    assert.ok(cardsBefore.length > 0, "应该先渲染出卡片");
+
+    // 同一份记录集（条数与收藏夹分布都和界面上一致），只是统计快照换了一份
+    // 侧栏里「全部视频」那一行是聚合行（key === "*"），统计快照里没有它，别算进来
+    const sameSet = {
+      videos: cardsBefore.length,
+      days: 1,
+      totals: { videos: cardsBefore.length, downloaded: 0, invalid: 0 },
+      firstSeen: "",
+      collections: 2,
+      collectionCounts: [...doc.querySelectorAll(".collection-row")]
+        .filter((row) => row.querySelector(".collection-button")?.dataset.collectionKey !== "*")
+        .map((row) => ({
+          name: textOf(row.querySelector(".collection-name")) || "",
+          count: Number(textOf(row.querySelector(".collection-count"))) || 0
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name, "zh-CN")),
+      daily: [],
+      dailyRows: []
+    };
+    seen.length = 0;
+    await page.__chrome.storage.local.set({ bcaStats: sameSet });
+    await new Promise((resolve) => setTimeout(resolve, 1100)); // 越过 900ms 防抖窗口
+    await settle();
+    assert.deepEqual(seen, [], `记录集没变时不该重扫，实际提示变了：${seen.join(" | ")}`);
+    assert.equal(doc.querySelector(".video-card"), cardsBefore[0], "卡片不该被重建（重建会整页闪一下）");
+
+    // 记录集真的变了（条数不一样）→ 照常重扫一次
+    seen.length = 0;
+    await page.__chrome.storage.local.set({ bcaStats: Object.assign({}, sameSet, { videos: cardsBefore.length + 5 }) });
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await settle();
+    assert.ok(seen.length > 0, "记录集变了应该重扫，但提示一次都没变");
+    watcher.disconnect();
   });
 
   await test("Alt+↑/↓ 在收藏夹行上换序，焦点跟着走（1.7.23）", async () => {
