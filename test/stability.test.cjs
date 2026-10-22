@@ -6779,3 +6779,36 @@ test("后台只有一个写者：页面交回的提交也走备份、就地写�
   assert.match(background, /if \(message\?\.type === "bca-stats-commit"\) \{/, "消息入口要在");
   assert.doesNotMatch(body, /writeFileAtomically\(/, "后台不该退回「临时文件 + 换名」那条慢路");
 });
+
+
+// ---- 1.8.18：后台「明确拒绝」时页面也不许自己写 ----
+test("后台明确拒绝写库时，页面不许退回那条 7 秒的换名路（V1.8.18）", () => {
+  const library = readProjectFile("library.js");
+  const background = readProjectFile("background.js");
+  const body = functionBodyOf(library, "async function commitStatsDatabaseViaBackground(database) {");
+  assert.match(body, /if \(result && result\.ok\) return "ok";/, "成功要单独一个状态");
+  assert.match(body, /if \(result && result\.declined\) \{/, "「明确拒绝」要认出来");
+  assert.match(body, /return "declined";/, "拒绝就回 declined，不许当失败处理");
+  assert.match(body, /return "failed";/, "通道断了才算失败");
+  const writer = functionBodyOf(library, "async function syncStatsDatabaseLocked(handle, options = {}) {");
+  assert.match(writer, /if \(!chrome\.runtime\?\.id\) \{/, "扩展上下文失效时一个字节都不写");
+  assert.match(writer, /showToast\(BcaI18n\.t\("扩展刚刚更新过，刷新这个页面才会继续写统计。"\)\)/, "要告诉用户刷新");
+  assert.match(writer, /if \(committed === "declined"\) \{/, "拒绝要单独一条分支");
+  assert.match(writer, /if \(committed === "failed"\) \{/, "只有失败才退回本页写");
+  assert.doesNotMatch(writer, /if \(!committed\) \{/, "旧的布尔判断不许回来（它会把拒绝也当成失败）");
+  assert.ok(
+    writer.indexOf('if (committed === "failed")') > writer.indexOf('if (committed === "declined")'),
+    "先判拒绝再判失败",
+  );
+  // 后台这两条「我知道该怎么写，但这一份不能写」必须带上 declined。
+  assert.match(background, /return \{ ok: false, declined: true, reason: "unreadable" \};/, "读不出旧库要算拒绝");
+  assert.match(background, /return \{ ok: false, declined: true, reason: "write-failed" \};/, "写失败也算拒绝");
+  assert.match(background, /return \{ ok: false, declined: true, reason: "bad-payload" \};/, "载荷不对也算拒绝");
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = JSON.parse(readProjectFile(`locales/${locale}.json`));
+    assert.ok(
+      dictionary["扩展刚刚更新过，刷新这个页面才会继续写统计。"],
+      `${locale} 要有「扩展刚刚更新过」这条提示`,
+    );
+  }
+});

@@ -4849,14 +4849,23 @@ async function primeStatsFingerprint() {
 }
 
 /* 1.8.17：写库交给后台。成功就不用再写 bcaStats 与统计镜像 —— commitStatsDatabase
-   里已经做过；失败（后台没醒、消息被拦）就退回本页的原子写，宁可慢几秒也不能丢。 */
+   里已经做过；失败（后台没醒、消息被拦）就退回本页的原子写，宁可慢几秒也不能丢。
+   1.8.18：回话改成三态 —— 后台「明确拒绝」（ok:false 且 declined:true，比如旧库这次
+   读不出来）时**本页也不许写**：那条兜底是「临时文件 + 换名」，一次 7 秒，换名完还要
+   写一份 bcaStats 把回声打回来，白闪就是这么来的；更要紧的是它会拿重建结果盖掉读不
+   出来的旧库。只有「消息通道本身断了」（扩展被重载、SW 没醒）才允许退回本页写。 */
 async function commitStatsDatabaseViaBackground(database) {
   try {
     const result = await chrome.runtime.sendMessage({ type: "bca-stats-commit", database });
-    return Boolean(result && result.ok);
+    if (result && result.ok) return "ok";
+    if (result && result.declined) {
+      console.warn(`后台没有接管这次写库（${result.reason || "declined"}），本页也不自己写。`);
+      return "declined";
+    }
+    return "failed";
   } catch (error) {
-    console.warn("后台没能接手写库（退回本页写盘，会慢几秒）", error);
-    return false;
+    console.warn("后台没能接手写库（消息通道断了）", error);
+    return "failed";
   }
 }
 
@@ -4965,8 +4974,19 @@ async function syncStatsDatabaseLocked(handle, options = {}) {
     /* 1.8.17：写盘交给后台（就地写 + 写前备份 + 写完自检）。本页以前走
        writeFileAtomically（临时文件 + move 换名），这台机器上一次 7.1 秒，而且换名完成
        后还要自己写一份 bcaStats —— 回声会让本页再重扫重绘一轮。失败才退回本页写。 */
+    /* 1.8.18：扩展刚被重载过时，这个页面还在跑旧的那一份脚本，chrome.runtime 已经
+       失效。这时候写库既写不进 bcaStats，也会白等 7 秒，干脆一个字节都不写，让用户
+       刷新页面（刷新后就是新版本）。 */
+    if (!chrome.runtime?.id) {
+      showToast(BcaI18n.t("扩展刚刚更新过，刷新这个页面才会继续写统计。"));
+      return;
+    }
     const committed = await commitStatsDatabaseViaBackground(database);
-    if (!committed) {
+    if (committed === "declined") {
+      publishedStatsFingerprint = fingerprint;
+      return;
+    }
+    if (committed === "failed") {
       await writeFileAtomically(directory, file, JSON.stringify(database));
       await syncStatsMirrorForSync(database);
       await chrome.storage.local.set({ bcaStats: payload });

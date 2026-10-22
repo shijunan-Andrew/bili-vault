@@ -3526,7 +3526,7 @@ async function commitStatsDatabaseFromPage(payload) {
   const permission = await root.queryPermission({ mode: "readwrite" }).catch(() => "denied");
   if (permission !== "granted") return { ok: false, reason: "no-permission" };
   const incoming = payload && payload.database;
-  if (!incoming || typeof incoming !== "object") return { ok: false, reason: "bad-payload" };
+  if (!incoming || typeof incoming !== "object") return { ok: false, declined: true, reason: "bad-payload" };
   // 页面构建期间这边可能又写过（摸宠物、导入收尾）：只前进的标量取新的那一份，
   // 别让一次「顺带同步」把亲密度与累计保存往回拨。
   return withStatsWriteSlot(async () => {
@@ -3537,10 +3537,13 @@ async function commitStatsDatabaseFromPage(payload) {
       console.warn(blocked);
       reportStatsWriteBlocked(blocked);
       await publishStatsSnapshot(read.database);
-      return { ok: false, reason: "unreadable" };
+      /* 1.8.18：declined 是「我知道该怎么写，但这一份不能写」。页面看到它就不许再退回
+         自己那条「临时文件 + 换名」的路 —— 那条路一次 7 秒，换名完还会写一份 bcaStats
+         把自己的回声打回来，白闪就是这么来的；更要紧的是它会把读不出来的旧库盖掉。 */
+      return { ok: false, declined: true, reason: "unreadable" };
     }
     const database = BcaStatsCore.applyStatsMirror(incoming, BcaStatsCore.statsMirrorOf(read.database));
-    if (!(await commitStatsDatabase(root, read, database))) return { ok: false, reason: "write-failed" };
+    if (!(await commitStatsDatabase(root, read, database))) return { ok: false, declined: true, reason: "write-failed" };
     return { ok: true };
   }).catch((error) => ({ ok: false, reason: error?.message || "commit-failed" }));
 }
