@@ -314,6 +314,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **外观写盘节流 120ms**（1.8.12）：`settings.js` 的 `scheduleAppearanceWrite()` 合并 patch、`flushAppearanceWrite()` 落地，`change` 事件立刻 flush。
 - **未来时间戳夹到现在**（1.8.12）：`FUTURE_DAY_SLACK_MS` 一天容差，超出夹到 `now` 并计入 `futureDayCount`；`at <= 0` 丢弃。
 - **台词序号单独算**（1.8.13）：`BcaStatsCore.petLineIndex(totalTouch, offset)` 是唯一实现；后台在「封顶后合写」的窗口里记 `petDeferredTouches` 并用 offset 补下标，落地清零 —— 合写省掉的是写盘，不是用户看到的变化。
+- **内容没变就不重建 DOM**（1.8.14）：`renderVideos()` 先算内容签名（当前页记录的 id/标题/下载与失效标记 + 侧栏名字与条数 + 筛选排序页码），相同就只 `paintPageCovers()` 补封面 —— 快照先画一遍、扫描再画一遍时页面不会闪两下。空列表不短路，否则空态文案会停在旧的上面。
 - **合成层不许常驻**（1.8.13）：`.bca-pet-dock` 平时不写 `will-change`，拖动期间才加 `.is-dragging`；常驻会让带 `backdrop-filter` 的面板反复重新采样。
 
 - **统计快照的指纹按内容算**（1.8.11）：`stats.js` 的 `rowSignature()` 对逐日/周/月行做「行数 + 内容滚动和」，同数量不同分布的改动也会触发整页重绘。

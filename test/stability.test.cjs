@@ -6696,3 +6696,16 @@ test("宠物封顶后不再整库重写、气泡渐入不再和 clamp 打架、�
   assert.match(theme, /const decodeError = new Error\("image decode failed"\);/, "解码失败要和「存不进去」分开报");
   assert.match(settings, /not an image\|no file\|image decode failed/i, "坏图的提示得和空间不足分开");
 });
+test("内容没变就不重建网格：快照画完再扫一遍时页面不该闪两下（V1.8.14）", () => {
+  const body = functionBodyOf(readProjectFile("library.js"), "function renderVideos() {");
+  assert.match(body, /let lastVideoRenderSignature = "";|lastVideoRenderSignature/, "要记住上一次画的是什么");
+  assert.match(body, /const renderSignature = \[/, "内容签名要现算");
+  assert.match(body, /video\.downloaded \? 1 : 0/, "签名要含下载标记");
+  assert.match(body, /collections\.map\(\(item\) =>/, "侧栏条数变了也要重建");
+  assert.match(body, /if \(\s*renderSignature === lastVideoRenderSignature/, "签名相同就短路");
+  assert.match(body, /paintPageCovers\(pageVideos\.map\(/, "短路时只补封面");
+  const shortAt = body.indexOf("renderSignature === lastVideoRenderSignature");
+  const rebuildAt = body.indexOf("videoGrid.replaceChildren(");
+  assert.ok(shortAt > 0 && rebuildAt > shortAt, "短路必须发生在重建网格之前");
+});
+

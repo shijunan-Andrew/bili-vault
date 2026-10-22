@@ -195,6 +195,11 @@ let upFilter = "all";
 let tagFilter = "all";
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
+/* 1.8.14：上一次网格/侧栏是照着什么内容画出来的。
+   打开收藏库时「快照先画一遍、整库扫完再画一遍」，即使两次内容一模一样也会整块重建
+   DOM —— 真机上看到的就是「页面闪两下」。内容签名相同就只补当前页还缺的封面。 */
+let lastVideoRenderSignature = "";
+let lastCollectionRenderSignature = "";
 let pendingCollectionAction = null;
 /* 1.7.21（收尾）：批量搬运要有进度与中止。搬运一个视频 = 复制整目录 + 删源，
    几十个能跑上一分钟，原来除了按钮上四个字没有任何反馈，也停不下来。 */
@@ -1783,6 +1788,34 @@ function renderVideos() {
   // 1.8.7（P1-5）：只要「当前页及以前」那一段的前 k 条，不再给整表排序（见 selectFirstVideos）
   const pageVideos = selectFirstVideos(matching, pageStart + pageSize, compareVideos).slice(pageStart, pageStart + pageSize);
   visibleVideoIds = pageVideos.map((video) => video.id);
+
+  /* 1.8.14：内容签名 —— 变了才重建网格。签名只看「用户看得到的东西」：
+     当前页每条记录的 id/标题/下载与失效标记，收藏夹侧栏的名字与条数，
+     以及筛选/排序/页码。快照与扫描结果一致时这里直接命中，网格原地不动。 */
+  const renderSignature = [
+    selectedCollection,
+    videoFilter,
+    upFilter,
+    tagFilter,
+    sortSelect.value,
+    query,
+    pageSize,
+    currentPage,
+    matching.length,
+    filterTotal,
+    pageVideos.map((video) => `${video.id}:${video.title}:${video.downloaded ? 1 : 0}:${video.isInvalid ? 1 : 0}`).join("|"),
+    collections.map((item) => `${item.name}:${item.videos.length}`).join("|"),
+  ].join("\u0000");
+  if (
+    renderSignature === lastVideoRenderSignature &&
+    pageVideos.length > 0 &&
+    videoGrid.children.length === pageVideos.length
+  ) {
+    // 只把「扫描之后才拿到的封面」补上去，别的什么都不动
+    paintPageCovers(pageVideos.map((video, index) => ({ card: videoGrid.children[index], video })));
+    return;
+  }
+  lastVideoRenderSignature = renderSignature;
 
   const countLabel = videoFilter !== "all"
     ? BcaI18n.t("{shown} / {total} 个{kind}视频", {

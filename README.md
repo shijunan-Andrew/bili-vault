@@ -137,13 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.7.30 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.8.13：宠物的问候语不再卡住同一句
+## V1.8.14：打开收藏库不再「闪两下」
 
-摸满当天 20 下以后，插件会把那一分钟里的连续抚摸合并成一次写盘。但台词的序号原来是从落盘次数算的 —— 写盘被合并，序号也就不走了，于是连点看到的是同一句问候语。现在序号单独算（`petLineIndex`），合并写盘时用「这一分钟里第几次」补上偏移，每摸一下换一句；落地后计数归零。
+打开收藏库是两段式：先用上次的结果铺一屏，再整库扫一遍校准。以前两段都会把整页卡片重建一遍，即使内容一模一样 —— 真机上的表现就是打开几秒后页面闪两下、布局跟着重排。现在重建前会先比「内容签名」（当前页的记录、侧栏条数、筛选排序与页码），一样就只补封面，网格原地不动。
 
-顺带去掉了宠物外壳常驻的合成层提示（`will-change`），只在拖动时临时提升 —— 常驻会让页面里带毛玻璃的面板反复重新采样，是「屏幕隔一会儿闪一下」的可疑来源之一。
-
-**这对你有什么影响**：封顶之后连点宠物，四句台词照常轮换；带背景图或毛玻璃时不容易再看到那种说不清的闪。
+**这对你有什么影响**：点开收藏库、等它扫完，页面不会再莫名其妙抖两下；扫描结束后封面照样补齐。
 
 ## 测试与文档
 
@@ -153,7 +151,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:299 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:300 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
