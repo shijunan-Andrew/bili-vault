@@ -497,6 +497,28 @@ async function boot() {
   $("copyNativeCleanup")?.addEventListener("click", () => { copyNativeCleanupCommand(); });
 
   // 滑块要「拖着就生效」，所以监听 input 而不是 change（change 要等松手）
+  // 1.8.12：滑杆是 input 事件逐帧来的。以前每帧都写一次 localStorage + chrome.storage，
+  // 别的扩展页收到 storage 事件就整页重绘毛玻璃 —— 低端机上拖一下就掉帧。
+  // 现在攒 120ms 合并写一次；松手（change）立刻落最后一次，不会「拖到 60% 松手却停在 55%」。
+  const APPEARANCE_WRITE_DELAY_MS = 120;
+  let appearanceWriteTimer = 0;
+  let pendingAppearance = null;
+  function flushAppearanceWrite() {
+    if (appearanceWriteTimer) {
+      clearTimeout(appearanceWriteTimer);
+      appearanceWriteTimer = 0;
+    }
+    if (!pendingAppearance) return;
+    const patch = pendingAppearance;
+    pendingAppearance = null;
+    BcaTheme.setAppearance(patch);
+  }
+  function scheduleAppearanceWrite(patch) {
+    pendingAppearance = Object.assign(pendingAppearance || {}, patch);
+    if (appearanceWriteTimer) return;
+    appearanceWriteTimer = setTimeout(flushAppearanceWrite, APPEARANCE_WRITE_DELAY_MS);
+  }
+
   const sliders = [
     ["wallpaperVeil", "veil", formatPercent],
     ["wallpaperBlur", "blur", formatPx],
@@ -505,10 +527,13 @@ async function boot() {
   for (const [id, key, format] of sliders) {
     $(id)?.addEventListener("input", (event) => {
       const value = Number(event.target.value);
-      BcaTheme.setAppearance({ [key]: value });
+      // 拖动中先攒着，数值文本仍然是即时的（用户看的是这一行）
+      scheduleAppearanceWrite({ [key]: value });
       // setAppearance 会通知 renderAppearance，本行的数值文本在那边一起更新
       writeText($(`${id}Value`), format(value));
     });
+    // 松手（键盘松开 / 点击轨道）立刻落最后一次，别让节流吞掉终点值
+    $(id)?.addEventListener("change", flushAppearanceWrite);
   }
 
   $("glassToggle")?.addEventListener("click", () => {

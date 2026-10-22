@@ -5,6 +5,26 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.12：四条小改动（宠物过渡、遮罩下限、滑杆节流、脏时间戳）
+
+**改了什么**：① 宠物换尺寸档、窗口 resize 时给一次过渡（之前 `syncPosition()` 永远传 `applyTransform(false)`，`pet.css` 里写的 transition 只对拖动有效，改尺寸档是瞬移的；拖动与 `settle()` 仍然瞬间到位，否则会像「松手以后猫自己溜走」）；② 背景遮罩下限从 0% 抬到 10%（滑杆 `min="10"`，读取侧 `clamp(raw.veil, 10, 100, …)` 把老库里的 0 也抬上来）；③ 三个滑杆的写盘从「每个 input 都写」改成 120ms 合并一次、`change` 立刻落最后一次；④ 统计库里未来/离谱的时间戳（手改出来的 `1e300`、时钟错乱的机器）读进来夹到「现在」并计入 `futureDayCount`，非正时间戳的行直接丢掉。
+
+**为什么**：这四条都不改数据语义，但都在「手感」上留着刺。滑杆那条最实在：一次拖动 60 个 input 就是 60 次 `chrome.storage.local.set`，别的扩展页每帧重绘毛玻璃，低端机上直接掉帧。时间戳那条则是「数字与图对不上」的最后一块拼图 —— 脏行以前计进总数却不进任何一格。
+
+**现在的口径**：
+
+- 过渡只属于「位置重算」（换档、resize）：`syncPosition(animate)` 显式传参，拖动路径与 `settle()` 传 `false`。
+- 遮罩 10% 是下限而不是默认值：默认仍是 50，用户可以在 10–100 之间调。
+- 滑杆：`input` 只更新数值文本并攒一份 patch，120ms 落地一次；`change` 立刻 flush。
+- 时间戳：`FUTURE_DAY_SLACK_MS`（一天）以内照收，超了就夹到 `now`；`at <= 0` 或非有限数的行丢弃。
+
+**踩的坑**：
+
+- `settle()` 里先写 `container.style.transition = "none"` 再 `syncPosition()`：如果顺手把 `syncPosition` 改成默认带过渡，这一句就被盖回去了（顺序是先撤后写，`applyTransform(true)` 会把 `transition` 重新置空）—— 所以改成显式传参而不是改默认值。
+- `addRecord` 里 `at` 与 `now` 同名了一次（`const at = Number.isFinite(time) ? time : …` 里再取 `now`），夹取要另起 `fallback`，否则未来值会把 `Math.min(existing.at, at)` 也带偏。
+
+**没动的**：统计 P2-5（重建丢 `at`）、P2-7（周/月/年聚合含区间外头尾整桶）、宠物 P3 死代码群与 `will-change`，仍留清单。
+
 ## V1.8.11：把审查清单里剩下的 P2/P3 收掉
 
 **改了什么**：① 统计页的实质指纹从「只比数组长度」改成 `rowSignature()`（行数 + 内容滚动和），同一天删一条、另一天加一条也能触发重绘；② `removeRecords()` 删不掉的老 key 现在按 bvid / 「收藏夹+标题」再认一次（key 算法在 1.5.0 前后换过，老库里的行删不掉）；③ 统计页两张瓷砖的 id 从 `statSavedToday` / `statSavedLast7` 改成 `statRangeTotal` / `statRangeDays`，与它们现在显示的「区间内新增 / 区间天数」对齐；④ `dayKeyToTime()` 回比年月日，`2026-02-30`、`2026-13-01` 这类输入不再被 JS 悄悄滚到下个月；⑤ 宠物每天摸到上限之后，一分钟才合一次写（`PET_CAPPED_WRITE_MS`），不再为一次 `totalTouch` 整库重写；⑥ 宠物气泡的渐入只动透明度（keyframe 里的 `translateY(6px)` 会和 JS 行内 clamp 打架，动画一结束就横跳）；⑦ 弹窗不再为了一个用不上的对象地址读 IndexedDB；⑧ 连选两张背景图串成一条链落地，后选的永远后落地；⑨ 坏图（字节像图片、像素解不出）现在报「这张图片读不出来」，不再是「可能是空间不够」。

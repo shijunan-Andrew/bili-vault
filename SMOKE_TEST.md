@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **293** 项里<!-- test-count:293 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **297** 项里<!-- test-count:297 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,6 +54,13 @@
 ---
 
 - **导入按条数收工不再假报失败**：设上限 50，勾一个超过 50 条新视频的收藏夹 → 应写入 50 条，提示「本次按上限导入：最多 50 条，已写入 50 条，另有 N 条新视频留到下次」；**不许**再出现「导入失败：importLimit is not defined」。
+
+## V1.8.12 新增的几条
+
+- 宠物：点另一档尺寸（或有拖窗口改宽度）→ 宠物应「滑」到新位置，而不是瞬移；拖它本身仍应瞬间跟手，松手后不许自己再溜一段。
+- 遮罩：把「背景遮罩」滑到最左 → 应停在 10%，且设置页重开后仍是 10%（老库里的 0 被抬上来）。
+- 滑杆：按住背景模糊快速来回拖 → DevTools 里 `chrome.storage.local` 的写入次数应明显少于鼠标事件数；松手后最终值与你看到的一致。
+- 脏时间戳：手改 `003database/database.json`，把某条记录的 `at` 改成 `9999999999999` → 打开统计页，该条应算进「今天」，总数与柱状图之和一致。
 
 ## V1.8.11 新增的几条
 
@@ -151,7 +158,7 @@
 
 1. `chrome://extensions` 里确认版本显示 **V1.7.32**；收藏库、设置页各打开一次。
 2. 打开 `README.md`：「正式版更新」下面**只有 V1.7.32 一节**，且给出了指向 `docs/HISTORY.md` 的链接；再打开 `docs/HISTORY.md`，最新一节也是 V1.7.32，往下能一路排到 V1.0.0。
-3. `node test/stability.test.cjs` 应 293 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
+3. `node test/stability.test.cjs` 应 297 项全过；故意在 `README.md` 里多写一行 `## V1.7.31：` 标题再跑，应该变红（这条验的是「历史不许堆回 README」）。
 
 ## V1.7.31 新增的几条
 

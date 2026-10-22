@@ -99,7 +99,9 @@
   function normalizeAppearance(source) {
     const raw = source && typeof source === "object" ? source : {};
     return {
-      veil: clamp(raw.veil, 0, 100, DEFAULT_APPEARANCE.veil),
+      // 1.8.12：遮罩最低 10%。0 等于没遮，深色背景图上浅色文字会直接糊成一片；
+      // 老库里存着的 0 也在读取时被抬到 10。
+      veil: clamp(raw.veil, 10, 100, DEFAULT_APPEARANCE.veil),
       blur: clamp(raw.blur, 0, 40, DEFAULT_APPEARANCE.blur),
       glass: Boolean(raw.glass),
       glassBlur: clamp(raw.glassBlur, 1, 20, DEFAULT_APPEARANCE.glassBlur)

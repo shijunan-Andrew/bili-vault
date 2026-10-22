@@ -309,6 +309,11 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **老 PNG 封面转 WebP（1.8.8）**：只走用户连上的 `rootHandle`，只碰记录目录里的 `封面.png`，先写 `封面.webp`、`close()` 之后才删原 PNG；保留目录与 `视频信息.txt` 一律不动；判断走 `archive-core.js` 的 `coverConvertAction()`，动手前先过 `archiveWriteLockedByImport()`。
 - **`004导出` 只留最近 5 份（1.8.8）**：导出成功后按 `exportPruneList()` 删多余（同秒撞名的 `-2` 排在本体之后），删旧失败只记日志，不影响本次导出；用户自己放进去的文件不匹配命名规则，不会被删。
 
+- **位置重算才允许过渡**（1.8.12）：`syncPosition(animate)` 显式传参 —— 换尺寸档、窗口 resize 传 `true`，拖动与 `settle()` 传 `false`；`settle()` 自己先写 `transition = "none"`。
+- **遮罩下限 10%**（1.8.12）：`settings.html` 的滑杆与 `theme.js` 的 `sanitizeAppearance` 两处同时夹，老库里的 0 读取时抬上来。
+- **外观写盘节流 120ms**（1.8.12）：`settings.js` 的 `scheduleAppearanceWrite()` 合并 patch、`flushAppearanceWrite()` 落地，`change` 事件立刻 flush。
+- **未来时间戳夹到现在**（1.8.12）：`FUTURE_DAY_SLACK_MS` 一天容差，超出夹到 `now` 并计入 `futureDayCount`；`at <= 0` 丢弃。
+
 - **统计快照的指纹按内容算**（1.8.11）：`stats.js` 的 `rowSignature()` 对逐日/周/月行做「行数 + 内容滚动和」，同数量不同分布的改动也会触发整页重绘。
 - **删行有三条路**（1.8.11）：`removeRecords()` 先按 key 精确删，删不掉按 `bvid:`、再按 `title:收藏夹\u0000标题` 兜底 —— key 算法换过，老行也得删得掉。
 - **日键要回比**（1.8.11）：`dayKeyToTime()` 只认「年月日回比一致」的输入，`2026-02-30` 返回 `NaN` 而不是被 JS 滚到 3 月 2 日。

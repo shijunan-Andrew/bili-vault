@@ -611,9 +611,13 @@
   }
 
   // 按视口比例存，读回来再夹一次：换分辨率 / 换尺寸档之后也绝不会跑到屏幕外。
-  function syncPosition() {
+  // 1.8.12：换尺寸档、窗口 resize 时给一次过渡 —— 之前这里永远传 false，
+  // 于是 pet.css 里写的 transition 只对拖动有效，改尺寸档时宠物是瞬移的。
+  // 拖动与状态切换（settle）仍然传 false：那两条路径一步都不能滑，否则看起来
+  // 像「松手之后猫自己又溜走了」。
+  function syncPosition(animate = false) {
     toPx();
-    applyTransform(false);
+    applyTransform(animate);
   }
 
   // 按视口比例存：换分辨率回来还能落在「同一个相对位置」。
@@ -645,8 +649,8 @@
     if (size === petSize) return false;
     petSize = size;
     applyBox();
-    // 换档之后可用空间变了：先把比例换算成新的 px，再夹一次边界
-    syncPosition();
+    // 换档之后可用空间变了：先把比例换算成新的 px，再夹一次边界（这一下允许过渡）
+    syncPosition(true);
     clampBubble();
     renderMenu();
     return true;
@@ -1539,7 +1543,8 @@
   // 换分辨率 / 改窗口大小：先按比例重算 px，再夹回边界（用户第 6 条要求）
   function onViewportChange() {
     if (!container) return;
-    syncPosition();
+    // 拖动过程中窗口变了就别过渡：那一刻 transform 由指针驱动，过渡会跟手打架。
+    syncPosition(!dragging);
     clampBubble();
     clampMenu();
   }

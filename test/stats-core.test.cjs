@@ -974,6 +974,23 @@ test("removeRecords：老 key 删不掉时按 bvid / 标题再认一次（1.8.11
   assert.equal(core.removeRecords(unrelated, ["bvid:BV1xx411c7mD"]), 0, "别的视频不能被误删");
 });
 
+test("脏时间戳不占总数以外的空位：未来的夹到今天，非正的直接丢（1.8.12）", () => {
+  const now = new Date(2026, 9, 22, 12, 0, 0).getTime();
+  const db = core.emptyDatabase(now);
+  core.addRecord(db, { bvid: "BV1aa411c7d1", collection: "默认收藏夹", title: "未来的", at: now + 400 * 86400000 }, now);
+  core.addRecord(db, { bvid: "BV1aa411c7d2", collection: "默认收藏夹", title: "脏的", at: 1e300 }, now);
+  const row = db.videos["bvid:BV1aa411c7d1"];
+  assert.equal(row.at, now, "未来的收藏时间要夹到现在");
+  assert.equal(row.day, core.localDayKey(now), "夹完之后必须落在今天这一格");
+  assert.equal(db.futureDayCount, 2, "两次都该记进 futureDayCount");
+  const snap = core.snapshot(db, now);
+  assert.equal(snap.videos, 2, "两条都要进总数");
+  assert.equal(snap.savedToday, 2, "也要进「今天」那一格，不能只进总数");
+  assert.equal(snap.futureDayCount, 2, "快照要把这个数带出去");
+  const dropped = core.normalizeDatabase({ videos: { "bvid:BV1aa411c7d3": { at: 0 } } }, now);
+  assert.equal(Object.keys(dropped.videos).length, 0, "非正时间戳的行留着没有意义");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

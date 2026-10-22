@@ -5753,6 +5753,47 @@ test("新的执行级测试不许重写一份被测实现，且必须接进发�
 // scripts/check-all.cjs —— 下面几条断言钉住「检查清单只有一份」和「Windows 专属自检不进 CI」，
 // 免得下一个人顺手在 workflow 里再列一遍各套测试，两套真相就是从那里开始漂的。
 
+// ---- 1.8.12：P2 四条小改动（宠物过渡、遮罩下限、滑杆节流、脏时间戳）----
+
+test("宠物换尺寸档/窗口变化时滑过去，拖动与状态切换仍然瞬间到位（V1.8.12）", () => {
+  const pet = readProjectFile("pet.js");
+  assert.match(pet, /function syncPosition\(animate = false\) \{\r?\n    toPx\(\);\r?\n    applyTransform\(animate\);/, "syncPosition 要能把 animate 传下去");
+  assert.match(pet, /syncPosition\(true\);/, "换尺寸档那一下要允许过渡");
+  assert.match(pet, /syncPosition\(!dragging\);/, "窗口变化允许过渡，但拖动中不行");
+  const settle = functionBodyOf(pet, "  function settle() {");
+  assert.match(settle, /container\.style\.transition = "none";/, "settle 先撤过渡，否则松手之后会自己溜");
+  assert.match(settle, /syncPosition\(\);/, "settle 里不能带过渡");
+  const drag = functionBodyOf(pet, "  function onPointerMove(event) {") || "";
+  assert.match(pet, /applyTransform\(false\);\r?\n    clampBubble\(\);/, "拖动中仍是瞬间到位");
+});
+
+test("背景遮罩最低 10%：滑杆拖不到 0，老库里的 0 也会被抬上来（V1.8.12）", () => {
+  const html = readProjectFile("settings.html");
+  assert.match(html, /id="wallpaperVeil"[^>]*type="range"[^>]*min="10"/, "滑杆下限 10%");
+  const theme = readProjectFile("theme.js");
+  assert.match(theme, /veil: clamp\(raw\.veil, 10, 100, DEFAULT_APPEARANCE\.veil\)/, "读取侧也要夹 10");
+});
+
+test("滑杆写盘 120ms 合一次，松手立刻落最后一次（V1.8.12）", () => {
+  const settings = readProjectFile("settings.js");
+  assert.match(settings, /const APPEARANCE_WRITE_DELAY_MS = 120;/, "节流窗口");
+  assert.match(settings, /function scheduleAppearanceWrite\(patch\)/, "合并写入口");
+  assert.match(settings, /function flushAppearanceWrite\(\)/, "落地入口");
+  assert.match(settings, /scheduleAppearanceWrite\(\{ \[key\]: value \}\);/, "input 走节流");
+  assert.match(settings, /addEventListener\("change", flushAppearanceWrite\)/, "change 立刻落地");
+  assert.doesNotMatch(settings, /addEventListener\("input", \(event\) => \{\r?\n      const value = Number\(event\.target\.value\);\r?\n      BcaTheme\.setAppearance/, "input 里不许再直接写");
+});
+
+test("脏时间戳夹到今天，并记进 futureDayCount（V1.8.12）", () => {
+  const coreSource = readProjectFile("stats-core.js");
+  assert.match(coreSource, /const FUTURE_DAY_SLACK_MS = 24 \* 60 \* 60 \* 1000;/, "容差常量");
+  assert.match(coreSource, /if \(!Number\.isFinite\(at\) \|\| at <= 0\) return null;/, "非正时间戳直接丢");
+  assert.match(coreSource, /const clamped = at > time \+ FUTURE_DAY_SLACK_MS \? time : at;/, "未来夹到现在");
+  assert.match(coreSource, /const at = future \? fallback : rawAt;/, "addRecord 同样夹");
+  assert.match(coreSource, /if \(future\) database\.futureDayCount = /, "记一笔脏时间");
+  assert.match(coreSource, /futureDayCount: Math\.max\(0, numberOr\(database && database\.futureDayCount, 0\)\),/, "快照带出");
+});
+
 test("CI 与发版跑同一套检查，检查清单只有一份（P0 工程）", () => {
   const workflowPath = path.join(projectRoot, ".github", "workflows", "ci.yml");
   assert.ok(fs.existsSync(workflowPath), "仓库要有 .github/workflows/ci.yml");

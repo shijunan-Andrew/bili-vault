@@ -22,6 +22,9 @@
   // 快照里那份「按天紧凑表」（dailyRows）覆盖的天数。180 天 ≈ 半年，
   // 足够统计页做「上月 / 近 30 天 / 近半年」这类区间，又不至于把快照撑大。
   const DAILY_ROWS_DAYS = 180;
+// 1.8.12：时间戳最多允许超前一天（时区/时钟漂移的余地）。再往后就当「现在」——
+// 之前这种行会计进总数、却因为落在未来而不进任何一天，数字和柱状图永远对不上。
+const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
   // 日期区间的天数上限（约十年）。既挡住 `new Date(...)` 的越界年份，
   // 也挡住界面上一次要画几万个柱子。以前是 730 天（两年），
   // 结果统计页「按年份汇总」那档在界面上根本选不出来（2024→2026 就被红字挡回去）。
@@ -127,17 +130,22 @@
       updatedAt: new Date(time).toISOString(),
       videos: {},
       totals: { savedTotal: 0 },
+      futureDayCount: 0,
       pet: { affinity: 0, day: localDayKey(time), todayTouch: 0, totalTouch: 0 }
     };
   }
 
-  function normalizeEntry(raw) {
+  function normalizeEntry(raw, now = Date.now()) {
     if (!raw || typeof raw !== "object") return null;
     const at = numberOr(raw.at, numberOr(dayKeyToTime(raw.day), NaN));
-    if (!Number.isFinite(at)) return null;
+    if (!Number.isFinite(at) || at <= 0) return null;
+    // 1.8.12：手改出来的 1e300、「未来某天」的收藏时间都夹到「现在」，
+    // 让它们至少落在今天这一格里，而不是从图上消失。
+    const time = numberOr(now, Date.now());
+    const clamped = at > time + FUTURE_DAY_SLACK_MS ? time : at;
     return {
-      at,
-      day: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.day || "")) ? String(raw.day) : localDayKey(at),
+      at: clamped,
+      day: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.day || "")) ? String(raw.day) : localDayKey(clamped),
       collection: String(raw.collection || ""),
       title: String(raw.title || ""),
       bvid: String(raw.bvid || ""),
@@ -169,7 +177,7 @@
     const videos = raw.videos && typeof raw.videos === "object" ? raw.videos : {};
     for (const [key, entry] of Object.entries(videos)) {
       if (!key) continue;
-      const normalized = normalizeEntry(entry);
+      const normalized = normalizeEntry(entry, time);
       if (normalized) database.videos[key] = normalized;
     }
     // 首次启用时间：老库没这个字段时退到 createdAt（数据库文件诞生的那一刻，
@@ -185,6 +193,7 @@
     const known = Object.keys(database.videos).length;
     database.totals = { savedTotal: Number.isFinite(savedTotal) ? Math.max(known, Math.floor(savedTotal)) : known };
     database.pet = normalizePet(raw.pet, time);
+    database.futureDayCount = Math.max(0, numberOr(raw.futureDayCount, 0));
     return database;
   }
 
@@ -195,8 +204,12 @@
     if (!database || typeof database !== "object") return database;
     const key = videoKey(record);
     if (!key) return database;
+    const fallback = numberOr(now, Date.now());
     const time = numberOr(record.at, NaN);
-    const at = Number.isFinite(time) ? time : numberOr(now, Date.now());
+    const rawAt = Number.isFinite(time) ? time : fallback;
+    // 1.8.12：未来时间戳夹到「现在」，并记一笔，方便界面/排查知道库里有过脏时间
+    const future = rawAt > fallback + FUTURE_DAY_SLACK_MS;
+    const at = future ? fallback : rawAt;
     const existing = database.videos[key];
     if (existing) {
       existing.at = Math.min(numberOr(existing.at, at), at);
@@ -218,6 +231,7 @@
       // 删视频也不会回退（用户要的正是「自首次启用以来的累计」）。
       if (!database.totals || typeof database.totals !== "object") database.totals = { savedTotal: 0 };
       database.totals.savedTotal = Math.max(0, numberOr(database.totals.savedTotal, 0)) + 1;
+      if (future) database.futureDayCount = Math.max(0, numberOr(database.futureDayCount, 0)) + 1;
     }
     database.updatedAt = new Date(numberOr(now, Date.now())).toISOString();
     return database;
@@ -693,6 +707,7 @@ function fallbackRowKey(videos, key) {
       firstSeen: { since: firstSeen, days: firstSeenDays },
       days: { since, days },
       pet: normalizePet(database && database.pet, time),
+      futureDayCount: Math.max(0, numberOr(database && database.futureDayCount, 0)),
       dailyRows,
       // 按自然周（周一~周日）的全量汇总：31 天 ~ 半年之间的区间按它画。
       // 和 monthly / yearly 一个道理 —— 统计页手里只有快照，拿不到数据库本体，
