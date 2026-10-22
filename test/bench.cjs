@@ -2,6 +2,8 @@
 //
 //   node test/bench.cjs            默认：N = 1000 / 3000 / 10000，每组跑 3 次取中位数
 //   node test/bench.cjs --quick    冒烟：只跑 N = 1000、只跑一次，看脚本能不能通
+//   node test/bench.cjs --strict   同上，但任何一项超过「软上界」就以退出码 1 结束（给发版前手动跑用）
+//
 //
 // 为什么要有它：五套单元测试管的是「对不对」，没有一套管「慢不慢」。收藏库一多，最容易
 // 写坏的就是复杂度 —— 「每条记录都 Object.keys(整个库)」或者「循环里 findIndex 扫一遍
@@ -21,7 +23,26 @@ const core = require("../archive-core.js");
 const stats = require("../stats-core.js");
 
 const QUICK = process.argv.includes("--quick");
-const KNOWN_FLAGS = new Set(["--quick"]);
+const STRICT = process.argv.includes("--strict");
+const KNOWN_FLAGS = new Set(["--quick", "--strict"]);
+
+// 1.8.8（P3-13）：软上界 —— 不进 CI 的「review 时看得见」的阈值。
+// 数字取自 1.8.6 在本机（node 24 · win32）N = 10000 的实测中位数 × 约 1.6~1.7，
+// 只用来抓「翻倍」级别的退化（例如快照从 20 ms 变成 45 ms），不是精确预算。
+// 同一台机器、同样负载下再跑一遍确认；换机器请整表重新标。
+const SOFT_LIMITS_MS = {
+  10000: {
+    normalize: 14,
+    addRecord: 28,
+    snapshot: 40,
+    series7: 7,
+    collectionRows: 9,
+    yearly: 7,
+    export: 65,
+    sha256: 460,
+    parse: 6
+  }
+};
 const SIZES = QUICK ? [1000] : [1000, 3000, 10000];
 const REPEATS = QUICK ? 1 : 3;
 // 视频信息.txt 的解析开销与库大小无关，固定跑 200 篇，算「200 次合计」。
@@ -559,10 +580,49 @@ function printHints(results) {
   console.log("6. " + describeScaling(results).trim());
 }
 
+// 1.8.8（P3-13）：拿这次的中位数跟 SOFT_LIMITS_MS 比一遍。默认只警告，--strict 才让退出码变 1。
+// 1.8.8（P3-13）：拿这次的中位数跟 SOFT_LIMITS_MS 比一遍。默认只警告，--strict 才让退出码变 1。
+function reportSoftLimits(results) {
+  const lines = [];
+  let exceeded = 0;
+  let compared = 0;
+  for (const result of results) {
+    const limits = SOFT_LIMITS_MS[result.size];
+    if (!limits) continue;
+    for (const column of COLUMNS) {
+      const limit = limits[column.key];
+      if (!(limit > 0)) continue;
+      const actual = result.timings[column.key];
+      if (!(actual > 0)) continue;
+      compared += 1;
+      if (actual > limit) {
+        exceeded += 1;
+        lines.push("[!] N=" + result.size + " · " + column.label + " " + formatMs(actual) + " ms 超过软上界 " + limit + " ms");
+      }
+    }
+  }
+  console.log("");
+  if (!compared) {
+    console.log("[软上界] 这次没有跑到 " + Object.keys(SOFT_LIMITS_MS).join(" / ") + " 条记录那一档（--quick 只看一千条），软上界没比对。");
+    return 0;
+  }
+  if (!exceeded) {
+    console.log("[软上界] 已比对的 " + compared + " 项都在软上界以内。");
+    return 0;
+  }
+  for (const line of lines) console.log(line);
+  console.log("软上界不是门禁：同一台机器、同样负载下再跑一遍确认；确实是这次改动带来的，就回头查那一段实现。");
+  if (STRICT) {
+    console.log("--strict：有 " + exceeded + " 项超过软上界，退出码按失败处理。");
+    process.exitCode = 1;
+  }
+  return exceeded;
+}
+
 function main() {
   const unknown = process.argv.slice(2).filter((arg) => !KNOWN_FLAGS.has(arg));
   if (unknown.length) {
-    console.error("不认识的参数：" + unknown.join(" ") + "；只支持 --quick（冒烟模式）。");
+    console.error("不认识的参数：" + unknown.join(" ") + "；只支持 --quick（冒烟模式）与 --strict（超软上界即失败）。");
     process.exit(1);
   }
 
@@ -586,6 +646,7 @@ function main() {
   console.log("导出字符串体积：" + results.map((result) => result.size + " → " + formatBytes(result.exportedBytes || 0)).join("，")
     + "（sha256 那列量的就是它，所以随体积走）。");
   printHints(results);
+  reportSoftLimits(results);
   console.log("");
   console.log("总耗时：" + ((performance.now() - startedAt) / 1000).toFixed(2) + " 秒（含数据生成、重复与取中位数）。");
 }

@@ -987,6 +987,37 @@
     return Math.max(1, Math.ceil(limit * 0.25));
   }
 
+  /* 1.8.8（P3-11）：老版本留下的 PNG 封面转成 WebP。
+     「转不转」只在这个纯函数里判：已经有 封面.webp 就绝不碰；只有「没有 webp、有 png」
+     才值得转。真正的读写发生在 library.js，作用域严格限制在归档根目录里。 */
+  const COVER_PNG_NAME = "封面.png";
+  const COVER_WEBP_NAME = "封面.webp";
+  const COVER_WEBP_QUALITY = 0.82;
+
+  function coverConvertAction(fileNames) {
+    const names = Array.isArray(fileNames) ? fileNames : [];
+    if (names.includes(COVER_WEBP_NAME)) return "skip";
+    return names.includes(COVER_PNG_NAME) ? "convert" : "skip";
+  }
+
+  /* 1.8.8（P3-12）：004导出 只留最近几份。
+     文件名是 归档元数据-YYYYMMDD-HHMMSS.json（同秒撞名再加 -2、-3），
+     所以按名字升序就是按时间升序；不认识的条目一律不碰，返回的是「该删的那几个」。 */
+  const EXPORT_KEEP_FILES = 5;
+
+  function exportPruneList(fileNames, keep = EXPORT_KEEP_FILES) {
+    const limit = Math.max(1, Math.floor(Number(keep) || EXPORT_KEEP_FILES));
+    const rows = [];
+    for (const raw of Array.isArray(fileNames) ? fileNames : []) {
+      const name = String(raw);
+      const match = /^归档元数据-(\d{8}-\d{6})(?:-(\d+))?\.json$/.exec(name);
+      if (!match) continue;
+      // 同一秒撞名时本体（无后缀）先写，所以排在有 -2、-3 的那几份前面。
+      rows.push({ stamp: match[1], attempt: match[2] ? Number(match[2]) : 0, name });
+    }
+    rows.sort((left, right) => left.stamp.localeCompare(right.stamp) || left.attempt - right.attempt);
+    return rows.slice(0, Math.max(0, rows.length - limit)).map((row) => row.name);
+  }
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,
@@ -1014,6 +1045,13 @@
     EXPORT_SCHEMA_VERSION,
     EXPORT_DIR_NAME,
     EXPORT_FILE_SUFFIX,
+    // 1.8.8（P3）：老 PNG 封面转 WebP、004导出 只留最近几份
+    COVER_PNG_NAME,
+    COVER_WEBP_NAME,
+    COVER_WEBP_QUALITY,
+    coverConvertAction,
+    EXPORT_KEEP_FILES,
+    exportPruneList,
     EXPORT_CHECKSUM_ALGORITHM,
     sha256Hex,
     exportFileName,

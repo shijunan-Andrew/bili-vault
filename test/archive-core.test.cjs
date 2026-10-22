@@ -965,6 +965,51 @@ test("旧策略抖动、新策略不抖：630 条记录在 1.8.4 的容量下第
   assert.equal(scanOnce(), total, "第二轮应该全部复用缓存");
 });
 
+test("coverConvertAction：已经有 WebP 就绝不重转，只有「没 WebP、有 PNG」才转（1.8.8）", () => {
+  assert.equal(core.COVER_PNG_NAME, "封面.png");
+  assert.equal(core.COVER_WEBP_NAME, "封面.webp");
+  assert.equal(core.COVER_WEBP_QUALITY, 0.82, "质量常数只在这一处定义");
+  assert.equal(core.coverConvertAction(["封面.webp", "视频信息.txt"]), "skip", "已经是 WebP 就别再转");
+  assert.equal(core.coverConvertAction(["封面.webp", "封面.png"]), "skip", "两代都在时保留 WebP、不碰 PNG");
+  assert.equal(core.coverConvertAction(["封面.png", "视频信息.txt"]), "convert", "只有 PNG 才值得转");
+  assert.equal(core.coverConvertAction(["视频信息.txt"]), "skip", "没有封面就不动");
+  assert.equal(core.coverConvertAction([]), "skip");
+  assert.equal(core.coverConvertAction(null), "skip", "非法输入不抛错");
+});
+
+test("exportPruneList：004导出 只留最近 5 份，认不出的文件一个不碰（1.8.8）", () => {
+  assert.equal(core.EXPORT_KEEP_FILES, 5, "保留份数只在这一处定义");
+  const names = [
+    "归档元数据-20260101-090000.json",
+    "归档元数据-20260102-090000.json",
+    "归档元数据-20260103-090000.json",
+    "归档元数据-20260104-090000.json",
+    "归档元数据-20260105-090000.json",
+    "归档元数据-20260106-090000.json",
+    "归档元数据-20260107-090000.json",
+    "说明.txt",
+    "别的.json"
+  ];
+  const pruned = core.exportPruneList(names);
+  assert.equal(pruned.length, 2, "7 份导出只删最老的 2 份");
+  assert.deepEqual(pruned, ["归档元数据-20260101-090000.json", "归档元数据-20260102-090000.json"], "删的是最老的两份");
+  assert.equal(pruned.includes("说明.txt"), false, "不认识的文件不许删");
+  assert.equal(pruned.includes("别的.json"), false, "别处的 json 也不许删");
+  assert.deepEqual(core.exportPruneList(names.slice(0, 3)), [], "不到 5 份就一份都不删");
+  assert.deepEqual(core.exportPruneList([], 5), []);
+  assert.equal(core.exportPruneList(names, 1).length, 6, "keep 参数可调");
+  // 同一秒撞名加 -2 的也认：它比本体旧，先删它。
+  const sameSecond = ["归档元数据-20260101-090000.json", "归档元数据-20260101-090000-2.json", "归档元数据-20260102-090000.json"];
+  assert.equal(core.exportPruneList(sameSecond, 2).length, 1, "撞名的那份也算一份");
+  assert.deepEqual(core.exportPruneList(sameSecond, 2), ["归档元数据-20260101-090000.json"], "先删更老的那一份");
+});
+
+test("封面转换与导出裁剪的函数都在 archive-core 的导出清单里（1.8.8）", () => {
+  for (const name of ["COVER_PNG_NAME", "COVER_WEBP_NAME", "COVER_WEBP_QUALITY", "coverConvertAction", "EXPORT_KEEP_FILES", "exportPruneList"]) {
+    assert.ok(name in core, name + " 要从 archive-core 导出");
+  }
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

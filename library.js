@@ -2199,6 +2199,29 @@ async function exportArchiveMetadata() {
         count: BcaArchiveCore.formatCountText(built.payload.counts.stale)
       }));
     }
+    // 1.8.8（P3-12）：004导出 只留最近 5 份 —— 10k 条一份约 8 MB，攒几个月很可观。
+    // 清理失败绝不影响这次导出：文件已经写好了，最多少删几份。
+    try {
+      const exportNames = [];
+      for await (const entry of exportDirectory.values()) exportNames.push(entry.name);
+      let pruned = 0;
+      for (const name of BcaArchiveCore.exportPruneList(exportNames)) {
+        try {
+          await exportDirectory.removeEntry(name);
+          pruned += 1;
+        } catch (error) {
+          console.warn(`旧导出文件删不掉（留着不影响这次导出）：${name}`, error);
+        }
+      }
+      if (pruned) {
+        showToast(BcaI18n.t("004导出 里只保留最近 {keep} 份，已清掉 {count} 份更早的。", {
+          keep: BcaArchiveCore.formatCountText(BcaArchiveCore.EXPORT_KEEP_FILES),
+          count: BcaArchiveCore.formatCountText(pruned)
+        }));
+      }
+    } catch (error) {
+      console.warn("清理旧导出文件失败（不影响这次导出）", error);
+    }
   } catch (error) {
     const explained = BcaArchiveCore.describeDirectoryCreateError(error, BcaArchiveCore.EXPORT_DIR_NAME)
       || BcaArchiveCore.describeFileSystemError(error);
@@ -2210,6 +2233,75 @@ async function exportArchiveMetadata() {
   }
 }
 
+/* 1.8.8（P3-11）：把老版本留下的「封面.png」转成 WebP，转好之后删掉原 PNG。
+   作用域严格限定在归档根目录里：只遍历根目录下的收藏夹目录，只看记录目录里文件名
+   叫「封面.png」的那一个，只写「封面.webp」。下载目录（000视频下载）、001错误报告 /
+   002同步报告 / 003database / 004导出、视频信息.txt，以及用户自己放进去的文件，一个都不碰。 */
+const ARCHIVE_RESERVED_DIRS = ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"];
+
+async function convertLegacyPngCovers() {
+  if (!rootHandle) { showToast(BcaI18n.t("先选一个本地备份文件夹，再转封面。")); return; }
+  if (await archiveWriteLockedByImport()) { showToast(BcaI18n.t("导入正在跑，等它结束再转封面。")); return; }
+  const confirmed = window.confirm(BcaI18n.t("把归档目录里的「封面.png」转成 WebP 并删掉原 PNG？只动归档目录里的封面文件，视频信息和其他文件都不会变。"));
+  if (!confirmed) return;
+  const convertButton = document.getElementById("convertCoverPng");
+  if (convertButton) convertButton.disabled = true;
+  let converted = 0;
+  let failed = 0;
+  let savedBytes = 0;
+  try {
+    showToast(BcaI18n.t("正在把老封面转成 WebP…"));
+    for await (const collectionEntry of rootHandle.values()) {
+      if (collectionEntry.kind !== "directory") continue;
+      if (ARCHIVE_RESERVED_DIRS.includes(collectionEntry.name)) continue;
+      for await (const recordEntry of collectionEntry.values()) {
+        if (recordEntry.kind !== "directory") continue;
+        const names = [];
+        for await (const child of recordEntry.values()) names.push(child.name);
+        if (BcaArchiveCore.coverConvertAction(names) !== "convert") continue;
+        try {
+          const pngHandle = await recordEntry.getFileHandle(BcaArchiveCore.COVER_PNG_NAME);
+          const pngFile = await pngHandle.getFile();
+          const bitmap = await createImageBitmap(pngFile);
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+          canvas.getContext("2d").drawImage(bitmap, 0, 0);
+          if (typeof bitmap.close === "function") bitmap.close();
+          const blob = await canvas.convertToBlob({ type: "image/webp", quality: BcaArchiveCore.COVER_WEBP_QUALITY });
+          if (!blob || !blob.size) throw new Error("转换结果为空");
+          const webpHandle = await recordEntry.getFileHandle(BcaArchiveCore.COVER_WEBP_NAME, { create: true });
+          const writable = await webpHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          // 写成功了才删原 PNG：中途失败时这一张保持原样，可以重跑。
+          await recordEntry.removeEntry(BcaArchiveCore.COVER_PNG_NAME);
+          converted += 1;
+          savedBytes += Math.max(0, pngFile.size - blob.size);
+        } catch (error) {
+          failed += 1;
+          console.warn(`封面转 WebP 失败（这一张保持原样：${collectionEntry.name}/${recordEntry.name}）`, error);
+        }
+      }
+    }
+    if (!converted) {
+      showToast(failed
+        ? BcaI18n.t("封面转换失败：{message}", { message: BcaI18n.t("没有一张成功，原文件都没动。") })
+        : BcaI18n.t("这次没有需要转换的老封面。"));
+      return;
+    }
+    showToast(BcaI18n.t("封面转换完成：转了 {converted} 张，省下 {bytes}。", {
+      converted: BcaArchiveCore.formatCountText(converted),
+      bytes: BcaArchiveCore.formatBytes(savedBytes)
+    }));
+    if (failed) showToast(BcaI18n.t("另有 {count} 张没转成，原 PNG 都还在。", { count: BcaArchiveCore.formatCountText(failed) }));
+    await refreshCurrentRoot();
+  } catch (error) {
+    showToast(BcaI18n.t("封面转换失败：{message}", {
+      message: BcaArchiveCore.describeFileSystemError(error) || error?.message || BcaI18n.t("未知错误")
+    }));
+  } finally {
+    if (convertButton) convertButton.disabled = false;
+  }
+}
 // 1.7.10（facet-storage P2-2）：manifest 里没有 unlimitedStorage，chrome.storage.local
 // 是 10MB 硬配额，而配置文件正常只有几 KB。这里给一个 256KB 的闸，免得一次误选
 // （例如把导出的归档清单当配置导入）就把插件存储挤到配额边缘。
@@ -5501,6 +5593,7 @@ exportConfigButton?.addEventListener("click", () => downloadConfigFile(true));
 (document.getElementById("exportConfigSlim"))?.addEventListener("click", () => downloadConfigFile(false));
 // 1.7.30（路线图第 2 项）：导出整个归档的元数据（含 schema 版本 + 校验和）
 exportArchiveButton?.addEventListener("click", () => { exportArchiveMetadata(); });
+document.getElementById("convertCoverPng")?.addEventListener("click", () => { convertLegacyPngCovers(); });
 importConfigButton?.addEventListener("click", () => {
   configFileInput.value = "";
   configFileInput.click();

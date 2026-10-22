@@ -2467,7 +2467,7 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   // 页面：三个写入标志任意一个为真就立锁，并在这四条写路径上先问后台
   assert.match(library, /function publishLibraryWriteLock\(\) \{/);
   assert.match(library, /const busy = deleteInProgress \|\| collectionCreateInProgress \|\| videoAddInProgress;/);
-  assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 5, "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径，加上 1.7.30 的导出，都要先查闸门");
+  assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 6, "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径，加上 1.7.30 的导出与 1.8.8 的封面转换，都要先查闸门");
   assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
   // 只清自己那一把：不能把别人后写进来的锁顺手抹掉
   assert.match(background, /if \(!lock \|\| !kind \|\| lock\.kind === kind\) await chrome\.storage\.session\.remove/);
@@ -6172,6 +6172,15 @@ function sliceBetween(source, startText, endText) {
   return end < 0 ? source.slice(start) : source.slice(start, end);
 }
 
+// 抠出一个顶层函数的函数体：从 header 之后到下一个「行首的 }」为止。
+// 结尾用 /\r?\n\}\r?\n/ 找 —— 工作区是 CRLF、GitHub Actions 检出是 LF，写死一种会假红。
+function functionBodyOf(source, headerText) {
+  const start = source.indexOf(headerText);
+  if (start < 0) return "";
+  const after = source.slice(start + headerText.length);
+  const match = /\r?\n\}\r?\n/.exec(after);
+  return match ? after.slice(0, match.index) : after;
+}
 test("V1.8.6：封面只在要显示时才读，扫描阶段不再把整库封面挂成 blob: URL", () => {
   const library = readProjectFile("library.js");
   const readRecord = sliceBetween(library, "async function readArchiveRecord(", "// collections 被整批替换时");
@@ -6336,4 +6345,65 @@ test("搬运下载目录之前先问浏览器还有多少空间（V1.8.7）", ()
   const copyAt = library.indexOf("await ensureCopySpace(await directorySize(source.directory), source.directory.name);");
   const uniqueAt = library.indexOf("const targetNameOnDisk = await uniqueRecordFolderName(targetCollection, source.directory.name);", copyAt);
   assert.ok(copyAt >= 0 && uniqueAt > copyAt, "空间检查要在建目标目录之前");
+});
+
+
+// ---- 1.8.8（P3）：老 PNG 封面转 WebP、004导出 只留最近 5 份、bench 软上界 ----
+
+test("老 PNG 封面转换只走归档根目录、只碰 封面.png 与 封面.webp（V1.8.8）", () => {
+  const library = readProjectFile("library.js");
+  const core = readProjectFile("archive-core.js");
+  // 判据只有一处：archive-core 的纯函数
+  assert.match(core, /function coverConvertAction\(fileNames\)/, "转不转只在 archive-core 里判");
+  assert.equal(library.match(/function coverConvertAction\(/g), null, "library.js 不许再抄一份判据");
+  // 转换函数的遍历范围：只有 rootHandle 一层收藏夹 + 一层记录目录
+  const at = library.indexOf("async function convertLegacyPngCovers() {");
+  assert.ok(at > 0, "要有 convertLegacyPngCovers");
+  const body = functionBodyOf(library, "async function convertLegacyPngCovers() {");
+  assert.match(body, /for await \(const collectionEntry of rootHandle\.values\(\)\)/, "只遍历归档根目录");
+  assert.match(body, /ARCHIVE_RESERVED_DIRS\.includes\(collectionEntry\.name\)/, "保留目录要跳过");
+  assert.match(body, /for await \(const recordEntry of collectionEntry\.values\(\)\)/, "只看收藏夹里的记录目录");
+  assert.match(body, /BcaArchiveCore\.coverConvertAction\(names\)/, "判据走 archive-core");
+  assert.match(body, /getFileHandle\(BcaArchiveCore\.COVER_PNG_NAME\)/);
+  assert.match(body, /getFileHandle\(BcaArchiveCore\.COVER_WEBP_NAME, \{ create: true \}\)/);
+  assert.match(body, /removeEntry\(BcaArchiveCore\.COVER_PNG_NAME\)/, "写成功之后才删原 PNG");
+  const writeAt = body.indexOf("await writable.close();");
+  const removeAt = body.indexOf("await recordEntry.removeEntry(BcaArchiveCore.COVER_PNG_NAME);");
+  assert.ok(writeAt > 0 && removeAt > writeAt, "先写完 WebP 才删 PNG，顺序不能反");
+  // 不许顺手动别的东西
+  assert.doesNotMatch(body, /removeEntry\([^)]*视频信息\.txt/, "不许删视频信息.txt");
+  assert.doesNotMatch(body, /removeEntry\([^)]*collectionEntry\.name/, "不许删整个收藏夹");
+  assert.doesNotMatch(body, /downloadParent|getDownloadParentHandle/, "不碰下载目录那一侧");
+  // 保留目录名单与扫描跳过名单是同一套
+  assert.match(library, /const ARCHIVE_RESERVED_DIRS = \["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"\];/);
+});
+
+test("导出归档元数据之后按 5 份裁剪旧文件，清理失败也不许说导出失败（V1.8.8）", () => {
+  const library = readProjectFile("library.js");
+  const core = readProjectFile("archive-core.js");
+  assert.match(core, /const EXPORT_KEEP_FILES = 5;/, "保留份数只在 archive-core 里定义");
+  assert.match(core, /function exportPruneList\(fileNames, keep = EXPORT_KEEP_FILES\)/, "该删哪几个也只在 archive-core 里判");
+  const at = library.indexOf("async function exportArchiveMetadata() {");
+  assert.ok(at > 0, "要有 exportArchiveMetadata");
+  const body = functionBodyOf(library, "async function exportArchiveMetadata() {");
+  assert.match(body, /BcaArchiveCore\.exportPruneList\(exportNames\)/);
+  assert.match(body, /await exportDirectory\.removeEntry\(name\);/, "裁剪要真的删");
+  assert.match(body, /旧导出文件删不掉（留着不影响这次导出）/, "单份删不掉只留日志");
+  assert.match(body, /清理旧导出文件失败（不影响这次导出）/, "整段失败也只留日志");
+  // 写盘成功的那条 toast 在裁剪之前，且裁剪块里不抛错
+  const toastAt = body.indexOf("已导出 {count} 条记录到 {file}。校验和 {checksum}…");
+  const pruneAt = body.indexOf("BcaArchiveCore.exportPruneList(exportNames)");
+  assert.ok(toastAt > 0 && pruneAt > toastAt, "先报导出成功，再顺手清理");
+});
+
+test("性能基准有软上界：默认只警告，--strict 才让退出码变红（V1.8.8）", () => {
+  const bench = readProjectFile("test/bench.cjs");
+  assert.match(bench, /const SOFT_LIMITS_MS = \{/, "要有软上界表");
+  assert.match(bench, /10000: \{/, "软上界按 10000 条那一档标");
+  assert.match(bench, /function reportSoftLimits\(results\)/, "要有比对函数");
+  assert.match(bench, /const STRICT = process.argv\.includes\("--strict"\)/, "--strict 是显式开关");
+  assert.match(bench, /if \(STRICT\) \{/, "默认不动退出码");
+  assert.match(bench, /KNOWN_FLAGS = new Set\(\["--quick", "--strict"\]\)/);
+  // 软上界不进门禁：check-all 与五套里都不许出现 bench
+  assert.doesNotMatch(readProjectFile("scripts/check-all.cjs"), /bench\.cjs/, "基准不进 CI");
 });
