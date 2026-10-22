@@ -55,6 +55,11 @@
 
 - **导入按条数收工不再假报失败**：设上限 50，勾一个超过 50 条新视频的收藏夹 → 应写入 50 条，提示「本次按上限导入：最多 50 条，已写入 50 条，另有 N 条新视频留到下次」；**不许**再出现「导入失败：importLimit is not defined」。
 
+## V1.8.20 新增的几条
+
+1. 打开收藏库、统计页、设置页、宠物：行为应与 1.8.19 完全一致（这一版没有代码改动）。
+2. 交接资料（桌面参考区，不进仓库）：`old-p3-checklist.md`（67 条，状态列已填「已核对：还成立 / 已过时」）、`unresolved-p0p2-checklist.md`（22 条未闭环）、`_chk_deadcode_compat_ux.md` / `_chk_destructive_native.md` / `_chk_storage_security_privacy.md` / `_chk_perf_and_fixp2.md`（四份逐条证据）、`_chk_p3_a.md` / `_chk_p3_b.md`（P3 逐条核对）。
+
 ## V1.8.19 新增的几条
 
 1. 把 `003database/database.json` 改成乱码再打开收藏库：`003database` 里只该多出**一份** `database.bad.<时间戳>.json`，控制台不该再出现「重建空库」。
