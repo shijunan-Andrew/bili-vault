@@ -991,6 +991,17 @@ test("脏时间戳不占总数以外的空位：未来的夹到今天，非正�
   assert.equal(Object.keys(dropped.videos).length, 0, "非正时间戳的行留着没有意义");
 });
 
+test("台词下标不会卡住：封顶后延后写盘的那一分钟里也要继续往前走（1.8.12）", () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 6].map((n) => core.petLineIndex(n)), [0, 1, 2, 3, 0, 1], "每摸一下换一句");
+  assert.deepEqual([1, 2, 3].map((o) => core.petLineIndex(21, o)), [1, 2, 3], "延后写盘时靠 offset 继续走，不能原地踏步");
+  assert.equal(core.petLineIndex(0), 0, "没摸过也不许算出负数");
+  const now = new Date(2026, 9, 22, 12, 0, 0).getTime();
+  const db = core.emptyDatabase(now);
+  const indexes = [];
+  for (let i = 0; i < 6; i += 1) indexes.push(core.touchPet(db, now).index);
+  assert.deepEqual(indexes, [0, 1, 2, 3, 0, 1], "touchPet 自己也要轮着走");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

@@ -1296,6 +1296,8 @@
     if (!moved) {
       moved = true;
       if (button) button.classList.add(DRAGGING_CLASS);
+      // 1.8.12：外壳也带上，让 pet.css 只在这一段提升合成层
+      if (container) container.classList.add(DRAGGING_CLASS);
       if (container) container.style.transition = "none";
     }
     const range = warpRange();
@@ -1325,6 +1327,7 @@
     if (button) {
       button.classList.remove(PRESS_CLASS);
       button.classList.remove(DRAGGING_CLASS);
+      if (container) container.classList.remove(DRAGGING_CLASS);
       try { button.releasePointerCapture(event.pointerId); } catch (_) {}
     }
     if (container) container.style.transition = "";

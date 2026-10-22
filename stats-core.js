@@ -786,6 +786,14 @@ function fallbackRowKey(videos, key) {
     return Array.from(rows.values()).sort((a, b) => b.videos - a.videos || b.lastAt - a.lastAt || a.name.localeCompare(b.name));
   }
 
+  // 1.8.12：台词下标单独成函数。后台在「封顶后合并写」的那一分钟里不落盘，
+  // 但下标必须继续往前走 —— 否则连点同一句，用户看到的就是「问候语卡住了」。
+  function petLineIndex(totalTouch, offset = 0) {
+    const base = Math.max(1, Math.floor(numberOr(totalTouch, 1)));
+    const shift = Math.max(0, Math.floor(numberOr(offset, 0)));
+    return (((base + shift - 1) % PET_LINE_COUNT) + PET_LINE_COUNT) % PET_LINE_COUNT;
+  }
+
   // 摸一下宠物：加亲密度（每天封顶），并给出这次该说第几句台词。
   // 台词本身不在这里 —— 后台 service worker 里没有 i18n，只回一个下标，界面侧再翻译。
   function touchPet(database, now = Date.now()) {
@@ -809,7 +817,7 @@ function fallbackRowKey(videos, key) {
     return {
       // 台词下标按「摸过多少次」走，一句一句往下轮。原来用 affinity + totalTouch：
       // 两个计数器一起涨，下标每次 +2，四句里只用得上两句（而且 affinity 当天封顶后步长又变回 1）。
-      index: (pet.totalTouch - 1) % PET_LINE_COUNT,
+      index: petLineIndex(pet.totalTouch),
       affinity: pet.affinity,
       todayTouch: pet.todayTouch,
       totalTouch: pet.totalTouch,
@@ -902,6 +910,7 @@ function fallbackRowKey(videos, key) {
     MAX_RANGE_DAYS,
     PET_LINE_COUNT,
     PET_DAILY_TOUCH_LIMIT,
+    petLineIndex,
     // 区间选择：预设表 + 预设 → 毫秒边界。生产代码只用 rangeFor；RANGE_PRESETS 与
     // rangeFromDays 由 test/stats-core.test.cjs 覆盖（统计页自己按预设画下拉框）。
     RANGE_PRESETS,

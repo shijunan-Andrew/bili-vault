@@ -3642,6 +3642,8 @@ async function touchPetInDatabase() {
    一分钟合一次；这段时间里 SW 被回收最多丢几十次计数，比「摸一下写 143KB」划算。 */
 const PET_CAPPED_WRITE_MS = 60 * 1000;
 let petCappedWriteAt = 0;
+// 1.8.12：这一分钟里不落盘，但台词下标要照常往前 —— 计一下攒了几次，交给 petLineIndex 补上。
+let petDeferredTouches = 0;
 
 async function touchPetInDatabaseInner() {
   const root = await getRootHandle().catch(() => null);
@@ -3658,10 +3660,20 @@ async function touchPetInDatabaseInner() {
   }
   const touched = BcaStatsCore.touchPet(read.database);
   if (touched.capped && Date.now() - petCappedWriteAt < PET_CAPPED_WRITE_MS) {
-    return { ok: true, lineIndex: touched.index, affinity: touched.affinity, todayTouch: touched.todayTouch, totalTouch: touched.totalTouch, capped: true, deferred: true };
+    petDeferredTouches += 1;
+    return {
+      ok: true,
+      lineIndex: BcaStatsCore.petLineIndex(touched.totalTouch, petDeferredTouches),
+      affinity: touched.affinity,
+      todayTouch: touched.todayTouch,
+      totalTouch: touched.totalTouch,
+      capped: true,
+      deferred: true
+    };
   }
   if (!(await commitStatsDatabase(root, read, read.database))) return { ok: false };
   petCappedWriteAt = touched.capped ? Date.now() : 0;
+  petDeferredTouches = 0;
   return {
     ok: true,
     lineIndex: touched.index,

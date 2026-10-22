@@ -5753,6 +5753,32 @@ test("新的执行级测试不许重写一份被测实现，且必须接进发�
 // scripts/check-all.cjs —— 下面几条断言钉住「检查清单只有一份」和「Windows 专属自检不进 CI」，
 // 免得下一个人顺手在 workflow 里再列一遍各套测试，两套真相就是从那里开始漂的。
 
+test("封顶后延后写盘时，台词下标仍继续走：问候语不会卡在同一句（V1.8.12）", () => {
+  const coreSource = readProjectFile("stats-core.js");
+  const backgroundCode = readProjectFile("background.js");
+  assert.match(coreSource, /function petLineIndex\(totalTouch, offset = 0\)/, "下标算法只写一处");
+  assert.match(coreSource, /index: petLineIndex\(pet\.totalTouch\),/, "touchPet 要复用它");
+  assert.match(coreSource, /\n    petLineIndex,/, "导出给后台用");
+  assert.match(backgroundCode, /let petDeferredTouches = 0;/, "延后窗口里要记账");
+  assert.match(backgroundCode, /petDeferredTouches \+= 1;/, "每次延后 +1");
+  assert.match(backgroundCode, /lineIndex: BcaStatsCore\.petLineIndex\(touched\.totalTouch, petDeferredTouches\),/, "下标要带上 offset");
+  assert.match(backgroundCode, /petDeferredTouches = 0;/, "落地后清零");
+  const deferredAt = backgroundCode.indexOf("if (touched.capped && Date.now() - petCappedWriteAt");
+  assert.ok(deferredAt > 0, "找不到封顶延后写盘那一段");
+  const deferredBlock = backgroundCode.slice(deferredAt, deferredAt + 420);
+  assert.match(deferredBlock, /lineIndex: BcaStatsCore\.petLineIndex\(touched\.totalTouch, petDeferredTouches\)/, "延后那一段必须带 offset，不许回 touched.index（会卡住）");
+});
+
+test("宠物外壳不再常驻提升合成层，只在拖动时提升（V1.8.12）", () => {
+  const petCss = readProjectFile("pet.css");
+  const pet = readProjectFile("pet.js");
+  const dock = petCss.slice(petCss.indexOf(".bca-pet-dock {"), petCss.indexOf(".bca-pet-dock.is-hidden"));
+  assert.doesNotMatch(dock, /^ {2}will-change:/m, "基状态不许常驻 will-change（注释提到它没关系）");
+  assert.match(petCss, /\.bca-pet-dock\.is-dragging \{\r?\n  will-change: transform;/, "只在拖动时给");
+  assert.match(pet, /if \(container\) container\.classList\.add\(DRAGGING_CLASS\);/, "按下时加");
+  assert.match(pet, /if \(container\) container\.classList\.remove\(DRAGGING_CLASS\);/, "松手时撤");
+});
+
 // ---- 1.8.12：P2 四条小改动（宠物过渡、遮罩下限、滑杆节流、脏时间戳）----
 
 test("宠物换尺寸档/窗口变化时滑过去，拖动与状态切换仍然瞬间到位（V1.8.12）", () => {

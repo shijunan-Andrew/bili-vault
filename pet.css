@@ -66,12 +66,19 @@
   /* 位移是这里唯一的动画：linear，时长由 JS 按距离算。拖动时 JS 会临时置 none，
      所以跟手不会有延迟。 */
   transition: transform var(--dur-slow) linear;
-  will-change: transform;
+  /* 1.8.12：will-change 不再常驻 —— 常驻会让这一层永久独立合成，页面里任何
+     backdrop-filter 面板都可能跟着反复重新采样（表现就是「屏幕隔一会儿闪一下」）。
+     只在真的拖动时临时提升（.is-dragging），松手立刻还回去。 */
   pointer-events: none; /* 外壳不吃点击，只有宠物、气泡和菜单吃 */
 }
 
 .bca-pet-dock.is-hidden {
   display: none;
+}
+
+/* 拖动期间才提示合成层：跟手优先，松手就还回去（见 pet.js 的 onPointerDown/Up）。 */
+.bca-pet-dock.is-dragging {
+  will-change: transform;
 }
 
 /* 1.8.10：详情抽屉打开时把宠物收起来（见 library.js 的 bca-pet-suspended）。
