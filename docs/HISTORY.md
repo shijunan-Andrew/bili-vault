@@ -5,6 +5,18 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.7：快照只写变的、排序只挑当前页、导入少写 session
+
+**改了什么**：`library.js` 五处、`background.js` 两处。① `snapshotSave()` 从「整根目录重写」改成增量：先按 `key` 建索引，顺着旧条目的游标走一趟 —— `size` / `lastModified` / `bytes` 三个都没变的直接跳过，变了的 `cursor.update()`，消失了的 `cursor.delete()`，走完再把这一轮新出现的补上（1 万条的库里通常只有几十条会变）。② `renderVideos()` 不再给整表排序：新增 `selectFirstVideos(list, count, compare)`，用「大小封顶为 count 的最大堆」挑出前 `pageStart + pageSize` 名再切页；比较器提到模块级（`TITLE_COLLATOR`），播放量先算进 `Map`。③ 快照条目不再存第二份 `share`（读到老快照用 `splitInfoDescription(entry.info)` 现算）。④ 快照里的 `bytes` 直接当体积种子上报（`updateStorageUsage(handle, { total: seededBytes })`），不必等整库扫完，也不必为这一个数字递归整棵树。⑤ `publishImportRun()` 加了内容指纹：抹掉 `updatedAt` 后与上一次真正写进 session 的内容比，一样就不写；顺手删掉 `page: maxPages` 那次与「可信度检查」之后那次完全重复的 `force`。⑥ `populateSelectOptions()` 记住上次的「(计数, 值)」签名，没变就不重建 `<option>`。⑦ 搬运下载目录前先用 `navigator.storage.estimate()` 预检空间，不够就明确说「还差多少」。
+
+**为什么**：这七处都不是「算法慢」，而是**同一份结果被重复算/重复写**。快照重写是 1 万次写里 9990 次内容一样；排序是给整库排完只显示 25 条；`share` 本来就能从 `info` 切出来，存两份只是让 IndexedDB 和内存各胖一倍；导入进度的 `session.set` 每次都会重置 service worker 的空闲计时器，而 `force` 的触发点里有两次 cursor/counts 一模一样；下拉池重建上千个 `<option>` 会抢走输入焦点；搬运下载目录是「先复制再删源」，空间不够时写到一半才失败、磁盘上留半份副本。
+
+**现在的口径**：扫描结果只写真的变了的那几条；排序只挑当前页需要的前 k 条（结果与整表稳定排序逐项一致，相等项按原下标兜底）；快照不再存 `share`，体积先用快照里的字节数顶上；导入进度内容没变就不写 session；筛选池签名没变就不动 DOM；搬运前先问一句空间，不够就把缺口说清楚。
+
+**踩的坑**：① 堆挑前 k 必须按「原下标」兜底，否则相等项的相对顺序会和整表稳定排序不一致 —— 列表看着会自己抖；② `paintSnapshot()` 里把整库条目数组 `length = 0` 放掉时要先算完 `seededBytes`，顺序反过来就丢数字；③ 守卫里写 `\u0000` / `\u0001` 要记得正则里是**两个字面反斜杠**，写成 `\u0001` 会变成控制字符、永远匹配不上；④ 页面用例里 `openLibrary()` 是 async，忘了 `await` 会报 `Cannot read properties of undefined (reading 'selectFirstVideos')`。
+
+**没动的**：P3 三条（老 PNG 封面转 WebP 要改用户磁盘上的文件、`004导出` 的保留份数、bench 软上界）—— 都等单独批准；归档文件的格式、目录结构、数据内容一个字节没改。
+
 ## V1.8.6：封面用到才读、粉丝数记住、统计库攒批
 
 **改了什么**：`library.js` 与 `background.js` 各三处。① 扫描阶段不再为每条记录 `getFile()` + `createObjectURL` 封面 —— `readArchiveRecord()` 改成先把记录目录枚举一遍（一次拿到 `视频信息.txt` 与 `封面.webp`/`封面.png` 两个句柄），封面只量 `size`（体积统计要准），句柄留在内存排到卡片要显示时才 `hydrateCover()` 现读现造，blob 用 LRU 封顶 300 个；② UP 主粉丝数按 `mid` 记住 7 天（`chrome.storage.local` 的 `bcaUpFans`，封顶 2000 条，写盘 2 秒合并），「只缺粉丝数」的记录只打 `/x/relation/stat` 一次，不再白拉 view / tags；③ 统计库改成攒批落盘（200 条或 30 秒），每个收藏夹跑完不再整份重写一次，导入收尾补最后一次。

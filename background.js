@@ -2209,6 +2209,8 @@ const IMPORT_JOURNAL_TEXT_BUDGET_BYTES = 1 * 1024 * 1024;
 let importRateLimitStreak = 0;
 let importKeepAliveAt = 0;
 let importRunPublishAt = 0;
+// 1.8.7（P2-7）：上一次真正写进 session 的内容指纹（不含 updatedAt），内容没变就不重复写
+let importRunPublishedMeasured = "";
 let importRunPublishChain = Promise.resolve();
 let importRunSnapshot = null;
 
@@ -2343,6 +2345,7 @@ function resetImportRunSnapshot(journal) {
     journal: importJournalSnapshot(journal)
   };
   importRunPublishAt = 0;
+  importRunPublishedMeasured = "";
   return writeImportRunSnapshot();
 }
 
@@ -2368,6 +2371,13 @@ function publishImportRun({ journal = null, cursor = null, counts = null, force 
   };
   if (throttled) return;
   importRunPublishAt = now;
+  /* 1.8.7（P2-7）：force 只该用在「阶段真的变了」的地方，可它每次都是
+     storage.session.set —— 而写 session 会重置 service worker 的空闲计时器。
+     这里再加一道「内容没变就别写」：把 updatedAt 抹成 0 之后比指纹，
+     指纹一样说明除了时间戳什么都没变，这一笔写下去没有任何人能看到区别。 */
+  const measured = JSON.stringify({ ...importRunSnapshot, updatedAt: 0 });
+  if (measured === importRunPublishedMeasured) return;
+  importRunPublishedMeasured = measured;
   void writeImportRunSnapshot();
 }
 
@@ -2383,6 +2393,7 @@ async function readImportRunSnapshot() {
 async function clearImportRunSnapshot() {
   importRunSnapshot = null;
   importRunPublishAt = 0;
+  importRunPublishedMeasured = "";
   // 排进同一条写入链：否则排队中的快照可能在 remove 之后落地，留下"幽灵活动记录"
   importRunPublishChain = importRunPublishChain
     .then(() => chrome.storage.session.remove(IMPORT_RUN_SESSION_KEY))
@@ -3939,7 +3950,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       } else if (missingCount > 0) {
         coverageNotes.push(`「${folder.title}」接口自报 ${expectedTotal} 条、实际返回 ${allItems.length} 条，差额 ${missingCount} 条`);
       }
-      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
+      // 1.8.7（P2-7）：这里原来也 force 一次，cursor/counts 与下面「可信度检查」之后那次完全一样，删掉
       scopedItems.forEach((item) => {
         item.coverCandidates = item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [];
         item.recoverySources = new Set();

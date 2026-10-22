@@ -516,21 +516,39 @@ async function snapshotLoad(rootKey) {
 
 async function snapshotSave(rootKey, entries) {
   if (!entries.length) return;
+  const nextByKey = new Map(entries.map((entry) => [entry.key, entry]));
   try {
     const db = await openSnapshotDb();
     await new Promise((resolve, reject) => {
       const transaction = db.transaction(SNAPSHOT_STORE, "readwrite");
       const store = transaction.objectStore(SNAPSHOT_STORE);
-      // 整根目录重写：先按 root 索引把上一轮的条目删干净，再写这一轮的
-      
-      const cursorRequest = store.index("root").openKeyCursor(rootKey);
+      /* 1.8.7（P1-4）：**增量写**。以前是「先按 root 删干净、再把这一轮全 put 一遍」——
+         10 000 条就是 10 000 次写；而绝大多数条目的 size / lastModified / bytes 根本没变。
+         现在顺着旧条目的游标走一趟：没变的不动、变了的 update、消失了的 delete，
+         走完再补上这一轮新出现的。读是内存里的索引读，写只发生在真的变了的那几条上。 */
+      const seenKeys = new Set();
+      const cursorRequest = store.index("root").openCursor(rootKey);
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result;
-        if (!cursor) return;
-        store.delete(cursor.primaryKey);
+        if (!cursor) {
+          for (const [key, entry] of nextByKey) {
+            if (!seenKeys.has(key)) store.put(entry);
+          }
+          return;
+        }
+        const current = cursor.value;
+        const next = nextByKey.get(current.key);
+        if (!next) {
+          cursor.delete();
+        } else {
+          seenKeys.add(current.key);
+          const unchanged = next.size === current.size
+            && next.lastModified === current.lastModified
+            && (Number(next.bytes) || 0) === (Number(current.bytes) || 0);
+          if (!unchanged) cursor.update(next);
+        }
         cursor.continue();
       };
-      for (const entry of entries) store.put(entry);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error || new Error("写快照失败"));
       transaction.onabort = () => reject(transaction.error || new Error("写快照被取消"));
@@ -566,7 +584,6 @@ function saveScanSnapshot(handle, scannedCollections) {
       bytes: record.bytes || 0,
       savedAt: record.savedAt || "",
       info: record.info,
-      share: record.share,
       downloaded: video.downloaded === true,
       hasFiles: video.hasDownloadFiles === true,
       downloadDirectoryName: video.downloadDirectoryName || "",
@@ -591,7 +608,9 @@ async function paintSnapshot(handle) {
   for (const entry of entries) {
     if (!entry?.collection || !entry?.directory || !entry?.info) continue;
     const cacheName = `${entry.collection}/${entry.directory}`;
-    const record = { info: entry.info, share: entry.share || { description: "", stats: {} }, savedAt: entry.savedAt || "", cover: "", bytes: entry.bytes || 0 };
+    // 1.8.7（P1-6）：快照里不再存第二份 share —— 它本来就是从 info 原文切出来的，
+    // 现算一次比在 IndexedDB 和内存里各存一份便宜得多（老快照没有 share，照样能读）。
+    const record = { info: entry.info, share: splitInfoDescription(entry.info), savedAt: entry.savedAt || "", cover: "", bytes: entry.bytes || 0 };
     // 灌进内存缓存：随后的扫描只要 size/lastModified 对得上，就只补封面、不重解析 txt
     if (!cache.has(cacheName)) cache.set(cacheName, { size: entry.size, lastModified: entry.lastModified, record });
     previousVideos.set(cacheName, {
@@ -605,6 +624,11 @@ async function paintSnapshot(handle) {
     if (!byCollection.has(entry.collection)) byCollection.set(entry.collection, []);
     byCollection.get(entry.collection).push(video);
   }
+  // 1.8.7（P2-9）：快照里本来就有每条记录的 bytes —— 先拿它当种子把「占用体积」填上，
+  // 不必等整库扫完，也不必为这一个数字递归整棵树。
+  const seededBytes = entries.reduce((sum, entry) => sum + (Number(entry.bytes) || 0), 0);
+  // 1.8.7（P1-6）：条目已经转进缓存与 video 对象，这个整库数组不再需要。
+  entries.length = 0;
   const scanned = [];
   for (const [name, videos] of byCollection) {
     videos.sort((a, b) => b.timestamp - a.timestamp);
@@ -627,6 +651,7 @@ async function paintSnapshot(handle) {
   renderVideos();
   // 这条提示会被扫描收尾时的 refreshScanNotice() 换掉
   setScanNotice(BcaI18n.t("已显示上次的 {count} 条记录，正在核对文件…", { count: formatCountText(allVideos().length) }));
+  if (seededBytes > 0) updateStorageUsage(handle, { total: seededBytes });
   return true;
 }
 
@@ -1534,6 +1559,9 @@ function safeCover(cover) {
 // 1.7.12（perf PF-2）：比较器里现写 `localeCompare(..., "zh-CN")` 的话，每比较一次就现建
 // 一个 collator —— 800 个 UP 主排下来约 7700 次，占了那次 6.78 ms 里的大头。提到模块级复用。
 const OPTION_TEXT_COLLATOR = new Intl.Collator("zh-CN");
+// 1.8.7（P1-5）：按标题排序的比较器也提到模块级 —— 原来写在比较函数体里，
+// 每比较一次就现建一个 collator，整表排下来等于建了上万次。
+const TITLE_COLLATOR = new Intl.Collator("zh-CN");
 function countByFrequency(values) {
   const counts = new Map();
   for (const value of values) {
@@ -1550,9 +1578,18 @@ function countByFrequency(values) {
 // 否则一旦选了某个 UP 主，其它 UP 主就从下拉里消失，再也换不回去。
 function populateSelectOptions(select, options, allLabel, currentValue) {
   const previous = currentValue ?? select.value;
+  /* 1.8.7（P2-8）：选项文案与计数都没变时**不要重建 DOM**。
+     重建上千个 <option> 是纯白花：下拉会掉焦点、选中态要重设一遍，滚动位置也可能跳。
+     签名里带上「全部」那一项的文案与每个 (计数, 值)，二者任一变化都必须重建。 */
+  const signature = [allLabel, ...options.map((item) => `${item.count}\u0000${item.value}`)].join("\u0001");
+  if (select.dataset.poolSignature === signature) {
+    select.value = options.some((item) => item.value === previous) ? previous : "all";
+    return select.value;
+  }
   const nodes = [new Option(allLabel, "all")];
   for (const item of options) nodes.push(new Option(`${item.value}（${item.count}）`, item.value));
   select.replaceChildren(...nodes);
+  select.dataset.poolSignature = signature;
   select.value = options.some((item) => item.value === previous) ? previous : "all";
   return select.value;
 }
@@ -1658,6 +1695,51 @@ function paintPageCovers(pageCards) {
   }
 }
 
+/* 1.8.7（P1-5）：只取排序后的前 count 条。
+   原来每敲一个键就把整表（上万条）sort 一遍，可真正要显示的只有当前页那几十条。
+   这里用一个「大小封顶为 count 的最大堆」挑出前 count 名，再对这 count 条排序。
+   相等项一律按原数组下标兜底（`|| a - b`），结果与「整表稳定排序后再切页」逐项一致 ——
+   稳定排序对相等元素保序，所以下标兜底就是同一份顺序，不会因为换算法就让列表抖动。 */
+function selectFirstVideos(list, count, compare) {
+  const limit = Math.max(0, Math.min(Number(count) || 0, list.length));
+  if (!limit) return [];
+  // 要的比一半还多：挑的代价已经不比整排便宜，直接整排
+  if (limit * 2 >= list.length) {
+    const indexes = list.map((_, index) => index);
+    indexes.sort((left, right) => compare(list[left], list[right]) || left - right);
+    return indexes.map((index) => list[index]);
+  }
+  const heap = []; // 最大堆：堆顶是当前「排得最靠后」的那一条（存的是下标）
+  const siftUp = (start) => {
+    let node = start;
+    while (node > 0) {
+      const parent = (node - 1) >> 1;
+      if (compare(list[heap[node]], list[heap[parent]]) <= 0) break;
+      const swap = heap[node]; heap[node] = heap[parent]; heap[parent] = swap;
+      node = parent;
+    }
+  };
+  const siftDown = () => {
+    let node = 0;
+    for (;;) {
+      const left = node * 2 + 1;
+      const right = left + 1;
+      let largest = node;
+      if (left < heap.length && compare(list[heap[left]], list[heap[largest]]) > 0) largest = left;
+      if (right < heap.length && compare(list[heap[right]], list[heap[largest]]) > 0) largest = right;
+      if (largest === node) return;
+      const swap = heap[node]; heap[node] = heap[largest]; heap[largest] = swap;
+      node = largest;
+    }
+  };
+  for (let index = 0; index < list.length; index += 1) {
+    if (heap.length < limit) { heap.push(index); siftUp(heap.length - 1); continue; }
+    if (compare(list[index], list[heap[0]]) < 0) { heap[0] = index; siftDown(); }
+  }
+  heap.sort((left, right) => compare(list[left], list[right]) || left - right);
+  return heap.map((index) => list[index]);
+}
+
 function renderVideos() {
   const collectionName = selectedCollection === "*" ? BcaI18n.t("全部收藏") : selectedCollection;
   currentCollection.textContent = collectionName;
@@ -1678,25 +1760,28 @@ function renderVideos() {
     if (matchesVideoFilters(video, query)) matching.push(video);
   }
   const sort = sortSelect.value;
-  // 4.5：按播放量从高到低。没有播放量数据的排在最后（用 -1 而不是 0，
-  // 否则“0 播放”会和“没有数据”混在一起），同档再按收藏时间倒序。
-  const viewsOf = (video) => {
+  /* 4.5：按播放量从高到低。没有播放量数据的排在最后（用 -1 而不是 0，
+     否则“0 播放”会和“没有数据”混在一起），同档再按收藏时间倒序。
+     1.8.7（P1-5）：比较器只建一份，播放量先算进 Map —— 原来 comparator 里现建
+     collator、现读属性，整表排一万条就是一万次现建 + 二十万次属性读取。 */
+  const viewsByVideo = sort === "views" ? new Map(matching.map((video) => {
     const value = Number(video.stats?.view);
-    return Number.isFinite(value) && value > 0 ? value : -1;
-  };
-  matching.sort((a, b) => {
-    if (sort === "title") return a.title.localeCompare(b.title, "zh-CN");
+    return [video, Number.isFinite(value) && value > 0 ? value : -1];
+  })) : null;
+  const compareVideos = (a, b) => {
+    if (sort === "title") return TITLE_COLLATOR.compare(a.title, b.title);
     if (sort === "oldest") return a.timestamp - b.timestamp;
-    if (sort === "views") return viewsOf(b) - viewsOf(a) || b.timestamp - a.timestamp;
+    if (sort === "views") return viewsByVideo.get(b) - viewsByVideo.get(a) || b.timestamp - a.timestamp;
     return b.timestamp - a.timestamp;
-  });
+  };
 
   // 分页：网格里只渲染当前页，visibleVideoIds 也跟着当前页走
   pageCount = Math.max(1, Math.ceil(matching.length / pageSize));
   if (currentPage > pageCount) currentPage = pageCount;
   if (currentPage < 1) currentPage = 1;
   const pageStart = (currentPage - 1) * pageSize;
-  const pageVideos = matching.slice(pageStart, pageStart + pageSize);
+  // 1.8.7（P1-5）：只要「当前页及以前」那一段的前 k 条，不再给整表排序（见 selectFirstVideos）
+  const pageVideos = selectFirstVideos(matching, pageStart + pageSize, compareVideos).slice(pageStart, pageStart + pageSize);
   visibleVideoIds = pageVideos.map((video) => video.id);
 
   const countLabel = videoFilter !== "all"
@@ -3746,6 +3831,24 @@ async function listVideoDownloadDirectories(downloadParent, video) {
   return matches;
 }
 
+/* 1.8.7（P2-10）：搬运下载目录是「先复制、校验字节数、再删源」，复制本身是流式写；
+   空间不够时 write() 会写到一半才抛错，磁盘上留下半份副本。这里先用
+   navigator.storage.estimate() 兜一道，并把「还差多少」直接写进错误文案；
+   拿不到 estimate（老浏览器）就不拦 —— 宁可让它照旧走校验那条路。 */
+async function ensureCopySpace(bytes, label) {
+  const need = Number(bytes) || 0;
+  if (!need) return;
+  let estimate = null;
+  try { estimate = await navigator.storage.estimate(); }
+  catch (error) { console.warn("问不到浏览器可用空间（这一次跳过搬运前的空间检查）", error); return; }
+  const quota = Number(estimate?.quota) || 0;
+  const usage = Number(estimate?.usage) || 0;
+  if (!quota) return;
+  const available = quota - usage;
+  if (available >= need) return;
+  throw new Error(`搬运「${label}」需要至少 ${formatBytes(need)}，浏览器报告还能写 ${formatBytes(Math.max(0, available))}，还差 ${formatBytes(need - available)}。先清理一些空间再试。`);
+}
+
 async function copyDownloadDirectories(downloadParent, video, targetNames) {
   const sources = await listVideoDownloadDirectories(downloadParent, video);
   if (!sources.length) return { sources, created: [] };
@@ -3765,6 +3868,8 @@ async function copyDownloadDirectories(downloadParent, video, targetNames) {
       }
       if (alreadyPresent) continue;
       const source = sources.find((item) => item.collectionName !== targetName) || sources[0];
+      // 1.8.7（P2-10）：复制之前先确认空间够（不够就明确说缺多少，而不是写到一半失败）
+      await ensureCopySpace(await directorySize(source.directory), source.directory.name);
       const targetNameOnDisk = await uniqueRecordFolderName(targetCollection, source.directory.name);
       const targetDirectory = await targetCollection.getDirectoryHandle(targetNameOnDisk, { create: true });
       try {

@@ -352,6 +352,22 @@ async function suiteLibrary() {
     );
   });
 
+  await test("只挑当前页需要的前 k 条，结果与整表稳定排序逐项一致（1.8.7）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const g = page.window;
+    const compare = (a, b) => a.key - b.key;
+    // 120 条、键值有重复（(index * 37) % 120），正好覆盖「相等项怎么排」这条边界
+    const list = Array.from({ length: 120 }, (_, index) => ({ key: (index * 37) % 120, order: index }));
+    const picked = g.selectFirstVideos(list, 25, compare).map((item) => item.order);
+    const expected = list.map((_, index) => index)
+      .sort((a, b) => compare(list[a], list[b]) || a - b)
+      .slice(0, 25)
+      .map((index) => list[index].order);
+    assert.deepEqual(picked, expected, "前 k 条必须与「整表稳定排序后切页」逐项一致");
+    assert.equal(g.selectFirstVideos(list, 0, compare).length, 0, "要 0 条就返回空");
+    assert.equal(g.selectFirstVideos(list, 500, compare).length, 120, "要的比总数多就全给");
+  });
+
   await test("Alt+↑/↓ 在收藏夹行上换序，焦点跟着走（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;

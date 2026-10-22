@@ -962,9 +962,13 @@ test("the library can sort by view count", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
   assert.match(html, /<option value="views"[^>]*>播放量从高到低<\/option>/);
-  assert.match(library, /if \(sort === "views"\) return viewsOf\(b\) - viewsOf\(a\)/);
+  // 1.8.7（P1-5）：比较器改成模块级 compareVideos，播放量先算进 viewsByVideo —— 排序键不再在比较里现读
+  assert.match(library, /if \(sort === "views"\) return viewsByVideo\.get\(b\) - viewsByVideo\.get\(a\) \|\| b\.timestamp - a\.timestamp/);
   // 没有播放量数据的记录排到最后，而不是当成 0 播放
   assert.match(library, /Number\.isFinite\(value\) && value > 0 \? value : -1/);
+  // 只挑当前页需要的那一段，不再给整表排序
+  assert.match(library, /selectFirstVideos\(matching, pageStart \+ pageSize, compareVideos\)/);
+  assert.equal(/matching\.sort\(/.test(library), false, "整表排序应已去掉");
 });
 
 test("the video card shows the view count at the bottom-right of the cover", () => {
@@ -6249,4 +6253,87 @@ test("V1.8.6：统计库攒够 200 条或 30 秒才落盘，收尾补一次", ()
   assert.ok(tail, "收尾补落那一段要还在");
   assert.match(tail, /if \(statsPendingRecords\.length\) \{/, "收尾补落要看队列非空");
   assert.match(tail, /await flushStatsPendingRecords\(root, importStatsKeys\);/, "收尾补落要真的写");
+});
+
+// ---- 1.8.7：P1 / P2 的七处性能与写入收敛 ----
+
+test("快照只写真的变了的那些条目，删掉消失的（V1.8.7）", () => {
+  const library = readProjectFile("library.js");
+  const body = sliceBetween(library, "async function snapshotSave(rootKey, entries) {", "async function paintSnapshot");
+  assert.ok(body, "要能找到 snapshotSave 的函数体");
+  // 先按 key 建索引，再顺着旧条目的游标走一趟
+  assert.match(body, /const nextByKey = new Map\(entries\.map\(\(entry\) => \[entry\.key, entry\]\)\);/);
+  assert.match(body, /store\.index\("root"\)\.openCursor\(rootKey\)/);
+  assert.match(body, /cursor\.update\(next\)/, "变了的那条要 update");
+  assert.match(body, /cursor\.delete\(\)/, "消失了的那条要 delete");
+  assert.match(body, /const seenKeys = new Set\(\);/, "记下已见过的 key，游标走完只补新的");
+  assert.match(body, /if \(!seenKeys\.has\(key\)\) store\.put\(entry\);/, "只补这一轮新出现的条目");
+  // 没变的必须跳过：三个字段都一样就不写
+  assert.match(body, /next\.size === current\.size/);
+  assert.match(body, /next\.lastModified === current\.lastModified/);
+  assert.match(body, /\(Number\(next\.bytes\) \|\| 0\) === \(Number\(current\.bytes\) \|\| 0\)/);
+  assert.equal(/for \(const entry of entries\) store\.put\(entry\);/.test(body), false, "不许再整库 put 一遍");
+});
+
+test("排序只挑当前页需要的前 k 条（V1.8.7）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const TITLE_COLLATOR = new Intl\.Collator\("zh-CN"\);/, "标题比较器要提到模块级");
+  assert.match(library, /function selectFirstVideos\(list, count, compare\) \{/);
+  assert.match(library, /const pageVideos = selectFirstVideos\(matching, pageStart \+ pageSize, compareVideos\)\.slice\(pageStart, pageStart \+ pageSize\);/);
+  assert.match(library, /const viewsByVideo = sort === "views" \? new Map\(matching\.map/);
+  assert.equal(/matching\.sort\(/.test(library), false, "整表排序应已去掉");
+  // 挑出来的顺序必须和「整表稳定排序后切页」一致 —— 相等项按下标兜底
+  const selector = sliceBetween(library, "function selectFirstVideos(list, count, compare) {", "function renderVideos()");
+  assert.ok(selector, "要能找到 selectFirstVideos 的函数体");
+  assert.match(selector, /\|\| left - right/, "相等项要按下标兜底，保证与稳定排序逐项一致");
+});
+
+test("快照不再存第二份 share，体积先用快照里的字节数当种子（V1.8.7）", () => {
+  const library = readProjectFile("library.js");
+  const saver = sliceBetween(library, "function saveScanSnapshot(", "async function snapshotLoad");
+  assert.ok(saver, "要能找到 saveScanSnapshot 的函数体");
+  assert.equal(/share: record\.share,/.test(saver), false, "快照条目里不该再写 share");
+  assert.match(library, /share: splitInfoDescription\(entry\.info\)/, "读到老快照时现算 share");
+  assert.match(library, /const seededBytes = entries\.reduce\(\(sum, entry\) => sum \+ \(Number\(entry\.bytes\) \|\| 0\), 0\);/, "用快照里的字节数当种子");
+  assert.match(library, /entries\.length = 0;/, "条目转进缓存后要放掉整库数组");
+  assert.match(library, /if \(seededBytes > 0\) updateStorageUsage\(handle, \{ total: seededBytes \}\);/, "先把体积填上，不必等扫完整库");
+});
+
+test("导入进度只在内容真的变了时才写 session（V1.8.7）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /let importRunPublishedMeasured = "";/);
+  const body = sliceBetween(background, "function publishImportRun({ journal = null, cursor = null, counts = null, force = false } = {}) {", "async function clearImportRunSnapshot");
+  assert.ok(body, "要能找到 publishImportRun 的函数体");
+  assert.match(body, /const measured = JSON\.stringify\(\{ \.\.\.importRunSnapshot, updatedAt: 0 \}\);/, "指纹要抹掉 updatedAt");
+  assert.match(body, /if \(measured === importRunPublishedMeasured\) return;/);
+  assert.match(body, /importRunPublishedMeasured = measured;/);
+  // 那两条一模一样的 force 调用只能留一条
+  const duplicated = background.split("publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });").length - 1;
+  assert.equal(duplicated, 1, "重复的那次 force 要删掉一条");
+});
+
+test("筛选下拉的选项池没变就不重建 DOM（V1.8.7）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const signature = \[allLabel, /, "签名要以「全部」那一项的文案开头");
+  assert.match(library, /\.count\}\\u0000/, "签名里要带计数与值");
+  assert.ok(library.includes('join("\\u0001")'), "用不可见分隔符拼签名");
+  assert.match(library, /if \(select\.dataset\.poolSignature === signature\) \{/, "签名一样就直接返回");
+  assert.match(library, /select\.dataset\.poolSignature = signature;/, "重建后要记住签名");
+  const skipAt = library.indexOf("select.dataset.poolSignature === signature");
+  const rebuildAt = library.indexOf("const nodes = [new Option(allLabel");
+  assert.ok(skipAt >= 0 && rebuildAt > skipAt, "跳过在前、重建在后");
+});
+
+test("搬运下载目录之前先问浏览器还有多少空间（V1.8.7）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /async function ensureCopySpace\(bytes, label\) \{/);
+  const body = sliceBetween(library, "async function ensureCopySpace(bytes, label) {", "async function copyDownloadDirectories");
+  assert.ok(body, "要能找到 ensureCopySpace 的函数体");
+  assert.match(body, /navigator\.storage\.estimate\(\)/, "要用 estimate 问空间");
+  assert.match(body, /还差 \$\{formatBytes\(need - available\)\}/, "错误文案要说清还差多少");
+  assert.match(body, /console\.warn\("问不到浏览器可用空间（这一次跳过搬运前的空间检查）", error\);/, "拿不到就放行，别拦");
+  assert.match(library, /await ensureCopySpace\(await directorySize\(source\.directory\), source\.directory\.name\);/, "复制之前要真的先查一次");
+  const copyAt = library.indexOf("await ensureCopySpace(await directorySize(source.directory), source.directory.name);");
+  const uniqueAt = library.indexOf("const targetNameOnDisk = await uniqueRecordFolderName(targetCollection, source.directory.name);", copyAt);
+  assert.ok(copyAt >= 0 && uniqueAt > copyAt, "空间检查要在建目标目录之前");
 });

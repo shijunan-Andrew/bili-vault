@@ -302,6 +302,9 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **扫描只读一遍**（1.8.4）：`scanRoot()` 不再「先枚举一遍数总数、再枚举一遍读记录」—— 进度分母先用上次扫描的条数（`lastScanRecordCount`），估少了跟着 `stats.processed` 长，真值在读完时收口。`longNames`（1.7.24 的路径长度度量）就在这一遍里算，并带回 `lastScanInfo` 显示。
 - **下载目录索引有缓存**（1.8.4）：`scanDownloadedDirectories()` 的结果按根目录缓存 2 分钟（`DOWNLOAD_INDEX_TTL_MS`）；手动「刷新」与 `downloadRevision` 变化强制重算，本页删除 / 搬运下载目录后调 `invalidateDownloadIndex(rootHandle)` 立刻作废。**`downloadRevision` 自 1.3.0 删掉下载功能之后已经没人写**，别指望它兜底。
 - **扫描结果会存成快照**（1.8.5）：一轮扫描结束后把每条记录的元数据写进 IndexedDB（`bca-archive-snapshot`），下次打开收藏库先按快照把列表画出来（`paintSnapshot()`），再去整库校准。**快照里不许存 `blob:` URL**（那个 URL 的生命周期只到页面关闭），记录对象的封面留空、需要时现读现造。手动「刷新」必须绕过快照 —— 它存在的意义就是不信缓存。
+- **快照只写变了的**（1.8.7）：`snapshotSave()` 按 `size` / `lastModified` / `bytes` 三个字段比对，一样就跳过、变了才 `cursor.update()`、消失了的 `cursor.delete()`。**别退回「整根目录先删再全 put」** —— 1 万条就是 1 万次写，而一轮扫描通常只有几十条会变。
+- **排序不做全表**（1.8.7）：`renderVideos()` 用 `selectFirstVideos(list, count, compare)` 挑「当前页及以前」的前 k 名（大小封顶为 k 的最大堆），再 `slice` 出当前页。相等项一律按下标兜底（`|| left - right`），保证与「整表稳定排序后再切页」逐项一致 —— 换算法不许让列表顺序抖动。
+- **搬运下载目录前先问空间**（1.8.7）：`ensureCopySpace()` 用 `navigator.storage.estimate()` 预检，不够就带着「还差 X」抛错；`estimate` 拿不到时只 `console.warn` 放行，**别拦**（老浏览器没有这个 API）。
 - **整库校准是 8 路并发**（1.8.5）：`SCAN_READ_CONCURRENCY = 8` 的 worker 池从同一个队列里取 `视频信息.txt` 来读，读完再按原顺序拼回收藏夹。并发只加在「读」上，写盘仍然是后台那条串行队列。
 - **体积统计复用扫描字节**（1.8.5）：`scanRoot()` 顺手把每条记录（`meta.size + coverBytes`）与下载树的字节累起来，`updateStorageUsage(handle, { total })` 有现成数字就不再递归整树。
 
