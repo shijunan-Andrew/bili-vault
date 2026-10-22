@@ -6417,6 +6417,11 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
 
   // 上限从界面一路传到后台：值 0 表示「全部」
   assert.match(backgroundCode, /const importLimit = Math\.max\(0, Number\(data\?\.limit\) \|\| 0\);/, "后台要接住 limit");
+  // 1.8.9 回归：这份声明一度被放在收藏夹循环里，循环外的完成消息一引用就抛
+  // ReferenceError（数据其实已经存好了，用户却看到「导入失败」）。必须是两空格缩进的函数作用域，
+  // 而且要在收藏夹循环之前。
+  assert.match(backgroundCode, /^ {2}const importLimit = Math\.max\(0, Number\(data\?\.limit\) \|\| 0\);$/m, "importLimit 要声明在函数作用域里（两空格缩进），不能藏在循环里");
+  assert.ok(backgroundCode.indexOf("const importLimit = Math.max") < backgroundCode.indexOf("for (let folderIndex = 0;"), "importLimit 的声明必须在收藏夹循环之前");
   assert.match(popupCode, /function selectedImportLimit\(\) \{/, "界面要有一个读上限的地方");
   assert.match(popupCode, /if \(options\.limit\) payload\.limit = options\.limit;/, "载荷里要带上 limit");
   assert.match(relay, /if \(message\.limit\) payload\.limit = message\.limit;/, "中转那层别把 limit 丢了");

@@ -3789,6 +3789,10 @@ async function importBiliFavoritesInner(data, tabId = null) {
   let imported = 0, refreshed = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
   // 1.8.8：「最多导入 N 条」用到的两个状态。limitReached 一旦为真，后面的收藏夹
   // 连列表都不去读（读页也要发请求）；limitedCount 记因为上限而没导入的新视频条数。
+  // 1.8.8：本次最多导入多少条**新**视频（0 = 不限，也就是「全部」）。
+  // 必须声明在收藏夹循环之外 —— 收尾的完成消息与报告也要用它（上一版误放在循环里，
+  // 循环外引用就抛 ReferenceError：数据已经存好了，界面却弹「导入失败」。）
+  const importLimit = Math.max(0, Number(data?.limit) || 0);
   let limitReached = false;
   let limitedCount = 0;
   let cancelled = false;
@@ -3917,10 +3921,6 @@ async function importBiliFavoritesInner(data, tabId = null) {
       // 注意：下面的对账（missingCount）仍然按 allItems 算 —— 那问的是"分页有没有读全"，
       // 与"这次要写哪几条"是两件事，混在一起会把过滤掉的数量误报成缺失。
       const recentDays = Math.max(0, Number(data?.recentDays) || 0);
-  // 1.8.8：本次最多导入多少条**新**视频（0 = 不限，也就是「全部」）。
-  // 只有「本地还没有这条记录」才占名额 —— 已有的跳过不占名额，这才符合点
-  // 「导入 50 条」时的期待：拿到的就是 50 条新内容，而不是 50 条候选里一半是旧的。
-  const importLimit = Math.max(0, Number(data?.limit) || 0);
       const scopedItems = importWithinRecentDays(allItems, recentDays);
       if (recentDays > 0) {
         folderNotes.push(`「${folder.title}」按最近 ${recentDays} 天过滤：线上 ${allItems.length} 条里命中 ${scopedItems.length} 条。`);
