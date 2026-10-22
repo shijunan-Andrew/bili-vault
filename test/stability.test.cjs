@@ -6653,8 +6653,10 @@ test("后台写完统计库要读回自检，不合格就用上一版顶回去�
   assert.match(background, /async function commitStatsDatabase\(root, read, database\) \{/, "三个写入口共用一条提交路径");
   assert.match(background, /async function statsDatabaseContentMatches\(file, expectedText\) \{/, "写完要读回比对");
   assert.match(background, /async function restoreStatsDatabaseBackup\(root, file\) \{/, "自检不过要用 database.bak.json 顶回");
-  assert.equal((background.match(/await commitStatsDatabase\(/g) || []).length, 3,
-    "写库 / 摸宠物 / 回滚统计这三个入口都要走同一条提交路径");
+  // 1.8.17：收藏库页不再自己写库，改由 commitStatsDatabaseFromPage 交回这里提交，
+  // 于是同一条提交路径上有四个调用点（写库 / 摸宠物 / 回滚统计 / 页面交回）。
+  assert.equal((background.match(/await commitStatsDatabase\(/g) || []).length, 4,
+    "写库 / 摸宠物 / 回滚统计 / 收藏库页交回，这四个入口都要走同一条提交路径");
   assert.equal((background.match(/await archivePreviousStatsDatabase\(read\);/g) || []).length, 1,
     "留上一版只在 commitStatsDatabase 里做一次，别又抄回三处");
 });
@@ -6741,4 +6743,39 @@ test("统计快照只比「记录集」，不再让本页自己的回声触发�
   const releaseAt = library.indexOf("releaseVideoCoverRefs();", carryAt);
   const assignAt = library.indexOf("collections = applyCollectionOrder(result.collections);", carryAt);
   assert.ok(carryAt > 0 && releaseAt > carryAt && assignAt > releaseAt, "顺序：记旧封面 → 交还旧对象 → 换成本轮结果");
+});
+
+// ---- 1.8.17：收藏库页不再自己写库（交给后台），写者只剩一个 ----
+
+test("收藏库页构建完就把库交给后台提交，自己不再写盘（V1.8.17）", () => {
+  const library = readProjectFile("library.js");
+  const start = library.indexOf("async function syncStatsDatabaseLocked(");
+  assert.ok(start > 0, "要能找到页面侧的同步函数");
+  const body = library.slice(start, library.indexOf("\nasync function displayRoot(", start));
+  assert.ok(body.includes("const committed = await commitStatsDatabaseViaBackground(database);"),
+    "构建完要交给后台提交");
+  const sentAt = body.indexOf("commitStatsDatabaseViaBackground(database)");
+  const fallbackAt = body.indexOf('await writeFileAtomically(directory, file, JSON.stringify(database));');
+  assert.ok(fallbackAt > sentAt, "本页写盘只能当兜底，必须排在交后台之后");
+  assert.match(library, /chrome\.runtime\.sendMessage\(\{ type: "bca-stats-commit", database \}\)/,
+    "交给后台走消息，消息类型不能改");
+  assert.match(library, /async function primeStatsFingerprint\(\) \{/, "指纹初值要先从 storage 补");
+  assert.match(library, /chrome\.storage\.local\.get\("bcaStats"\)/, "补初值读的就是上一份快照");
+  assert.match(body, /if \(!publishedStatsFingerprint\) await primeStatsFingerprint\(\);/,
+    "第一次同步前必须先补初值，否则每次打开收藏库都白写一次库");
+});
+
+test("后台只有一个写者：页面交回的提交也走备份、就地写、写完自检（V1.8.17）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /async function commitStatsDatabaseFromPage\(payload\) \{/,
+    "页面交回来的提交要有独立入口");
+  const start = background.indexOf("async function commitStatsDatabaseFromPage(payload) {");
+  const body = background.slice(start, background.indexOf("async function writeStatsDatabaseInner(", start));
+  assert.match(body, /return withStatsWriteSlot\(async \(\) => \{/, "要排进同一条写槽（内存链 + 跨上下文锁）");
+  assert.match(body, /const blocked = statsDatabaseWriteBlocked\(read\);/, "读不出来就一个字节都不写");
+  assert.match(body, /BcaStatsCore\.applyStatsMirror\(incoming, BcaStatsCore\.statsMirrorOf\(read\.database\)\)/,
+    "只前进的标量要取后台这一份，别被页面构建期的旧值拨回去");
+  assert.match(body, /await commitStatsDatabase\(root, read, database\)/, "备份 + 就地写 + 自检都在这条路上");
+  assert.match(background, /if \(message\?\.type === "bca-stats-commit"\) \{/, "消息入口要在");
+  assert.doesNotMatch(body, /writeFileAtomically\(/, "后台不该退回「临时文件 + 换名」那条慢路");
 });

@@ -3515,6 +3515,36 @@ async function restoreStatsDatabaseBackup(root, file) {
   }
 }
 
+/* 1.8.17：收藏库页不再自己写库 —— 它只做「读 + 构建」，把整份结果交回这里统一提交。
+   页面侧那条路是「临时文件 + move() 换名」，本机实测 7.1 秒（同一份 145 KB 库，
+   就地写只要几毫秒）；换名完成时页面还会顺便写一份 bcaStats，回声再触发一次没必要的
+   重扫与重绘。现在写者只有这一个：备份、就地写、写完自检、失败用 database.bak.json
+   顶回，全在同一条 commitStatsDatabase 上。 */
+async function commitStatsDatabaseFromPage(payload) {
+  const root = await getRootHandle().catch(() => null);
+  if (!root) return { ok: false, reason: "no-root" };
+  const permission = await root.queryPermission({ mode: "readwrite" }).catch(() => "denied");
+  if (permission !== "granted") return { ok: false, reason: "no-permission" };
+  const incoming = payload && payload.database;
+  if (!incoming || typeof incoming !== "object") return { ok: false, reason: "bad-payload" };
+  // 页面构建期间这边可能又写过（摸宠物、导入收尾）：只前进的标量取新的那一份，
+  // 别让一次「顺带同步」把亲密度与累计保存往回拨。
+  return withStatsWriteSlot(async () => {
+    const read = await readStatsDatabase(root);
+    const blocked = statsDatabaseWriteBlocked(read);
+    if (blocked) {
+      // 读不到库就一个字节都不写 —— 页面那份是「按扫描结果重建」的，拿它盖未知现场不安全。
+      console.warn(blocked);
+      reportStatsWriteBlocked(blocked);
+      await publishStatsSnapshot(read.database);
+      return { ok: false, reason: "unreadable" };
+    }
+    const database = BcaStatsCore.applyStatsMirror(incoming, BcaStatsCore.statsMirrorOf(read.database));
+    if (!(await commitStatsDatabase(root, read, database))) return { ok: false, reason: "write-failed" };
+    return { ok: true };
+  }).catch((error) => ({ ok: false, reason: error?.message || "commit-failed" }));
+}
+
 async function writeStatsDatabaseInner(root, records, insertedKeys = null) {
   if (!root || !records.length) return null;
   try {
@@ -5007,6 +5037,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     diffBiliFavorites(message.data || message, sender?.tab?.id ?? null)
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, message: error?.message || "对比差异失败。" }));
+    return true;
+  }
+  if (message?.type === "bca-stats-commit") {
+    // 1.8.17：收藏库页把「读 + 构建」的结果交回来提交（它自己不再写库）。
+    commitStatsDatabaseFromPage(message)
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === "bca-pet-touch") {

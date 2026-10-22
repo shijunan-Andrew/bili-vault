@@ -137,14 +137,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.7.30 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.8.16：封面不再被扔掉，回声也只比条数
+## V1.8.17：统计库改由后台写，打开收藏库不再有那 7 秒
 
-打开收藏库几秒后还会闪一下的那个问题，这一版收掉了尾巴。两件事：
+以前收藏库页自己写 `003database/database.json`，走的是「临时文件 + 换名」这条原子写路径，
+在这台机器上一次要 **7 秒**（同一份库，后台就地写只要几毫秒）；而且写完还要自己推一份快照，
+回声又让本页重扫重绘一轮。现在页面只负责「读 + 构建」，落盘统一交给后台那一条
+（先留 `database.bak.json`、就地写、写完读回自检、不合格用备份顶回）。
 
-1. **换记录时把封面带过去**。扫描会把每条记录换成新对象，以前这一换封面 URL 就被交还、卡片先变白再补图。现在先把旧封面记下来、给新对象补一份引用再交还，卡片不会白。
-2. **回声只比条数**。1.8.15 用「条数 + 收藏夹分布」判断自己写的统计快照要不要重扫，但侧栏是用户排的顺序、快照是名字顺序，永远对不上 —— 于是 8 秒后还是会整页重扫一遍。现在只比条数。
+顺带修掉一个一直存在的浪费：指纹初值原来是空串，**每次打开收藏库都算「内容变了」**，
+所以第一次打开总会白写一次库。现在第一次同步前先从 storage 补上初值，没变就一个字节都不写。
 
-**这对你有什么影响**：第一次打开收藏库，扫描结束后列表应该就是最终样子，不该再白一下。
+**这对你有什么影响**：打开收藏库时那 7 秒的换名没有了；`database.json` 还是原来那份可读的 JSON，
+备份文件名也没变。后台没接住消息时页面会自己写（慢一点，但不会丢这次统计）。
 
 ## 测试与文档
 
@@ -154,7 +158,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:301 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:303 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

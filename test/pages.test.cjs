@@ -394,6 +394,49 @@ async function suiteLibrary() {
     assert.equal(database.firstSeenAt, "2026-01-01T00:00:00.000Z", "陪伴开始时间要从镜像顶回来");
   });
 
+  await test("写库交给后台：页面只发一次 bca-stats-commit，失败才自己写（1.8.17）", async () => {
+    const tree = {
+      "小鲸鱼测试": {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("交后台的第一条"), "封面.png": "PNG-1" }
+      }
+    };
+    const page = dom.loadPage({ htmlFile: "library.html", chrome: makeChrome({ localData: {} }) });
+    await settle();
+    const g = page.window;
+    const sent = [];
+    g.chrome.runtime.sendMessage = async (message) => {
+      sent.push(message);
+      return { ok: true };
+    };
+    const root = await makeDirectoryTree({ "_测试归档": tree }).getDirectoryHandle("_测试归档");
+    await g.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const commits = sent.filter((item) => item && item.type === "bca-stats-commit");
+    assert.equal(commits.length, 1, "构建完应该正好交一次");
+    assert.equal(Object.keys(commits[0].database.videos).length, 1, "交上去的是整份库");
+    const folder = await root.getDirectoryHandle("003database");
+    const file = await folder.getFileHandle("database.json");
+    assert.equal(await (await file.getFile()).text(), "", "后台接手了，页面就不该再往盘上写");
+  });
+
+  await test("后台没接住时页面自己写盘，不能因为消息失败就丢这次统计（1.8.17）", async () => {
+    const tree = {
+      "小鲸鱼测试": {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("兜底写盘这条"), "封面.png": "PNG-1" }
+      }
+    };
+    const page = dom.loadPage({ htmlFile: "library.html", chrome: makeChrome({ localData: {} }) });
+    await settle();
+    const g = page.window;
+    g.chrome.runtime.sendMessage = async () => { throw new Error("message port closed"); };
+    const root = await makeDirectoryTree({ "_测试归档": tree }).getDirectoryHandle("_测试归档");
+    await g.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const folder = await root.getDirectoryHandle("003database");
+    const file = await folder.getFileHandle("database.json");
+    const database = JSON.parse(await (await file.getFile()).text());
+    assert.equal(Object.keys(database.videos).length, 1, "兜底路径要把这次统计写进去");
+  });
   await test("详情抽屉打开时宠物收起来，关掉再放回来（1.8.10）", async () => {
     const page = await openLibrary({
       tree: sampleTree(),

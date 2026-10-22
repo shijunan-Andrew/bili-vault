@@ -4780,6 +4780,8 @@ async function writeFileInPlace(file, text) {
 /* 1.7.7（P0-1）：本页发布 bcaStats 的「实质指纹」——只看会真正改变列表/图表内容的字段，
    **不算 updatedAt**（它每次写入都不同，正是那个自我维持环路唯一的燃料）。
    syncStatsDatabase 写之前比它，onChanged 里收到自己的回声也比它。 */
+/* 1.8.17：初值是空串 —— 意味着「还没发布过」。第一次同步前会先读一次 storage 里
+   上一份 bcaStats 补上初值，否则每次打开收藏库都算「内容变了」，白写一次库。 */
 let publishedStatsFingerprint = "";
 function publishedStatsFingerprintOf(stats) {
   if (!stats) return "";
@@ -4832,6 +4834,29 @@ async function syncStatsMirrorForSync(database) {
     await chrome.storage.local.set({ [BcaStatsCore.STATS_MIRROR_KEY]: next });
   } catch (error) {
     console.warn("统计镜像写不进去（统计页会停在上一版数字）", error);
+  }
+}
+
+/* 1.8.17：指纹第一次用之前先从 storage 取一份 —— 否则每次打开收藏库，「上一次发布」
+   都记成空串，第一次同步一定会写库（这也是打开就慢 7 秒、回声再触发一轮重扫的原因）。 */
+async function primeStatsFingerprint() {
+  try {
+    const stored = await chrome.storage.local.get("bcaStats");
+    publishedStatsFingerprint = publishedStatsFingerprintOf(stored && stored.bcaStats);
+  } catch (error) {
+    console.warn("读不到上次的统计快照（这次照常同步）", error);
+  }
+}
+
+/* 1.8.17：写库交给后台。成功就不用再写 bcaStats 与统计镜像 —— commitStatsDatabase
+   里已经做过；失败（后台没醒、消息被拦）就退回本页的原子写，宁可慢几秒也不能丢。 */
+async function commitStatsDatabaseViaBackground(database) {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "bca-stats-commit", database });
+    return Boolean(result && result.ok);
+  } catch (error) {
+    console.warn("后台没能接手写库（退回本页写盘，会慢几秒）", error);
+    return false;
   }
 }
 
@@ -4935,11 +4960,18 @@ async function syncStatsDatabaseLocked(handle, options = {}) {
        updatedAt），而本页自己又订阅 bcaStats → 900ms 后再整树重扫 → 再写：不用导入、
        开着收藏库页就每秒一轮（磁盘每秒 ~227KB、storage 每秒一次、SW 永不回收）。 */
     const fingerprint = publishedStatsFingerprintOf(payload);
+    if (!publishedStatsFingerprint) await primeStatsFingerprint();
     if (fingerprint && fingerprint === publishedStatsFingerprint) return;
-    await writeFileAtomically(directory, file, JSON.stringify(database));
+    /* 1.8.17：写盘交给后台（就地写 + 写前备份 + 写完自检）。本页以前走
+       writeFileAtomically（临时文件 + move 换名），这台机器上一次 7.1 秒，而且换名完成
+       后还要自己写一份 bcaStats —— 回声会让本页再重扫重绘一轮。失败才退回本页写。 */
+    const committed = await commitStatsDatabaseViaBackground(database);
+    if (!committed) {
+      await writeFileAtomically(directory, file, JSON.stringify(database));
+      await syncStatsMirrorForSync(database);
+      await chrome.storage.local.set({ bcaStats: payload });
+    }
     publishedStatsFingerprint = fingerprint;
-    await syncStatsMirrorForSync(database);
-    await chrome.storage.local.set({ bcaStats: payload });
   } catch (error) {
     console.warn("同步本地数据库失败（收藏库不受影响）", error);
   }
