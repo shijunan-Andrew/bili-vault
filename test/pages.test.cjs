@@ -537,7 +537,29 @@ async function suitePopup() {
     assert.match(summarize({ report: "第一行随便\n导入失败：网络中断\n第二行" }), /导入失败：网络中断/);
     assert.match(summarize({}), /没有成功完成/);
   });
-}
+
+  await test("导入条数上限：下拉的五个档位都能读成数字，默认「全部」是 0（1.8.8）", async () => {
+    const chrome = makeChrome({ version: "1.8.8", localData: {} });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle();
+    const doc = page.document;
+    const select = doc.getElementById("importLimit");
+    assert.ok(select, "导入面板要有「每次最多导入多少条」");
+    assert.deepEqual([...doc.querySelectorAll("#importLimit option")].map((option) => option.value), ["50", "100", "300", "500", "0"]);
+    const selectedByDefault = doc.querySelector("#importLimit option[selected]");
+    assert.equal(selectedByDefault && selectedByDefault.value, "0", "默认必须是「全部」，否则老用户会觉得导入被截断");
+
+    const readLimit = page.window.selectedImportLimit;
+    assert.equal(typeof readLimit, "function", "上限要有一个统一的读法");
+    select.value = "50";
+    assert.equal(readLimit(), 50);
+    select.value = "500";
+    assert.equal(readLimit(), 500);
+    select.value = "0";
+    assert.equal(readLimit(), 0, "「全部」读出来必须是 0");
+    select.value = "";
+    assert.equal(readLimit(), 0, "读不到值时要退成「全部」，不许变成 NaN 把导入卡死");
+  });}
 
 /* ---------------- content.js ---------------- */
 

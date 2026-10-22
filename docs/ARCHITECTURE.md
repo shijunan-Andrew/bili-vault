@@ -304,6 +304,11 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **扫描结果会存成快照**（1.8.5）：一轮扫描结束后把每条记录的元数据写进 IndexedDB（`bca-archive-snapshot`），下次打开收藏库先按快照把列表画出来（`paintSnapshot()`），再去整库校准。**快照里不许存 `blob:` URL**（那个 URL 的生命周期只到页面关闭），记录对象的封面留空、需要时现读现造。手动「刷新」必须绕过快照 —— 它存在的意义就是不信缓存。
 - **快照只写变了的**（1.8.7）：`snapshotSave()` 按 `size` / `lastModified` / `bytes` 三个字段比对，一样就跳过、变了才 `cursor.update()`、消失了的 `cursor.delete()`。**别退回「整根目录先删再全 put」** —— 1 万条就是 1 万次写，而一轮扫描通常只有几十条会变。
 - **排序不做全表**（1.8.7）：`renderVideos()` 用 `selectFirstVideos(list, count, compare)` 挑「当前页及以前」的前 k 名（大小封顶为 k 的最大堆），再 `slice` 出当前页。相等项一律按下标兜底（`|| left - right`），保证与「整表稳定排序后再切页」逐项一致 —— 换算法不许让列表顺序抖动。
+- **导入可以按条数收工（1.8.8）**：`bca-import-selected-folders` 载荷可带 `limit`（0 = 全部）。名额只数 `pendingItems`（本地还没有的新视频），已有记录不算；`remaining = importLimit - imported` 截断队列后置 `limitReached`，收藏夹循环据此提前 `break`，且额度用完时不再刷新旧记录。完成消息与报告都要写明「按上限」「还剩多少」，否则用户会把「只导了一半」当失败。
+- **「同步最近收藏」是「开始更新」的新名字（1.8.8）**：界面、引导页、两本词典一起改名；`docs/HISTORY.md` 里的旧写法是历史记录，不改。
+- **老 PNG 封面转 WebP（1.8.8）**：只走用户连上的 `rootHandle`，只碰记录目录里的 `封面.png`，先写 `封面.webp`、`close()` 之后才删原 PNG；保留目录与 `视频信息.txt` 一律不动；判断走 `archive-core.js` 的 `coverConvertAction()`，动手前先过 `archiveWriteLockedByImport()`。
+- **`004导出` 只留最近 5 份（1.8.8）**：导出成功后按 `exportPruneList()` 删多余（同秒撞名的 `-2` 排在本体之后），删旧失败只记日志，不影响本次导出；用户自己放进去的文件不匹配命名规则，不会被删。
+
 - **搬运下载目录前先问空间**（1.8.7）：`ensureCopySpace()` 用 `navigator.storage.estimate()` 预检，不够就带着「还差 X」抛错；`estimate` 拿不到时只 `console.warn` 放行，**别拦**（老浏览器没有这个 API）。
 - **老 PNG 封面只从归档目录里转**（1.8.8）：`convertLegacyPngCovers()` 只遍历 `rootHandle` 下的收藏夹 → 记录目录一层，只认记录目录里文件名叫「封面.png」的那一个，写「封面.webp」成功后才 `removeEntry("封面.png")`。下载目录（`000视频下载`）、`001错误报告` / `002同步报告` / `003database` / `004导出`、`视频信息.txt` 以及用户自己放进去的文件，**一个都不碰**；保留目录名单与扫描跳过名单是同一套（`ARCHIVE_RESERVED_DIRS`）。「转不转」的判断在 `BcaArchiveCore.coverConvertAction()` 一处：已经有 `封面.webp` 就绝不重转。
 - **`004导出` 只留最近 5 份**（1.8.8）：导出成功之后用 `BcaArchiveCore.exportPruneList()` 算出该删哪几个（只认 `归档元数据-YYYYMMDD-HHMMSS(-N)?.json`，同秒撞名时本体排在 `-2` 之前），逐个 `removeEntry`。**清理失败绝不影响这次导出**：写盘已经成功，删不掉只留一条 `console.warn`。

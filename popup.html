@@ -126,9 +126,19 @@
               <input id="recoverInvalid" type="checkbox" checked>
               <span><span data-i18n="尝试找回失效视频的部分信息">尝试找回失效视频的部分信息</span><small data-i18n="失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。">失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。</small></span>
             </label>
+            <label class="import-option import-limit-row">
+              <span><span data-i18n="每次最多导入多少条">每次最多导入多少条</span><small data-i18n="只数本地还没有的视频，已有的不占名额；到上限就收工，再点一次从后面接着补。">只数本地还没有的视频，已有的不占名额；到上限就收工，再点一次从后面接着补。</small></span>
+              <select id="importLimit" class="import-limit-select">
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="300">300</option>
+                <option value="500">500</option>
+                <option value="0" selected data-i18n="全部">全部</option>
+              </select>
+            </label>
             <button id="startImport" class="primary" type="button" data-i18n="开始导入" disabled>开始导入</button>
-            <p class="diff-hint" data-i18n="导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（1000 条约 10 分钟以上）。中途可以暂停或取消。">导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（1000 条约 10 分钟以上）。中途可以暂停或取消。</p>
-            <button id="updateRecent" class="secondary diff-button" type="button" data-i18n="开始更新" disabled>开始更新</button>
+            <p class="diff-hint" data-i18n="导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（1000 条约 10 分钟以上）。中途可以暂停或取消；按上面的条数导完就收工。">导入会逐条解析收藏夹里的每个视频再写入本地，记录多时可能要很久（1000 条约 10 分钟以上）。中途可以暂停或取消；按上面的条数导完就收工。</p>
+            <button id="updateRecent" class="secondary diff-button" type="button" data-i18n="同步最近收藏" disabled>同步最近收藏</button>
             <p class="diff-hint" data-i18n="只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。">只同步最近几天新收藏的视频，不用扫描整个收藏夹。适合经常用手机收藏的情况。</p>
             <button id="diffFolders" class="secondary diff-button" type="button" data-i18n="先看差异" disabled>先看差异</button>
             <p class="diff-hint" data-i18n="只对比收藏夹列表，不抓取每条视频的详情：1000 条约 1 分钟。导入本身要 10 分钟以上，所以建议先看一眼变了什么。">只对比收藏夹列表，不抓取每条视频的详情：1000 条约 1 分钟。导入本身要 10 分钟以上，所以建议先看一眼变了什么。</p>
@@ -223,7 +233,7 @@
   </dialog>
 
   <dialog id="updateRecentDialog" class="popup-dialog" aria-labelledby="updateRecentTitle">
-    <h2 id="updateRecentTitle" data-i18n="开始更新">开始更新</h2>
+    <h2 id="updateRecentTitle" data-i18n="同步最近收藏">同步最近收藏</h2>
     <p id="updateRecentDetail" class="muted"></p>
     <p class="muted" data-i18n="只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。">只处理所选时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新。窗口之外的记录完全不动。</p>
     <div class="update-range-list">
@@ -233,7 +243,7 @@
     </div>
     <div class="popup-dialog-actions">
       <button id="updateRecentCancel" class="secondary" type="button" data-i18n="取消">取消</button>
-      <button id="updateRecentGo" class="primary" type="button" data-i18n="开始更新">开始更新</button>
+      <button id="updateRecentGo" class="primary" type="button" data-i18n="同步最近收藏">同步最近收藏</button>
     </div>
   </dialog>
   <dialog id="importConfirm" class="popup-dialog" aria-labelledby="importConfirmTitle">

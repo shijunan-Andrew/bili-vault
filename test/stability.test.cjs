@@ -6407,3 +6407,54 @@ test("性能基准有软上界：默认只警告，--strict 才让退出码变�
   // 软上界不进门禁：check-all 与五套里都不许出现 bench
   assert.doesNotMatch(readProjectFile("scripts/check-all.cjs"), /bench\.cjs/, "基准不进 CI");
 });
+// ---- 1.8.8：导入可以按条数收工（50 / 100 / 300 / 500 / 全部）----
+
+test("导入可以按条数收工：名额只算本地没有的新视频，到上限就停（V1.8.8）", () => {
+  const backgroundCode = readProjectFile("background.js");
+  const popupHtml = readProjectFile("popup.html");
+  const popupCode = readProjectFile("popup.js");
+  const relay = readProjectFile("favorites-import.js");
+
+  // 上限从界面一路传到后台：值 0 表示「全部」
+  assert.match(backgroundCode, /const importLimit = Math\.max\(0, Number\(data\?\.limit\) \|\| 0\);/, "后台要接住 limit");
+  assert.match(popupCode, /function selectedImportLimit\(\) \{/, "界面要有一个读上限的地方");
+  assert.match(popupCode, /if \(options\.limit\) payload\.limit = options\.limit;/, "载荷里要带上 limit");
+  assert.match(relay, /if \(message\.limit\) payload\.limit = message\.limit;/, "中转那层别把 limit 丢了");
+
+  // 下拉就是那五档，默认「全部」
+  const selectBlock = popupHtml.slice(popupHtml.indexOf('id="importLimit"'), popupHtml.indexOf("</select>"));
+  assert.deepEqual([...selectBlock.matchAll(/<option value="(\d+)"/g)].map((m) => m[1]), ["50", "100", "300", "500", "0"]);
+
+  // 名额只数「本地还没有的」：裁剪必须发生在 pendingItems 上，而不是 scopedItems
+  assert.match(backgroundCode, /if \(pendingItems\.length > remaining\) \{/, "要按剩余名额裁剪新视频");
+  assert.match(backgroundCode, /pendingItems\.length = remaining;/, "裁剪要真的截短队列");
+  assert.match(backgroundCode, /limitedCount \+= pendingItems\.length - remaining;/, "被截掉的条数要记账");
+  assert.doesNotMatch(backgroundCode, /scopedItems\.length = remaining;/, "不许把已有记录也算进名额");
+
+  // 到上限就收工：后面的收藏夹连列表都不读；额度用完后也不再顺手刷新旧记录
+  assert.match(backgroundCode, /if \(limitReached\) break;/, "到上限要跳出收藏夹循环");
+  assert.match(backgroundCode, /for \(const entry of limitReached \? \[\] : refreshTargets\)/, "额度用完别再去刷新旧记录");
+
+  // 裁剪要在抓详情之前，否则白花请求
+  assert.ok(backgroundCode.indexOf("pendingItems.length = remaining;") < backgroundCode.indexOf("if (detailTargets.length) await fetchImportDetails("), "裁剪必须早于抓详情");
+
+  // 收尾要把「按上限」「还剩多少」讲出来，否则用户以为一半没导是失败
+  assert.match(backgroundCode, /const limitText = limitReached/, "消息里要有额度说明");
+  assert.match(backgroundCode, /\+ limitText;/, "说明要拼进完成消息");
+  assert.match(backgroundCode, /limitReached, limitedCount \}/, "返回值要带上这两个字段");
+});
+
+test("「开始更新」改叫「同步最近收藏」：界面上不再出现旧名字（V1.8.8）", () => {
+  for (const file of ["popup.html", "popup.js", "library.html", "library.js", "guide.html", "favorites-import.js"]) {
+    const text = readProjectFile(file);
+    assert.equal(text.includes("开始更新"), false, `${file} 里还有旧名字「开始更新」`);
+  }
+  assert.match(readProjectFile("popup.html"), /data-i18n="同步最近收藏"/, "按钮要叫「同步最近收藏」");
+  const zhTW = JSON.parse(readProjectFile("locales/zh-TW.json"));
+  const en = JSON.parse(readProjectFile("locales/en.json"));
+  for (const dict of [zhTW, en]) {
+    assert.ok(dict["同步最近收藏"], "词典里要有新名字");
+    assert.equal("开始更新" in dict, false, "词典里不许留旧名字");
+    assert.ok(dict["每次最多导入多少条"], "词典里要有条数上限的文案");
+  }
+});

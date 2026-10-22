@@ -20,6 +20,7 @@ const lastResultBrief = document.getElementById("lastResultBrief");
 const importConfirm = document.getElementById("importConfirm");
 const importConfirmDetail = document.getElementById("importConfirmDetail");
 const updateRecentButton = document.getElementById("updateRecent");
+const importLimitSelect = document.getElementById("importLimit");
 const updateRecentDialog = document.getElementById("updateRecentDialog");
 const updateRecentDetail = document.getElementById("updateRecentDetail");
 const speedGroup = document.getElementById("speedGroup");
@@ -321,11 +322,19 @@ function setLastResultText(value) {
 
 /* V1.1.3：点「开始导入」先弹确认框。
    导入是逐条解析 + 写盘的慢操作（1000 条约 10 分钟），误点代价很高，所以先问一句。 */
+// 1.8.8：0 表示「全部」；数字表示这次最多导入多少条**新**视频（已有的跳过不占名额）。
+function selectedImportLimit() {
+  return Math.max(0, Number(importLimitSelect?.value) || 0);
+}
+
 function openImportConfirm() {
   if (importBusy) return;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
   if (!selected) return;
-  importConfirmDetail.textContent = BcaI18n.t("将要导入 {count} 个收藏夹。", { count: selected })
+  const limit = selectedImportLimit();
+  importConfirmDetail.textContent = (limit > 0
+    ? BcaI18n.t("将要导入 {count} 个收藏夹，本次最多写入 {limit} 条还没保存到本地的新视频。", { count: selected, limit })
+    : BcaI18n.t("将要导入 {count} 个收藏夹。", { count: selected }))
     + " " + requestEstimateText();
   importConfirm.showModal();
 }
@@ -407,7 +416,7 @@ function renderDiffResult(response) {
   diffResult.hidden = diffs.length === 0;
 }
 
-/* V1.1.4：「开始更新」——只同步最近 N 天新收藏的视频。
+/* V1.1.4：「同步最近收藏」——只同步最近 N 天新收藏的视频。
    经常用手机刷到就收藏的用户，为这几天的新增跑一次全量导入（1000 条约 10 分钟）没有意义。
    过滤在后台按收藏时间做，这里只负责让用户选时间窗。 */
 /* 估算这次要发多少次请求，让用户自己决定值不值得。
@@ -497,7 +506,7 @@ function openUpdateRecent() {
   if (importBusy) return;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
   if (!selected) return;
-  updateRecentDetail.textContent = BcaI18n.t("将要更新 {count} 个收藏夹。", { count: selected })
+  updateRecentDetail.textContent = BcaI18n.t("将要同步 {count} 个收藏夹。", { count: selected })
     + " " + requestEstimateText();
   updateRecentDialog.showModal();
 }
@@ -539,6 +548,7 @@ async function startImport(options = {}) {
     const tab = await queryCurrentTab();
     const payload = { type: "bca-import-selected-folders", folderIds };
     if (options.recentDays) payload.recentDays = options.recentDays;
+    if (options.limit) payload.limit = options.limit;
     const response = await sendTabMessage(tab.id, payload);
     if (response?.cancelled) {
       importStatus.classList.add("error");
@@ -841,7 +851,7 @@ document.getElementById("importConfirmCancel").addEventListener("click", () => i
 document.getElementById("importConfirmGo").addEventListener("click", async () => {
   importConfirm.close();
   if (!await confirmRiskySpeed()) return;
-  startImport();
+  startImport({ limit: selectedImportLimit() });
 });
 document.getElementById("riskyWarnCancel").addEventListener("click", () => {
   riskyWarnDialog.close();
@@ -860,7 +870,7 @@ document.getElementById("riskyWarnGo").addEventListener("click", () => {
   riskyConfirmResolve = null;
 });
 /* 按 Esc 关掉同样要把等在 Promise 上的调用点放掉。
-   否则「开始导入」「开始更新」「先看差异」会永久挂住：按钮点了没反应，也没有任何报错。
+   否则「开始导入」「同步最近收藏」「先看差异」会永久挂住：按钮点了没反应，也没有任何报错。
    Esc 等价于「取消」。 */
 riskyWarnDialog.addEventListener("cancel", () => {
   if (riskyConfirmResolve) riskyConfirmResolve(false);
@@ -890,7 +900,7 @@ function dismissDoneDialog() {
 }
 document.getElementById("doneDialogClose").addEventListener("click", dismissDoneDialog);
 doneDialog.addEventListener("cancel", dismissDoneDialog);
-// 与「开始导入」「开始更新」保持一致：点一下先弹确认框，再点一次才真的开始
+// 与「开始导入」「同步最近收藏」保持一致：点一下先弹确认框，再点一次才真的开始
 function openDiffConfirm() {
   if (importBusy) return;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;

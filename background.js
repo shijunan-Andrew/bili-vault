@@ -3787,6 +3787,10 @@ async function importBiliFavoritesInner(data, tabId = null) {
   resetImportRunSnapshot(journal);
 
   let imported = 0, refreshed = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
+  // 1.8.8：「最多导入 N 条」用到的两个状态。limitReached 一旦为真，后面的收藏夹
+  // 连列表都不去读（读页也要发请求）；limitedCount 记因为上限而没导入的新视频条数。
+  let limitReached = false;
+  let limitedCount = 0;
   let cancelled = false;
   let rateLimited = null;
   const savedPaths = [];
@@ -3814,6 +3818,8 @@ async function importBiliFavoritesInner(data, tabId = null) {
         reportLines.push("", `收藏夹：${folder.title}`, "收藏夹名称与插件保留目录冲突，已跳过。请先在 B 站重命名该收藏夹后重试。");
         continue;
       }
+      // 1.8.8：上一个收藏夹就把这次的额度用完了 —— 这里直接收工，不再读它的列表。
+      if (limitReached) break;
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderTotal: 0 }, counts: { imported, refreshed, skipped, failed, total } });
 
       importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`);
@@ -3844,7 +3850,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
         reportLines.push("", `收藏夹：${folder.title}`,
           `读取第 1 页失败（已重试 ${IMPORT_FIRST_PAGE_ATTEMPTS} 次）：${firstError?.message || "未知错误"}`);
         if (importIsRateLimitedError(firstError)) {
-          reportLines.push("这通常是短时间请求过多触发的限流。等几分钟再试；如果反复出现，可以先只用「开始更新」缩小范围。");
+          reportLines.push("这通常是短时间请求过多触发的限流。等几分钟再试；如果反复出现，可以先只用「同步最近收藏」缩小范围。");
         }
         continue;
       }
@@ -3906,11 +3912,15 @@ async function importBiliFavoritesInner(data, tabId = null) {
         // 改成每页之间都停一下 —— 71 页从约 18 秒变成约 30 秒，代价很小，稳得多。
         await importDelay(IMPORT_PAGE_DELAY_MS);
       }
-      // V1.1.4：「开始更新」只处理最近 N 天收藏的条目。
+      // V1.1.4：「同步最近收藏」只处理最近 N 天收藏的条目。
       // 经常用手机刷到就收藏的用户，为了同步这几天的新增去跑一次 39 分钟的全量没有意义。
       // 注意：下面的对账（missingCount）仍然按 allItems 算 —— 那问的是"分页有没有读全"，
       // 与"这次要写哪几条"是两件事，混在一起会把过滤掉的数量误报成缺失。
       const recentDays = Math.max(0, Number(data?.recentDays) || 0);
+  // 1.8.8：本次最多导入多少条**新**视频（0 = 不限，也就是「全部」）。
+  // 只有「本地还没有这条记录」才占名额 —— 已有的跳过不占名额，这才符合点
+  // 「导入 50 条」时的期待：拿到的就是 50 条新内容，而不是 50 条候选里一半是旧的。
+  const importLimit = Math.max(0, Number(data?.limit) || 0);
       const scopedItems = importWithinRecentDays(allItems, recentDays);
       if (recentDays > 0) {
         folderNotes.push(`「${folder.title}」按最近 ${recentDays} 天过滤：线上 ${allItems.length} 条里命中 ${scopedItems.length} 条。`);
@@ -4010,7 +4020,20 @@ async function importBiliFavoritesInner(data, tabId = null) {
           refreshTargets.push({ item, record });
         }
       }
-      // 无论有没有拦到都记一行：这一行能证明"守卫确实跑过了"。
+      // 1.8.8：本次只写 N 条新视频。裁剪放在「抓详情 / 下封面」之前 ——
+      // 额度用完的那些条目不该再花任何一次 B 站请求。
+      if (importLimit > 0) {
+        const remaining = Math.max(0, importLimit - imported);
+        if (pendingItems.length > remaining) {
+          limitedCount += pendingItems.length - remaining;
+          pendingItems.length = remaining;
+          limitReached = true;
+          folderNotes.push(`「${folder.title}」按本次上限（${importLimit} 条）截断：还有 ${limitedCount} 条新视频没导入，再点一次「开始导入」会接着补。`);
+        } else if (imported + pendingItems.length >= importLimit) {
+          limitReached = true;
+        }
+      }
+      // 无论有没有拦到都记一行：这一行能证明「守卫确实跑过了」。
       // 上一轮的报告里连备注都没有，我分不清是"守卫没生效"还是"根本没走到这里"。
       folderLog.push(`信息可信度检查：匹配到本地已有记录 ${skipped} 条，其中 ${protectedCount} 条解析结果不可信（失效/标题取不到），已保留原记录。`);
       if (protectedCount > 0) {
@@ -4041,7 +4064,8 @@ async function importBiliFavoritesInner(data, tabId = null) {
       if (detailTargets.length) await fetchImportDetails(detailTargets, folder, tabId);
 
       // 更新模式：按新格式重写数据不完整的旧记录（原文进回滚日志）
-      for (const entry of refreshTargets) {
+      // 1.8.8：额度用完就只收工，不再顺手刷新旧记录（那也是成片的请求）。
+      for (const entry of limitReached ? [] : refreshTargets) {
         await importWaitIfPaused();
         // 1.4.2（P1-4）：这条循环只重写本地文件、不联网，几千条时中间能静默很久，
         // 不保活就会被 MV3 的空闲回收掐断（内部按 20 秒节流）
@@ -4221,6 +4245,10 @@ async function importBiliFavoritesInner(data, tabId = null) {
 
   reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`,
     `读取视频：${total}`, `新导入：${imported}`, `更新记录：${refreshed}`, `已存在跳过：${skipped}`, `失败：${failed}`);
+  if (limitReached) {
+    reportLines.push("", `本次按上限：最多 ${importLimit} 条，已写入 ${imported} 条`
+      + (limitedCount > 0 ? `，另有 ${limitedCount} 条新视频未导入（再点一次「开始导入」接着补）` : ""));
+  }
   if (missingNotes.length) reportLines.push("", "分页缺口：", ...missingNotes);
   if (coverageNotes.length) {
     reportLines.push("", "接口口径说明（不是失败）：", ...coverageNotes,
@@ -4238,10 +4266,16 @@ async function importBiliFavoritesInner(data, tabId = null) {
     await chrome.storage.local.set({ lastError: { report: maskLocalUserPaths(report), reportPath: storageReportLabel(reportPath), createdAt: Date.now(), needsReauth: needsReauthFromError(report) } });
   }
   // 分页缺口必须同时出现在回给界面的消息里，否则界面只会显示"失败 N 个"
+  // 1.8.8：撞上「最多导入 N 条」时要说清楚，否则用户会以为「还有一半没导」是失败
+  const limitText = limitReached
+    ? `本次按上限导入：最多 ${importLimit} 条，已写入 ${imported} 条`
+      + (limitedCount > 0 ? `，另有 ${limitedCount} 条新视频留到下次（再点一次「开始导入」就接着补）。` : "。")
+    : "";
   const message = `导入/更新完成：新导入 ${imported} 个，更新 ${refreshed} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`
     + (missingNotes.length ? `分页未取全：${missingNotes.join("；")}。` : "")
     // 4.9.2：差额如实报出来，用户才能对照 B 站页面自行核对
-    + (coverageNotes.length ? `（${coverageNotes.join("；")}。差额是 B 站收藏夹里的占位空槽：视频被删除后会留下空位，它计入总数但没有内容、接口也不返回，不是导入遗漏。）` : "");
+    + (coverageNotes.length ? `（${coverageNotes.join("；")}。差额是 B 站收藏夹里的占位空槽：视频被删除后会留下空位，它计入总数但没有内容、接口也不返回，不是导入遗漏。）` : "")
+    + limitText;
   const pathText = savedPaths.slice(0, 10).join("\n");
   // 1.8.6（P0-3）：收尾把最后不足一批的统计记录补落一次 —— 阈值批处理不能把尾巴留在内存里
   if (statsPendingRecords.length) {
@@ -4251,7 +4285,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
   await finishImportRunSnapshot();
   publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);
-  return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath };
+  return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath, limitReached, limitedCount };
 }
 
 // 4.9.x：占住"当前这一轮导入"。claimImportRun 必须在任何 await 之前调用 ——

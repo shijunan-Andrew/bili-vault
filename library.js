@@ -2653,7 +2653,7 @@ function openStatusConfirm(videos, source) {
   statusConfirmGo.disabled = false;
   // 文案与状态一起复位（P2-14：等待后台期间它叫「不再等待」）
   setStatusCancelWaiting(false);
-  statusConfirmGo.textContent = BcaI18n.t("开始更新");
+  statusConfirmGo.textContent = BcaI18n.t("同步最近收藏");
   statusConfirm.showModal();
 }
 

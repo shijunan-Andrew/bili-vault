@@ -462,3 +462,7 @@ button:disabled { cursor: wait; opacity: .6; }
   color: var(--danger);
   font-weight: 600;
 }
+/* 1.8.8：导入面板里的「每次最多导入多少条」。用 import-option 的壳子，右侧摆一个下拉。 */
+.import-limit-row { align-items: center; }
+.import-limit-select { min-width: 92px; margin-left: auto; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font-family: inherit; font-size: var(--fs-base); }
+.import-limit-select:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }

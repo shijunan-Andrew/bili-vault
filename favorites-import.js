@@ -50,9 +50,10 @@
       return true;
     }
     if (message?.type === "bca-import-selected-folders") {
-      // recentDays 只在「开始更新」时带上；不传就是全量导入
+      // recentDays 只在「同步最近收藏」时带上；limit 只在「最多导入 N 条」时带上；都不传就是全量导入
       const payload = { type: "import-bili-favorites", uid: pageUid(), folderIds: message.folderIds };
       if (message.recentDays) payload.recentDays = message.recentDays;
+      if (message.limit) payload.limit = message.limit;
       let answered = false;
       const answer = (payload) => {
         if (answered) return;
