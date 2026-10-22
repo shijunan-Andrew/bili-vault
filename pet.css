@@ -74,6 +74,13 @@
   display: none;
 }
 
+/* 1.8.10：详情抽屉打开时把宠物收起来（见 library.js 的 bca-pet-suspended）。
+   抽屉与宠物同为 z-index 6，宠物树序在后会压住抽屉右下角且仍可点中；抽屉里又有
+   自己的焦点陷阱，留着它只会让鼠标和键盘看到两套真相。 */
+html.bca-pet-suspended .bca-pet-dock {
+  display: none;
+}
+
 /* 宠物本体：<button type="button" aria-label="宠物">，按下的弹性挂在它身上 */
 .bca-pet {
   display: block;

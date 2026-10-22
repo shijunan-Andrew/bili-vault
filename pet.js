@@ -1171,7 +1171,9 @@
 
   function onKeydown(event) {
     if (event.key !== "Escape") return;
-    if (menu) { hideMenu(); return; }
+    // 1.8.10：menu 在 build() 里无条件创建、此后永不为 null，原来这条恒真 ——
+    // Escape 永远只走「关菜单」这一支，气泡根本收不掉（aria-expanded 还停在 true）。
+    if (menu && !menu.hidden) { hideMenu(); return; }
     if (bubble && !bubble.hidden) dismissBubble();
   }
 

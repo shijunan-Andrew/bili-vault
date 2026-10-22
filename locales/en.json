@@ -275,6 +275,7 @@
   "归档目录": "Archive folder",
   "归档失败": "Archive failed",
   "部分收藏夹没保存": "Some collections weren't saved",
+  "本地数据库这次读不出来，先不动它，免得把原记录覆盖掉。": "Could not read the local database this time. Leaving it untouched so the existing records are not overwritten.",
   "把老 PNG 封面转成 WebP": "Convert old PNG covers to WebP",
   "先选一个本地备份文件夹，再转封面。": "Pick a local backup folder first, then convert covers.",
   "导入正在跑，等它结束再转封面。": "An import is running — wait until it finishes before converting covers.",

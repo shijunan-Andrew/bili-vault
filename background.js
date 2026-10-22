@@ -3271,69 +3271,15 @@ async function archiveBrokenStatsDatabase(directory, text) {
    4. 每次成功改写正文之前，把**上一版**原文轮转存成 database.bak.json。
       File System Access 没有 rename，所以顺序是「先写副本、成功后再重写正文」——
    副本永远比正文早一个版本，中间任何一步断电都不会把唯一一份数据弄丢。 */
-const STATS_MIRROR_KEY = "bcaStatsMirror";
+// 1.8.10：键与判据、合并算法都搬进 stats-core.js（收藏库页要用同一份），这里只引用。
+const STATS_MIRROR_KEY = BcaStatsCore.STATS_MIRROR_KEY;
 const STATS_PREVIOUS_DATABASE_NAME = "database.bak.json";
 
-function statsMirrorNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
-}
-
-function statsMirrorOf(database) {
-  const pet = (database && database.pet) || {};
-  const totals = (database && database.totals) || {};
-  return {
-    firstSeenAt: String((database && database.firstSeenAt) || ""),
-    savedTotal: statsMirrorNumber(totals.savedTotal),
-    affinity: statsMirrorNumber(pet.affinity),
-    totalTouch: statsMirrorNumber(pet.totalTouch)
-  };
-}
-
-// 读得到的镜像；读不到返回 null —— 不能把「storage 里还没有」当成「镜像是 0」，
-// 否则第一次读失败就会把刚起步的用户数据顶成 0（虽然 0 也顶不掉什么，但语义要分清）
-async function readStatsMirror() {
-  try {
-    const stored = await chrome.storage.local.get(STATS_MIRROR_KEY);
-    const mirror = stored && stored[STATS_MIRROR_KEY];
-    return mirror && typeof mirror === "object" ? mirror : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-// 只在真的变了的时候才写 storage：读库比写库频繁（扫描、摸头、每次导入批次），
-// 镜像没变就不该多写一次
-async function syncStatsMirror(database) {
-  const next = statsMirrorOf(database);
-  const current = await readStatsMirror();
-  if (current && JSON.stringify(current) === JSON.stringify(next)) return next;
-  try {
-    await chrome.storage.local.set({ [STATS_MIRROR_KEY]: next });
-  } catch (error) {
-    // 镜像写不进去不影响这一次扫描，但统计页会停在上一版数字上 —— 留个原因，
-    // 别让下一个人对着不动的数字猜是「数据没变」还是「写失败了」。
-    console.warn("统计镜像写不进去（统计页会停在上一版数字）", error);
-  }
-  return next;
-}
-
-// 读不到库时用镜像把「只会往前走」的字段顶回来：宁可数字停在上一版，也不能归零
-function applyStatsMirror(database, mirror) {
-  if (!mirror) return database;
-  const next = database;
-  const mirroredSeen = Date.parse(String(mirror.firstSeenAt || ""));
-  const ownSeen = Date.parse(String(next.firstSeenAt || ""));
-  if (Number.isFinite(mirroredSeen) && (!Number.isFinite(ownSeen) || mirroredSeen < ownSeen)) {
-    next.firstSeenAt = new Date(mirroredSeen).toISOString();
-  }
-  if (!next.totals || typeof next.totals !== "object") next.totals = { savedTotal: 0 };
-  next.totals.savedTotal = Math.max(statsMirrorNumber(next.totals.savedTotal), statsMirrorNumber(mirror.savedTotal));
-  if (!next.pet || typeof next.pet !== "object") next.pet = {};
-  next.pet.affinity = Math.max(statsMirrorNumber(next.pet.affinity), statsMirrorNumber(mirror.affinity));
-  next.pet.totalTouch = Math.max(statsMirrorNumber(next.pet.totalTouch), statsMirrorNumber(mirror.totalTouch));
-  return next;
-}
+/* 1.8.10：这三个函数搬进了 stats-core.js —— 收藏库页的 syncStatsDatabase 也要用同一套
+   判据（原来页面侧完全没有这层保护，坏文件一来就把亲密度与累计保存清零）。这里只留别名。 */
+const statsMirrorNumber = BcaStatsCore.statsMirrorNumber;
+const statsMirrorOf = BcaStatsCore.statsMirrorOf;
+const applyStatsMirror = BcaStatsCore.applyStatsMirror;
 
 // 两个写入口共用：能写返回空串，不能写返回一句给用户看的话
 function statsDatabaseWriteBlocked(read) {

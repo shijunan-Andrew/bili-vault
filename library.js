@@ -3392,6 +3392,10 @@ function openDetail(video, restoreTo, options = {}) {
   if (deleteLocalButton) deleteLocalButton.addEventListener("click", () => askToDeleteVideo(video));
   showDownloadSize(video).catch(() => {});
   detailPanel.classList.add("open");
+  // 1.8.10：宠物外壳与详情抽屉同为 z-index 6，而宠物后插入 DOM（树序在后者胜），
+  // 抽屉右下角会被它盖住还能点中 —— 鼠标点得到、键盘却因焦点陷阱 tab 不到。
+  // 抽屉开着的时候把宠物整个收起来，两套输入才不会各看到一套真相。
+  document.documentElement.classList.add("bca-pet-suspended");
   detailPanel.setAttribute("aria-hidden", "false");
   detailBackdrop.hidden = false;
   document.body.style.overflow = "hidden";
@@ -3545,6 +3549,7 @@ function closeDetail() {
   detailPanel.classList.remove("open");
   detailPanel.classList.remove("invalid-video");
   detailPanel.setAttribute("aria-hidden", "true");
+  document.documentElement.classList.remove("bca-pet-suspended");
   detailBackdrop.hidden = true;
   document.body.style.overflow = "";
 }
@@ -4772,6 +4777,31 @@ function statsBackupStamp(date = new Date()) {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
+/* 1.8.10：统计库的「只会往前走」字段有一份跨上下文镜像（键与合并算法在 stats-core.js）。
+   页面侧以前从不读它 —— 旧库读不出来就当「没有旧库」整份重建，一次坏文件就把亲密度、
+   陪伴天数、累计保存清零。现在与 background.js 同源：读不出来一个字节都不写，坏文件留档
+   之后用镜像把四个标量顶回来。 */
+async function readStatsMirrorForSync() {
+  try {
+    const stored = await chrome.storage.local.get(BcaStatsCore.STATS_MIRROR_KEY);
+    const mirror = stored && stored[BcaStatsCore.STATS_MIRROR_KEY];
+    return mirror && typeof mirror === "object" ? mirror : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function syncStatsMirrorForSync(database) {
+  try {
+    const next = BcaStatsCore.statsMirrorOf(database);
+    const current = await readStatsMirrorForSync();
+    if (current && JSON.stringify(current) === JSON.stringify(next)) return;
+    await chrome.storage.local.set({ [BcaStatsCore.STATS_MIRROR_KEY]: next });
+  } catch (error) {
+    console.warn("统计镜像写不进去（统计页会停在上一版数字）", error);
+  }
+}
+
 async function syncStatsDatabase(handle, options = {}) {
   const core = globalThis.BcaStatsCore;
   if (!handle || !core) return;
@@ -4786,12 +4816,29 @@ async function syncStatsDatabase(handle, options = {}) {
        只会看到统计页数字变小。坏文件的现场还要先留下来，否则「为什么清零」永远查不出。 */
     let previousBroken = false;
     let previousBytes = 0;
+    let previousUnreadable = false;
+    let previousText = "";
+    // 1.8.10：读不出来 ≠ JSON 坏了。前者是权限/占用/同步盘替换，原文可能完好，
+    // 硬拿空结果覆盖就是把唯一一份数据抹掉；后者原文已经坏了，留档之后才敢重建。
     try {
       const blob = await file.getFile();
       previousBytes = blob.size || 0;
-      const text = await blob.text();
-      if (text.trim()) previous = JSON.parse(text);
-    } catch (_) { previousBroken = true; }
+      previousText = await blob.text();
+    } catch (error) {
+      previousUnreadable = true;
+      console.warn("本地数据库这次读不出来，跳过本次同步（不拿空结果覆盖它）", error);
+    }
+    if (!previousUnreadable && previousText.trim()) {
+      try {
+        previous = JSON.parse(previousText);
+      } catch (error) {
+        previousBroken = true;
+      }
+    }
+    if (previousUnreadable) {
+      showToast(BcaI18n.t("本地数据库这次读不出来，先不动它，免得把原记录覆盖掉。"));
+      return;
+    }
     if (previousBroken && previousBytes > 0) {
       try {
         const brokenText = await (await file.getFile()).text();
@@ -4827,6 +4874,17 @@ async function syncStatsDatabase(handle, options = {}) {
       }));
       return;
     }
+    /* 1.8.10：previous 为空有两种情况 —— 库还不存在（真新用户），或者原文坏了/为空但
+       镜像里还有四个「只会往前走」的标量。后者绝不能当新库重建，否则亲密度与累计保存
+       直接归零。stats-core.js 的同一个 applyStatsMirror 在后台也是这么兜的。 */
+    if (!previous) {
+      const mirror = await readStatsMirrorForSync();
+      if (core.statsMirrorHasValues(mirror)) {
+        previous = core.applyStatsMirror(core.emptyDatabase(), mirror);
+        console.warn("旧数据库不可用，用统计镜像把亲密度与累计保存顶回来。");
+      }
+    }
+
     const database = core.databaseFromVideos(videos, { previous });
     // 1.5.0：和 background.js 的 publishStatsSnapshot 保持同一形状 —— snapshot() 的
     // days.days 是「库里有几天」的数字，每日明细另算一份 daily 给统计页画柱子。
@@ -4838,6 +4896,7 @@ async function syncStatsDatabase(handle, options = {}) {
     if (fingerprint && fingerprint === publishedStatsFingerprint) return;
     await writeFileAtomically(directory, file, JSON.stringify(database));
     publishedStatsFingerprint = fingerprint;
+    await syncStatsMirrorForSync(database);
     await chrome.storage.local.set({ bcaStats: payload });
   } catch (error) {
     console.warn("同步本地数据库失败（收藏库不受影响）", error);

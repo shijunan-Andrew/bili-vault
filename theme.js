@@ -207,7 +207,11 @@
       return;
     }
     wallpaperUrl = URL.createObjectURL(blob);
-    ensureWallpaperLayer();
+    // 1.8.10：body 还没解析出来时插不了层（document_start 阶段就切到自定义）；
+    // 原来这一轮背景直接丢，用户要刷新才看到图。等 DOM 好了再补插一次。
+    if (!ensureWallpaperLayer()) {
+      document.addEventListener("DOMContentLoaded", () => { ensureWallpaperLayer(); }, { once: true });
+    }
     root.style.setProperty("--bca-wallpaper-image", `url("${wallpaperUrl}")`);
     root.dataset.wallpaper = "on";
   }
@@ -395,6 +399,8 @@
   }
 
   function use(next, options = {}) {
+    // 1.8.10：记住进来之前是什么主题 —— 只有「刚变成自定义」这一帧才需要读图。
+    const previousMode = mode;
     mode = isSupported(next) ? next : DEFAULT_MODE;
     paint();
     if (!options.silent) {
@@ -406,6 +412,9 @@
     listeners.forEach((listener) => {
       try { listener(mode); } catch (_) {}
     });
+    /* 1.8.10：程序化切到自定义（收藏库页「导入配置」就是调 use()）时没有人去读图，
+       页面只剩透明的 body、一根图都没有 —— 表现是整页变白。boot 之后补一次读图。 */
+    if (booted && mode === "custom" && previousMode !== "custom") loadWallpaper();
     return mode;
   }
 
@@ -491,6 +500,7 @@
     STORAGE_KEY, DEFAULT_MODE, MODES,
     APPEARANCE_KEY, DEFAULT_APPEARANCE,
     appearance: getAppearance, setAppearance, onAppearanceChange,
+    STORAGE_KEY, DEFAULT_MODE, MODES, WALLPAPER_REVISION_KEY,
     loadWallpaper, prepareWallpaper, saveWallpaper, clearWallpaper
   });
   global.BcaTheme = api;

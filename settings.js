@@ -669,6 +669,13 @@ async function boot() {
     Promise.resolve(BcaI18n.use(next, { silent: true })).catch(() => {}).then(() => { renderLocaleOptions(); showLocaleFailure(); });
   });
 
+  // 1.8.10：别的扩展页换图/删图后这里要跟着刷新状态，否则按钮还写着「移除背景图片」，
+  // 点下去却提示「还没有背景图」。theme.js 那边用同一个键广播。
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[BcaTheme.WALLPAPER_REVISION_KEY]) return;
+    refreshWallpaperState();
+  });
+
   // V1.4.1：「返回收藏库」改成把这个标签页本身导航回去，不再先 window.close()。
   // 关标签页只在「上一个被激活的标签恰好是收藏库」时才看起来正确 —— 用户可能是从书签、
   // 地址栏或别的扩展页进来的，关掉之后落在哪个标签上就不一定了（真机上报过这个问题：

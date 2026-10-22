@@ -368,6 +368,49 @@ async function suiteLibrary() {
     assert.equal(g.selectFirstVideos(list, 500, compare).length, 120, "要的比总数多就全给");
   });
 
+  await test("统计库坏掉时不许把亲密度清零：镜像把四个标量顶回来（1.8.10）", async () => {
+    const brokenTree = {
+      "小鲸鱼测试": {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("第一条视频"), "封面.png": "PNG-1" }
+      },
+      "003database": { "database.json": "{这不是 JSON" }
+    };
+    const mirror = { affinity: 500, totalTouch: 999, savedTotal: 1234, firstSeenAt: "2026-01-01T00:00:00.000Z" };
+    const chrome = makeChrome({ localData: { bcaStatsMirror: mirror } });
+    const page = dom.loadPage({ htmlFile: "library.html", chrome });
+    await settle();
+    const g = page.window;
+    const root = await makeDirectoryTree({ "_测试归档": brokenTree }).getDirectoryHandle("_测试归档");
+    await g.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const databaseFolder = await root.getDirectoryHandle("003database");
+    const databaseFile = await databaseFolder.getFileHandle("database.json");
+    const text = await (await databaseFile.getFile()).text();
+    const database = JSON.parse(text);
+    assert.equal(database.pet.affinity, 500, "亲密度要从镜像顶回来，不能清零");
+    assert.equal(database.totals.savedTotal, 1234, "累计保存数要从镜像顶回来");
+    assert.equal(database.firstSeenAt, "2026-01-01T00:00:00.000Z", "陪伴开始时间要从镜像顶回来");
+  });
+
+  await test("详情抽屉打开时宠物收起来，关掉再放回来（1.8.10）", async () => {
+    const page = await openLibrary({
+      tree: sampleTree(),
+      localData: { interfacePet: { enabled: true, size: 96, x: 0.5, y: 0.5 } }
+    });
+    const g = page.window;
+    const html = page.document.documentElement;
+    const card = page.document.querySelector(".video-card");
+    assert.ok(card, "要有一张视频卡片可以点");
+    assert.equal(html.classList.contains("bca-pet-suspended"), false);
+    card.dispatchEvent(new g.MouseEvent("click", { bubbles: true }));
+    await settle();
+    assert.equal(page.document.getElementById("detailPanel").classList.contains("open"), true);
+    assert.equal(html.classList.contains("bca-pet-suspended"), true, "抽屉开着时宠物必须收起");
+    page.document.getElementById("closeDetail").dispatchEvent(new g.MouseEvent("click", { bubbles: true }));
+    await settle();
+    assert.equal(html.classList.contains("bca-pet-suspended"), false, "抽屉关掉后宠物要回来");
+  });
+
   await test("Alt+↑/↓ 在收藏夹行上换序，焦点跟着走（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;

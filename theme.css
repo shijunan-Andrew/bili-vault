@@ -360,7 +360,9 @@ html[data-appearance="custom"][data-wallpaper="on"] .bca-wallpaper { display: bl
 /* 铺了背景图就得把页面自己那层纯色底让出来，否则图被盖住看不见。
    弹窗例外：它不铺背景图（theme.js 靠 data-wallpaper-scope 认出它），
    底一透明就只剩浏览器窗口色，比不设背景还难看。 */
-html[data-appearance="custom"]:not([data-wallpaper-scope="popup"]) body { background: transparent; }
+/* 1.8.10：透明底必须等图真的铺上（data-wallpaper=on）才生效。原来只要外观是 custom
+   就透明 —— 图没读出来（新建/坏图/程序化切换的瞬间）时页面背后什么都没有，整页发白。 */
+html[data-appearance="custom"][data-wallpaper="on"]:not([data-wallpaper-scope="popup"]) body { background: transparent; }
 
 /* 毛玻璃。只给「收藏库 / 设置页」这几类面开：插件弹窗与文档页不参与
    （正文页要的是可读性，弹窗小、糊起来没有意义还费性能）。

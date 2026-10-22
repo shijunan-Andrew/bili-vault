@@ -6463,3 +6463,64 @@ test("「开始更新」改叫「同步最近收藏」：界面上不再出现�
     assert.ok(dict["每次最多导入多少条"], "词典里要有条数上限的文案");
   }
 });
+
+
+// ---- 1.8.10：审查后的修复（统计读侧判据同源 / 宠物收纳 / 背景透明底） ----
+
+test("统计库读不出来时页面侧不许整份重建，判据与后台同源（1.8.10）", () => {
+  const library = readProjectFile("library.js");
+  const background = readProjectFile("background.js");
+  const core = readProjectFile("stats-core.js");
+  const body = library.slice(library.indexOf("async function syncStatsDatabase("), library.indexOf("async function displayRoot("));
+  assert.match(body, /let previousUnreadable = false;/, "要把「读不出来」与「JSON 坏了」分开");
+  assert.ok(
+    body.indexOf("if (previousUnreadable) {") > body.indexOf("previousUnreadable = false;")
+      && body.indexOf("if (previousUnreadable) {") < body.indexOf("writeFileAtomically("),
+    "读不出来要在落盘之前就返回"
+  );
+  assert.match(body, /showToast\(BcaI18n\.t\("本地数据库这次读不出来，先不动它，免得把原记录覆盖掉。"\)\);/, "要告诉用户这次没动它");
+  assert.match(body, /if \(core\.statsMirrorHasValues\(mirror\)\) \{/, "坏库要用镜像兜住四个标量");
+  assert.match(body, /previous = core\.applyStatsMirror\(core\.emptyDatabase\(\), mirror\);/, "合并算法只许用 stats-core.js 的那一份");
+  assert.match(body, /await syncStatsMirrorForSync\(database\);/, "写成功之后要把镜像刷新");
+  assert.match(core, /const STATS_MIRROR_KEY = "bcaStatsMirror";/, "镜像键只在 stats-core.js 里写一次");
+  assert.equal(
+    (background.match(/function statsMirrorOf\(/g) || []).length,
+    0,
+    "background.js 不许再留一份镜像实现，统一调 stats-core.js"
+  );
+  assert.match(background, /const statsMirrorOf = BcaStatsCore\.statsMirrorOf;/, "后台改为引用同一份");
+});
+
+test("宠物的两条 P1：详情抽屉开着时收起来，Escape 先判菜单是否真的开着（1.8.10）", () => {
+  const library = readProjectFile("library.js");
+  const pet = readProjectFile("pet.js");
+  const petCss = readProjectFile("pet.css");
+  assert.ok(
+    library.indexOf("document.documentElement.classList.add(\"bca-pet-suspended\");")
+      > library.indexOf("detailPanel.classList.add(\"open\");"),
+    "抽屉打开时要把宠物收起来"
+  );
+  assert.ok(
+    library.indexOf("document.documentElement.classList.remove(\"bca-pet-suspended\");")
+      > library.indexOf("function closeDetail()"),
+    "抽屉关掉时要把宠物放回来"
+  );
+  assert.match(petCss, /html\.bca-pet-suspended \.bca-pet-dock \{\s*display: none;\s*\}/, "收起要用 display:none，别只降 z-index");
+  assert.match(pet, /if \(menu && !menu\.hidden\) \{ hideMenu\(\); return; \}/, "Escape 要先判菜单是否真的开着");
+  assert.doesNotMatch(pet, /if \(menu\) \{ hideMenu\(\); return; \}/, "原来那条恒真，会把气泡的键盘收起整条吞掉");
+});
+
+test("背景：透明底要等图真的铺上，程序化切自定义要补读图，设置页跨页同步（1.8.10）", () => {
+  const themeCss = readProjectFile("theme.css");
+  const theme = readProjectFile("theme.js");
+  const settings = readProjectFile("settings.js");
+  assert.match(
+    themeCss,
+    /html\[data-appearance="custom"\]\[data-wallpaper="on"\]:not\(\[data-wallpaper-scope="popup"\]\) body \{ background: transparent; \}/,
+    "没铺上图时不许把 body 变透明（否则整页发白）"
+  );
+  assert.match(theme, /if \(booted && mode === "custom" && previousMode !== "custom"\) loadWallpaper\(\);/, "程序化切到自定义时要补读一次图");
+  assert.match(theme, /document\.addEventListener\("DOMContentLoaded", \(\) => \{ ensureWallpaperLayer\(\); \}, \{ once: true \}\);/, "body 还没解析出来时要补插层");
+  assert.match(theme, /STORAGE_KEY, DEFAULT_MODE, MODES, WALLPAPER_REVISION_KEY,/, "换图时间戳的键要导出，别在设置页抄一遍");
+  assert.match(settings, /changes\[BcaTheme\.WALLPAPER_REVISION_KEY\]/, "别的页面换图/删图后设置页要跟着刷新");
+});

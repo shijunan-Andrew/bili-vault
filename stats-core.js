@@ -787,6 +787,56 @@
      工具函数」，不是「界面聚合器」。契约由 test/stability.test.cjs 的
      「stats-core 的导出面与统计页的真实用法对得上」钉住：统计页一旦读第 6 个成员，
      这条断言会红，提醒顺手更新本段。 */
+  /* ---------- 统计库的跨上下文镜像（1.8.10） ----------
+     003database/database.json 有两个写者：background.js（导入、摸宠物）与
+     library.js（收藏库页扫描完成后重建）。两边原本的容错策略是**相反**的：后台读
+     不出来就拒写，页面读不出来却当成「没有旧库」照样整份重建 —— 一次坏文件就够把
+     亲密度、陪伴天数、累计保存（四个只会往前走的标量）清零，而用户只会看到数字变小。
+     所以判据与合并算法只写在这里，两边都调，别再各抄一份。 */
+  const STATS_MIRROR_KEY = "bcaStatsMirror";
+
+  function statsMirrorNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
+  }
+
+  function statsMirrorOf(database) {
+    const pet = (database && database.pet) || {};
+    const totals = (database && database.totals) || {};
+    return {
+      firstSeenAt: String((database && database.firstSeenAt) || ""),
+      savedTotal: statsMirrorNumber(totals.savedTotal),
+      affinity: statsMirrorNumber(pet.affinity),
+      totalTouch: statsMirrorNumber(pet.totalTouch)
+    };
+  }
+
+  // 镜像值全空时不要拿它当 previous —— 「还没有镜像」和「镜像里就是 0」是两件事。
+  function statsMirrorHasValues(mirror) {
+    if (!mirror || typeof mirror !== "object") return false;
+    return Boolean(statsMirrorNumber(mirror.savedTotal)
+      || statsMirrorNumber(mirror.affinity)
+      || statsMirrorNumber(mirror.totalTouch)
+      || String(mirror.firstSeenAt || "").trim());
+  }
+
+  // 读不到库时用镜像把「只会往前走」的字段顶回来：宁可数字停在上一版，也不能归零。
+  function applyStatsMirror(database, mirror) {
+    if (!mirror || typeof mirror !== "object") return database;
+    const next = database;
+    const mirroredSeen = Date.parse(String(mirror.firstSeenAt || ""));
+    const ownSeen = Date.parse(String(next.firstSeenAt || ""));
+    if (Number.isFinite(mirroredSeen) && (!Number.isFinite(ownSeen) || mirroredSeen < ownSeen)) {
+      next.firstSeenAt = new Date(mirroredSeen).toISOString();
+    }
+    if (!next.totals || typeof next.totals !== "object") next.totals = { savedTotal: 0 };
+    next.totals.savedTotal = Math.max(statsMirrorNumber(next.totals.savedTotal), statsMirrorNumber(mirror.savedTotal));
+    if (!next.pet || typeof next.pet !== "object") next.pet = {};
+    next.pet.affinity = Math.max(statsMirrorNumber(next.pet.affinity), statsMirrorNumber(mirror.affinity));
+    next.pet.totalTouch = Math.max(statsMirrorNumber(next.pet.totalTouch), statsMirrorNumber(mirror.totalTouch));
+    return next;
+  }
+
   const api = {
     DATABASE_FOLDER_NAME,
     DATABASE_FILE_NAME,
@@ -830,7 +880,12 @@
     snapshot,
     recentDays,
     collectionRows,
-    touchPet
+    touchPet,
+    STATS_MIRROR_KEY,
+    statsMirrorNumber,
+    statsMirrorOf,
+    statsMirrorHasValues,
+    applyStatsMirror
   };
 
   global.BcaStatsCore = api;
