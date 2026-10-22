@@ -3281,6 +3281,34 @@ const statsMirrorNumber = BcaStatsCore.statsMirrorNumber;
 const statsMirrorOf = BcaStatsCore.statsMirrorOf;
 const applyStatsMirror = BcaStatsCore.applyStatsMirror;
 
+// 读得到的镜像；读不到返回 null —— 不能把「storage 里还没有」当成「镜像是 0」，
+// 否则第一次读失败就会把刚起步的用户数据顶成 0（虽然 0 也顶不掉什么，但语义要分清）
+async function readStatsMirror() {
+  try {
+    const stored = await chrome.storage.local.get(STATS_MIRROR_KEY);
+    const mirror = stored && stored[STATS_MIRROR_KEY];
+    return mirror && typeof mirror === "object" ? mirror : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// 只在真的变了的时候才写 storage：读库比写库频繁（扫描、摸头、每次导入批次），
+// 镜像没变就不该多写一次
+async function syncStatsMirror(database) {
+  const next = statsMirrorOf(database);
+  const current = await readStatsMirror();
+  if (current && JSON.stringify(current) === JSON.stringify(next)) return next;
+  try {
+    await chrome.storage.local.set({ [STATS_MIRROR_KEY]: next });
+  } catch (error) {
+    // 镜像写不进去不影响这一次扫描，但统计页会停在上一版数字上 —— 留个原因，
+    // 别让下一个人对着不动的数字猜是「数据没变」还是「写失败了」。
+    console.warn("统计镜像写不进去（统计页会停在上一版数字）", error);
+  }
+  return next;
+}
+
 // 两个写入口共用：能写返回空串，不能写返回一句给用户看的话
 function statsDatabaseWriteBlocked(read) {
   if (read && read.canWrite) return "";
@@ -3421,13 +3449,70 @@ async function publishStatsSnapshot(database) {
    / 消息处理）不包 —— 槽里再进槽会自己等自己。 */
 let statsWriteChain = Promise.resolve();
 function withStatsWriteSlot(task) {
-  const run = statsWriteChain.then(task, task);
+  // 1.8.10：内存链只串本上下文，跨上下文交给 Web Locks（与收藏库页同一把锁名）
+  const run = statsWriteChain.then(
+    () => BcaStatsCore.withStatsDatabaseLock(task),
+    () => BcaStatsCore.withStatsDatabaseLock(task)
+  );
   statsWriteChain = run.then(() => undefined, () => undefined);
   return run;
 }
 
 async function writeStatsDatabase(root, records, insertedKeys = null) {
   return withStatsWriteSlot(() => writeStatsDatabaseInner(root, records, insertedKeys));
+}
+
+/* 1.8.10：三个写入口共用同一条提交路径 —— 先留上一版、再整份写、写完读回自检，
+   自检不过就用 database.bak.json 顶回去。原来「archivePrevious + createWritable +
+   write + close + syncStatsMirror + publishStatsSnapshot」这六步在
+   writeStatsDatabaseInner / touchPetInDatabaseInner / rollbackStatsRecordsInner
+   里各抄了一遍，自检与回滚只能一处一处加，迟早漏一处。 */
+async function commitStatsDatabase(root, read, database) {
+  await archivePreviousStatsDatabase(read);
+  const text = JSON.stringify(database);
+  const writable = await read.file.createWritable();
+  await writable.write(text);
+  await writable.close();
+  if (!(await statsDatabaseContentMatches(read.file, text))) {
+    await restoreStatsDatabaseBackup(root, read.file);
+    return false;
+  }
+  await syncStatsMirror(database);
+  await publishStatsSnapshot(database);
+  return true;
+}
+
+/* 写完立刻读回来自检：createWritable 的提交本身是原子的，但「写成功、内容却不是
+   我们要的那份」这类事故从 write()/close() 的返回上一点都看不出来（历史上就出过
+   半份 JSON）。文本逐字节比对最省事，也最不容易骗人。 */
+async function statsDatabaseContentMatches(file, expectedText) {
+  try {
+    const text = await (await file.getFile()).text();
+    if (text === expectedText) return true;
+    console.warn(`本地数据库写完自检不一致（写进去 ${expectedText.length} 字节，读回来 ${text.length} 字节）`);
+    return false;
+  } catch (error) {
+    console.warn("本地数据库写完自检读不回来", error);
+    return false;
+  }
+}
+
+/* 自检没过：用上一版顶回去。顶不回去也不能把现场抹掉 —— 备份与 .bad 都在盘上，
+   下一次打开收藏库会走「坏库 → 留档 → 重建」那条路，而不是静默变成空库。 */
+async function restoreStatsDatabaseBackup(root, file) {
+  try {
+    const directory = await root.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME);
+    const backup = await directory.getFileHandle(STATS_PREVIOUS_DATABASE_NAME);
+    const text = await (await backup.getFile()).text();
+    const writable = await file.createWritable();
+    await writable.write(text);
+    await writable.close();
+    console.warn("本地数据库写完自检没通过，已用 database.bak.json 顶回上一版");
+    return true;
+  } catch (error) {
+    console.warn("本地数据库写完自检没通过，顶回上一版也失败了", error);
+    return false;
+  }
 }
 
 async function writeStatsDatabaseInner(root, records, insertedKeys = null) {
@@ -3451,12 +3536,7 @@ async function writeStatsDatabaseInner(root, records, insertedKeys = null) {
       }
       next = BcaStatsCore.addRecord(next, record);
     }
-    await archivePreviousStatsDatabase(read);
-    const writable = await read.file.createWritable();
-    await writable.write(JSON.stringify(next));
-    await writable.close();
-    await syncStatsMirror(next);
-    await publishStatsSnapshot(next);
+    if (!(await commitStatsDatabase(root, read, next))) return null;
     return next;
   } catch (error) {
     console.warn("写入本地数据库失败（归档不受影响）", error);
@@ -3532,12 +3612,7 @@ async function rollbackStatsRecordsInner(root, keys) {
     if (statsDatabaseWriteBlocked(read)) return { removed: 0, failed: true };
     const removed = BcaStatsCore.removeRecords(read.database, keys);
     if (!removed) return { removed: 0, failed: false };
-    await archivePreviousStatsDatabase(read);
-    const writable = await read.file.createWritable();
-    await writable.write(JSON.stringify(read.database));
-    await writable.close();
-    await syncStatsMirror(read.database);
-    await publishStatsSnapshot(read.database);
+    if (!(await commitStatsDatabase(root, read, read.database))) return { removed: 0, failed: true };
     return { removed, failed: false };
   } catch (error) {
     console.warn("回滚统计行失败（归档已回滚，统计会由下次全量扫描纠正）", error);
@@ -3577,12 +3652,7 @@ async function touchPetInDatabaseInner() {
     return { ok: false, blocked: true, lineIndex: null };
   }
   const touched = BcaStatsCore.touchPet(read.database);
-  await archivePreviousStatsDatabase(read);
-  const writable = await read.file.createWritable();
-  await writable.write(JSON.stringify(read.database));
-  await writable.close();
-  await syncStatsMirror(read.database);
-  await publishStatsSnapshot(read.database);
+  if (!(await commitStatsDatabase(root, read, read.database))) return { ok: false };
   return {
     ok: true,
     lineIndex: touched.index,

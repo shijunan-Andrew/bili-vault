@@ -309,6 +309,11 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **老 PNG 封面转 WebP（1.8.8）**：只走用户连上的 `rootHandle`，只碰记录目录里的 `封面.png`，先写 `封面.webp`、`close()` 之后才删原 PNG；保留目录与 `视频信息.txt` 一律不动；判断走 `archive-core.js` 的 `coverConvertAction()`，动手前先过 `archiveWriteLockedByImport()`。
 - **`004导出` 只留最近 5 份（1.8.8）**：导出成功后按 `exportPruneList()` 删多余（同秒撞名的 `-2` 排在本体之后），删旧失败只记日志，不影响本次导出；用户自己放进去的文件不匹配命名规则，不会被删。
 
+- **统计库的判据只有一份**（1.8.10）：`stats-core.js` 的 `STATS_MIRROR_KEY` / `statsMirrorOf` / `applyStatsMirror` 同时被后台与收藏库页使用；页面侧「读不出来」只跳过并提示，永远不会拿空结果覆盖原文。
+- **统计库的写入要跨上下文串行**（1.8.10）：`withStatsDatabaseLock()`（`stats-core.js`）用 Web Locks，锁名 `bili-vault-stats-database`；后台的 `withStatsWriteSlot()` 只负责本上下文排队，跨上下文交给这把锁。没有 `navigator.locks` 时直接跑。
+- **写完统计库要读回自检**（1.8.10）：三个写入口共用 `commitStatsDatabase()`（留上一版 → 整份写 → 逐字节比对），不合格用 `database.bak.json` 顶回。
+- **逐日明细只有 180 天**（1.8.10）：`stats.js` 的 `dailyRowsCover()` 判区间有没有被明细盖住，没盖住就退到按周 / 按月，并在图下说明粒度变粗的原因 —— 头部「区间内新增」与柱子必须同一个粒度。
+
 - **搬运下载目录前先问空间**（1.8.7）：`ensureCopySpace()` 用 `navigator.storage.estimate()` 预检，不够就带着「还差 X」抛错；`estimate` 拿不到时只 `console.warn` 放行，**别拦**（老浏览器没有这个 API）。
 - **老 PNG 封面只从归档目录里转**（1.8.8）：`convertLegacyPngCovers()` 只遍历 `rootHandle` 下的收藏夹 → 记录目录一层，只认记录目录里文件名叫「封面.png」的那一个，写「封面.webp」成功后才 `removeEntry("封面.png")`。下载目录（`000视频下载`）、`001错误报告` / `002同步报告` / `003database` / `004导出`、`视频信息.txt` 以及用户自己放进去的文件，**一个都不碰**；保留目录名单与扫描跳过名单是同一套（`ARCHIVE_RESERVED_DIRS`）。「转不转」的判断在 `BcaArchiveCore.coverConvertAction()` 一处：已经有 `封面.webp` 就绝不重转。
 - **`004导出` 只留最近 5 份**（1.8.8）：导出成功之后用 `BcaArchiveCore.exportPruneList()` 算出该删哪几个（只认 `归档元数据-YYYYMMDD-HHMMSS(-N)?.json`，同秒撞名时本体排在 `-2` 之前），逐个 `removeEntry`。**清理失败绝不影响这次导出**：写盘已经成功，删不掉只留一条 `console.warn`。

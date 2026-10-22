@@ -1181,7 +1181,16 @@
         ? t("{day} 这一天新增了 {count} 个视频", { day: row.day, count: formatCount(row.count) })
         : t("{day} 新增了 {count} 个视频", { day: row.label || row.day, count: formatCount(row.count) }))
     });
-    show(ui.chartNote, total <= 0);
+    /* 退到周/月时要说清「为什么不是按天」：用户选了 20 天却看到 3 根柱子，
+       不解释一句会以为丢数据。这条和「这段时间还没有新增」不冲突 —— 后者是总数 0，
+       前者是有数但粒度变粗。 */
+    const coarse = mode !== "day" && !dailyRowsCover(range);
+    show(ui.chartNote, total <= 0 || coarse);
+    if (total > 0 && coarse) {
+      setText(ui.chartNote, mode === "month"
+        ? t("逐日明细只保留最近 180 天，这个区间按月显示，数字含区间外头尾那两个月。")
+        : t("逐日明细只保留最近 180 天，这个区间按周显示，数字含区间外头尾那两周。"));
+    }
     /* 头尾两根是整周 / 整月 / 整年：它们的条数含区间外的记录，下面那句话把口径说清。
        用户就是拿「已选 744 天」去反推那两根柱子才对不上的。 */
     const boundary = mode !== "day" && rows.some((row) => row.partial);
@@ -1298,9 +1307,20 @@
   /* 0 = 按天，1 = 按周，2 = 按月，3 = 按年。边界按用户口径：
      30 天以内按天（超过一个月一天一根柱子就成牙签了）、90 天以内按周、
      一年以内按月、超过一年按年。 */
+  /* 1.8.10：逐日明细只有最近 180 天。区间整个落在更早的时候，按天取数一天都
+     取不到 —— 以前「区间内新增」直接是 0，而柱子也一根没有。这里先判区间有没有
+     被逐日明细盖住，没盖住就退到按周 / 按月，至少把老区间的量算出来。 */
+  function dailyRowsCover(range) {
+    const keys = rangeDayList(range);
+    if (!keys.length || !dayRows.length) return true;
+    return String(keys[0]) >= String(dayRows[0].day);
+  }
+
   function chartModeOf(range) {
     const days = rangeDayList(range).length;
     if (days > 365) return "year";
+    const covered = dailyRowsCover(range);
+    if (!covered) return days > 90 ? "month" : "week";
     if (days > 90) return "month";
     if (days > 30) return "week";
     return "day";

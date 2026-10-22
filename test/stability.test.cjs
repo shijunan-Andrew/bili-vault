@@ -5028,7 +5028,8 @@ test("交给调用方的空库必须先过统计镜像，四条出口一条都�
     "四条空库出口（读不出来 / 空文件 / 坏库没留档 / 坏库已留档）都要用镜像顶回累计值"
   );
   // 全新安装时镜像还不存在，applyStatsMirror 必须原样返回，不许凭空造数
-  assert.match(bg, /function applyStatsMirror\(database, mirror\) \{\s*\n\s*if \(!mirror\) return database;/,
+  // 1.8.10：实现搬进了 stats-core.js（收藏库页与后台共用同一份判据），断言跟着搬。
+  assert.match(readProjectFile("stats-core.js"), /function applyStatsMirror\(database, mirror\) \{\s*\r?\n\s*if \(!mirror \|\| typeof mirror !== "object"\) return database;/, 
     "没有镜像时必须原样返回，不能凭空造数");
 });
 
@@ -5104,7 +5105,8 @@ test("背景图存 IndexedDB 的 Blob，不进 chrome.storage（静态回归）"
   assert.match(theme, /dataset\.wallpaperScope === "popup"/);
   assert.match(
     css,
-    /html\[data-appearance="custom"\]:not\(\[data-wallpaper-scope="popup"\]\) body \{ background: transparent; \}/
+    // 1.8.10：透明底必须等图真的铺上（[data-wallpaper="on"]），否则图没读出来时整页发白。
+    /html\[data-appearance="custom"\]\[data-wallpaper="on"\]:not\(\[data-wallpaper-scope="popup"\]\) body \{ background: transparent; \}/
   );
 
   // V1.4.1：换图 / 删图要能通知到已经开着的别的页面。localStorage 那条通道看不见
@@ -5729,7 +5731,8 @@ test("新的执行级测试不许重写一份被测实现，且必须接进发�
   for (const anchor of [
     [background, "const blocked = statsDatabaseWriteBlocked(read);", "P0 红线"],
     [background, "statsPendingRecords.unshift(...batch);", "写失败回队"],
-    [background, "const run = statsWriteChain.then(task, task);", "写入口互斥"],
+    // 1.8.10：写槽外面又套了跨上下文的 Web Lock，变异锚点改成真正被包住的那一行
+    [background, "const run = statsWriteChain.then(", "写入口互斥"],
     [library, "if (protocol !== NATIVE_PROTOCOL_VERSION) {", "协议号校验"]
   ]) {
     const source = anchor[0];
@@ -6523,4 +6526,68 @@ test("背景：透明底要等图真的铺上，程序化切自定义要补读�
   assert.match(theme, /document\.addEventListener\("DOMContentLoaded", \(\) => \{ ensureWallpaperLayer\(\); \}, \{ once: true \}\);/, "body 还没解析出来时要补插层");
   assert.match(theme, /STORAGE_KEY, DEFAULT_MODE, MODES, WALLPAPER_REVISION_KEY,/, "换图时间戳的键要导出，别在设置页抄一遍");
   assert.match(settings, /changes\[BcaTheme\.WALLPAPER_REVISION_KEY\]/, "别的页面换图/删图后设置页要跟着刷新");
+});
+
+
+// ---- 1.8.10：统计 P1 三条（老区间粒度 / 跨上下文串行 / 写完自检）----
+//
+// 三条都是「接缝」上的问题：逐日明细只有 180 天、两个上下文各写各的、写完不看一眼。
+// 页面层原本零用例，所以这些一直没人碰 —— 第一条这里用「抠出来真跑」补上行为验证。
+
+test("老区间不再恒为 0：逐日明细盖不住时退到周/月（V1.8.10）", () => {
+  const stats = readProjectFile("stats.js");
+  assert.match(stats, /function dailyRowsCover\(range\) \{/, "要有「这个区间被逐日明细盖住了吗」的判据");
+  assert.match(stats, /if \(!covered\) return days > 90 \? "month" : "week";/,
+    "没盖住就退到按周 / 按月，别按天取一屏 0");
+  assert.match(stats, /const coarse = mode !== "day" && !dailyRowsCover\(range\);/,
+    "退到周/月时要能判出「粒度变粗了」，好在图上说一句");
+  const zh = JSON.parse(readProjectFile("locales/zh-TW.json"));
+  const en = JSON.parse(readProjectFile("locales/en.json"));
+  for (const key of [
+    "逐日明细只保留最近 180 天，这个区间按周显示，数字含区间外头尾那两周。",
+    "逐日明细只保留最近 180 天，这个区间按月显示，数字含区间外头尾那两个月。"
+  ]) {
+    assert.ok(zh[key] && en[key], `两本词典都要有这条说明：${key}`);
+  }
+
+  /* 真跑一遍判据：2025-01 的 21 天区间（早于 180 天窗口）该退到周，
+     「最近 7 天」这种落在窗口里的区间仍然按天。 */
+  const harness = require("./harness.cjs");
+  const mod = harness.buildModule(
+    [harness.carveFunction(stats, "dailyRowsCover"), harness.carveFunction(stats, "chartModeOf")],
+    {
+      rangeDayList: (range) => (range && range.days) || [],
+      dayRows: [{ day: "2026-05-01", count: 1 }]
+    }
+  );
+  const oldDays = Array.from({ length: 21 }, (_, index) => `2025-01-${String(index + 5).padStart(2, "0")}`);
+  assert.equal(mod.chartModeOf({ days: oldDays }), "week", "老区间要按周");
+  const veryOld90 = Array.from({ length: 120 }, (_, index) => `2025-01-${String((index % 28) + 1).padStart(2, "0")}`);
+  assert.equal(mod.chartModeOf({ days: veryOld90 }), "month", "更老一点的区间按周画 120 根也太密");
+  const recent = Array.from({ length: 7 }, (_, index) => `2026-05-0${index + 1}`);
+  assert.equal(mod.chartModeOf({ days: recent }), "day", "落在窗口里的区间仍然按天");
+});
+
+test("两个写入口共用一把跨上下文的锁，不再各写各的（V1.8.10）", () => {
+  const core = readProjectFile("stats-core.js");
+  const background = readProjectFile("background.js");
+  const library = readProjectFile("library.js");
+  assert.match(core, /const STATS_DATABASE_LOCK = "bili-vault-stats-database";/, "锁名只能有一处");
+  assert.match(core, /async function withStatsDatabaseLock\(run\) \{/, "锁的实现放 stats-core，两个上下文共用");
+  assert.match(core, /if \(!locks \|\| typeof locks\.request !== "function"\) return run\(\);/, "没有 Web Locks 时直接跑，别让统计卡在门外");
+  assert.match(background, /const run = statsWriteChain\.then\(\s*\r?\n\s*\(\) => BcaStatsCore\.withStatsDatabaseLock\(task\),/, "后台写槽要先进锁再跑");
+  assert.match(library, /return core\.withStatsDatabaseLock\(\(\) => syncStatsDatabaseLocked\(handle, options\)\);/, "收藏库页的重建也要进同一把锁");
+  assert.ok(!/function withStatsDatabaseLock/.test(library) && !/function withStatsDatabaseLock/.test(background),
+    "锁不许在页面 / 后台各写一份 —— 那样迟早两把不同的锁各锁各的");
+});
+
+test("后台写完统计库要读回自检，不合格就用上一版顶回去（V1.8.10）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /async function commitStatsDatabase\(root, read, database\) \{/, "三个写入口共用一条提交路径");
+  assert.match(background, /async function statsDatabaseContentMatches\(file, expectedText\) \{/, "写完要读回比对");
+  assert.match(background, /async function restoreStatsDatabaseBackup\(root, file\) \{/, "自检不过要用 database.bak.json 顶回");
+  assert.equal((background.match(/await commitStatsDatabase\(/g) || []).length, 3,
+    "写库 / 摸宠物 / 回滚统计这三个入口都要走同一条提交路径");
+  assert.equal((background.match(/await archivePreviousStatsDatabase\(read\);/g) || []).length, 1,
+    "留上一版只在 commitStatsDatabase 里做一次，别又抄回三处");
 });

@@ -931,5 +931,7 @@
   "只数本地还没有的视频，已有的不占名额；到上限就收工，再点一次从后面接着补。": "Only videos not yet local count toward the cap; existing ones take no slot. It stops at the cap — tap again to keep filling.",
   "全部": "All",
   "将要导入 {count} 个收藏夹，本次最多写入 {limit} 条还没保存到本地的新视频。": "About to import {count} collections, writing at most {limit} videos that aren't local yet.",
-  "开始前可以选「每次最多导入多少条」：<strong>50 / 100 / 300 / 500 / 全部</strong>。名额只算本地还没有的视频（已有的跳过不占名额），导到上限就收工，想接着补就再点一次。": "Before starting you can pick how many to import at most: <strong>50 / 100 / 300 / 500 / All</strong>. Only videos not yet local take a slot; existing ones are skipped. It stops at the cap, so tap again to continue."
+  "开始前可以选「每次最多导入多少条」：<strong>50 / 100 / 300 / 500 / 全部</strong>。名额只算本地还没有的视频（已有的跳过不占名额），导到上限就收工，想接着补就再点一次。": "Before starting you can pick how many to import at most: <strong>50 / 100 / 300 / 500 / All</strong>. Only videos not yet local take a slot; existing ones are skipped. It stops at the cap, so tap again to continue.",
+  "逐日明细只保留最近 180 天，这个区间按周显示，数字含区间外头尾那两周。": "Daily detail is kept for the last 180 days only, so this range is shown by week; the numbers include the two weeks at the edges.",
+  "逐日明细只保留最近 180 天，这个区间按月显示，数字含区间外头尾那两个月。": "Daily detail is kept for the last 180 days only, so this range is shown by month; the numbers include the two months at the edges."
 }

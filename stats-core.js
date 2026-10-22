@@ -821,6 +821,19 @@
   }
 
   // 读不到库时用镜像把「只会往前走」的字段顶回来：宁可数字停在上一版，也不能归零。
+  /* 1.8.10：两个上下文（service worker 与收藏库页）都会「读 → 改 → 整份写回」，
+     各自内存里那条 promise 链只串得住自己那一侧，跨上下文就会互相整份覆盖：
+     后台刚导入的行被页面的重建盖掉、页面刚删的行被后台的旧读复活。
+     Web Locks 在同一个扩展源下是共享的，两处用同一把锁名即可串行化；
+     环境里没有 navigator.locks 时直接跑 —— 宁可不锁，也不能让统计更新卡在门外。 */
+  const STATS_DATABASE_LOCK = "bili-vault-stats-database";
+
+  async function withStatsDatabaseLock(run) {
+    const locks = globalThis.navigator && globalThis.navigator.locks;
+    if (!locks || typeof locks.request !== "function") return run();
+    return locks.request(STATS_DATABASE_LOCK, () => run());
+  }
+
   function applyStatsMirror(database, mirror) {
     if (!mirror || typeof mirror !== "object") return database;
     const next = database;
@@ -885,7 +898,9 @@
     statsMirrorNumber,
     statsMirrorOf,
     statsMirrorHasValues,
-    applyStatsMirror
+    applyStatsMirror,
+    STATS_DATABASE_LOCK,
+    withStatsDatabaseLock
   };
 
   global.BcaStatsCore = api;

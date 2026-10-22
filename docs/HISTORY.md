@@ -5,6 +5,28 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.10：统计库不再被清零，三个 P1 接缝补上
+
+**改了什么**：① 收藏库页的 `syncStatsDatabase` 把「读不出来 / 空了 / 坏了 / 正常」分成四类，读不出来就跳过并提示，空了或坏了先用 `bcaStatsMirror` 把亲密度、累计保存、陪伴天数顶回来再重建；② 判据与合并算法搬进 `stats-core.js`（`STATS_MIRROR_KEY` / `statsMirrorNumber` / `statsMirrorOf` / `statsMirrorHasValues` / `applyStatsMirror`），后台只留读写两个函数；③ 页面与后台的统计写入都进同一把 Web Lock（`bili-vault-stats-database`），没有 `navigator.locks` 时直接跑；④ 后台三个写入口（写库 / 摸宠物 / 回滚统计行）合并成 `commitStatsDatabase()`，写完读回逐字节自检，不合格用 `database.bak.json` 顶回；⑤ 统计页在「逐日明细盖不住这个区间」时退到按周 / 按月，并说明为什么不是按天；⑥ 顺手补上两条宠物与背景的 P1（详情抽屉打开时收起宠物、`Escape` 能收气泡、程序化切自定义主题会补读壁纸、透明底要等图铺上、设置页监听壁纸修订号）。
+
+**为什么**：统计页以前在 `test/pages.test.cjs` 里是零覆盖（harness 的 `chrome.storage` 只有 Promise 版，`stats.js` 用回调式，页面根本跑不完 init），于是三处「接缝」一直没人碰：页面侧完全没有镜像保护（坏文件一来就重建，亲密度清零）、两个上下文各串各的链（后写的整份盖掉先写的）、后台写完从不看一眼（半份 JSON 也要等下次读取才发现）。
+
+**现在的口径**：
+
+- 「读不出来」≠「库不存在」：前者只跳过并留一句提示，后者才算全新安装。
+- 「镜像是 0」≠「没有镜像」：`applyStatsMirror` 只在镜像里真有值时顶，全新安装不会被凭空造数。
+- 写 lock 只有一把：`STATS_DATABASE_LOCK` 定义在 `stats-core.js`，后台和页面都调 `withStatsDatabaseLock()`；守卫钉了「页面 / 后台不许各自再实现一份」。
+- 自检基准是「我们写进去的那串字节」：文本逐字节比对，比解析回来比字段更不容易骗人。
+- 逐日明细窗口是 180 天（`DAILY_ROWS_DAYS`），区间比它更老就退到周 / 月，头部「区间内新增」与柱子用同一个粒度。
+
+**踩的坑**：
+
+- 三个写入口原来是「六步各抄一遍」，`archivePreviousStatsDatabase(read)` 在 `background.js` 里出现了三次；重构时先删后补，一度把 `readStatsMirror` / `syncStatsMirror` 一起删掉（`BACKGROUND_EXPORTS` 守卫当场变红），靠「钉住导出名字」的守卫才没漏到发版。
+- `test/stability.test.cjs` 的变异锚点钉的是 `const run = statsWriteChain.then(task, task);` —— 写槽外面套了锁之后这行变成多行，锚点跟着改，否则变异测试会得出「守卫有效」的假结论。
+- V1.7.19 那条守卫断言 `background.js` 里有 `function applyStatsMirror(database, mirror) {`，实现搬进 `stats-core.js` 后断言也得搬 —— 守卫盯的应该是「判据只有一份」，不是「某个文件里有某个字符串」。
+
+**没动的**：`stats.js` 的页面级用例仍只有「脚本序列」那一条；老区间退到周/月后，头部数字含区间外头尾整桶这件事仍然只由下面那行边界说明披露（口径没变，只是现在不会恒为 0 了）。
+
 ## V1.8.9：修掉 1.8.8 的 ReferenceError（「导入失败」但其实已保存）
 
 **改了什么**：把 `importLimit` 的声明从收藏夹循环里挪到函数作用域（`importBiliFavoritesInner` 顶部的状态声明处），并给守卫加两条判据（两空格缩进 + 声明在 `for (let folderIndex = 0;` 之前）。

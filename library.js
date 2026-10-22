@@ -4805,6 +4805,15 @@ async function syncStatsMirrorForSync(database) {
 async function syncStatsDatabase(handle, options = {}) {
   const core = globalThis.BcaStatsCore;
   if (!handle || !core) return;
+  /* 1.8.10：后台 service worker 也在「读 → 改 → 整份写回」。两边各串各的链，
+     跨上下文就会互相整份覆盖（后台刚导入的行被这里的重建盖掉，这里刚删的行
+     被后台的旧读复活）。Web Locks 在同一扩展源下共享，锁名与 background.js 一致。 */
+  return core.withStatsDatabaseLock(() => syncStatsDatabaseLocked(handle, options));
+}
+
+async function syncStatsDatabaseLocked(handle, options = {}) {
+  const core = globalThis.BcaStatsCore;
+  if (!handle || !core) return;
   const videos = allVideos();
   try {
     const directory = await handle.getDirectoryHandle(core.DATABASE_FOLDER_NAME, { create: true });
