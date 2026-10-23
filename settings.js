@@ -870,6 +870,126 @@ function openRecyclePage() {
   }
 }
 
+/* 1.9.3：手动重建统计库。用户点一下，从本地归档重扫一遍 —— 旧库先备份成
+   database.backup-<时间>.json（不覆盖、不静默），重建结果仍然交给后台统一落盘。
+   统计页只认 chrome.storage 里的快照，所以提交时带 republishSnapshot，强制后台重发
+   一份：1.9.2 那次「库里有 5 条、界面还是 3 条」就是快照停在旧口径上。 */
+function showStatsMessage(text, isError = false) {
+  const status = $("statsStatus");
+  const error = $("statsError");
+  if (status) {
+    status.hidden = isError || !text;
+    status.textContent = isError ? "" : text;
+  }
+  if (error) {
+    error.hidden = !isError;
+    error.textContent = isError ? text : "";
+  }
+}
+
+async function readStatsDatabaseText(handle) {
+  const directory = await handle.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: false });
+  const file = await directory.getFileHandle(BcaStatsCore.DATABASE_FILE_NAME, { create: false });
+  const blob = await file.getFile();
+  return { directory, text: await blob.text() };
+}
+
+async function rebuildStatsDatabase() {
+  if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+  const handle = await BcaArchiveTools.loadRootHandle();
+  if (!handle) throw new Error(BcaI18n.t("先选择一个本地备份文件夹，再重建统计库。"));
+  const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
+  if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
+
+  let previousText = "";
+  try {
+    previousText = (await readStatsDatabaseText(handle)).text || "";
+  } catch (error) {
+    /* 目录/文件不存在就是「还没有库」，正常往下走；其它错误说明旧库这次读不出来，
+       这时候重建会把它盖掉，宁可停下让用户先处理那个错误。 */
+    if (!BcaArchiveCore.isMissingError(error)) throw error;
+  }
+
+  const scan = await BcaArchiveTools.scanArchive(handle);
+  const videos = [];
+  for (const collection of scan.collections) {
+    for (const entry of collection.records) {
+      videos.push(BcaArchiveTools.recordToVideo(collection.name, { name: entry.directory }, entry.record));
+    }
+  }
+  if (!videos.length) {
+    const sure = window.confirm(BcaI18n.t("本地归档里一条记录都没扫到，重建会把统计库变成空库。确定继续吗？"));
+    if (!sure) return null;
+  }
+
+  let previous = null;
+  if (previousText.trim()) {
+    try {
+      previous = JSON.parse(previousText);
+    } catch (error) {
+      console.warn("旧统计库解析失败，这次按扫描结果重建（原文仍会先备份）", error);
+    }
+  }
+  const database = BcaStatsCore.databaseFromVideos(videos, { previous });
+
+  let backupName = "";
+  if (previousText.trim()) {
+    const directory = await handle.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: true });
+    /* 同一秒里连点两次不能把上一份备份盖掉：撞名就往后加 -2、-3。 */
+    const existing = new Set();
+    for await (const entry of directory.values()) existing.add(entry.name);
+    const baseName = `database.backup-${BcaArchiveTools.recycleStamp()}`;
+    let attempt = 1;
+    backupName = `${baseName}.json`;
+    while (existing.has(backupName)) {
+      attempt += 1;
+      backupName = `${baseName}-${attempt}.json`;
+    }
+    const backup = await directory.getFileHandle(backupName, { create: true });
+    const writable = await backup.createWritable();
+    await writable.write(previousText);
+    await writable.close();
+  }
+
+  /* 写库只有后台一条路（1.8.17）：这里只把重建结果交给它。 */
+  const result = await chrome.runtime.sendMessage({ type: "bca-stats-commit", database, republishSnapshot: true });
+  if (!result || !result.ok) {
+    throw new Error(BcaI18n.t("后台没有接下这次写库（{reason}），统计库没有改动。", {
+      reason: (result && (result.reason || "declined")) || BcaI18n.t("没响应")
+    }));
+  }
+  return { rows: Object.keys(database.videos || {}).length, backup: backupName };
+}
+
+async function handleRebuildStats() {
+  const button = $("rebuildStats");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  showStatsMessage(BcaI18n.t("正在扫描本地归档，重建统计库…"));
+  try {
+    const rebuilt = await rebuildStatsDatabase();
+    if (!rebuilt) {
+      showStatsMessage("");
+      return;
+    }
+    let today = NaN;
+    try {
+      const stored = await readStoredSettings(["bcaStats"]);
+      today = Number(stored && stored.bcaStats && stored.bcaStats.savedToday);
+    } catch (error) {
+      console.warn("读不到统计快照（不影响重建结果）", error);
+    }
+    const summary = Number.isFinite(today)
+      ? BcaI18n.t("已重建统计库：{count} 条记录，今日新增 {today} 条。", { count: rebuilt.rows, today })
+      : BcaI18n.t("已重建统计库：{count} 条记录。", { count: rebuilt.rows });
+    showStatsMessage(summary + (rebuilt.backup ? BcaI18n.t("旧库已备份为 {file}。", { file: rebuilt.backup }) : ""));
+  } catch (error) {
+    showStatsMessage(error?.message || BcaI18n.t("重建统计库失败。"), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function wireTransferAndMaintenance() {
   $("settingsExportConfig")?.addEventListener("click", () => { downloadConfigFile(true); });
   $("settingsExportConfigSlim")?.addEventListener("click", () => { downloadConfigFile(false); });
@@ -881,6 +1001,7 @@ function wireTransferAndMaintenance() {
   $("settingsExportArchive")?.addEventListener("click", () => { exportArchiveMetadata(); });
   $("settingsHealthCheck")?.addEventListener("click", () => { writeHealthReport(); });
   $("settingsOpenRecycle")?.addEventListener("click", openRecyclePage);
+  $("rebuildStats")?.addEventListener("click", () => { handleRebuildStats(); });
 }
 
 // 供 pages.test 直接驱动（收藏库时代的测试调的是 importConfigFromText，搬家后名字保持一致）。
@@ -889,7 +1010,8 @@ globalThis.BcaSettingsTransfer = Object.freeze({
   downloadConfigFile,
   currentConfigPreferences,
   exportArchiveMetadata,
-  writeHealthReport
+  writeHealthReport,
+  rebuildStatsDatabase
 });
 
 wireTransferAndMaintenance();

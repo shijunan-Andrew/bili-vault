@@ -1072,6 +1072,35 @@ async function suiteSettings() {
     assert.deepEqual(backStale.map((element) => element.dataset.i18n), [],
       "切回中文后不该还有英文残留");
   });
+
+  await test("设置页「重建数据库」先备份旧库、再按归档重建并强制重发快照（1.9.3 真执行）", async () => {
+    const page = await openSettings();
+    const g = page.window;
+    const root = await makeDirectoryTree({ _测试归档: sampleTree() }).getDirectoryHandle("_测试归档");
+    g.indexedDB = makeRootHandleDb(root);
+
+    // 一份「旧库」：内容故意是空的，好确认重建结果不是拿它出来的
+    const directory = await root.getDirectoryHandle(g.BcaStatsCore.DATABASE_FOLDER_NAME, { create: true });
+    const oldFile = await directory.getFileHandle(g.BcaStatsCore.DATABASE_FILE_NAME, { create: true });
+    const oldWritable = await oldFile.createWritable();
+    await oldWritable.write(JSON.stringify(g.BcaStatsCore.emptyDatabase(Date.now())));
+    await oldWritable.close();
+
+    const sent = [];
+    page.chrome.runtime.sendMessage = async (message) => { sent.push(message); return { ok: true }; };
+
+    assert.ok(page.document.getElementById("rebuildStats"), "设置页要有「重建数据库」按钮");
+    const result = await g.BcaSettingsTransfer.rebuildStatsDatabase();
+    assert.equal(sent.length, 1, "重建只该提交一次");
+    assert.equal(sent[0].type, "bca-stats-commit");
+    assert.equal(sent[0].republishSnapshot, true, "要强制后台重发快照，否则界面还停在旧口径");
+    assert.equal(Object.keys(sent[0].database.videos || {}).length, 3, "三条归档记录都该进库");
+    assert.equal(result.rows, 3);
+    assert.match(result.backup, /^database\.backup-\d{8}-\d{6}\.json$/, "旧库要带时间后缀备份");
+    const names = [];
+    for await (const entry of directory.values()) names.push(entry.name);
+    assert.ok(names.includes(result.backup), "备份文件要真的写进 003database");
+  });
 }
 
 /* ---------------- 跑 ---------------- */

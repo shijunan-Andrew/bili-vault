@@ -2024,8 +2024,14 @@ test("the settings page offers theme, language, and the two help pages", () => {
   const settingsCode = stripComments(script);
   assert.doesNotMatch(settingsCode, /chrome\.tabs\.remove/);
   assert.equal(/window\.close\(\)/.test(settingsCode), false, "设置页不再靠关标签页返回，也就不该有关页调用");
-  // 只改选中态、不写文字：切完语言后写死的文字会把译文盖回中文
-  assert.doesNotMatch(script, /textContent\s*=/);
+  // 只改选中态、不写文字：切完语言后写死的文字会把译文盖回中文。
+  // 1.9.3 起允许把**译本**写进动态状态行（`showStatsMessage` 收到的是 BcaI18n.t 的结果），
+  // 但写死的中文字面量仍然禁止 —— 那种才会在切语言后把译文盖回去。
+  const hardcodedTextWrites = settingsCode
+    .split(/\r?\n/)
+    .filter((line) => /textContent\s*=\s*["'`]/.test(line))
+    .filter((line) => /[\u4e00-\u9fff]/.test(line));
+  assert.deepEqual(hardcodedTextWrites, [], "设置页不许把写死的中文写进 textContent（切语言后会被盖回中文）");
   // 毛玻璃开关的视觉是 .off 类画的（照 popup.css 的约定）。只写 aria-pressed 的话，
   // 「上次已经开着毛玻璃」的用户再打开设置页会看到一个显示为「关」的开关。
   assert.match(html, /id="glassToggle" class="toggle-switch off"/);
@@ -2489,10 +2495,10 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 4,
     "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径（导出与封面转换 1.9.0 搬去设置页）都要先查闸门");
   assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
-  // 设置页的「导出归档元数据 / 归档体检」在导入期间拒绝扫半成品
+  // 设置页的「导出归档元数据 / 归档体检 / 重建统计库」在导入期间拒绝扫半成品
   assert.match(settings, /async function importIsRunning\(\) \{/);
-  assert.equal([...settings.matchAll(/if \(await importIsRunning\(\)\) throw new Error/g)].length, 2,
-    "导出元数据与归档体检都要先问一句");
+  assert.equal([...settings.matchAll(/if \(await importIsRunning\(\)\) throw new Error/g)].length, 3,
+    "导出元数据、归档体检与重建统计库都要先问一句");
   // 只清自己那一把：不能把别人后写进来的锁顺手抹掉
   assert.match(background, /if \(!lock \|\| !kind \|\| lock\.kind === kind\) await chrome\.storage\.session\.remove/);
 });
@@ -7582,4 +7588,29 @@ test("统计分天优先用「视频收藏时间」，目录名只在时间缺�
   const tools = readProjectFile("archive-tools.js");
   assert.match(tools, /const date = field\(info, "视频收藏时间"\) \|\| recordEntry\.name;/, "扫描时先取视频收藏时间，取不到退回目录名");
   assert.match(tools, /favoriteAt: date,/, "扫描出来的记录要带上收藏时间给统计用");
+});
+
+// ---- 1.9.3：统计库可以手动重建（旧库先备份、后台强制重发快照） ----
+test("设置页能手动重建统计库：先备份旧库，再按归档重建，并让后台强制重发快照（1.9.3）", () => {
+  const html = readProjectFile("settings.html");
+  const settings = stripComments(readProjectFile("settings.js"));
+  const background = stripComments(readProjectFile("background.js"));
+
+  assert.match(html, /data-i18n="重建统计库"/, "设置页要有「重建统计库」这一行");
+  assert.match(html, /id="rebuildStats" data-i18n="重建数据库"/, "这一行的按钮要能点");
+  assert.match(settings, /async function rebuildStatsDatabase\(\) \{/, "重建逻辑要有一个集中的函数");
+  assert.match(
+    settings,
+    /const baseName = `database\.backup-\$\{BcaArchiveTools\.recycleStamp\(\)\}`;/,
+    "旧库备份名要带时间后缀"
+  );
+  assert.match(settings, /while \(existing\.has\(backupName\)\) \{/, "同一秒连点两次不能盖掉上一份备份");
+  assert.match(settings, /const database = BcaStatsCore\.databaseFromVideos\(videos, \{ previous \}\);/, "重建走 stats-core 的整份重建");
+  assert.match(settings, /type: "bca-stats-commit", database, republishSnapshot: true/, "提交时要强制重发快照");
+  assert.match(
+    background,
+    /if \(payload && payload\.republishSnapshot === true\) statsSnapshotPublished = "";/,
+    "后台要认得这个开关（否则快照指纹会挡掉重发）"
+  );
+  assert.match(background, /entry\.name\.endsWith\("\.crswap"\)/, "顺手清掉写库留下的 .crswap 残骸");
 });
