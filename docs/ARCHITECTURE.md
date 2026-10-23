@@ -300,7 +300,6 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **导入中断快照不再带 `视频信息.txt` 原文**（1.8.21）：`importJournalSnapshot` 的 `modifiedFiles` 只记 `{collection, directory, name}`。回滚从来没用过快照里的 text（真回滚读的是内存 journal 的 `entry.text`），带着它只是把 session storage 撑大。**别把 text 加回去。**
 - **`lastResult.path` 本来就是相对路径**（前用户绝对路径这条审查项不成立）：四处写入点拼的都是 `${root.name}/${收藏夹}/${时间目录}`，`root` 是目录句柄、`.name` 只是末段名。`maskLocalUserPaths()` 在这里是防御性空转，不是补漏。**真正会外泄绝对路径的只有错误报告的 `reportPath`**，1.8.21 起回给页面/弹窗的一律过 `storageReportLabel()`（只留末两段）。
 - **`视频信息.txt` 的「视频收藏时间」保留精确到秒**（1.8.21 明确取舍）：设置页已写明会把收藏时间一起存下来。改成日期粒度会同时动目录名与统计库 `date`，而且 `parseChineseDateTime` 不认日期-only —— 刷新路径会静默把老记录的时间改成今天。**要么整条链路一起降级，要么不做。**
-- **统计的「哪一天」只看「视频收藏时间」**（1.9.2）：`stats-core.js` 的 `recordFromVideo()` 用 `firstParsedTime([source.date, source.favoriteAt, source.directory])` 取时间 —— 显式 `date` 优先（导入路径把收藏时间放在这里），其次是扫描出来的 `favoriteAt`（就是 `视频信息.txt` 的「视频收藏时间」），两者都认不出来才退回目录名。目录名是**建档时间**，搬运/补档、或者重新收藏一条早就归档过的视频时会与收藏时间不是同一天；拿它分天会让「今日新增」比卡片上的日期少算（1.9.2 修的就是这个）。页面侧别自己再拼一份时间来源。
 - **`isMissingError()` 是「不存在」的唯一判据**（1.8.21，`archive-core.js`）：网络盘掉线时 FSA 抛的也是 `NotFoundError`，所以判据只能统一在一处，探活另走 `library.js` 的 `rootIsReachable()`（2 秒 TTL）。**`background.js` 里那份 `NotFoundError && TypeMismatchError` 联合判断是故意保留的**（`stability` 钉着这个字面量），别顺手换掉。
 
 - **原生宿主的 `Assert-HostRootSafe` 不做 8.3 短名展开**（1.8.22 复核，不修）：有人把宿主目录写成 `%LOCALAPPDATA%\BCAFLD~1` 这种短名形式时会被当成「不是默认位置」拒掉。**拒绝比误删安全**，宁可让人重新跑安装脚本，也不要为了一条罕见写法去解析 NTFS 短名。

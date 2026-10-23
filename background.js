@@ -3693,20 +3693,6 @@ async function cleanStatsTempFiles(root) {
   try {
     const directory = await root.getDirectoryHandle(BcaStatsCore.DATABASE_FOLDER_NAME, { create: false });
     await removeStaleTempFiles(directory);
-    /* 1.9.3：createWritable 会先写一份 .crswap 再换名。断电/崩溃/进程被杀时它会留在
-       003database 里，体积和 database.json 一样大却永远没人用。只清超过 10 分钟的，
-       正在写的那份 close() 时自己就删了，10 分钟足够一次写库跑完。 */
-    const staleBefore = Date.now() - 10 * 60 * 1000;
-    for await (const entry of directory.values()) {
-      if (entry.kind !== "file" || !entry.name.endsWith(".crswap")) continue;
-      try {
-        const file = await entry.getFile();
-        if (Number(file.lastModified) > staleBefore) continue;
-        await directory.removeEntry(entry.name);
-      } catch (error) {
-        console.warn("清理统计库的 .crswap 残骸失败（不影响这次写库）", error);
-      }
-    }
   } catch (_) {
     // 三档：清陈年残骸是顺手做的事，目录还不存在或权限刚变都不该影响这次写库。
   }
@@ -3784,9 +3770,6 @@ async function commitStatsDatabaseFromPage(payload) {
     /* 1.8.19：页面已经把坏原文留档了，它手里那份「用镜像补好的重建结果」就是唯一
        该落盘的版本：后台不用再归档一遍，也不该把这次提交当成「读不到库」拦下来。 */
     const pageReplacedBroken = payload?.pageArchivedBroken === true;
-    /* 1.9.3：手动「重建数据库」要求界面快照一定跟着重发 —— 快照本身按内容指纹去重，
-       库内容没变时那份旧快照可能还停在错口径上（1.9.2 的「库里 5 条、界面 3 条」）。 */
-    if (payload && payload.republishSnapshot === true) statsSnapshotPublished = "";
     const read = await readStatsDatabase(root, { archiveBroken: !pageReplacedBroken });
     const blocked = statsDatabaseWriteBlocked(read) && !pageReplacedBroken;
     if (blocked) {
