@@ -1110,11 +1110,107 @@ async function logClientError(payload) {
   return { ok: true, merged: false, reportPath: storageReportLabel(saved.reportPath) };
 }
 
+/* 1.9.3（用户报「收藏时 UP 主名字 / UID / 主页变成了右侧推荐位那一个，播放量点赞也没存」）：
+   页面 DOM 只给「作者叫什么」，不给互动数据；新版 B 站连作者容器都换了，页面抓取随时可能抓偏。
+   所以收藏这一下顺手问一次 `/x/web-interface/view`（与「更新视频状态」「导入」同一个接口），
+   以接口的 owner / stat / desc 为准。请求失败一律退回页面元数据 ——
+   补资料失败绝不能让这次收藏变成失败。 */
+const SAVE_ENRICH_TIMEOUT_MS = 8000;
+
+async function enrichFavoriteMetadata(pageMetadata) {
+  const metadata = pageMetadata || {};
+  const bvid = String(metadata.bvid || (String(metadata.url || "").match(/\bBV[\w]+/i)?.[0] || "")).trim();
+  const aid = String(metadata.aid || "").replace(/^av/i, "").trim();
+  if (!bvid && !aid) return metadata;
+  try {
+    const video = await biliImportApiGet("/x/web-interface/view", bvid ? { bvid } : { aid }, SAVE_ENRICH_TIMEOUT_MS);
+    if (!video || typeof video !== "object") return metadata;
+    const owner = video.owner || {};
+    const stat = video.stat || {};
+    const pick = (key) => (importIsPlaceholder(stat[key]) ? metadata.stats?.[key] : stat[key]);
+    const stats = {
+      view: pick("view"),
+      danmaku: pick("danmaku"),
+      like: pick("like"),
+      coin: pick("coin"),
+      favorite: pick("favorite"),
+      share: pick("share")
+    };
+    const hasAnyStat = STAT_KEYS.some((key) => !importIsPlaceholder(stats[key]));
+    return {
+      ...metadata,
+      bvid: String(video.bvid || bvid || "").trim(),
+      aid: video.aid || metadata.aid,
+      title: metadata.title || String(video.title || "").trim(),
+      upName: importIsPlaceholder(owner.name) ? metadata.upName : owner.name,
+      upMid: owner.mid ? String(owner.mid) : metadata.upMid,
+      description: String(video.desc || "").trim() ? video.desc : metadata.description,
+      pubdate: Number(video.pubdate) || metadata.pubdate,
+      duration: Number(video.duration) || metadata.duration,
+      cover: metadata.cover || video.pic || "",
+      stats: hasAnyStat ? stats : (metadata.stats || {})
+    };
+  } catch (error) {
+    console.warn("收藏时没能补上互动数据（这次先按页面抓到的存，之后可以用「更新视频状态」补）", error);
+    return metadata;
+  }
+}
+
+/* 1.9.3（用户报「同一条视频在一个收藏夹里存了两份」）：收藏前先查「收藏夹 + BV 号」索引，
+   已经有记录就更新那一份（目录名与「视频收藏时间」都保留），不再新建目录。索引由收藏库扫描时
+   发布（library.js 的 publishBvIndex），后台只读，不自己扫盘。 */
+const BV_INDEX_KEY = "biliVaultBvIndex";
+
+function bvOfInfoText(text) {
+  const match = String(text || "").match(/^BV号：\s*(BV[\w]+)\s*$/m);
+  return match ? match[1].trim() : "";
+}
+
+function favoriteLineOfInfoText(text) {
+  const match = String(text || "").match(/^视频收藏时间：.*$/m);
+  return match ? match[0] : "";
+}
+
+async function loadBvIndex() {
+  try {
+    const stored = await chrome.storage.local.get(BV_INDEX_KEY);
+    const value = stored?.[BV_INDEX_KEY];
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch (error) {
+    console.warn("读取视频索引失败（这次可能重复建目录）", error);
+    return {};
+  }
+}
+
+async function saveBvIndex(index) {
+  try {
+    await chrome.storage.local.set({ [BV_INDEX_KEY]: index });
+  } catch (error) {
+    console.warn("保存视频索引失败（下次收藏可能重复建目录）", error);
+  }
+}
+
+async function readExistingRecordFolder(collectionFolder, directoryName, bvid) {
+  if (!directoryName || !bvid) return null;
+  try {
+    const directory = await collectionFolder.getDirectoryHandle(directoryName, { create: false });
+    const fileHandle = await directory.getFileHandle("视频信息.txt", { create: false });
+    const text = await (await fileHandle.getFile()).text();
+    if (bvOfInfoText(text) !== bvid) return null;
+    return { directory, favoriteLine: favoriteLineOfInfoText(text) };
+  } catch (error) {
+    if (!isMissingError(error)) console.warn(`检查已有归档「${directoryName}」失败（这次按新记录保存）`, error);
+    return null;
+  }
+}
+
 async function saveFavorite(data) {
-  const metadata = data?.metadata || {};
+  const pageMetadata = data?.metadata || {};
   const folders = Array.isArray(data?.folders) ? data.folders : [];
   const settings = await chrome.storage.local.get("enabled");
   if (settings.enabled === false) return { ok: false, message: "自动归档已关闭，本次收藏未保存到本地。" };
+  // 1.9.3：先补一次接口数据（真实 UP 主 + 互动数据），失败自动退回页面元数据
+  const metadata = await enrichFavoriteMetadata(pageMetadata);
   try {
     if (!folders.length || folders.some((folder) => !folder?.name)) {
       throw new Error("无法从 B 站读取本次收藏夹的实际名称。请保持收藏夹列表已加载后重试。");
@@ -1131,6 +1227,10 @@ async function saveFavorite(data) {
     // 每遍都要排一次限速队列；真机上 5 个收藏夹里的 封面.webp 是同一份 11046 字节。
     // 放在建目录之前：拿不到封面就整次失败，磁盘上一个半截目录都不留。
     const cover = await loadCoverPng(metadata.cover);
+    // 1.9.3：同一条视频在同一个收藏夹里已经存过，就更新那一份，不再新建目录
+    const bvIndex = await loadBvIndex();
+    const savedBvid = String(metadata.bvid || "").trim();
+    let reusedCount = 0;
     // 1.8.0：收藏夹之间并行落盘。每个收藏夹内部仍然严格「先封面、后 txt」——
     // txt 是完成标记（4.9 协议），这个顺序不能动；但收藏夹彼此独立，串行跑等于
     // 把每个文件的落盘等待乘上收藏夹数量。真机对照：5 个收藏夹串行 68 秒
@@ -1152,13 +1252,25 @@ async function saveFavorite(data) {
         throw new Error(`收藏夹名「${folderName}」和插件自己用的目录重名，为免写乱本地文件，这次没有保存到本地。`);
       }
       const collectionFolder = await createDirectoryOrExplain(root, folderName);
-      const recordFolder = await uniqueTimeFolder(collectionFolder, dateFolderName);
+      const indexedDirectory = savedBvid ? (bvIndex[folderName] || {})[savedBvid] || "" : "";
+      const existing = await readExistingRecordFolder(collectionFolder, indexedDirectory, savedBvid);
+      if (existing) reusedCount += 1;
+      const recordFolder = existing?.directory || (await uniqueTimeFolder(collectionFolder, dateFolderName));
       try {
         // 4.9：先封面、后 txt（txt 即完成标记），失败时把整个目录清掉，不留半截记录
         await writeFile(recordFolder, COVER_FILE_NAME, cover);
         // buildInfo 也必须在这个 try 内：它一旦抛错，目录已经建出来了，
         // 下面的 catch 负责把这个空目录清掉（否则每失败一次就留一个空目录）
-        await writeFile(recordFolder, "视频信息.txt", buildInfo({ ...data, metadata }, recordFolder.name, savedAt));
+        let infoText = buildInfo({ ...data, metadata }, recordFolder.name, savedAt);
+        // 1.9.3（用户口径）：更新已有记录时保留原来的「视频收藏时间」——统计按首次入库那天算，
+        // 重收藏/补档/搬运不该把它挪到今天。用函数式 replace，避免字符串里的 $ 被当替换模式。
+        if (existing?.favoriteLine) {
+          infoText = infoText.replace(/^视频收藏时间：.*$/m, () => existing.favoriteLine);
+        }
+        await writeFile(recordFolder, "视频信息.txt", infoText);
+        if (savedBvid) {
+          bvIndex[folderName] = { ...(bvIndex[folderName] || {}), [savedBvid]: recordFolder.name };
+        }
       } catch (error) {
         // 4.9.x：目录是上面 getDirectoryHandle(create:true) 刚建出来的，buildInfo 抛错时它已经在磁盘上了。
         // 1.7.16（destructive P1-1）：改成「有内容就留、空目录才删」—— 见 discardFailedRecord。
@@ -1175,13 +1287,16 @@ async function saveFavorite(data) {
       else failures.push({ name: uniqueFolders[index].name, error: item.reason });
     });
     if (!savedFolders.length) throw failures[0]?.error || new Error("这次没有保存到任何收藏夹。");
+    await saveBvIndex(bvIndex);
+    // 1.9.3：更新已有记录时说清楚，别让人以为又新建了一份
+    const reusedSuffix = reusedCount ? `（其中 ${reusedCount} 条更新的是已有记录）` : "";
 
     // 1.8.0：部分成功必须如实说 —— 磁盘上确实写进去了，整次报「归档失败」是假红灯
     // （用户报过「弹归档失败，但其实已经保存」）。把没成的收藏夹名字和原因摆出来。
     if (failures.length) {
       const failure = failures[0];
       await logError(failure.error, { metadata, folders });
-      const partialMessage = `已保存到 ${savedFolders.length} 个收藏夹；另有 ${failures.length} 个没保存（${failures.map((item) => item.name).join("、")}）：${failure.error?.message || "未知错误"}`;
+      const partialMessage = `已保存到 ${savedFolders.length} 个收藏夹${reusedSuffix}；另有 ${failures.length} 个没保存（${failures.map((item) => item.name).join("、")}）：${failure.error?.message || "未知错误"}`;
       try {
         await chrome.storage.local.set({ lastResult: { message: partialMessage, path: maskLocalUserPaths(savedFolders.join("\n")), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
       } catch (storageError) {
@@ -1190,7 +1305,7 @@ async function saveFavorite(data) {
       return { ok: true, partial: true, message: partialMessage, path: savedFolders.join("\n") };
     }
 
-    const message = `已保存到 ${savedFolders.length} 个收藏夹。`;
+    const message = `已保存到 ${savedFolders.length} 个收藏夹${reusedSuffix}。`;
     // 4.9.x：这时视频已经落盘（封面 + 视频信息.txt 都写完了），下面只是收尾。
     // 原来它裸 await 在同一个 try 里：storage 一抛错就被 catch 改写成「保存失败」，
     // 而磁盘上其实已经有一份完整记录。收尾必须自己兜住异常，不许改写已成功的结果。

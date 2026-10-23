@@ -134,26 +134,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 ## 正式版更新
 
-> 这里**只放最新一版**的改动说明。更早的版本（V1.9.0 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
+> 这里**只放最新一版**的改动说明。更早的版本（V1.9.1 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.9.1：卡片封面不再卡在占位图
-
-这版只修一个显示问题：收藏库里有些卡片一直停在灰底播放键的占位图上，点开详情却能看到封面，刷新也不管用。
+## V1.9.3：收藏时抓对 UP 主、补上互动数据、同一条视频不再存两份
 
 **你会感觉到的几处**
 
-- **卡片封面会自己补上**：翻页、切收藏夹、按搜索或标签筛过再回来，卡片上的封面都跟着当前这条记录走，不再停在占位图。
-- **不会再显示「上一条视频的封面」**：卡片复用时封面槽跟着记录一起换；刷新后也不会留下已经失效的旧图。
-- 本来就没有封面的记录，仍然显示占位图，跟以前一样。
+- **收藏时抓的就是这条视频的 UP 主**：以前新版 B 站页面没有老的选择器，插件会误把右侧推荐位那条视频的 UP 主写进去（名字、UID、主页全错）。现在只从视频自己的信息区取，取不到就留「未知」，不会再写别人的名字。
+- **收藏时就补上播放量、点赞、投币这些数据**：以前要等「更新视频状态」才会有；现在收藏时顺手请求一次视频详情，接口失败才退回页面抓到的（之后仍可用「更新视频状态」补）。
+- **同一条视频在同一个收藏夹里不会存成两份**：收藏前先看收藏库的索引，已经存过就更新那一份；目录名和「视频收藏时间」都保留第一次收藏时的值，统计也仍然算在第一次入库那天（按 1.9.1 的统计口径）。
 
-**开发侧（不影响使用）**
+**开发侧**
 
-- 1.8.23 的卡片复用（keyed diff）只更新了文字类节点，没管 `.card-cover`；`paintPageCovers()` 又拿 `video.cover` 当「这张卡已经有图」的判据 —— 复用的新卡片天生只有占位图，于是永远补不上。详情面板直接读 `video.cover`，所以看起来「详情有图、卡片没图」。
-- 现在封面槽只有一个落笔函数 `applyCardCover(card, cover)`：`updateVideoCard()` 每次换记录时对齐、`paintPageCovers()` 读到文件后调用同一个函数；判据从「缓存里有没有 URL」改成「槽里现在放的是不是这张图」。
-- 新增两条回归：页面套件真跑一次「丢弃卡片再重建，三张卡都得有封面」，稳定性套件钉住「不许再用 `video.cover` 猜有没有图」。
+- `content.js` 新增 `findOwnerAnchor()`：只认 `#v_upinfo` / `.up-info` 里的 `space.bilibili.com` 链接，推荐位卡片（也在 `a.up-name` 上）排除；`upName` 用该链接的文字兜底。
+- `background.js` 新增 `enrichFavoriteMetadata()`（`SAVE_ENRICH_TIMEOUT_MS = 8000`，`/x/web-interface/view`，`importIsPlaceholder` 逐字段回退）与 BV 去重：`BV_INDEX_KEY = "biliVaultBvIndex"`、`bvOfInfoText()`、`readExistingRecordFolder()`、`saveBvIndex()`；复用目录时用原「视频收藏时间」那行覆盖新文本，消息里注明「其中 N 条更新的是已有记录」。
+- `library.js` 扫描结束后 `publishBvIndex(scanned)` 把「收藏夹 → BV → 目录名」发布到 storage（老记录没有「BV号：」行时从视频链接取）。
+- 新增 4 条 stability 守卫 + 2 条 background 真执行用例（补资料成功/失败回退、BV 对不上不复用）+ 1 条 pages 真执行用例（扫描后索引已发布）。
 
-**遗留**：无（纯显示修复）。
+**遗留**：接口失败时只能退回页面元数据（互动数据那几项会缺，需再点「更新视频状态」）；索引只覆盖收藏库扫过的收藏夹。
 
 ## 测试与文档
 
@@ -163,7 +162,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:358 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:362 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

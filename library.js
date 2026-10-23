@@ -752,6 +752,32 @@ function rememberArchiveCacheLimit(rootKey, recordCount) {
   if (store) store.cacheLimit = next;
   return next;
 }
+
+/* 1.9.3（用户报「同一条视频在一个收藏夹里存了两份」）：收藏库最清楚「哪个 BV 已经在哪个目录」，
+   所以由扫描结束后把这份索引发布到 storage，后台收藏时先查它、命中就更新那一份（保留原收藏时间）。
+   同一收藏夹内同名 BV 只留最早建档的那一条：videos 已按时间倒序，循环覆盖后留下的正是最后一条。 */
+const BV_INDEX_KEY = "biliVaultBvIndex";
+
+function publishBvIndex(collections) {
+  const index = {};
+  for (const collection of collections) {
+    const map = {};
+    for (const video of collection.videos) {
+      // 老记录不一定有「BV号：」那一行，退回从视频链接里取
+      const bvid = String(video.bvid || (String(video.url || "").match(/\/video\/(BV[\w]+)/i)?.[1] || "")).trim();
+      if (!bvid) continue;
+      map[bvid] = video.directory;
+    }
+    if (Object.keys(map).length) index[collection.name] = map;
+  }
+  try {
+    chrome.storage.local.set({ [BV_INDEX_KEY]: index }).catch((error) => {
+      console.warn("发布视频索引失败（收藏时可能重复建目录）", error);
+    });
+  } catch (error) {
+    console.warn("发布视频索引失败（收藏时可能重复建目录）", error);
+  }
+}
 // 1.7.12（perf PF-4）：上面那条是「每个根目录」的上限，根目录个数本身一直没有上限。
 // rootCacheKey 靠 WeakMap 计数发号，而句柄对象一旦不再被引用就会回收 —— 用户重选一次目录
 // （选错再选回来、换一个备份文件夹）就是一个新 key，旧 key 的条目要等到关页面才清。
@@ -1085,6 +1111,8 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   // 1.8.4：读完才知道真条数；顺手把下一轮的缓存容量定下来
   stats.total = stats.processed;
   rememberArchiveCacheLimit(cacheKey, stats.total);
+  // 1.9.3：把「收藏夹 → BV → 目录名」发布给后台，收藏时就不会再建一份重复目录
+  publishBvIndex(scanned);
   // hits/reads/total 挂在返回值上，界面用它显示「本次命中缓存多少条」
   return { collections: scanned, issues, unfinished, longNames, diagnostics, forced, stats: { hits: stats.hits, reads: stats.reads, total: stats.total, bytes: stats.bytes } };
 }

@@ -192,13 +192,26 @@
        整页兜底那个可能落在顶栏 / 推荐位 / 评论区，写错 UID 比留空危险 —— 留空时
        buildInfo 用「未知」占位，用户一眼能看出是没抓到，而不是抓成了别人。
        1.8.21（PRV-P2-6）：UP 主昵称同理 —— 裸 `.username` 在 B 站导航栏里匹配的是
-       登录用户自己，所以名字也只从 UP 主信息容器里取；两条兜底一起删掉。 */
-    const upContainerLink = document.querySelector(
-      '#v_upinfo a[href*="space.bilibili.com/"], .up-info a[href*="space.bilibili.com/"], .upname a[href*="space.bilibili.com/"]'
-    );
+       登录用户自己，所以名字也只从 UP 主信息容器里取；两条兜底一起删掉。
+       1.9.3：新版 B 站页面没有 `#v_upinfo`（1.8.21 的容器选择器全落空），最后一条
+       `.upname a` 兜底会命中右侧推荐列表里第一个卡片 —— 名字、UID、主页全变成推荐位上
+       那个 UP。现在改成「认 UP 主名字节点本身」：`.up-name` 链接，且排除被整卡链接包住的
+       推荐位/合集位（那些链接里嵌着 `/video/`）；容器里找不到时也绝不整页乱抓，留空。 */
+    const findOwnerAnchor = () => {
+      const scoped = document.querySelector(
+        '#v_upinfo a[href*="space.bilibili.com/"], .up-info a[href*="space.bilibili.com/"]'
+      );
+      if (scoped) return scoped;
+      const candidates = Array.from(document.querySelectorAll('a[href*="space.bilibili.com/"]'))
+        .filter((node) => !node.closest('a[href*="/video/"]'))
+        .filter((node) => /(^|\s)up-name(\s|$)/.test(typeof node.className === "string" ? node.className : ""));
+      return candidates[0] || null;
+    };
+    const upContainerLink = findOwnerAnchor();
     const linkMid = upContainerLink?.href?.match(/space\.bilibili\.com\/(\d+)/)?.[1] || "";
     const ownerMid = String(owner.mid || owner.uid || "");
     const upMid = ownerMid || linkMid;
+    const upNameText = upContainerLink ? (upContainerLink.textContent || "").replace(/\s+/g, " ").trim() : "";
     const title = video.title || document.querySelector("h1")?.textContent?.trim() || document.title.replace(/_哔哩哔哩.*$/i, "").trim();
     const player = document.querySelector("video");
 
@@ -211,7 +224,7 @@
       category: [video.tname || video.tid_name || "", video.tname2 || ""].filter(Boolean).join(" / "),
       duration: Number(video.duration) || (Number.isFinite(player?.duration) ? Math.floor(player.duration) : 0),
       pubdate: Number(video.pubdate) || 0,
-      upName: owner.name || owner.uname || document.querySelector("#v_upinfo .username, #v_upinfo .up-name, .up-info .name, .up-info .username, .upname a")?.textContent?.trim() || "",
+      upName: owner.name || owner.uname || upNameText || "",
       upMid,
       description: video.desc || video.description || meta('meta[name="description"]') || "",
       tags

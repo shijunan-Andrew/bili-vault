@@ -83,6 +83,65 @@ const now = () => Date.now();
 /* ---------------- 统计库：读 ---------------- */
 
 async function suite() {
+  /* ---------------- 1.9.3：收藏时的补资料与去重 ---------------- */
+
+  await test("收藏前按「收藏夹 + BV」索引找已有目录，BV 对得上才复用（1.9.3）", async () => {
+    const bvid = bv("A1");
+    const favoriteLine = "视频收藏时间：2026年10月08日21时15分00秒.000";
+    const infoText = [
+      "【基本信息】",
+      favoriteLine,
+      "信息保存于：2026年10月08日21时15分00秒",
+      "所属收藏夹：测试收藏夹",
+      "视频标题：老标题",
+      "视频链接：https://www.bilibili.com/video/" + bvid,
+      "BV号：" + bvid,
+      ""
+    ].join("\r\n");
+    const bg = loadBackground({
+      chrome: makeChrome({ localData: { biliVaultBvIndex: { 测试收藏夹: { [bvid]: "2026年10月08日21时15分00秒" } } } })
+    });
+    const root = makeDirectoryTree({ 测试收藏夹: { "2026年10月08日21时15分00秒": { "视频信息.txt": infoText } } });
+    const collectionFolder = await root.getDirectoryHandle("测试收藏夹");
+    const existing = await bg.__test.readExistingRecordFolder(collectionFolder, "2026年10月08日21时15分00秒", bvid);
+    assert.ok(existing, "索引命中的目录应该复用");
+    assert.equal(existing.favoriteLine, favoriteLine);
+    assert.equal(await bg.__test.readExistingRecordFolder(collectionFolder, "2026年10月08日21时15分00秒", bv("B2")), null);
+    assert.equal(await bg.__test.readExistingRecordFolder(collectionFolder, "", bvid), null);
+    assert.equal(await bg.__test.readExistingRecordFolder(collectionFolder, "2026年10月09日00时00分00秒", bvid), null);
+  });
+
+  await test("收藏时用接口补真实 UP 主与互动数据，接口失败就退回页面元数据（1.9.3）", async () => {
+    const pageMetadata = { bvid: bv("A1"), upName: "推荐位里的名字", upMid: "999", title: "页面标题" };
+    const fetchOk = async () => ({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          bvid: bv("A1"),
+          aid: 123,
+          title: "真标题",
+          desc: "真简介",
+          pubdate: 1700000000,
+          duration: 120,
+          pic: "https://i0.hdslb.com/bfs/archive/cover.jpg",
+          owner: { mid: 4925207, name: "真 UP" },
+          stat: { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 }
+        }
+      })
+    });
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }), fetch: fetchOk });
+    const merged = await bg.__test.enrichFavoriteMetadata(pageMetadata);
+    assert.equal(merged.upName, "真 UP");
+    assert.equal(merged.upMid, "4925207");
+    assert.deepEqual(merged.stats, { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 });
+
+    const failing = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const fallback = await failing.__test.enrichFavoriteMetadata(pageMetadata);
+    assert.equal(fallback.upName, "推荐位里的名字");
+    assert.equal(fallback.stats, undefined);
+  });
+
 
   await test("新目录第一次读库：给空库、允许写、reason 是 empty", async () => {
     const bg = loadBackground({ chrome: chromeWithMirror(null) });

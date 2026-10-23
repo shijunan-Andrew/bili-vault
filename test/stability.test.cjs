@@ -7580,3 +7580,50 @@ test("统计分天按「首次入库时间」（目录名），不按「视频�
   const doc = readProjectFile("docs/ARCHITECTURE.md");
   assert.match(doc, /统计分天按「首次入库时间」（目录名）/, "这条特性要写进已知限制，免得下一个人又当 bug 修");
 });
+
+// ---- 1.9.3：收藏时先补接口数据、按 BV 去重、UP 主只在视频自己的信息区取 ----
+
+test("UP 主只在视频自己的信息区里取，绝不捡全页第一个 space.bilibili.com 链接（1.9.3）", () => {
+  const source = readProjectFile("content.js");
+  assert.match(source, /const findOwnerAnchor = \(\) => \{/);
+  assert.ok(source.includes('#v_upinfo a[href*="space.bilibili.com/"], .up-info a[href*="space.bilibili.com/"]'), "UP 主链接必须限定在视频信息区里");
+  assert.ok(source.includes(".filter((node) => !node.closest('a[href*=\"/video/\"]'))"), "推荐位卡片的链接要排除掉");
+  assert.match(source, /const upNameText = upContainerLink \?/);
+  assert.match(source, /upName: owner\.name \|\| owner\.uname \|\| upNameText \|\| ""/);
+  assert.ok(!source.includes("document.querySelector('a[href*=\"space.bilibili.com/\"]')"), "全页第一个 space 链接的兜底不许回来");
+});
+
+test("收藏前用 /x/web-interface/view 补真实 UP 主与互动数据，UP 主不再来自推荐位（1.9.3）", () => {
+  const source = readProjectFile("background.js");
+  assert.match(source, /const SAVE_ENRICH_TIMEOUT_MS = 8000;/);
+  assert.match(source, /async function enrichFavoriteMetadata\(pageMetadata\) \{/);
+  assert.ok(source.includes('await biliImportApiGet("/x/web-interface/view", bvid ? { bvid } : { aid }, SAVE_ENRICH_TIMEOUT_MS)'), "收藏时要请求视频详情接口");
+  assert.match(source, /upName: importIsPlaceholder\(owner\.name\) \? metadata\.upName : owner\.name,/);
+  assert.match(source, /const metadata = await enrichFavoriteMetadata\(pageMetadata\);/);
+  assert.match(source, /console\.warn\("收藏时没能补上互动数据（这次先按页面抓到的存，之后可以用「更新视频状态」补）", error\);/);
+});
+
+test("同一条视频在同一个收藏夹里只留一份：按 BV 索引复用目录，并保留原「视频收藏时间」（1.9.3）", () => {
+  const source = readProjectFile("background.js");
+  assert.match(source, /const BV_INDEX_KEY = "biliVaultBvIndex";/);
+  assert.match(source, /function bvOfInfoText\(text\) \{/);
+  assert.match(source, /async function readExistingRecordFolder\(collectionFolder, directoryName, bvid\) \{/);
+  assert.match(source, /if \(bvOfInfoText\(text\) !== bvid\) return null;/);
+  assert.match(source, /return \{ directory, favoriteLine: favoriteLineOfInfoText\(text\) \};/);
+  assert.match(source, /const bvIndex = await loadBvIndex\(\);/);
+  assert.match(source, /const existing = await readExistingRecordFolder\(collectionFolder, indexedDirectory, savedBvid\);/);
+  assert.match(source, /const recordFolder = existing\?\.directory \|\| \(await uniqueTimeFolder\(collectionFolder, dateFolderName\)\);/);
+  assert.match(source, /infoText = infoText\.replace\(\/\^视频收藏时间：\.\*\$\/m, \(\) => existing\.favoriteLine\);/);
+  assert.match(source, /await saveBvIndex\(bvIndex\);/);
+  assert.match(source, /const reusedSuffix = reusedCount \? `（其中 \$\{reusedCount\} 条更新的是已有记录）` : "";/);
+  assert.match(source, /const partialMessage = `已保存到 \$\{savedFolders\.length\} 个收藏夹\$\{reusedSuffix\}/);
+  assert.match(source, /const message = `已保存到 \$\{savedFolders\.length\} 个收藏夹\$\{reusedSuffix\}。`;/);
+});
+
+test("收藏库扫描后把「收藏夹 → BV → 目录名」发布给后台（1.9.3）", () => {
+  const source = readProjectFile("library.js");
+  assert.match(source, /const BV_INDEX_KEY = "biliVaultBvIndex";/);
+  assert.match(source, /function publishBvIndex\(collections\) \{/);
+  assert.match(source, /BcaArchiveCore|chrome\.storage\.local\.set\(\{ \[BV_INDEX_KEY\]: index \}\)/);
+  assert.match(source, /rememberArchiveCacheLimit\(cacheKey, stats\.total\);\r?\n  \/\/ 1\.9\.3：把「收藏夹 → BV → 目录名」发布给后台[^\r\n]*\r?\n  publishBvIndex\(scanned\);/);
+});

@@ -124,6 +124,14 @@ async function suiteLibrary() {
     assert.equal(page.warnings.length, 0, `加载期不该有 warning：${page.warnings.join(" | ")}`);
   });
 
+  await test("扫描完把「收藏夹 → BV → 目录名」发布给后台，收藏时不再重复建目录（1.9.3）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    await settle();
+    const stored = page.__chrome.storage.local.dump().biliVaultBvIndex || {};
+    assert.deepEqual(stored["小鲸鱼测试"], { BV1xx411c7mD: "2026年10月09日01时19分50秒", BV1yy411c7mE: "2026年10月10日02时20分00秒" });
+    assert.equal(stored["另一个夹"], undefined, "没有 BV 号的记录不进索引");
+  });
+
   await test("扫描一份真实归档：收藏夹列表、视频网格、计数都按目录内容渲染（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;

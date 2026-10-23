@@ -358,6 +358,8 @@ const BACKGROUND_EXPORTS = [
   "readStatsMirror", "applyStatsMirror", "syncStatsMirror", "publishStatsSnapshot",
   "archiveBrokenStatsDatabase",
   "createDirectoryOrExplain", "describeDirectoryCreateError",
+  "saveFavorite", "readExistingRecordFolder", "bvOfInfoText", "favoriteLineOfInfoText",
+  "loadBvIndex", "saveBvIndex", "enrichFavoriteMetadata",
   "writeFile", "fileExists"
 ];
 
