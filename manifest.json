@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "哔哩藏库",
-  "version": "1.8.21",
+  "version": "1.8.22",
   "description": "把 B 站收藏夹备份本地，启用后，收藏成功自动保存视频资料到本地，支持已有收藏夹视频的本地归档与失效视频恢复，支持本地归档浏览、搜索与筛选。",
   "minimum_chrome_version": "111",
   "icons": {
