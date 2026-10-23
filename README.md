@@ -134,35 +134,38 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 ## 正式版更新
 
-> 这里**只放最新一版**的改动说明。更早的版本（V1.8.23 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
+> 这里**只放最新一版**的改动说明。更早的版本（V1.8.24 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.8.24：商店上架准备与统计库迁移位
+## V1.9.0：按钮搬家、回收站页，和「删了也还能捞回来」
 
-这版把 TODO 的 P3 三条收掉，都是「为以后省事」的准备，日常用法一点没变。
+这版把「导出/导入/体检/回收站」从收藏库侧栏搬到了设置页，并给回收站做了一页真正的收件箱。
 
 **你会感觉到的几处**
 
-- **有一份正式的隐私说明了**：新增 [`docs/PRIVACY.md`](docs/PRIVACY.md)，把「数据存在本机哪儿、只向哪两个域名发 GET、每个权限到底干什么、错误报告里有什么、怎么删干净」一次写清；提交商店审核时可以直接引用。
-- **扩展信息补全**：`manifest.json` 加了 `homepage_url`，商店页、隐私说明与仓库地址能对得上。
+- **侧栏清爽了**：收藏库左上角不再堆一排工具按钮；导出配置、导入配置、只导外观与档位、导出归档元数据，现在都在**设置页 → 导入与导出**里。
+- **归档体检和回收站也搬进了设置页**：设置页多了「归档维护」一组，点「查看回收站」会打开一个新的回收站页。
+- **回收站页像一个小列表**：最近删掉的视频以卡片排开（和收藏库一样的卡片，但**点不开**，只用来选），能全选、恢复所选、彻底删除所选，也能一键清空回收站。恢复时若目标收藏夹里已有同名目录，会存成「名字-2」，**不会覆盖**。
+- **删除提示不再说「不可恢复」**：收藏库里的删除确认现在写的是「会先移进 005回收站，30 天后自动清理；这段时间里还能自己捞回来」，按钮从「删除本地文件，不可恢复」改成「移到回收站」。
+- **备份文件夹失联时更稳**：设置页与收藏库共用同一套归档读盘代码；网络盘掉线、目录被移走等情况会按「读不出来」处理，不会把归档当成空的。
 
 **开发侧（不影响使用）**
 
-- **发布包有了白名单与体积上限**：`pack.ps1` 现在先核对「包里只允许出现哪些文件」，再卡单文件 2 MB、源目录 6 MB、zip 3 MB、文件数 150；任何一项超了直接失败（zip 超限还会把包删掉），末尾多打一行「发布清单」。
-- **统计库有了显式版本位**：`database.json` 多一个 `schemaVersion` 字段，迁移逻辑收进 `migrateDatabase()`（目前只有 v1，老库读进来自动补上）；以后改结构不用再往 `normalizeDatabase()` 里堆兼容分支。
-- **基准有趋势了**：`node test/bench.cjs` 每次跑完把中位数追加到参考区的 `bench.md`（`--no-log` 可跳过），跨版本能看出哪一格变慢了；它仍然不是门禁，也不影响退出码。
+- 归档读盘、记录映射、回收站原语收进 `archive-tools.js` 一处；`library.js` 与 `settings.js` 都只调它，原来 `library.js` 里那份 `videoFromArchiveRecord` 已删。
+- 收藏库的搜索词、筛选与排序开始持久化到 `libraryFilters`；设置页导入配置后收藏库不用重开就会跟上。
+- **移除了「把老 PNG 封面转成 WebP」**：这个一次性工具已经不需要，`archive-core.js` 里的 `coverConvertAction()` 与四个常量一并删除；归档里遗留的 `封面.png` 仍原样保留、照常读取。
 
-**遗留**：商店里还没有实际提交（需要账号、截图与审核文案）；`library.js` 仍是单文件。
+**遗留**：回收站页的恢复不覆盖同名目录（自动加 `-2`）；30 天清理只认插件自己写的时间戳目录名。
 
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1001 条**<!-- i18n-count:1001 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1019 条**<!-- i18n-count:1019 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:357 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:356 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

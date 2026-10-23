@@ -15,6 +15,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
 ├── archive-core.js               # 可复用的纯逻辑：安全名称、下载目录匹配、下载路径、视频信息解析、页码序列
+├── archive-tools.js              # 1.9.0：归档读盘与回收站原语（scanArchive / readRecord / recordToVideo / recycle* / listRecycled / restoreRecycled / deleteRecycled / pruneRecycler）。library.js 与 settings.js 共用这一份
 ├── stats-core.js                 # 1.5.0：本地数据库的纯逻辑（明细读写、按本地日分天、快照与排行、宠物亲密度）。浏览器挂 globalThis，node 里能 require
 ├── pet.js / pet.css              # 1.5.0：宠物挂件（自绘内联 SVG + 气泡轮播 + 点击互动），只读 chrome.storage 里的快照
 ├── stats.html/js/css             # 1.5.0：数据统计页（数字卡 + 最近 14 天柱状图 + 收藏夹排行），入口在设置页
@@ -25,8 +26,9 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 │   ├── zh-TW.json                # 繁体词典（简体中文不需要词典，查不到就原样返回）
 │   └── en.json                   # 英文词典
 ├── popup.html/js/css             # 插件弹窗：自动归档开关、本地备份文件夹、导入界面、语言（1.4.0 起弹窗不再有主题滑块）
-├── settings.html/js/css          # 1.3.2：设置页（外观 / 语言 / 使用说明）；1.4.0 起外观含自定义背景与毛玻璃；1.5.0 起多一组「数据统计」（统计页入口 + 宠物挂件开关）
+├── settings.html/js/css          # 1.3.2：设置页（外观 / 语言 / 使用说明）；1.4.0 起外观含自定义背景与毛玻璃；1.5.0 起多一组「数据统计」；1.9.0 起再加「导入与导出」「归档维护」（体检与回收站入口）
 ├── library.html/js/css           # 本地收藏库页面
+├── recycle.html/js/css           # 1.9.0：回收站页（卡片列表、恢复/彻底删除/一键清空），从设置页「查看回收站」打开
 ├── guide.html / tutorial.html     # 使用说明页 / 安装教程页（两页共用 tutorial.js、page.css、mockup.css）
 ├── tutorial.js                    # 上面两页共用的关窗按钮脚本
 ├── mockup.css                     # 教程页与说明页共用的界面示意图样式（CSS 画的假截图）
@@ -264,6 +266,16 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **视频卡按 `video.id` 复用**：`renderVideos()` 先把当前页记录塞进 `pageVideoById`，再按 id 从 `videoGrid` 现有子节点里找卡片，找不到才 `createVideoCard()`，随后 `updateVideoCard(card, video, query)` 刷内容；顺序不同才逐位 `insertBefore`，多余子节点 `removeChild`。卡片的事件处理器只绑一次，**一律用 `pageVideoById.get(card.dataset.videoId)` 取当前记录**——闭包捕获旧 video 会让筛选后的点击落到上一条记录上。`paintPageCovers()` 仍按页统一读封面。
 - **HISTORY 版本索引**：`scripts/history-index.cjs` 在 `docs/HISTORY.md` 顶部维护「版本 → 行号」表；`--write` 重算、`--check` 验新鲜度，`scripts/check-all.cjs` 第 7 项调它。**行号按 `blockLineCount(rows) = rows + 6` 先占位再回填**，别按插入前的行号直接写。新增/删除版本小节后跑一次 `node scripts/history-index.cjs --write`。
 
+### 共享归档工具、设置页导入导出与回收站页（1.9.0）
+
+- **归档读盘与回收站原语只有一份**：`archive-tools.js` 集中 `scanArchive()` / `readRecord()` / `recordToVideo()` / `recycleCollection()` / `recycleRecords()` / `listRecycled()` / `restoreRecycled()` / `deleteRecycled()` / `pruneRecycler()` / `purgeRecycler()` / `loadRootHandle()` / `ensureRootPermission()`。`library.js` 顶部解构别名后直接调用，**它自己那份 `videoFromArchiveRecord`、缓存淘汰、保留目录名单、回收站常量都已删除**；`settings.js` 也调同一份。新增归档读盘或删除动作时先看这里，不要再往页面里抄一份。
+- **记录映射只有 `recordToVideo()` 一处**：把「磁盘上的记录目录 + `视频信息.txt`」变成界面用的 video 对象（`downloadIndex` 可选、`previous` 用于保留上一轮的下载状态）；`library.js` 的 `scanRoot` 与 `settings.js` 的元数据导出都用它。
+- **配置导出/导入搬进设置页**：`settings.html` 的「导入与导出」卡里有 `#settingsExportConfig` / `#settingsImportConfig` / `#settingsExportConfigSlim` / `#settingsExportArchive`；设置页读 `chrome.storage.local` 的 `libraryPageSize` / `libraryViewMode` / `collectionOrder` / `libraryFilters` 拼 payload，导入时写回同样四个键（主题走 `BcaTheme.use`、语言走 `BcaI18n.use`）。**收藏库不再有导出/导入按钮，别再往 `library.js` 里加回去。**
+- **筛选的持久化在收藏库**：`library.js` 的 `saveViewSettings()` 把搜索词、视频筛选、UP/标签筛选、排序写进 `libraryFilters`；`restoreViewSettings()` 启动时套回，`chrome.storage.onChanged` 里 `libraryFilters` 一变就 `applyLibraryFilters()` + `renderVideos()`。设置页导入「只导外观与档位」时没有 `filters` 字段，就不动用户已有的筛选。
+- **回收站页**：`recycle.html` 加载 `theme.css` / `page.css` / `library.css` / `recycle.css` + `archive-core.js` / `archive-tools.js` / `recycle.js`；卡片复用 `.video-grid` / `.video-card`，但 `cursor: default`、hover 不位移，**整卡只切换选择、不打开**。恢复、彻底删除、一键清空各自 `window.confirm`，其中彻底删除与清空写明「不可逆，不会进系统回收站」。`restoreRecycled()` 遇到目标收藏夹里同名目录会追加 `-2`/`-3`，**绝不覆盖**。
+- **转入回收站的动作不变**：收藏库的删除仍然先 `recycleCollection()` / `recycleRecords()`，`pruneRecycler()` 在扫描结束后 fire-and-forget；确认框文案是「先移进 005回收站，30 天后自动清理」，**不要再出现「不可恢复」「不进系统回收站」这类字样**（stability 盯着）。
+- **「把老 PNG 封面转成 WebP」已整体移除（1.9.0）**：`archive-core.js` 的 `COVER_PNG_NAME` / `COVER_WEBP_NAME` / `COVER_WEBP_QUALITY` / `coverConvertAction()` 与 `library.js` 的 `convertLegacyPngCovers()` 都删了。归档里遗留的 `封面.png` 原样保留，读取侧照旧优先 `封面.webp`、退回 `封面.png`。
+
 ### 已知限制（4.9 审视结论，未修的部分）
 
 一次覆盖 约 8800 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**
@@ -291,7 +303,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **卡片用相对时间、详情用绝对时间是刻意分工**（1.8.22 复核，不修）：列表要能一眼扫「刚存的还是很久以前的」，详情要能和磁盘上的目录名逐字对上。**别为了「统一」把两处改成同一种格式。**
 - **统计页的小表每次渲染都重算**（1.8.22 复核，不修）：`normalizeDayRows` 逐渲染重建 Map，`dailyRows` 上限 180 行，常数项远小于缓存 + 失效判断的成本。要改先量 `test/bench.cjs`。
 - **递归删除遇到 junction / symlink 的行为只做过说明、没有自动化断言**（1.8.22）：FSA 的 `removeEntry(..., { recursive: true })` 在不同 Windows 版本上对 junction 的处理无法在 CI 里复现，只能真机验证。删除失败走失败分支并保留现场，不会静默成功。
-- **回收站只按整份 30 天清理，没有「撤销这一条」**（1.8.23）：要提前捞回来只能自己从资源管理器把 `005回收站/<时间戳>/` 下的目录拖回收藏夹；`pruneRecycler()` 只认自己写的时间戳目录名，用户改过名的目录不会被自动清理，也不会被误删。
+- **回收站页可以逐条恢复/彻底删除，但不覆盖同名目录**（1.9.0）：恢复时目标收藏夹里已有同名目录会存成「名字-2」，想合并只能手动处理；30 天清理仍只认插件自己写的时间戳目录名，用户改过名的目录不会被自动清理，也不会被误删。
 - **`safeLocalSet()` 只接了三条关键路径**（1.8.23）：统计镜像、补存登记、统计快照。其余几十处 `chrome.storage.local.set` 仍是裸写——它们失败最多丢一条界面状态，不值得逐个改；新增关键写入时再往 `safeLocalSet` 里接。
 - **归档体检只描述、不修**（1.8.23）：七类问题里「只有骨架」「缺封面」这类含历史遗留的正常现象，报告不做去重也不做合并；每点一次都重新全量扫一遍（8 路并发读）。
 - **`bcaImportResume` 按收藏夹名匹配**（1.8.23）：中途给收藏夹改名或删掉它，续跑就回退成从头开始（会写一行说明）。续跑只保证「不重复写已经有 `视频信息.txt` 的记录」，不保证页内顺序与上次完全一致。
@@ -346,7 +358,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **排序不做全表**（1.8.7）：`renderVideos()` 用 `selectFirstVideos(list, count, compare)` 挑「当前页及以前」的前 k 名（大小封顶为 k 的最大堆），再 `slice` 出当前页。相等项一律按下标兜底（`|| left - right`），保证与「整表稳定排序后再切页」逐项一致 —— 换算法不许让列表顺序抖动。
 - **导入可以按条数收工（1.8.8）**：`bca-import-selected-folders` 载荷可带 `limit`（0 = 全部）。名额只数 `pendingItems`（本地还没有的新视频），已有记录不算；`remaining = importLimit - imported` 截断队列后置 `limitReached`，收藏夹循环据此提前 `break`，且额度用完时不再刷新旧记录。完成消息与报告都要写明「按上限」「还剩多少」，否则用户会把「只导了一半」当失败。
 - **「同步最近收藏」是「开始更新」的新名字（1.8.8）**：界面、引导页、两本词典一起改名；`docs/HISTORY.md` 里的旧写法是历史记录，不改。
-- **老 PNG 封面转 WebP（1.8.8）**：只走用户连上的 `rootHandle`，只碰记录目录里的 `封面.png`，先写 `封面.webp`、`close()` 之后才删原 PNG；保留目录与 `视频信息.txt` 一律不动；判断走 `archive-core.js` 的 `coverConvertAction()`，动手前先过 `archiveWriteLockedByImport()`。
+- **老 PNG 封面转 WebP 工具已移除（1.9.0）**：`coverConvertAction()` 与四个常量全部删除；归档里遗留的 `封面.png` 原样保留、读取侧照常退回它。别再把这个一次性迁移工具加回来。
 - **`004导出` 只留最近 5 份（1.8.8）**：导出成功后按 `exportPruneList()` 删多余（同秒撞名的 `-2` 排在本体之后），删旧失败只记日志，不影响本次导出；用户自己放进去的文件不匹配命名规则，不会被删。
 
 - **位置重算才允许过渡**（1.8.12）：`syncPosition(animate)` 显式传参 —— 换尺寸档、窗口 resize 传 `true`，拖动与 `settle()` 传 `false`；`settle()` 自己先写 `transition = "none"`。
@@ -380,7 +392,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
   抢同一把锁，互相等成死锁。
 - **换代时交接封面，别扔**（1.8.16）：扫描结果里每条记录都是新对象、`cover` 为空。换 `collections` 之前先按「收藏夹 + 目录名」把旧封面记下来，给新对象 `addCoverRef()` 补一次引用，再让旧对象交还 —— 顺序反了 URL 会被提前撤销，真机表现是卡片先白一下再补图。
 - **搬运下载目录前先问空间**（1.8.7）：`ensureCopySpace()` 用 `navigator.storage.estimate()` 预检，不够就带着「还差 X」抛错；`estimate` 拿不到时只 `console.warn` 放行，**别拦**（老浏览器没有这个 API）。
-- **老 PNG 封面只从归档目录里转**（1.8.8）：`convertLegacyPngCovers()` 只遍历 `rootHandle` 下的收藏夹 → 记录目录一层，只认记录目录里文件名叫「封面.png」的那一个，写「封面.webp」成功后才 `removeEntry("封面.png")`。下载目录（`000视频下载`）、`001错误报告` / `002同步报告` / `003database` / `004导出` / `005回收站` / `006报告`、`视频信息.txt` 以及用户自己放进去的文件，**一个都不碰**；保留目录名单与扫描跳过名单是同一套（`ARCHIVE_RESERVED_DIRS`）。「转不转」的判断在 `BcaArchiveCore.coverConvertAction()` 一处：已经有 `封面.webp` 就绝不重转。
+- **遗留的 `封面.png` 不会被自动转换了**（1.9.0）：转换工具已删，记录目录里同时有 `封面.webp` 与 `封面.png` 时，读取侧优先用 WebP、`封面.png` 只做兜底；保留目录名单（`archive-tools.js` 的 `RESERVED_DIRS`，9 个名字）在扫描、回收、体检里是同一套。
 - **`004导出` 只留最近 5 份**（1.8.8）：导出成功之后用 `BcaArchiveCore.exportPruneList()` 算出该删哪几个（只认 `归档元数据-YYYYMMDD-HHMMSS(-N)?.json`，同秒撞名时本体排在 `-2` 之前），逐个 `removeEntry`。**清理失败绝不影响这次导出**：写盘已经成功，删不掉只留一条 `console.warn`。
 - **性能基准的软上界**（1.8.8）：`test/bench.cjs` 里的 `SOFT_LIMITS_MS` 记着 N = 10000 那一档的「不该再慢成什么样」（实测 × 约 2）。它**不是门禁**：默认只在汇总里打 `[!] … 超过软上界 …`，加了 `--strict` 才用退出码 1 结束。换机器请整表重标；同一台机器跑两遍再下结论。
 - **基准有趋势文件了**（1.8.24，P3-14）：`node test/bench.cjs` 跑完会把每组中位数追加到仓库外的 `Desktop\bili_vault_ref\bench.md`（`版本 | 时间 | node | 平台` + 一张表），`--no-log` 跳过；仍然不进 `check-all`、不影响退出码。脚本里的版本号从 `manifest.json` 现读，别再写死。
@@ -427,7 +439,7 @@ V1.2.3 起：**折叠的须知必须留个「口子」** —— 摘要行里固�
 
 解析视频信息时依赖“【基本信息】”区块和“视频标题”等字段。不要轻易改变文件名或目录格式，否则旧档案可能不再被识别。列表中的收藏夹和视频信息是本地扫描的结果；线上 B 站收藏不会因移动/删除本地记录而改变。
 
-移动或复制操作先按目标收藏夹判断 BV/av 重复项，再复制归档文件。勾选原收藏夹表示保留原件（复制）；不勾选表示移动。删除收藏夹/视频/批量视频前会确认；**确认后的删除一律先挪进 `005回收站`（保留 30 天），不再直接递归删**（见「回收站、归档体检与导入断点」）；扫描提示条上的「清理这些没写完的目录」同样先送回收站。用户可额外勾选同时删除关联下载，默认不删除下载。
+移动或复制操作先按目标收藏夹判断 BV/av 重复项，再复制归档文件。勾选原收藏夹表示保留原件（复制）；不勾选表示移动。删除收藏夹/视频/批量视频前会确认；**确认后的删除一律先挪进 `005回收站`（保留 30 天），不再直接递归删**（见「共享归档工具、设置页导入导出与回收站页」）；扫描提示条上的「清理这些没写完的目录」同样先送回收站。删进回收站的内容可以在设置页「查看回收站」里逐条恢复或彻底删除。用户可额外勾选同时删除关联下载，默认不删除下载。
 
 **V1.2.1 起，这个对话框还会标出「这支视频在别的收藏夹里也有一份」**：`collectionsHoldingEveryVideo(videos)` 用 BV/av 标识键（`videoIdentifierKeys` / `identifiersOverlap`）在全库的 `collections` 里比对，命中的收藏夹加一枚灰色「已收录」徽标（和品牌色的「原收藏夹」徽标刻意分开）。**徽标只是说明，不参与搬运**：`moveVideoRecordToTargets` 只在 `video.collection` 不在目标里时才移走**那一个**副本，别处的副本它不碰 —— 所以「已收录」的收藏夹**故意不被默认勾选**。勾上不会产生任何效果，却会让用户以为「取消勾选 = 从那里删掉」，点了看着像干了什么其实什么都没干。要清理别处的副本，得先切到那个收藏夹再操作一次。没有 BV/av 号的档案（标识键为空）不参与比对：宁可漏标，不能标错。底部说明文字、`.collection-held-badge` 样式、这条规则都由测试盯着。
 

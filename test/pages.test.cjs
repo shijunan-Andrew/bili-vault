@@ -119,7 +119,7 @@ function idsIn(root, selector) {
 async function suiteLibrary() {
   await test("library.html 整页真加载：七个脚本都跑了，侧栏版本号来自 manifest", async () => {
     const page = await openLibrary();
-    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "archive-core.js", "stats-core.js", "library.js", "pet.js"]);
+    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "archive-core.js", "archive-tools.js", "stats-core.js", "library.js", "pet.js"]);
     assert.equal(page.document.getElementById("sideVersion").textContent, "V1.7.23");
     assert.equal(page.warnings.length, 0, `加载期不该有 warning：${page.warnings.join(" | ")}`);
   });
@@ -246,17 +246,23 @@ async function suiteLibrary() {
     assert.equal(doc.getElementById("confirmBackdrop").hidden, true, "取消后要关掉");
   });
 
-  await test("导出配置：完整导出带个人内容，精简导出只有外观与档位（1.7.23）", async () => {
-    const page = await openLibrary({ tree: sampleTree(), localData: { locale: "zh-CN" } });
+  await test("设置页导出配置：完整导出带个人内容，精简导出只有外观与档位（1.9.0）", async () => {
+    const page = await openSettings({
+      localData: {
+        libraryPageSize: 50,
+        libraryViewMode: "list",
+        collectionOrder: ["另一个夹", "小鲸鱼测试"],
+        libraryFilters: { search: "第二条", videoFilter: "invalid", upFilter: "all", tagFilter: "all", sort: "oldest" }
+      }
+    });
     const doc = page.document;
     const blobs = [];
 
-    // 拦截落盘：把 <a download> 的点击换成抓 Blob
     const originalCreate = page.window.URL.createObjectURL;
     page.window.URL.createObjectURL = (blob) => { blobs.push(blob); return "blob:test/captured"; };
     page.window.confirm = () => true;
     try {
-      doc.getElementById("exportConfigSlim").click();
+      doc.getElementById("settingsExportConfigSlim").click();
       await settle(6);
       assert.equal(blobs.length, 1, "精简导出应当落一个文件");
       const slim = JSON.parse(blobs[0].parts.join("").replace(/^\uFEFF/, ""));
@@ -265,42 +271,48 @@ async function suiteLibrary() {
       assert.equal("collectionOrder" in slim.preferences, false, "精简导出不许带收藏夹顺序");
       assert.equal("filters" in slim.preferences, false, "精简导出不许带筛选词");
 
-      doc.getElementById("exportConfig").click();
+      doc.getElementById("settingsExportConfig").click();
       await settle(6);
       assert.equal(blobs.length, 2, "完整导出应当再落一个文件");
       const full = JSON.parse(blobs[1].parts.join("").replace(/^\uFEFF/, ""));
       assert.equal(full._containsPersonalData, true);
-      assert.deepEqual(full.preferences.collectionOrder, ["另一个夹", "小鲸鱼测试"]);
-      assert.ok(full.preferences.filters);
+      assert.deepEqual(full.preferences.collectionOrder, ["另一个夹", "小鲸鱼测试"], "完整导出要带上收藏夹顺序");
+      assert.equal(full.preferences.filters.search, "第二条", "完整导出要带上搜索词");
+      assert.equal(full.preferences.filters.sort, "oldest", "完整导出要带上筛选与排序");
     } finally {
       page.window.URL.createObjectURL = originalCreate;
     }
   });
 
-  await test("导入配置：app 名不对、JSON 坏掉、超过 256KB 都要报错且不改界面（1.7.23）", async () => {
-    const page = await openLibrary({ tree: sampleTree() });
-    const doc = page.document;
+  await test("设置页导入配置：app 名不对、JSON 坏掉、超过 256KB 都要报错且不改界面（1.9.0）", async () => {
+    const page = await openSettings();
     const g = page.window;
-    const before = textOf(doc.getElementById("currentCollection"));
+    const transfer = g.BcaSettingsTransfer;
+    assert.ok(transfer, "设置页要暴露 BcaSettingsTransfer");
+    const themeBefore = page.document.documentElement.getAttribute("data-theme");
 
-    await assert.rejects(() => g.importConfigFromText("{ 这不是 JSON"), /./);
-    await assert.rejects(() => g.importConfigFromText(JSON.stringify({ app: "别的东西", version: 1, preferences: {} })), /./);
+    await assert.rejects(() => transfer.importConfigText("{ 这不是 JSON"), /合法的 JSON/);
+    await assert.rejects(
+      () => transfer.importConfigText(JSON.stringify({ app: "别的东西", version: 1, preferences: {} })),
+      /哔哩藏库导出的配置文件/
+    );
     const huge = JSON.stringify({ app: "bili-vault/library-settings", version: 1, preferences: {}, pad: "x".repeat(300 * 1024) });
-    await assert.rejects(() => g.importConfigFromText(huge), /超过了/);
+    await assert.rejects(() => transfer.importConfigText(huge), /超过了/);
 
-    assert.equal(textOf(doc.getElementById("currentCollection")), before, "失败不许改界面");
+    assert.equal(page.document.documentElement.getAttribute("data-theme"), themeBefore, "失败不许改界面");
   });
 
-  await test("导入配置：合法文件真的会套用主题、页大小与收藏夹顺序（1.7.23）", async () => {
-    const page = await openLibrary({ tree: sampleTree() });
+  await test("设置页导入配置：合法文件真的会套用主题、页大小、收藏夹顺序与筛选（1.9.0）", async () => {
+    const page = await openSettings();
     const g = page.window;
+    const transfer = g.BcaSettingsTransfer;
     const payload = {
       app: "bili-vault/library-settings",
       version: 1,
       preferences: {
         theme: "dark",
         locale: "zh-CN",
-        pageSize: 24,
+        pageSize: 50,
         viewMode: "list",
         collectionOrder: ["另一个夹", "小鲸鱼测试"],
         filters: { search: "", videoFilter: "all", upFilter: "all", tagFilter: "all", sort: "oldest" }
@@ -308,33 +320,30 @@ async function suiteLibrary() {
       _containsPersonalData: true
     };
     g.confirm = () => true;
-    const warnings = await g.importConfigFromText(JSON.stringify(payload));
+    const warnings = await transfer.importConfigText(JSON.stringify(payload));
     await settle(6);
     assert.equal(warnings === false, false, "确认后不该被当成取消");
-    assert.equal(page.document.documentElement.dataset.theme || page.document.documentElement.getAttribute("data-theme"), "dark");
-    const order = [...page.document.querySelectorAll("#collectionList .collection-name")].map(textOf);
-    assert.deepEqual(order, ["全部收藏", "另一个夹", "小鲸鱼测试"], "收藏夹顺序按导入的来");
+    assert.equal(
+      page.document.documentElement.dataset.theme || page.document.documentElement.getAttribute("data-theme"),
+      "dark",
+      "主题要立刻套用"
+    );
+
+    const stored = await page.chrome.storage.local.get([
+      "libraryPageSize", "libraryViewMode", "collectionOrder", "libraryFilters"
+    ]);
+    assert.equal(stored.libraryPageSize, 50, "页大小要写进 storage");
+    assert.equal(stored.libraryViewMode, "list", "视图要写进 storage");
+    assert.deepEqual(stored.collectionOrder, ["另一个夹", "小鲸鱼测试"], "收藏夹顺序要写进 storage");
+    assert.equal(stored.libraryFilters.sort, "oldest", "筛选与排序要写进 storage");
   });
 
-  await test("导入「只导外观与档位」不会清空当前的搜索词与筛选（1.8.4）", async () => {
-    const page = await openLibrary({ tree: sampleTree() });
-    const doc = page.document;
+  await test("设置页导入「只导外观与档位」不会清空收藏库已有的搜索词与筛选（1.9.0）", async () => {
+    const filters = { search: "第二条", videoFilter: "invalid", upFilter: "all", tagFilter: "all", sort: "oldest" };
+    const page = await openSettings({ localData: { libraryFilters: filters } });
     const g = page.window;
+    const transfer = g.BcaSettingsTransfer;
 
-    // 先把界面调成「用户正在筛选」的样子：搜索词、视频筛选、排序都不是默认值
-    const search = doc.getElementById("searchInput");
-    search.value = "第二条";
-    g.applySearchNow();
-    const videoFilter = doc.getElementById("videoFilter");
-    videoFilter.value = "invalid";
-    videoFilter.dispatchEvent(new g.Event("change", { bubbles: true }));
-    const sort = doc.getElementById("sortSelect");
-    sort.value = "oldest";
-    sort.dispatchEvent(new g.Event("change", { bubbles: true }));
-    await settle(4);
-    assert.equal(doc.getElementById("searchInput").value, "第二条");
-
-    // 别人发来的「只导外观与档位」：preferences 里没有 filters 这一项
     const slim = {
       app: "bili-vault/library-settings",
       version: 1,
@@ -342,17 +351,22 @@ async function suiteLibrary() {
       _containsPersonalData: false
     };
     g.confirm = () => true;
-    await g.importConfigFromText(JSON.stringify(slim));
+    await transfer.importConfigText(JSON.stringify(slim));
     await settle(6);
 
-    assert.equal(doc.getElementById("searchInput").value, "第二条", "文件里没有搜索词，就不许清空用户当前的搜索");
-    assert.equal(doc.getElementById("videoFilter").value, "invalid", "文件里没有筛选，就不许重置筛选");
-    assert.equal(doc.getElementById("sortSelect").value, "oldest", "文件里没有排序，就不许重置排序");
+    const stored = await page.chrome.storage.local.get("libraryFilters");
+    assert.deepEqual(stored.libraryFilters, filters, "文件里没有筛选，就不许清空用户现有的筛选");
     assert.equal(
       page.document.documentElement.dataset.theme || page.document.documentElement.getAttribute("data-theme"),
       "dark",
       "外观与档位仍然要生效"
     );
+
+    // 收藏库启动时把 storage 里的 libraryFilters 套回界面（1.9.0 的新读法）
+    const library = await openLibrary({ tree: sampleTree(), localData: { libraryFilters: filters } });
+    assert.equal(library.document.getElementById("searchInput").value, "第二条", "搜索词要恢复到收藏库界面");
+    assert.equal(library.document.getElementById("videoFilter").value, "invalid", "视频筛选要恢复");
+    assert.equal(library.document.getElementById("sortSelect").value, "oldest", "排序要恢复");
   });
 
   await test("只挑当前页需要的前 k 条，结果与整表稳定排序逐项一致（1.8.7）", async () => {
@@ -586,15 +600,16 @@ async function suiteLibrary() {
     assert.ok(card.getAttribute("aria-label"), "卡片要有可访问名");
   });
 
-  await test("导出归档元数据：真写进 004导出，校验和可复算，数据库里多出来的行标 stale（V1.7.30）", async () => {
+  await test("设置页导出归档元数据：真写进 004导出，校验和可复算，数据库里多出来的行标 stale（1.9.0）", async () => {
     const archiveCore = require("../archive-core.js");
-    const chrome = makeChrome({ version: "1.7.30", localData: {} });
-    const page = dom.loadPage({ htmlFile: "library.html", chrome });
+    const chrome = makeChrome({ version: "1.9.0", localData: {} });
+    const page = dom.loadPage({ htmlFile: "settings.html", chrome });
     await settle();
     const g = page.window;
     const root = await makeDirectoryTree({ "_测试归档": sampleTree() }).getDirectoryHandle("_测试归档");
-    await g.displayRoot(root, "*", BcaT(page, "已读取"));
-    await settle();
+
+    // 根句柄放进内存版 IndexedDB：settings.js 的 loadRootHandle 走的是真代码路径
+    g.indexedDB = makeRootHandleDb(root);
 
     // 手工把数据库写成「1 条磁盘上找不到的旧行」，用来看 stale 的对照是否真的生效
     const databaseDirectory = await root.getDirectoryHandle("003database", { create: true });
@@ -606,10 +621,10 @@ async function suiteLibrary() {
     }));
     await databaseWritable.close();
 
-    const button = page.document.getElementById("exportArchive");
-    assert.ok(button, "收藏库侧栏要有「导出归档元数据」按钮");
+    const button = page.document.getElementById("settingsExportArchive");
+    assert.ok(button, "设置页要有「导出归档元数据」按钮");
     button.click();
-    await settle(24);
+    await settle(32);
 
     const exportDirectory = await root.getDirectoryHandle("004导出");
     const firstNames = [];
@@ -629,16 +644,14 @@ async function suiteLibrary() {
 
     // 再点一次：同秒也不许覆盖前一份
     button.click();
-    await settle(24);
+    await settle(32);
     const secondNames = [];
     for await (const entry of exportDirectory.values()) secondNames.push(entry.name);
     assert.equal(secondNames.length, 2, `同秒连点两次要留两份，实际 ${JSON.stringify(secondNames)}`);
 
-    // 重扫一遍：004导出 不能被当成一个收藏夹
-    await g.displayRoot(root, "*", BcaT(page, "已读取"));
-    await settle();
-    const collectionNames = [...page.document.querySelectorAll("#collectionList .collection-name")].map(textOf);
-    assert.equal(collectionNames.includes("004导出"), false, `004导出 被当成收藏夹扫出来了：${JSON.stringify(collectionNames)}`);
+    // 004导出 不能被当成一个收藏夹
+    const scanned = await g.BcaArchiveTools.scanArchive(root);
+    assert.equal(scanned.collections.some((collection) => collection.name === "004导出"), false, "004导出 被当成收藏夹扫出来了");
   });
 
   await test("结果计数会播报、宠物挂件不挡读屏与 Tab（P1-5 真执行）", async () => {
@@ -837,8 +850,8 @@ async function suiteContent() {
 /* ---------------- settings.html ---------------- */
 
 /** 内存版 IndexedDB：只够 theme.js 的壁纸存取（open / transaction / get / put / delete）。 */
-function makeFakeIndexedDb() {
-  const data = new Map();
+function makeFakeIndexedDb(initial = {}) {
+  const data = new Map(Object.entries(initial));
   const request = (result) => ({ result, error: null, onsuccess: null, onerror: null, onupgradeneeded: null });
   const db = {
     objectStoreNames: { contains: () => true },
@@ -850,6 +863,40 @@ function makeFakeIndexedDb() {
         get: (key) => request(data.has(key) ? data.get(key) : undefined),
         put: (value, key) => { data.set(key, value); return request(undefined); },
         delete: (key) => { data.delete(key); return request(undefined); }
+      });
+      setTimeout(() => { if (tx.oncomplete) tx.oncomplete(); }, 0);
+      return tx;
+    }
+  };
+  return {
+    open() {
+      const opened = request(db);
+      setTimeout(() => {
+        if (opened.onupgradeneeded) opened.onupgradeneeded();
+        if (opened.onsuccess) opened.onsuccess();
+      }, 0);
+      return opened;
+    }
+  };
+}
+
+/** 只够 archive-tools.loadRootHandle：get 请求要按规范异步回调 onsuccess。 */
+function makeRootHandleDb(rootHandle) {
+  const request = (result) => {
+    const req = { result, error: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+    setTimeout(() => { if (req.onsuccess) req.onsuccess(); }, 0);
+    return req;
+  };
+  const db = {
+    objectStoreNames: { contains: () => true },
+    createObjectStore() {},
+    close() {},
+    transaction() {
+      const tx = { error: null, oncomplete: null, onerror: null, onabort: null };
+      tx.objectStore = () => ({
+        get: (key) => request(key === "rootHandle" ? rootHandle : undefined),
+        put: () => request(undefined),
+        delete: () => request(undefined)
       });
       setTimeout(() => { if (tx.oncomplete) tx.oncomplete(); }, 0);
       return tx;

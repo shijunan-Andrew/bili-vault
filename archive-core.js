@@ -679,8 +679,11 @@
         .map((name) => sliceCodePoints(name, CONFIG_MAX_TEXT_LENGTH)),
       filters: {
         search: typeof filters.search === "string" ? sliceCodePoints(filters.search, CONFIG_MAX_TEXT_LENGTH) : "",
+        // 1.9.0：视频筛选与排序也进了配置文件（导入侧 1.7.23 起就认这两项，之前只有导出漏了）
+        videoFilter: ["all", "invalid", "downloaded"].includes(filters.videoFilter) ? filters.videoFilter : "all",
         upFilter: typeof filters.upFilter === "string" ? sliceCodePoints(filters.upFilter, CONFIG_MAX_TEXT_LENGTH) : "all",
-        tagFilter: typeof filters.tagFilter === "string" ? sliceCodePoints(filters.tagFilter, CONFIG_MAX_TEXT_LENGTH) : "all"
+        tagFilter: typeof filters.tagFilter === "string" ? sliceCodePoints(filters.tagFilter, CONFIG_MAX_TEXT_LENGTH) : "all",
+        sort: ["newest", "oldest", "title", "views"].includes(filters.sort) ? filters.sort : "newest"
       }
     };
   }
@@ -997,19 +1000,6 @@
     return Math.max(1, Math.ceil(limit * 0.25));
   }
 
-  /* 1.8.8（P3-11）：老版本留下的 PNG 封面转成 WebP。
-     「转不转」只在这个纯函数里判：已经有 封面.webp 就绝不碰；只有「没有 webp、有 png」
-     才值得转。真正的读写发生在 library.js，作用域严格限制在归档根目录里。 */
-  const COVER_PNG_NAME = "封面.png";
-  const COVER_WEBP_NAME = "封面.webp";
-  const COVER_WEBP_QUALITY = 0.82;
-
-  function coverConvertAction(fileNames) {
-    const names = Array.isArray(fileNames) ? fileNames : [];
-    if (names.includes(COVER_WEBP_NAME)) return "skip";
-    return names.includes(COVER_PNG_NAME) ? "convert" : "skip";
-  }
-
   /* 1.8.8（P3-12）：004导出 只留最近几份。
      文件名是 归档元数据-YYYYMMDD-HHMMSS.json（同秒撞名再加 -2、-3），
      所以按名字升序就是按时间升序；不认识的条目一律不碰，返回的是「该删的那几个」。 */
@@ -1061,11 +1051,7 @@
     EXPORT_SCHEMA_VERSION,
     EXPORT_DIR_NAME,
     EXPORT_FILE_SUFFIX,
-    // 1.8.8（P3）：老 PNG 封面转 WebP、004导出 只留最近几份
-    COVER_PNG_NAME,
-    COVER_WEBP_NAME,
-    COVER_WEBP_QUALITY,
-    coverConvertAction,
+    // 1.8.8（P3）：004导出 只留最近几份
     EXPORT_KEEP_FILES,
     exportPruneList,
     EXPORT_CHECKSUM_ALGORITHM,

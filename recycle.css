@@ -1,0 +1,67 @@
+/* 回收站页（recycle.html）专属排版。
+   骨架与收藏库的卡片网格一致（直接复用 library.css 的 .video-grid / .video-card），
+   这里只写这一页多出来的东西：顶栏、批量操作条、空状态、以及「卡片不可点开」的提示。 */
+
+.recycle-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--sp-5);
+}
+
+.recycle-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.recycle-lead { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+.recycle-heading { min-width: 0; }
+.recycle-heading h1 { margin: 0; font-size: var(--fs-xl); }
+.recycle-summary { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+
+.recycle-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+.recycle-hint {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+
+.recycle-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  text-align: center;
+}
+.recycle-empty p { margin: 0; }
+.recycle-empty-note { font-size: var(--fs-sm); }
+
+/* 回收站里的卡片只是「一块可多选的面板」：不能点开，所以不跟随收藏库的指针提示。
+   选择框常显（收藏库那边只有批量模式才显示），否则用户不知道能多选。 */
+.recycle-grid .video-card { cursor: default; }
+.recycle-grid .video-card:hover { transform: none; }
+.recycle-grid .video-card:hover .card-cover img { transform: none; }
+.recycle-grid .card-select { display: block; }
+.recycle-grid .card-deleted {
+  margin-top: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 720px) {
+  .recycle-shell { padding: var(--sp-3); }
+  .recycle-actions { width: 100%; }
+  .recycle-actions .button { flex: 1 1 auto; }
+}

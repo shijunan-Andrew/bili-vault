@@ -79,6 +79,14 @@
           <span class="nav-icon" data-icon="user"></span>
           <span class="nav-text" data-i18n="宠物">宠物</span>
         </button>
+        <button type="button" class="nav-item" data-group="transfer">
+          <span class="nav-icon" data-icon="download"></span>
+          <span class="nav-text" data-i18n="导入与导出">导入与导出</span>
+        </button>
+        <button type="button" class="nav-item" data-group="maintenance">
+          <span class="nav-icon" data-icon="shield"></span>
+          <span class="nav-text" data-i18n="归档维护">归档维护</span>
+        </button>
         <button type="button" class="nav-item" data-group="localdata">
           <span class="nav-icon" data-icon="shield"></span>
           <span class="nav-text" data-i18n="本机数据">本机数据</span>
@@ -309,6 +317,68 @@
       <!-- 1.7.11（facet-privacy P2-3 / P2-5）：本机到底留了哪些和「你是谁」有关的东西，
            说清楚 + 给一个能反悔的按钮。UID 那条是报告点名的：为了「与 B 站对比」缓存了
            用户自己的 UID，只进不出、没有失效期也没有清除入口。 -->
+      <!-- 1.9.0：配置导出/导入与归档元数据从收藏库左上角搬到这里 —— 它们都是「设置」性质的事，
+           不该占着收藏库的主界面。配置的构造与校验仍在 archive-core.js，搬运的只是入口。 -->
+      <section class="settings-card" id="group-transfer" data-group="transfer">
+        <h2 data-i18n="导入与导出">导入与导出</h2>
+        <p class="card-lead" data-i18n="配置文件只含界面偏好；归档元数据写进本地备份文件夹的 004导出/ 里。">配置文件只含界面偏好；归档元数据写进本地备份文件夹的 004导出/ 里。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="配置">配置</p>
+            <p class="setting-row-desc" data-i18n="主题、语言、每页数量、视图模式，以及收藏夹顺序和筛选。文件里默认带着收藏夹名与搜索词，发给别人前先想想。">主题、语言、每页数量、视图模式，以及收藏夹顺序和筛选。文件里默认带着收藏夹名与搜索词，发给别人前先想想。</p>
+          </div>
+          <div class="setting-row-control">
+            <button id="settingsExportConfig" class="button button-quiet" type="button"><span data-icon="download"></span><span data-i18n="导出配置">导出配置</span></button>
+            <button id="settingsImportConfig" class="button button-quiet" type="button"><span data-icon="file"></span><span data-i18n="导入配置">导入配置</span></button>
+            <button id="settingsExportConfigSlim" class="button button-quiet" type="button"><span data-icon="download"></span><span data-i18n="只导外观与档位">只导外观与档位</span></button>
+            <input id="settingsConfigFileInput" type="file" accept="application/json,.json" hidden>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="归档元数据">归档元数据</p>
+            <p class="setting-row-desc" data-i18n="把整个归档的元数据导成一份 JSON，写进本地备份文件夹的 004导出/。只读归档，不改任何一条记录。">把整个归档的元数据导成一份 JSON，写进本地备份文件夹的 004导出/。只读归档，不改任何一条记录。</p>
+          </div>
+          <div class="setting-row-control">
+            <button id="settingsExportArchive" class="button button-quiet" type="button"><span data-icon="download"></span><span data-i18n="导出归档元数据">导出归档元数据</span></button>
+          </div>
+        </div>
+
+        <p class="row-status" id="transferStatus" role="status" hidden></p>
+        <p class="row-error" id="transferError" role="alert" hidden></p>
+      </section>
+
+      <!-- 1.9.0：归档体检（只读报告）与回收站入口。清空回收站不再是收藏库上的一个盲按钮，
+           回收站有自己的页面：能看、能挑着恢复、也能彻底删掉。 -->
+      <section class="settings-card" id="group-maintenance" data-group="maintenance">
+        <h2 data-i18n="归档维护">归档维护</h2>
+        <p class="card-lead" data-i18n="体检只读不修；删掉的归档先进 005回收站，30 天后自动清理，这期间还能捞回来。">体检只读不修；删掉的归档先进 005回收站，30 天后自动清理，这期间还能捞回来。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="归档体检">归档体检</p>
+            <p class="setting-row-desc" data-i18n="重新扫一遍本地备份文件夹，把读不出来、缺封面、缺基本信息、半截目录和残留临时文件写成一份 Markdown，放进 006报告/。">重新扫一遍本地备份文件夹，把读不出来、缺封面、缺基本信息、半截目录和残留临时文件写成一份 Markdown，放进 006报告/。</p>
+          </div>
+          <div class="setting-row-control">
+            <button id="settingsHealthCheck" class="button button-quiet" type="button"><span data-icon="shield"></span><span data-i18n="归档体检">归档体检</span></button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="回收站">回收站</p>
+            <p class="setting-row-desc" data-i18n="打开回收站可以查看最近删掉的视频：挑着恢复到原收藏夹，或者彻底删掉。彻底删掉不可逆，不会进系统回收站。">打开回收站可以查看最近删掉的视频：挑着恢复到原收藏夹，或者彻底删掉。彻底删掉不可逆，不会进系统回收站。</p>
+          </div>
+          <div class="setting-row-control">
+            <button id="settingsOpenRecycle" class="button button-quiet" type="button"><span data-icon="trash"></span><span data-i18n="查看回收站">查看回收站</span></button>
+          </div>
+        </div>
+
+        <p class="row-status" id="maintenanceStatus" role="status" hidden></p>
+        <p class="row-error" id="maintenanceError" role="alert" hidden></p>
+      </section>
       <section class="settings-card" id="group-localdata" data-group="localdata">
         <h2 data-i18n="本机数据">本机数据</h2>
         <p class="card-lead" data-i18n="插件只在本机留东西，不会上传。下面这些和「你是谁」有关，可以随时清掉。">插件只在本机留东西，不会上传。下面这些和「你是谁」有关，可以随时清掉。</p>
@@ -352,6 +422,9 @@
     </main>
   </div>
 
+  <script src="archive-core.js"></script>
+  <script src="stats-core.js"></script>
+  <script src="archive-tools.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

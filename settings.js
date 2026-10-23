@@ -442,6 +442,459 @@ function wireNav() {
 }
 
 /* ------------------------------------------------------------------ *
+ * 导入与导出 / 归档维护（1.9.0）
+ *
+ * 这几项原来是收藏库左上角的按钮（library.js）。搬到这里的原因：它们改的是「设置」
+ * 或者维护动作，不是「看视频」；而且回收站要能一页一页地挑，塞不进收藏库的侧栏。
+ *
+ * 单一权威的切分：
+ *   · 配置文件长什么样、哪些字段算个人内容 —— archive-core.js（buildConfigPayload /
+ *     configPersonalFields），不再有第二份字面量；
+ *   · 扫盘、回收站、把一条记录映射成界面卡片要的 video —— archive-tools.js；
+ *   · 本文件只做「读设置 → 拼 payload → 写盘 / 反向套用」这些接线。
+ * ------------------------------------------------------------------ */
+
+const CONFIG_MAX_BYTES = 256 * 1024;
+const CONFIG_PAGE_SIZES = [25, 50, 100];
+const CONFIG_VIEW_MODES = ["grid", "list"];
+const CONFIG_FILTER_SORTS = ["newest", "oldest", "title", "views"];
+const CONFIG_FILTER_VIDEOS = ["all", "invalid", "downloaded"];
+
+// 1.9.0：状态行只显示最近一次动作的结果，下一次动作直接覆盖 —— 不挂自动消失的定时器，
+// 因为导入/导出都可能是「点完去倒杯水」的长度，回来时结果还在才算真的告诉过用户。
+const transferRow = { status: "transferStatus", error: "transferError" };
+const maintenanceRow = { status: "maintenanceStatus", error: "maintenanceError" };
+
+function showRowMessage(row, text, isError = false) {
+  const status = $(row.status);
+  const error = $(row.error);
+  if (isError) {
+    writeText(status, "");
+    setVisible(status, false);
+    writeText(error, text);
+    setVisible(error, Boolean(text));
+    return;
+  }
+  writeText(error, "");
+  setVisible(error, false);
+  writeText(status, text);
+  setVisible(status, Boolean(text));
+}
+
+function showTransferMessage(text, isError = false) {
+  showRowMessage(transferRow, text, isError);
+}
+
+function flashTransfer(text, isError = false) {
+  showTransferMessage(text, isError);
+}
+
+function showMaintenanceMessage(text, isError = false) {
+  showRowMessage(maintenanceRow, text, isError);
+}
+
+// chrome.storage.local 在这几个页面上两种用法都见过（Promise / 回调），统一包一层，
+// 免得某个测试桩只实现了一种就炸。失败一律当「没读到」，调用方有兜底。
+function readStoredSettings(keys) {
+  return new Promise((resolve) => {
+    try {
+      const result = chrome.storage.local.get(keys, (data) => resolve(data || {}));
+      if (result && typeof result.then === "function") {
+        result.then((data) => resolve(data || {})).catch(() => resolve({}));
+      }
+    } catch (_) {
+      resolve({});
+    }
+  });
+}
+
+function writeStoredSettings(patch) {
+  return new Promise((resolve, reject) => {
+    try {
+      const result = chrome.storage.local.set(patch, () => {
+        const failure = chrome.runtime.lastError;
+        if (failure) reject(new Error(failure.message));
+        else resolve();
+      });
+      if (result && typeof result.then === "function") {
+        result.then(() => resolve()).catch(reject);
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function humanTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatKilobytes(bytes) {
+  return `${Math.max(1, Math.ceil(Number(bytes || 0) / 1024))} KB`;
+}
+
+/* 导出的偏好从「收藏库写在 storage 里的那一份」读，不猜 DOM：
+   设置页没有「每页数量 / 视图模式」的控件，收藏库才是这些值的主人。 */
+async function currentConfigPreferences() {
+  const stored = await readStoredSettings(["libraryPageSize", "libraryViewMode", "collectionOrder", "libraryFilters"]);
+  const filters = stored.libraryFilters && typeof stored.libraryFilters === "object" ? stored.libraryFilters : null;
+  return {
+    theme: BcaTheme.current(),
+    locale: BcaI18n.locale(),
+    pageSize: CONFIG_PAGE_SIZES.includes(stored.libraryPageSize) ? stored.libraryPageSize : 25,
+    viewMode: CONFIG_VIEW_MODES.includes(stored.libraryViewMode) ? stored.libraryViewMode : "grid",
+    collectionOrder: Array.isArray(stored.collectionOrder) ? stored.collectionOrder.filter((name) => typeof name === "string") : [],
+    filters: filters
+      ? {
+          search: typeof filters.search === "string" ? filters.search : "",
+          videoFilter: CONFIG_FILTER_VIDEOS.includes(filters.videoFilter) ? filters.videoFilter : "all",
+          upFilter: typeof filters.upFilter === "string" ? filters.upFilter : "all",
+          tagFilter: typeof filters.tagFilter === "string" ? filters.tagFilter : "all",
+          sort: CONFIG_FILTER_SORTS.includes(filters.sort) ? filters.sort : "newest"
+        }
+      : null
+  };
+}
+
+function configPersonalSummary(payload) {
+  const fields = BcaArchiveCore.configPersonalFields(payload);
+  const parts = [];
+  if (fields.collections) {
+    parts.push(BcaI18n.t("收藏夹顺序里的 {count} 个收藏夹名", { count: String(fields.collections) }));
+  }
+  if (fields.search) parts.push(BcaI18n.t("搜索关键词「{text}」", { text: fields.search }));
+  if (fields.upFilter) parts.push(BcaI18n.t("UP 主筛选「{text}」", { text: fields.upFilter }));
+  if (fields.tagFilter) parts.push(BcaI18n.t("标签筛选「{text}」", { text: fields.tagFilter }));
+  return parts.join("、");
+}
+
+async function downloadConfigFile(includePersonal) {
+  try {
+    const preferences = await currentConfigPreferences();
+    const payload = BcaArchiveCore.buildConfigPayload(preferences, { includePersonal });
+    if (includePersonal) {
+      const detail = configPersonalSummary(payload);
+      if (detail) {
+        const ok = window.confirm(BcaI18n.t("这份配置会带上你自己的内容：{detail}。发给别人就等于把这些一起公开。确定导出吗？", { detail }));
+        if (!ok) return;
+      }
+    }
+    const text = `\ufeff${JSON.stringify(payload, null, 2)}\n`;
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `bili-vault-config-${new Date().toISOString().slice(0, 10)}.json`;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    const revokeTimer = setTimeout(() => URL.revokeObjectURL(url), 10000);
+    window.addEventListener("pagehide", () => {
+      clearTimeout(revokeTimer);
+      URL.revokeObjectURL(url);
+    }, { once: true });
+    flashTransfer(BcaI18n.t(includePersonal ? "配置已导出（含收藏夹顺序与筛选）。" : "配置已导出（只含外观与档位）。"));
+  } catch (error) {
+    flashTransfer(BcaI18n.t("导出配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }), true);
+  }
+}
+
+/* 导入侧的封顶必须和导出侧一致（archive-core 的 normalizeConfigPreferences），
+   否则「本机导出的文件在另一台机器上被判成非法」这种错会很难查。 */
+function sanitizeImportedPreferences(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const filters = source.filters && typeof source.filters === "object" ? source.filters : null;
+  return {
+    theme: BcaTheme.isSupported(source.theme) ? source.theme : null,
+    locale: BcaI18n.isSupported(source.locale) ? source.locale : null,
+    pageSize: CONFIG_PAGE_SIZES.includes(source.pageSize) ? source.pageSize : null,
+    viewMode: CONFIG_VIEW_MODES.includes(source.viewMode) ? source.viewMode : null,
+    collectionOrder: Array.isArray(source.collectionOrder)
+      ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500).map((name) => BcaArchiveCore.sliceCodePoints(name, 120))
+      : null,
+    filters: filters
+      ? {
+          search: BcaArchiveCore.sliceCodePoints(filters.search, 200),
+          videoFilter: CONFIG_FILTER_VIDEOS.includes(filters.videoFilter) ? filters.videoFilter : "all",
+          upFilter: BcaArchiveCore.sliceCodePoints(filters.upFilter || "all", 120) || "all",
+          tagFilter: BcaArchiveCore.sliceCodePoints(filters.tagFilter || "all", 120) || "all",
+          sort: CONFIG_FILTER_SORTS.includes(filters.sort) ? filters.sort : "newest"
+        }
+      : null
+  };
+}
+
+async function applyImportedPreferences(preferences) {
+  if (preferences.theme) BcaTheme.use(preferences.theme);
+  if (preferences.locale) {
+    await BcaI18n.use(preferences.locale, { silent: true });
+    applyTitle();
+    renderLocaleOptions();
+    buildSearchIndex();
+  }
+  const patch = {};
+  if (preferences.pageSize) patch.libraryPageSize = preferences.pageSize;
+  if (preferences.viewMode) patch.libraryViewMode = preferences.viewMode;
+  if (preferences.collectionOrder) patch.collectionOrder = preferences.collectionOrder;
+  // 筛选落回 libraryFilters：收藏库那边有 storage.onChanged 监听，导完不用重开收藏库。
+  if (preferences.filters) patch.libraryFilters = preferences.filters;
+  if (Object.keys(patch).length) await writeStoredSettings(patch);
+  renderThemeOptions();
+  renderLocaleOptions();
+}
+
+async function importConfigText(rawText) {
+  const source = String(rawText || "");
+  if (source.length > CONFIG_MAX_BYTES) {
+    throw new Error(BcaI18n.t("这个配置文件有 {size}，超过了 {limit}，为了不把插件存储挤爆，没有导入。", {
+      size: formatKilobytes(source.length),
+      limit: formatKilobytes(CONFIG_MAX_BYTES)
+    }));
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(source.replace(/^\uFEFF/, ""));
+  } catch (_) {
+    throw new Error(BcaI18n.t("这个文件不是合法的 JSON，无法导入。"));
+  }
+  if (!payload || payload.app !== BcaArchiveCore.CONFIG_APP_ID) {
+    throw new Error(BcaI18n.t("这不是哔哩藏库导出的配置文件。"));
+  }
+  if (BcaArchiveCore.configHasPersonalData(payload)) {
+    const ok = window.confirm(BcaI18n.t("这份配置里有你自己的内容（收藏夹顺序或筛选）。导入会覆盖本机的对应设置，确定导入吗？"));
+    if (!ok) return false;
+  }
+  await applyImportedPreferences(sanitizeImportedPreferences(payload.preferences));
+  return true;
+}
+
+async function handleConfigFileInput(input) {
+  const file = input?.files?.[0];
+  // 同一个文件连着选两次时 change 不会再触发，每次处理完都清掉。
+  if (input) input.value = "";
+  if (!file) return;
+  try {
+    const imported = await importConfigText(await file.text());
+    if (imported) flashTransfer(BcaI18n.t("配置已导入。"));
+  } catch (error) {
+    flashTransfer(BcaI18n.t("导入配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }), true);
+  }
+}
+
+/* 归档元数据：只读扫盘 → archive-core 拼文档 + 校验和 → 写 004导出/。
+   「数据库」只当 stale 对照，读不到不算失败（磁盘才是权威，1.7.30 的取舍）。 */
+/* 后台正在导入时，归档目录也在被写：这时候扫出来的只是一半。
+   闸门跟收藏库共用一把（storage.session 里的 archiveWriteLock，超过 30 分钟算陈旧）。 */
+const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
+const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
+
+async function importIsRunning() {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || lock.kind !== "import") return false;
+    return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function exportArchiveMetadata() {
+  try {
+    const handle = await BcaArchiveTools.loadRootHandle();
+    if (!handle) throw new Error(BcaI18n.t("先选一个本地备份文件夹，再导出归档元数据。"));
+    const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
+    if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
+    if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+    showMaintenanceMessage(BcaI18n.t("正在导出归档元数据…"));
+    const scan = await BcaArchiveTools.scanArchive(handle);
+    const collections = scan.collections.map((collection) => ({
+      name: collection.name,
+      videos: collection.records.map(({ directory, record }) => BcaArchiveTools.recordToVideo(collection.name, { name: directory }, record))
+    }));
+    const videos = collections.flatMap((collection) => collection.videos);
+    if (!videos.length) throw new Error(BcaI18n.t("收藏库里还没有记录。先点「刷新」读一遍，再导出。"));
+    const statsCore = globalThis.BcaStatsCore;
+    const seenKeys = new Set(statsCore ? videos.map((video) => statsCore.videoKey(video)).filter(Boolean) : []);
+    let database = null;
+    let databaseState = "missing";
+    if (statsCore) {
+      try {
+        const databaseDirectory = await handle.getDirectoryHandle(statsCore.DATABASE_FOLDER_NAME);
+        const databaseFile = await databaseDirectory.getFileHandle(statsCore.DATABASE_FILE_NAME);
+        const databaseText = await (await databaseFile.getFile()).text();
+        const parsed = JSON.parse(databaseText.replace(/^\uFEFF/, ""));
+        if (parsed && typeof parsed === "object" && parsed.videos && typeof parsed.videos === "object") {
+          database = parsed;
+          databaseState = "ok";
+        } else {
+          databaseState = "broken";
+        }
+      } catch (error) {
+        databaseState = BcaArchiveCore.isMissingError(error) ? "missing" : "unreadable";
+      }
+    }
+    const built = BcaArchiveCore.buildArchiveExportDocument({
+      collections,
+      database,
+      seenKeys,
+      databaseState,
+      generatedAt: new Date().toISOString(),
+      appVersion: String(chrome?.runtime?.getManifest?.()?.version || "")
+    });
+    const exportDirectory = await handle.getDirectoryHandle(BcaArchiveCore.EXPORT_DIR_NAME, { create: true });
+    // 同秒连点两次也不覆盖前一份：撞名就加 -2、-3。
+    const baseName = BcaArchiveCore.exportFileName(new Date()).replace(/\.json$/, "");
+    let fileName = `${baseName}.json`;
+    for (let attempt = 2; attempt < 100; attempt += 1) {
+      try {
+        await exportDirectory.getFileHandle(fileName);
+        fileName = `${baseName}-${attempt}.json`;
+      } catch (error) {
+        if (!BcaArchiveCore.isMissingError(error)) throw error;
+        break;
+      }
+    }
+    const exportFile = await exportDirectory.getFileHandle(fileName, { create: true });
+    const writable = await exportFile.createWritable();
+    await writable.write(built.text);
+    await writable.close();
+    // 004导出 只留最近 5 份（1.8.8 的门槛，10k 条一份约 8 MB）。清理失败不影响这次导出。
+    try {
+      const exportNames = [];
+      for await (const entry of exportDirectory.values()) exportNames.push(entry.name);
+      for (const name of BcaArchiveCore.exportPruneList(exportNames)) {
+        try {
+          await exportDirectory.removeEntry(name);
+        } catch (error) {
+          console.warn(`旧导出文件删不掉（留着不影响这次导出）：${name}`, error);
+        }
+      }
+    } catch (error) {
+      console.warn("清理旧导出文件失败（不影响这次导出）", error);
+    }
+    showMaintenanceMessage(BcaI18n.t("已导出 {count} 条记录到 {file}。", {
+      count: BcaArchiveCore.formatCountText(built.payload.counts.records),
+      file: fileName
+    }));
+  } catch (error) {
+    showMaintenanceMessage(BcaI18n.t("导出归档元数据失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }), true);
+  }
+}
+
+/* 归档体检：只读扫一遍，把「扫描时被悄悄跳过的东西」写成 Markdown。
+   报告的小节与措辞和收藏库时代一致 —— 两份格式必须能互相替代，用户手里的旧报告还得看得懂。 */
+async function writeHealthReport() {
+  try {
+    const handle = await BcaArchiveTools.loadRootHandle();
+    if (!handle) throw new Error(BcaI18n.t("先选择本地备份文件夹，再做归档体检。"));
+    const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
+    if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
+    if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+    showMaintenanceMessage(BcaI18n.t("正在做归档体检：重新读一遍归档…"));
+    const result = await BcaArchiveTools.scanArchive(handle, { diagnostics: true });
+    const diagnostics = result.diagnostics || { missingText: [], missingCover: [], brokenText: [], tempFiles: [] };
+    const videos = result.collections.flatMap((collection) => collection.records.map(({ directory, record }) => (
+      BcaArchiveTools.recordToVideo(collection.name, { name: directory }, record)
+    )));
+    const invalid = videos.filter((video) => video.isInvalid);
+    const unknownIds = videos.filter((video) => (!video.bvid || video.bvid === "未知") && (!video.aid || video.aid === "未知"));
+    const problems = result.issues.length + result.unfinished.length + diagnostics.missingText.length
+      + diagnostics.missingCover.length + diagnostics.brokenText.length + result.longNames.length + diagnostics.tempFiles.length;
+    const lines = [
+      `# ${BcaI18n.t("归档体检报告")}`,
+      "",
+      `- ${BcaI18n.t("生成时间")}：${humanTimestamp()}`,
+      `- ${BcaI18n.t("本地备份文件夹")}：${handle.name}`,
+      `- ${BcaI18n.t("收藏夹")}：${result.collections.length}`,
+      `- ${BcaI18n.t("归档记录")}：${videos.length}`,
+      `- ${BcaI18n.t("估算占用")}：${BcaArchiveTools.formatMegabytes(result.bytes)}`,
+      `- ${BcaI18n.t("已失效视频")}：${invalid.length}`,
+      `- ${BcaI18n.t("认不出 BV/av 号的记录")}：${unknownIds.length}`,
+      "",
+      `## ${BcaI18n.t("需要看一眼")}（${problems}）`,
+      "",
+      `### ${BcaI18n.t("读不出来的目录（{count}）", { count: result.issues.length })}`,
+      ...BcaArchiveTools.reportListLine(result.issues),
+      "",
+      `### ${BcaI18n.t("没写完的目录（{count}）", { count: result.unfinished.length })}`,
+      `> ${BcaI18n.t("没有 视频信息.txt，多半是上次导入被打断；可点扫描提示条上的「清理这些没写完的目录」。")}`,
+      ...BcaArchiveTools.reportListLine(result.unfinished),
+      "",
+      `### ${BcaI18n.t("有 视频信息.txt 但缺封面的目录（{count}）", { count: diagnostics.missingCover.length })}`,
+      ...BcaArchiveTools.reportListLine(diagnostics.missingCover),
+      "",
+      `### ${BcaI18n.t("视频信息.txt 缺【基本信息】或标题（{count}）", { count: diagnostics.brokenText.length })}`,
+      ...BcaArchiveTools.reportListLine(diagnostics.brokenText),
+      "",
+      `### ${BcaI18n.t("只有骨架、还没有 视频信息.txt 的目录（{count}）", { count: diagnostics.missingText.length })}`,
+      ...BcaArchiveTools.reportListLine(diagnostics.missingText),
+      "",
+      `### ${BcaI18n.t("目录名太长（{count}）", { count: result.longNames.length })}`,
+      `> ${BcaI18n.t("收藏夹 / 记录目录合起来超过 168 字符时，Windows 上再拼文件名可能超 260 的上限。")}`,
+      ...BcaArchiveTools.reportListLine(result.longNames),
+      "",
+      `### ${BcaI18n.t("写盘留下的临时文件（{count}）", { count: diagnostics.tempFiles.length })}`,
+      `> ${BcaI18n.t("点号开头的 .tmp 是覆盖写盘时的中间件，正常会在写完后换名；留在这里说明那次写入没走完。")}`,
+      ...BcaArchiveTools.reportListLine(diagnostics.tempFiles),
+      "",
+      `## ${BcaI18n.t("结论")}`,
+      problems
+        ? `- ${BcaI18n.t("共 {count} 项需要处理，见上面各节。", { count: problems })}`
+        : `- ${BcaI18n.t("没发现需要处理的问题。")}`,
+      ""
+    ];
+    const name = `体检-${BcaArchiveTools.recycleStamp()}.md`;
+    const directory = await BcaArchiveTools.subdirectoryHandle(handle, BcaArchiveTools.HEALTH_DIR_NAME);
+    const fileHandle = await directory.getFileHandle(name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(lines.join("\r\n"));
+    await writable.close();
+    const path = `${BcaArchiveTools.HEALTH_DIR_NAME}/${name}`;
+    showMaintenanceMessage(BcaI18n.t("报告写在 {path}。需要看一眼的地方有 {count} 处，明细都在报告里。", {
+      path,
+      count: problems
+    }), problems > 0);
+  } catch (error) {
+    showMaintenanceMessage(BcaI18n.t("归档体检失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }), true);
+  }
+}
+
+function openRecyclePage() {
+  try {
+    chrome.tabs.create({ url: chrome.runtime.getURL("recycle.html") });
+  } catch (error) {
+    showMaintenanceMessage(BcaI18n.t("打不开回收站页：{message}", { message: error?.message || BcaI18n.t("未知错误") }), true);
+  }
+}
+
+function wireTransferAndMaintenance() {
+  $("settingsExportConfig")?.addEventListener("click", () => { downloadConfigFile(true); });
+  $("settingsExportConfigSlim")?.addEventListener("click", () => { downloadConfigFile(false); });
+  $("settingsImportConfig")?.addEventListener("click", () => {
+    const input = $("settingsConfigFileInput");
+    if (input) input.click();
+  });
+  $("settingsConfigFileInput")?.addEventListener("change", () => { handleConfigFileInput($("settingsConfigFileInput")); });
+  $("settingsExportArchive")?.addEventListener("click", () => { exportArchiveMetadata(); });
+  $("settingsHealthCheck")?.addEventListener("click", () => { writeHealthReport(); });
+  $("settingsOpenRecycle")?.addEventListener("click", openRecyclePage);
+}
+
+// 供 pages.test 直接驱动（收藏库时代的测试调的是 importConfigFromText，搬家后名字保持一致）。
+globalThis.BcaSettingsTransfer = Object.freeze({
+  importConfigText,
+  downloadConfigFile,
+  currentConfigPreferences,
+  exportArchiveMetadata,
+  writeHealthReport
+});
+
+wireTransferAndMaintenance();
+
+/* ------------------------------------------------------------------ *
  * 启动
  * ------------------------------------------------------------------ */
 

@@ -35,7 +35,11 @@ const SOURCE_FILES = [
   // 4.9：把后台纳入扫描。background.js 是模块化 service worker，加载不了 i18n.js，
   // 所以自己做了个存在性兜底；新增的界面文案仍写成 BcaI18n.t("字面量")。
   // 不纳入扫描的话，这些词条永远进不了词典（4.9 的 6 条就是这样漏掉的）。
-  "background.js"
+  "background.js",
+  // 1.9.0：归档维护从收藏库搬到设置页，扫盘/回收站/记录映射独立成 archive-tools.js；
+  // 回收站是独立页面（recycle.html / recycle.js）。三个新文件都要扫，否则它们的词条
+  // 只会静默退回中文。
+  "archive-tools.js", "recycle.html", "recycle.js"
 ];
 // 这些是语言名与第三方工具名，任何语言下都保持原样，不需要进词典。
 // （品牌名「哔哩藏库」**要**翻译：繁中用「哔哩藏庫」、英文用 Bili Vault，所以不在此列。）

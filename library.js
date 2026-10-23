@@ -7,6 +7,25 @@ const DB_STORE = "settings";
 // 1.8.22（old-p3 security P3-2）：判据收口到 BcaI18n.guardTopFrame()，各扩展页共用一份。
 BcaI18n.guardTopFrame("本地收藏库需要在独立标签页中打开，请不要把它嵌入其他页面。", "本地收藏库不允许被嵌入其他页面。");
 
+// 1.9.0：归档目录的读写规矩（记录目录名、半截目录、回收站、保留目录）统一收在
+// archive-tools.js，收藏库页与回收站页共用同一份实现。
+const {
+  field,
+  realField,
+  statsFromInfo,
+  bilibiliLink,
+  parseDate,
+  videoIdentifierKeys,
+  RESERVED_DIRS,
+  isRecordDirectoryName,
+  isUnfinishedRecord,
+  RECYCLE_DIR_NAME,
+  RECYCLE_KEEP_DAYS,
+  recycleCollection,
+  recycleRecords,
+  pruneRecycler
+} = BcaArchiveTools;
+
 const collectionList = document.getElementById("collectionList");
 const collectionTotal = document.getElementById("collectionTotal");
 const rootLabel = document.getElementById("rootLabel");
@@ -120,13 +139,6 @@ const toggleFailuresButton = document.getElementById("toggleFailures");
 const copyFailuresButton = document.getElementById("copyFailures");
 const copyFailurePathsButton = document.getElementById("copyFailurePaths");
 const clearFailuresButton = document.getElementById("clearFailures");
-const exportConfigButton = document.getElementById("exportConfig");
-const importConfigButton = document.getElementById("importConfig");
-// 1.7.30（路线图第 2 项）：导出整个归档的元数据
-const exportArchiveButton = document.getElementById("exportArchive");
-const healthCheckButton = document.getElementById("healthCheck");
-const purgeRecyclerButton = document.getElementById("purgeRecycler");
-const configFileInput = document.getElementById("configFileInput");
 const batchManageButton = document.getElementById("batchManage");
 const batchToolbar = document.getElementById("batchToolbar");
 const selectedCount = document.getElementById("selectedCount");
@@ -199,6 +211,8 @@ let videoFilter = "all";
 // 4.6：UP 主 / 标签两个精确筛选，值取自当前范围（纯本地计算，不发请求）
 let upFilter = "all";
 let tagFilter = "all";
+// 1.9.0：设置页导入配置后留在 storage 里的筛选，等选项池建好再落位。
+let pendingLibraryFilters = null;
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
 // 1.8.23（TODO P2-8）：当前页卡片复用的查表（video.id -> 当前这条记录）。
@@ -386,33 +400,10 @@ async function readCover(fileHandle) {
   return { cover: url, coverBytes: file.size };
 }
 
-function field(info, key) { return info.fields[key] || ""; }
-
-// “未知 / 无 / -”这类占位值等于没有数据，不能当成内容显示
-function realField(info, key) {
-  const value = field(info, key);
-  return value && !BcaArchiveCore.isPlaceholderValue(value) ? value : "";
-}
-
 // 存档里的「失效原因」→ 界面文案。返回空串表示这条记录没写原因（老存档，或「更新视频状态」
 // 自己标的失效）——调用方按「已失效」兜底，绝不能显示「未知」：「未知」等于什么都没说，
 // 而「已失效」至少是确定的事实。
 // 按值 switch 而不是查表：BcaI18n.t() 的 key 必须是字面量（测试会扫），切语言后每次渲染现翻。
-function invalidReasonText(reason) {
-  const text = String(reason || "").trim();
-  if (!text) return "";
-  switch (text) {
-    case "其他": return BcaI18n.t("其他");
-    case "版权原因": return BcaI18n.t("版权原因");
-    case "违规内容": return BcaI18n.t("违规内容");
-    case "视频已失效": return BcaI18n.t("视频已失效");
-    case "UP主自行删除": return BcaI18n.t("UP主自行删除");
-    case "已锁定": return BcaI18n.t("已锁定");
-    // 表外的值（将来 B 站新增枚举）原样显示，不吞掉、也不冒充「其他」
-    default: return text;
-  }
-}
-
 /* ---------------- 4.2：互动数据与分享文案 ---------------- */
 
 // 「【互动数据】播放量：73798」这类字段名 → video.stats 的键，以及六个中文标签。
@@ -432,15 +423,6 @@ function splitInfoDescription(info) {
   const raw = descriptionFromInfo(info);
   const split = BcaArchiveCore.splitShareText?.(raw);
   return { description: split?.description ?? raw, stats: split?.stats || {} };
-}
-
-function statsFromInfo(info, fallbackStats = {}) {
-  const stats = {};
-  for (const [key, label] of Object.entries(STAT_LABELS)) {
-    const value = realField(info, label) || String(fallbackStats[key] || "");
-    if (value) stats[key] = value;
-  }
-  return stats;
 }
 
 // 4.8：「已下载？点击标记」会在视频目录里放一个说明文件。有它在，目录就不是空的，
@@ -827,41 +809,6 @@ function clearArchiveCache(handle) {
   dropRootCaches(rootCacheKey(handle));
 }
 
-function cacheEntryFor(store, name, size, lastModified) {
-  const entry = store.get(name);
-  if (!entry || entry.size !== size || entry.lastModified !== lastModified) return null;
-  // 命中就算「刚用过」：Map 保持插入序，把它挪到末尾，扫描到后面时不会被当成最旧的淘汰
-  store.delete(name);
-  store.set(name, entry);
-  return entry.record;
-}
-
-function storeCacheEntry(store, name, size, lastModified, record) {
-  // 文件内容变了：旧条目作废，它持有的封面 URL 也一并交还（这条记录已被新纪录取代）
-  const existing = store.get(name);
-  if (existing) { store.delete(name); dropCacheEntry(existing); }
-  // 4.9：这里原来是 store.clear()，有两个问题：① 4000 条以上的库每轮扫描都会从零重读，
-  // 缓存等于没有；② 被清掉的条目再也没人 revoke 它们的封面 blob: URL —— 正是下面那句
-  // 注释想避免的泄漏。改成按 Map 的插入序淘汰**最旧的**（配合 cacheEntryFor 的
-  // 「命中即刷新位置」构成 LRU）。
-  // 1.8.4：一次淘汰一批（25%），容量按库大小算 —— 逐条淘汰在「集合只比容量大一点」时会
-  // 每次都丢掉下一条要读的条目（630 条 / 上限 600 = 命中率 0%，真机复现过）。
-  const cacheLimit = store.growing
-    ? BcaArchiveCore.archiveCacheCapacity(store.size + 1) // 扫描中：跟着已读条数长，先不淘汰
-    : store.cacheLimit || BcaArchiveCore.archiveCacheCapacity(0);
-  if (store.size >= cacheLimit) {
-    const dropCount = BcaArchiveCore.archiveCacheDropCount(cacheLimit);
-    for (let dropIndex = 0; dropIndex < dropCount; dropIndex += 1) {
-      const oldestKey = store.keys().next().value;
-      if (oldestKey === undefined) break;
-      const oldest = store.get(oldestKey);
-      store.delete(oldestKey);
-      dropCacheEntry(oldest);
-    }
-  }
-  store.set(name, { size, lastModified, record });
-}
-
 /* 1.8.6：封面改成「用到才读」。
 
    扫描 630 条记录，原来要建 630 个 blob: URL；老档案的封面是真 PNG（平均 1.7 MB、
@@ -925,62 +872,14 @@ async function hydrateCover(video) {
 
 // 读一条归档记录。命中缓存时只取 File 的元数据（不读正文），未命中才 getFile().text()。
 async function readArchiveRecord(collectionName, recordEntry, cache, stats, diagnostics) {
-  const cacheName = `${collectionName}/${recordEntry.name}`;
-  /* 1.8.6：一条记录目录只枚举一次。原来「探 视频信息.txt、探 封面.webp、探 封面.png」
-     是三次 IPC，现在一趟 values() 把名字与存在性全拿到（630 条能省两千次往返）。 */
-  const children = [];
-  try {
-    for await (const child of recordEntry.values()) children.push(child);
-  } catch (error) {
-    console.warn("读不了这个记录目录（当作不是归档记录）", error);
-    return null;
-  }
-  const label = `${collectionName}/${recordEntry.name}`;
-  if (diagnostics) {
-    for (const child of children) {
-      if (child.kind === "file" && /^\./.test(child.name) && /\.tmp$/i.test(child.name)) diagnostics.tempFiles.push(`${label}/${child.name}`);
-    }
-  }
-  const infoHandle = children.find((child) => child.kind === "file" && child.name === "视频信息.txt");
-  if (!infoHandle) {
-    if (diagnostics) diagnostics.missingText.push(label);
-    return null;
-  }
-  const coverEntry = children.find((child) => child.kind === "file" && child.name === "封面.webp")
-    || children.find((child) => child.kind === "file" && child.name === "封面.png");
-  const meta = await (await infoHandle.getFile());
-  const cachedRecord = cacheEntryFor(cache, cacheName, meta.size, meta.lastModified);
-  if (cachedRecord && coverEntry) {
-    stats.hits += 1;
-    // 1.8.5：体积统计复用这一轮已经量到的字节（缓存条目里带着上次的）；
-    // 1.8.6：命中缓存连封面文件都不碰，字节省下两次 IPC
-    stats.bytes += cachedRecord.bytes || meta.size;
-    return Object.assign({}, cachedRecord, { cover: "", coverEntry });
-  }
-  const raw = await meta.text();
-  if (!raw.includes("【基本信息】")) {
-    if (diagnostics) diagnostics.brokenText.push(label);
-    return null;
-  }
-  const info = parseInfo(raw);
-  if (!field(info, "视频标题")) {
-    if (diagnostics) diagnostics.brokenText.push(`${label}（没有标题）`);
-    return null;
-  }
-  // 没有封面就不是一条合法归档，交给上层按「跳过」处理（和 4.5 的行为一致）
-  if (!coverEntry) {
-    if (diagnostics) diagnostics.missingCover.push(label);
-    return null;
-  }
-  // 1.8.6：冷扫只量封面大小（体积统计要准，不然 219 MB 会显示成 7 MB），不建 blob: URL
-  const coverBytes = (await coverEntry.getFile()).size;
-  const share = splitInfoDescription(info);
-  // bytes：这条记录在磁盘上占的字节（视频信息.txt + 封面），体积统计直接用
-  const record = { info, share, savedAt: field(info, "信息保存于"), cover: "", coverEntry, coverBytes, bytes: meta.size + coverBytes };
-  storeCacheEntry(cache, cacheName, meta.size, meta.lastModified, record);
-  stats.reads += 1;
-  stats.bytes += record.bytes;
-  return record;
+  // 1.9.0：读一条记录（目录枚举、缓存、懒封面、诊断）整段收在 archive-tools.js，
+  // 回收站页用的是同一份，判断不会再分叉。
+  return BcaArchiveTools.readRecord(collectionName, recordEntry, {
+    diagnostics,
+    cache,
+    stats,
+    onEvict: dropCacheEntry
+  });
 }
 
 // collections 被整批替换时，上一批 video 对象持有的封面 URL 要交还引用计数。
@@ -1014,77 +913,6 @@ function releaseDetailCover() {
    出现优先），这里再从渲染侧收一道：只有 B 站自己的域名才当链接渲染，别的退回纯文本。
    万一以后又裂开一条注入路径，最坏也只是详情页多显示一行字，不会变成「点一下就跳到
    别人站点」的锚点。 */
-const BILIBILI_LINK_HOSTS = ["bilibili.com", "b23.tv"];
-
-function bilibiliLink(value) {
-  const text = String(value ?? "").trim();
-  let parsed;
-  try {
-    parsed = new URL(text);
-  } catch (_) {
-    return "";
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-  const host = parsed.hostname.toLowerCase();
-  return BILIBILI_LINK_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ? text : "";
-}
-
-function videoFromArchiveRecord(collectionName, recordEntry, record, downloadIndex, previousVideos) {
-  const info = record.info;
-  const share = record.share;
-  const url = field(info, "视频链接");
-  const title = field(info, "视频标题") || recordEntry.name;
-  const date = field(info, "视频收藏时间") || recordEntry.name;
-  const bvid = field(info, "BV号");
-  const aid = field(info, "av号");
-  const upName = field(info, "UP主昵称");
-  const category = field(info, "分区");
-  const tags = tagsFromInfo(info);
-  const id = `${collectionName}/${recordEntry.name}`;
-  const previous = previousVideos.get(id);
-  const downloadState = BcaArchiveCore.downloadStateFromIndex(collectionName, videoIdentifierKeys({ bvid, aid }), downloadIndex, previous);
-  // 1.8.6：扫描阶段不再持有封面 URL（卡片/详情见到才读，见 hydrateCover）；
-  // 这里只把句柄带过去，缓存条目被淘汰也不影响显示。
-  // 4.9：搜索比对串在扫描时拼一次就够，不必每敲一个键给每条记录重新 join + toLocaleLowerCase。
-  // 字段顺序与取值必须和原来 matchesBaseFilters 里那份完全一致（join 会把 undefined 写成 ""），
-  // 否则搜索命中范围会悄悄变。
-  const searchIndex = [title, upName, bvid, category, collectionName, share.description, ...tags].join(" ").toLocaleLowerCase();
-  return {
-    id,
-    collection: collectionName,
-    directory: recordEntry.name,
-    title,
-    url: bilibiliLink(url),
-    bvid,
-    aid,
-    downloaded: downloadState.downloaded,
-    hasDownloadFiles: downloadState.hasFiles,
-    downloadDirectoryName: downloadState.name,
-    downloadCollectionName: downloadState.collectionName,
-    downloadDirectoryHandle: downloadState.handle,
-    isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
-    // 老存档没有「失效原因」这一行，读回来是空串，不是「未知」
-    invalidReason: invalidReasonText(field(info, "失效原因")),
-    upName,
-    upMid: field(info, "UP主UID"),
-    upHome: bilibiliLink(field(info, "UP主主页")),
-    upFans: realField(info, "UP主粉丝数"),
-    favoriteAt: date,
-    savedAt: record.savedAt,
-    timestamp: parseDate(date, recordEntry.name),
-    category,
-    duration: field(info, "视频时长"),
-    publishDate: field(info, "视频发布时间"),
-    description: share.description,
-    stats: statsFromInfo(info, share.stats),
-    tags,
-    searchIndex,
-    info,
-    cover: record.cover || "",
-    coverEntry: record.coverEntry || null
-  };
-}
-
 /* ---------------- 4.6：扫描进度提示（DOM 写入按帧合并，避免每条记录都触发重排） ---------------- */
 
   // 4.9.3：**element 必须是只放文字的节点**（例如 <span>），不能用带子元素的容器 ——
@@ -1162,26 +990,6 @@ function refreshScanNotice() {
   setScanNotice(lines.join("\n"));
 }
 
-/* 1.7.10（facet-destructive P2-6）：区分「目录没写完」和「目录内容有问题」。
-   没有 视频信息.txt 的目录就是导入写到一半被打断留下的（写入顺序是先建目录、再写封面、
-   最后写 视频信息.txt，所以缺 txt 就等于没写完）。完全空的目录不算 —— 那可能只是用户
-   自己刚建的，报出来只会让人困惑。 */
-async function isUnfinishedRecord(recordEntry) {
-  const infoHandle = await optionalFileHandle(recordEntry, "视频信息.txt");
-  if (infoHandle) return false;
-  for await (const entry of recordEntry.values()) {
-    if (entry.kind === "file" || entry.kind === "directory") return true;
-  }
-  return false;
-}
-
-/* 记录目录名的唯一判据（V1.8.21）：扫描与「删除收藏夹前数一数」共用一份正则，
-   避免两处各写一条、哪天改了格式只改一处。 */
-const RECORD_DIRECTORY_PATTERN = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
-function isRecordDirectoryName(name) {
-  return RECORD_DIRECTORY_PATTERN.test(String(name || ""));
-}
-
 async function scanRoot(handle, preserveDownloadStatuses = true) {
   const scanned = [];
   const issues = [];
@@ -1212,7 +1020,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   const collections = [];
   for await (const collectionEntry of handle.values()) {
     if (collectionEntry.kind !== "directory") continue;
-    if (!["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出", "005回收站", "006报告"].includes(collectionEntry.name)) {
+    if (!BcaArchiveTools.RESERVED_DIRS.includes(collectionEntry.name)) {
       collections.push(collectionEntry);
       continue;
     }
@@ -1258,7 +1066,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
             if (await isUnfinishedRecord(recordEntry)) unfinished.push(`${collectionName}/${recordEntry.name}`);
             continue;
           }
-          job.videos.push(videoFromArchiveRecord(collectionName, recordEntry, record, downloadIndex, previousVideos));
+          job.videos.push(BcaArchiveTools.recordToVideo(collectionName, recordEntry, record, { downloadIndex, previous: previousVideos }));
         } catch (error) {
           issues.push(`${collectionName}/${recordEntry.name}：${error.message || BcaI18n.t("读取失败")}`);
         }
@@ -1281,15 +1089,6 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   return { collections: scanned, issues, unfinished, longNames, diagnostics, forced, stats: { hits: stats.hits, reads: stats.reads, total: stats.total, bytes: stats.bytes } };
 }
 
-function parseDate(value, fallback) {
-  const text = `${value} ${fallback}`;
-  const match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒)?/);
-  if (match) return new Date(+match[1], +match[2] - 1, +match[3], +(match[4] || 0), +(match[5] || 0), +(match[6] || 0)).getTime();
-  const fallbackMatch = fallback.match(/(\d{4})-(\d{2})-(\d{2})[T_ ]?(\d{2})?-?(\d{2})?-?(\d{2})?/);
-  return fallbackMatch ? new Date(+fallbackMatch[1], +fallbackMatch[2] - 1, +fallbackMatch[3], +(fallbackMatch[4] || 0), +(fallbackMatch[5] || 0), +(fallbackMatch[6] || 0)).getTime() : 0;
-}
-
-
 function stampText(date = new Date()) {
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -1301,136 +1100,8 @@ function recycledSuffix(paths) {
   return BcaI18n.t("已移到 {path}（{days} 天后自动清理），这段时间里还能自己捞回来。", { path: label, days: RECYCLE_KEEP_DAYS });
 }
 
-/* 1.8.23（TODO P0-2）：归档体检 = 重新扫一遍 + 把「平时被悄悄跳过的东西」写成一份
-   只读 Markdown，放进归档根目录的 006报告/。不修任何东西，也不碰 B 站。 */
-async function writeHealthReport() {
-  if (!rootHandle) {
-    showToast(BcaI18n.t("先选择本地备份文件夹，再做归档体检。"));
-    return;
-  }
-  if (videoAddInProgress || deleteInProgress || collectionCreateInProgress) {
-    showToast(BcaI18n.t("等当前操作结束再做归档体检。"));
-    return;
-  }
-  if (healthCheckButton) healthCheckButton.disabled = true;
-  try {
-    setScanNotice(BcaI18n.t("正在做归档体检：重新读一遍归档…"));
-    const result = await scanRoot(rootHandle, true);
-    const diagnostics = result.diagnostics || { missingText: [], missingCover: [], brokenText: [], tempFiles: [] };
-    const videos = result.collections.flatMap((collection) => collection.videos);
-    const invalid = videos.filter((video) => video.isInvalid);
-    const unknownIds = videos.filter((video) => (!video.bvid || video.bvid === "未知") && (!video.aid || video.aid === "未知"));
-    const problems = result.issues.length + result.unfinished.length + diagnostics.missingText.length
-      + diagnostics.missingCover.length + diagnostics.brokenText.length + result.longNames.length + diagnostics.tempFiles.length;
-    const lines = [
-      `# ${BcaI18n.t("归档体检报告")}`,
-      "",
-      `- ${BcaI18n.t("生成时间")}：${stampText()}`,
-      `- ${BcaI18n.t("本地备份文件夹")}：${rootHandle.name}`,
-      `- ${BcaI18n.t("收藏夹")}：${result.collections.length}`,
-      `- ${BcaI18n.t("归档记录")}：${videos.length}`,
-      `- ${BcaI18n.t("估算占用")}：${formatMegabytes(result.stats?.bytes)}`,
-      `- ${BcaI18n.t("已失效视频")}：${invalid.length}`,
-      `- ${BcaI18n.t("认不出 BV/av 号的记录")}：${unknownIds.length}`,
-      "",
-      `## ${BcaI18n.t("需要看一眼")}（${problems}）`,
-      "",
-      `### ${BcaI18n.t("读不出来的目录（{count}）", { count: result.issues.length })}`,
-      ...reportListLine(result.issues),
-      "",
-      `### ${BcaI18n.t("没写完的目录（{count}）", { count: result.unfinished.length })}`,
-      `> ${BcaI18n.t("没有 视频信息.txt，多半是上次导入被打断；可点扫描提示条上的「清理这些没写完的目录」。")}`,
-      ...reportListLine(result.unfinished),
-      "",
-      `### ${BcaI18n.t("有 视频信息.txt 但缺封面的目录（{count}）", { count: diagnostics.missingCover.length })}`,
-      ...reportListLine(diagnostics.missingCover),
-      "",
-      `### ${BcaI18n.t("视频信息.txt 缺【基本信息】或标题（{count}）", { count: diagnostics.brokenText.length })}`,
-      ...reportListLine(diagnostics.brokenText),
-      "",
-      `### ${BcaI18n.t("只有骨架、还没有 视频信息.txt 的目录（{count}）", { count: diagnostics.missingText.length })}`,
-      ...reportListLine(diagnostics.missingText),
-      "",
-      `### ${BcaI18n.t("目录名太长（{count}）", { count: result.longNames.length })}`,
-      `> ${BcaI18n.t("收藏夹 / 记录目录合起来超过 168 字符时，Windows 上再拼文件名可能超 260 的上限。")}`,
-      ...reportListLine(result.longNames),
-      "",
-      `### ${BcaI18n.t("写盘留下的临时文件（{count}）", { count: diagnostics.tempFiles.length })}`,
-      `> ${BcaI18n.t("点号开头的 .tmp 是覆盖写盘时的中间件，正常会在写完后换名；留在这里说明那次写入没走完。")}`,
-      ...reportListLine(diagnostics.tempFiles),
-      "",
-      `## ${BcaI18n.t("结论")}`,
-      problems ? `- ${BcaI18n.t("共 {count} 项需要处理，见上面各节。", { count: problems })}` : `- ${BcaI18n.t("没发现需要处理的问题。")}`,
-      ""
-    ];
-    const name = `体检-${recycleStamp()}.md`;
-    const directory = await subdirectoryHandle(rootHandle, HEALTH_DIR_NAME);
-    const handle = await directory.getFileHandle(name, { create: true });
-    const writable = await handle.createWritable();
-    await writable.write(lines.join("\r\n"));
-    await writable.close();
-    const path = `${HEALTH_DIR_NAME}/${name}`;
-    showResultDialog(BcaI18n.t("归档体检报告已生成"), BcaI18n.t("报告写在 {path}。需要看一眼的地方有 {count} 处，明细都在报告里。", { path, count: problems }), problems ? "warning" : "ok");
-  } catch (error) {
-    showResultDialog(BcaI18n.t("归档体检失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
-  } finally {
-    if (healthCheckButton) healthCheckButton.disabled = false;
-  }
-}
-
-/* 1.8.23（TODO P0-1）：清空回收站 = 把 005回收站 里所有时间戳目录整批删掉。 */
-async function emptyRecycler() {
-  if (!rootHandle) {
-    showToast(BcaI18n.t("先选择本地备份文件夹，再看回收站。"));
-    return;
-  }
-  if (videoAddInProgress || deleteInProgress) {
-    showToast(BcaI18n.t("等当前操作结束再清空回收站。"));
-    return;
-  }
-  if (purgeRecyclerButton) purgeRecyclerButton.disabled = true;
-  try {
-    const { removed, failures } = await purgeRecycler(rootHandle);
-    if (!removed && !failures.length) {
-      showToast(BcaI18n.t("回收站里现在是空的。"));
-      return;
-    }
-    if (failures.length) {
-      showResultDialog(BcaI18n.t("清空回收站结果"), [BcaI18n.t("已删掉 {count} 项。", { count: removed }), BcaI18n.t("{count} 项没删掉：", { count: failures.length }), ...failures].join("；"), "error");
-    } else {
-      showToast(BcaI18n.t("已清空回收站，删掉 {count} 项。", { count: removed }));
-    }
-  } catch (error) {
-    showResultDialog(BcaI18n.t("清空回收站失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
-  } finally {
-    if (purgeRecyclerButton) purgeRecyclerButton.disabled = false;
-  }
-}
-
 function allVideos() { return collections.flatMap((collection) => collection.videos); }
 function selectedVideos() { return selectedCollection === "*" ? allVideos() : collections.find((item) => item.name === selectedCollection)?.videos || []; }
-
-const LIBRARY_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
-function libraryBvidToAid(bvid) {
-  const text = String(bvid || "").trim();
-  if (!/^BV[0-9A-Za-z]{10}$/.test(text)) return "";
-  const chars = text.split("");
-  [chars[3], chars[9]] = [chars[9], chars[3]];
-  [chars[4], chars[7]] = [chars[7], chars[4]];
-  let value = 0n;
-  for (const char of chars.slice(3, 11)) {
-    const digit = LIBRARY_BV_TABLE.indexOf(char);
-    if (digit < 0) return "";
-    value = value * 58n + BigInt(digit);
-  }
-  return String((value & 2251799813685247n) ^ 23442827791579n);
-}
-
-function videoIdentifierKeys(video) {
-  const bvid = String(video?.bvid || "").trim();
-  const aid = String(video?.aid || "").trim().replace(/^av/i, "") || libraryBvidToAid(bvid);
-  return new Set([bvid && bvid !== "未知" ? `bvid:${bvid}` : "", aid && aid !== "未知" ? `aid:${aid}` : ""].filter(Boolean));
-}
 
 // 判断两组标识符（BV 号 / av 号）有没有交集。background.js 有一份同名同体的副本
 // —— service worker 是 ES module，import 不了经典脚本 —— 所以两处的**名字与函数体**
@@ -1812,6 +1483,10 @@ function buildVideoFilterPool() {
 function applyVideoFilterPool(pool) {
   if (upFilterSelect) upFilter = populateSelectOptions(upFilterSelect, pool.up, BcaI18n.t("全部 UP 主"), upFilter);
   if (tagFilterSelect) tagFilter = populateSelectOptions(tagFilterSelect, pool.tag, BcaI18n.t("全部标签"), tagFilter);
+  if (pendingLibraryFilters) {
+    applyLibraryFilters(pendingLibraryFilters);
+    pendingLibraryFilters = null;
+  }
 }
 
 // 数据源或筛选条件变化时走这里（不带缓存，顺手把逐键缓存清掉）
@@ -2281,36 +1956,6 @@ function setViewMode(mode) {
   renderVideos();
 }
 
-function saveViewSettings() {
-  chrome.storage.local.set({ libraryViewMode: viewMode, libraryPageSize: pageSize }).catch(() => {});
-}
-
-async function restoreViewSettings() {
-  try {
-    const saved = await chrome.storage.local.get(["libraryViewMode", "libraryPageSize"]);
-    if (saved.libraryViewMode === "list" || saved.libraryViewMode === "grid") viewMode = saved.libraryViewMode;
-    const size = Number(saved.libraryPageSize);
-    if (PAGE_SIZES.includes(size)) pageSize = size;
-  } catch (error) {
-    // 读不回来就用默认的视图模式与每页数量，界面上看不出来，但得留一条原因。
-    console.warn("恢复界面视图设置失败（用默认的列表与每页数量）", error);
-  }
-}
-
-/* ---------------- 4.6：配置导出 / 导入 ----------------
-
-   只导出「界面偏好」：主题、语言、每页数量、视图模式、收藏夹排序，以及当前这一页的
-   筛选偏好。**绝不导出**目录授权句柄（IndexedDB 里的 rootHandle / downloadFolder）、
-   任何 B 站数据、任何错误报告内容，也不做除用户点选之外的文件访问。
-   1.7.17 起「收藏夹顺序 + 三项筛选」按**个人内容**对待：导出前会列出具体内容并要求确认，
-   设置页另外提供只导「外观与档位」的入口，导入侧同样会二次确认。 */
-// 1.7.17（facet-privacy P1-2）：配置文件的形状与「带了哪些个人内容」的判断都搬到了
-// archive-core.js —— 导出前的提示、导入时的二次确认、设置页的「只导外观与档位」
-// 读的是同一份实现，不会再各说各话。
-const CONFIG_APP_ID = BcaArchiveCore.CONFIG_APP_ID;
-const CONFIG_VERSION = BcaArchiveCore.CONFIG_VERSION;
-const CONFIG_NAME = BcaArchiveCore.CONFIG_NAME;
-
 function currentFilterPreferences() {
   return {
     search: searchInput?.value || "",
@@ -2321,528 +1966,54 @@ function currentFilterPreferences() {
   };
 }
 
-/* includePersonal === false 时只带主题 / 语言 / 每页数量 / 视图模式（设置页那个入口用）。 */
-function buildConfigPayload(includePersonal = true) {
-  return BcaArchiveCore.buildConfigPayload({
-    theme: BcaTheme.current(),
-    locale: BcaI18n.locale(),
-    pageSize,
-    viewMode,
-    collectionOrder: [...collectionOrder],
-    filters: currentFilterPreferences()
-  }, { includePersonal });
+function selectHasOption(select, value) {
+  // 真浏览器里 <select>.options 一定有；页面测试用的 DOM 桩没有 options，只按 value 落位。
+  if (!select) return false;
+  if (!select.options) return true;
+  return [...select.options].some((option) => option.value === value);
 }
 
-/* 「这份配置里带了哪些你自己的东西」—— 人话版。导出提示与导入确认共用同一份。 */
-function configPersonalSummaryText(payload) {
-  const fields = BcaArchiveCore.configPersonalFields(payload);
-  const parts = [];
-  if (fields.collections) parts.push(BcaI18n.t("收藏夹顺序里的 {count} 个收藏夹名", { count: fields.collections }));
-  if (fields.search) parts.push(BcaI18n.t("搜索关键词「{text}」", { text: fields.search }));
-  if (fields.upFilter) parts.push(BcaI18n.t("UP 主筛选「{text}」", { text: fields.upFilter }));
-  if (fields.tagFilter) parts.push(BcaI18n.t("标签筛选「{text}」", { text: fields.tagFilter }));
-  // 分隔符不进词典：和 refreshScanNotice 的「；」一样，按项目既有做法保持字面量
-  return parts.join("、");
+function applyLibraryFilters(filters) {
+  if (!filters || typeof filters !== "object") return;
+  if (typeof filters.search === "string") searchInput.value = filters.search;
+  if (sortSelect && typeof filters.sort === "string" && selectHasOption(sortSelect, filters.sort)) {
+    sortSelect.value = filters.sort;
+  }
+  if (videoFilterSelect && ["all", "invalid", "downloaded"].includes(filters.videoFilter)) {
+    videoFilterSelect.value = filters.videoFilter;
+  }
+  if (upFilterSelect && typeof filters.upFilter === "string" && selectHasOption(upFilterSelect, filters.upFilter)) {
+    upFilter = filters.upFilter;
+  }
+  if (tagFilterSelect && typeof filters.tagFilter === "string" && selectHasOption(tagFilterSelect, filters.tagFilter)) {
+    tagFilter = filters.tagFilter;
+  }
 }
 
-function downloadConfigFile(includePersonal = true) {
+function saveViewSettings() {
+  // 1.9.0：筛选也存下来 —— 设置页导出配置时读的就是这一份，收藏库自己不再弹导出按钮。
+  chrome.storage.local.set({
+    libraryViewMode: viewMode,
+    libraryPageSize: pageSize,
+    libraryFilters: currentFilterPreferences()
+  }).catch(() => {});
+}
+
+async function restoreViewSettings() {
   try {
-    const payload = buildConfigPayload(includePersonal);
-    // 1.7.17（facet-privacy P1-2）：导出前先把「里面有什么」摆出来。带了个人内容就必须
-    // 过一次确认 —— 配置文件是本项目里唯一「设计上要交给别人」的产物，顺手发出去就等于
-    // 把自己的收藏夹清单和检索习惯一起公开。
-    const detail = configPersonalSummaryText(payload);
-    if (detail && !window.confirm(BcaI18n.t("这份配置会带上你自己的内容：{detail}。发给别人就等于把这些一起公开。确定导出吗？", { detail }))) return;
-    // 带 BOM，Windows 记事本打开也不会乱码
-    const blob = new Blob([`\ufeff${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `bili-vault-config-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    /* 1.8.22（old-p3 perf PF-8）：撤销定时器要能提前结束 —— 页面若在 10 秒内关掉，
-       定时器跟着页面没了倒无所谓，但「页面先关、URL 一直挂着」不该留在那儿。
-       这里登记 pagehide，关闭时立刻撤销并清掉定时器（重复撤销是空操作）。 */
-    const revokeTimer = setTimeout(() => URL.revokeObjectURL(url), 10000);
-    window.addEventListener("pagehide", () => {
-      clearTimeout(revokeTimer);
-      URL.revokeObjectURL(url);
-    }, { once: true });
-    showToast(includePersonal
-      ? BcaI18n.t("配置已导出（含收藏夹顺序与筛选）。")
-      : BcaI18n.t("配置已导出（只含外观与档位）。"));
+    const saved = await chrome.storage.local.get(["libraryViewMode", "libraryPageSize", "libraryFilters"]);
+    if (saved.libraryViewMode === "list" || saved.libraryViewMode === "grid") viewMode = saved.libraryViewMode;
+    const size = Number(saved.libraryPageSize);
+    if (PAGE_SIZES.includes(size)) pageSize = size;
+    // 1.9.0：设置页导入配置时会把筛选写进 storage，这里先接住；UP 主/标签的选项池
+    // 要等数据读完才有，剩下两项在 applyVideoFilterPool() 里补。
+    pendingLibraryFilters = saved.libraryFilters && typeof saved.libraryFilters === "object" ? saved.libraryFilters : null;
+    if (pendingLibraryFilters) applyLibraryFilters(pendingLibraryFilters);
   } catch (error) {
-    showToast(BcaI18n.t("导出配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
+    // 读不回来就用默认的视图模式与每页数量，界面上看不出来，但得留一条原因。
+    console.warn("恢复界面视图设置失败（用默认的列表与每页数量）", error);
   }
 }
-
-
-/* 1.7.30（路线图第 2 项）：把整个归档的元数据导成单个 JSON，写进归档根目录的
-   004导出/。载荷组装与校验和在 archive-core.js（纯函数、node 里测得到），
-   这里只做「取数据 + 写盘 + 说人话」三件事。
-   权威来源是磁盘扫描结果、不是数据库 —— 理由写在 archive-core.js 那段注释里（①）。 */
-async function exportArchiveMetadata() {
-  if (!rootHandle) { showToast(BcaI18n.t("先选一个本地备份文件夹，再导出归档元数据。")); return; }
-  if (await archiveWriteLockedByImport()) { showToast(BcaI18n.t("导入正在跑，等它结束再导出，免得导到一半的数据。")); return; }
-  const videos = allVideos();
-  if (!videos.length) { showToast(BcaI18n.t("收藏库里还没有记录。先点「刷新」读一遍，再导出。")); return; }
-  const exportButton = document.getElementById("exportArchive");
-  if (exportButton) exportButton.disabled = true;
-  showToast(BcaI18n.t("正在导出归档元数据…"));
-  try {
-    const statsCore = globalThis.BcaStatsCore;
-    const seenKeys = new Set(
-      (statsCore ? videos.map((video) => statsCore.videoKey(video)) : []).filter(Boolean)
-    );
-    let database = null;
-    let databaseState = "missing";
-    if (statsCore) {
-      try {
-        const databaseDirectory = await rootHandle.getDirectoryHandle(statsCore.DATABASE_FOLDER_NAME);
-        const databaseFile = await databaseDirectory.getFileHandle(statsCore.DATABASE_FILE_NAME);
-        const databaseText = await (await databaseFile.getFile()).text();
-        const parsed = JSON.parse(databaseText.replace(/^\uFEFF/, ""));
-        if (parsed && typeof parsed === "object" && parsed.videos && typeof parsed.videos === "object") {
-          database = parsed;
-          databaseState = "ok";
-        } else {
-          databaseState = "broken";
-        }
-      } catch (error) {
-        // 读不到数据库不算导出失败：磁盘上的记录才是权威，缺的只是 stale 对照。
-        // 1.8.21（§3.3）：盘掉线时抛的也是 NotFoundError —— 先探一眼根目录，
-        // 连不上就记成 unreadable，别在导出文件里写成「没有数据库」。
-        if (!BcaArchiveCore.isMissingError(error)) databaseState = "unreadable";
-        else databaseState = await rootIsReachable(rootHandle) ? "missing" : "unreadable";
-      }
-    }
-    const built = BcaArchiveCore.buildArchiveExportDocument({
-      collections: collections.map((collection) => ({ name: collection.name, videos: collection.videos })),
-      database,
-      seenKeys,
-      databaseState,
-      generatedAt: new Date().toISOString(),
-      appVersion: String(chrome?.runtime?.getManifest?.()?.version || "")
-    });
-    const exportDirectory = await rootHandle.getDirectoryHandle(BcaArchiveCore.EXPORT_DIR_NAME, { create: true });
-    // 同秒连点两次也不覆盖前一份：撞名就加 -2、-3。
-    const baseName = BcaArchiveCore.exportFileName(new Date()).replace(/\.json$/, "");
-    let fileName = `${baseName}.json`;
-    for (let attempt = 2; attempt < 100; attempt += 1) {
-      try {
-        await exportDirectory.getFileHandle(fileName);
-        fileName = `${baseName}-${attempt}.json`;
-      } catch (error) {
-        if (!BcaArchiveCore.isMissingError(error)) throw error;
-        break;
-      }
-    }
-    const exportFile = await exportDirectory.getFileHandle(fileName, { create: true });
-    const writable = await exportFile.createWritable();
-    await writable.write(built.text);
-    await writable.close();
-    showToast(BcaI18n.t("已导出 {count} 条记录到 {file}。校验和 {checksum}…", {
-      count: BcaArchiveCore.formatCountText(built.payload.counts.records),
-      file: fileName,
-      checksum: built.checksum.slice(0, 8)
-    }));
-    if (built.payload.counts.stale) {
-      showToast(BcaI18n.t("另有 {count} 条数据库里多出来的行已标成 stale（磁盘上找不到）。", {
-        count: BcaArchiveCore.formatCountText(built.payload.counts.stale)
-      }));
-    }
-    // 1.8.8（P3-12）：004导出 只留最近 5 份 —— 10k 条一份约 8 MB，攒几个月很可观。
-    // 清理失败绝不影响这次导出：文件已经写好了，最多少删几份。
-    try {
-      const exportNames = [];
-      for await (const entry of exportDirectory.values()) exportNames.push(entry.name);
-      let pruned = 0;
-      for (const name of BcaArchiveCore.exportPruneList(exportNames)) {
-        try {
-          await exportDirectory.removeEntry(name);
-          pruned += 1;
-        } catch (error) {
-          console.warn(`旧导出文件删不掉（留着不影响这次导出）：${name}`, error);
-        }
-      }
-      if (pruned) {
-        showToast(BcaI18n.t("004导出 里只保留最近 {keep} 份，已清掉 {count} 份更早的。", {
-          keep: BcaArchiveCore.formatCountText(BcaArchiveCore.EXPORT_KEEP_FILES),
-          count: BcaArchiveCore.formatCountText(pruned)
-        }));
-      }
-    } catch (error) {
-      console.warn("清理旧导出文件失败（不影响这次导出）", error);
-    }
-  } catch (error) {
-    const explained = BcaArchiveCore.describeDirectoryCreateError(error, BcaArchiveCore.EXPORT_DIR_NAME)
-      || BcaArchiveCore.describeFileSystemError(error);
-    showToast(BcaI18n.t("归档元数据导出失败：{message}", {
-      message: explained || error?.message || BcaI18n.t("未知错误")
-    }));
-  } finally {
-    if (exportButton) exportButton.disabled = false;
-  }
-}
-
-/* 1.8.8（P3-11）：把老版本留下的「封面.png」转成 WebP，转好之后删掉原 PNG。
-   作用域严格限定在归档根目录里：只遍历根目录下的收藏夹目录，只看记录目录里文件名
-   叫「封面.png」的那一个，只写「封面.webp」。下载目录（000视频下载）、001错误报告 /
-   002同步报告 / 003database / 004导出、视频信息.txt，以及用户自己放进去的文件，一个都不碰。 */
-const ARCHIVE_RESERVED_DIRS = ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出", "005回收站", "006报告"];
-
-/* 1.8.23（TODO P0-1）：删除不再直接 removeEntry —— 要删的目录先整体挪进
-   本地备份文件夹里的 005回收站/<时间戳>/<收藏夹>/<目录>，30 天后（或用户点
-   「清空回收站」时）才真正从磁盘删掉。挪动优先用 handle.move()（一次换名、
-   零复制）；本机不支持时才退回「复制 → 逐文件校验 → 才删源」，与搬归档的规矩一致。 */
-const RECYCLE_DIR_NAME = "005回收站";
-const RECYCLE_KEEP_DAYS = 30;
-const RECYCLE_RETENTION_MS = RECYCLE_KEEP_DAYS * 24 * 60 * 60 * 1000;
-const HEALTH_DIR_NAME = "006报告";
-const HEALTH_REPORT_LIST_LIMIT = 20;
-
-function recycleStamp(date = new Date()) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
-}
-
-async function subdirectoryHandle(parent, name, create = true) {
-  return parent.getDirectoryHandle(name, { create });
-}
-
-async function copyFileHandle(source, targetDirectory) {
-  const file = await source.getFile();
-  const writable = await (await targetDirectory.getFileHandle(source.name, { create: true })).createWritable();
-  await writable.write(file);
-  await writable.close();
-}
-
-async function copyDirectoryTree(source, target) {
-  for await (const entry of source.values()) {
-    if (entry.kind === "directory") await copyDirectoryTree(entry, await subdirectoryHandle(target, entry.name));
-    else await copyFileHandle(entry, target);
-  }
-}
-
-async function directoryFingerprint(directory, prefix = "") {
-  const rows = [];
-  for await (const entry of directory.values()) {
-    const label = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.kind === "directory") rows.push(...await directoryFingerprint(entry, label));
-    else rows.push(`${label}:${(await entry.getFile()).size}`);
-  }
-  return rows.sort();
-}
-
-async function moveDirectoryInto(sourceHandle, sourceParent, sourceName, targetParent, targetName) {
-  if (typeof sourceHandle.move === "function") {
-    try {
-      await sourceHandle.move(targetParent, targetName);
-      return "moved";
-    } catch (error) {
-      console.warn("目录 move() 用不了（多半是本机不支持），改用复制 + 校验 + 删源", error);
-    }
-  }
-  const target = await subdirectoryHandle(targetParent, targetName);
-  await copyDirectoryTree(sourceHandle, target);
-  const before = await directoryFingerprint(sourceHandle);
-  const after = await directoryFingerprint(target);
-  if (before.join("|") !== after.join("|")) throw new Error(BcaI18n.t("复制到回收站后校验不一致，源目录没有删除。"));
-  await sourceParent.removeEntry(sourceName, { recursive: true });
-  return "copied";
-}
-
-async function recycleCollection(root, collectionName) {
-  const source = await root.getDirectoryHandle(collectionName, { create: false });
-  const stamp = recycleStamp();
-  const bucket = await subdirectoryHandle(root, RECYCLE_DIR_NAME);
-  const stampDir = await subdirectoryHandle(bucket, stamp);
-  const path = `${RECYCLE_DIR_NAME}/${stamp}/${collectionName}`;
-  await moveDirectoryInto(source, root, collectionName, stampDir, collectionName);
-  return path;
-}
-
-async function recycleRecords(root, items, onProgress) {
-  const stamp = recycleStamp();
-  const bucket = await subdirectoryHandle(root, RECYCLE_DIR_NAME);
-  const stampDir = await subdirectoryHandle(bucket, stamp);
-  const moved = [];
-  for (const item of items) {
-    if (onProgress) onProgress(item);
-    const collectionHandle = await root.getDirectoryHandle(item.collection, { create: false });
-    const source = await collectionHandle.getDirectoryHandle(item.directory, { create: false });
-    const collectionDir = await subdirectoryHandle(stampDir, item.collection);
-    let name = item.directory;
-    for (let attempt = 2; ; attempt += 1) {
-      let exists = false;
-      try {
-        await collectionDir.getDirectoryHandle(name, { create: false });
-        exists = true;
-      } catch (error) {
-        if (!BcaArchiveCore.isMissingError(error)) throw error;
-      }
-      if (!exists) break;
-      name = `${item.directory}-${attempt}`;
-    }
-    await moveDirectoryInto(source, collectionHandle, item.directory, collectionDir, name);
-    moved.push({ ...item, name, path: `${RECYCLE_DIR_NAME}/${stamp}/${item.collection}/${name}` });
-  }
-  return { stamp, moved };
-}
-
-async function pruneRecycler(root) {
-  let bucket;
-  try {
-    bucket = await root.getDirectoryHandle(RECYCLE_DIR_NAME, { create: false });
-  } catch (error) {
-    if (BcaArchiveCore.isMissingError(error)) return 0;
-    console.warn("回收站读不出来（这次的过期清理先跳过）", error);
-    return 0;
-  }
-  const now = Date.now();
-  let removed = 0;
-  for await (const entry of bucket.values()) {
-    if (entry.kind !== "directory") continue;
-    const match = entry.name.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
-    const at = match ? new Date(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +match[6]).getTime() : 0;
-    if (at && now - at < RECYCLE_RETENTION_MS) continue;
-    try {
-      await bucket.removeEntry(entry.name, { recursive: true });
-      removed += 1;
-    } catch (error) {
-      console.warn(`清理过期回收站目录 ${entry.name} 失败（下次还会再试）`, error);
-    }
-  }
-  return removed;
-}
-
-async function purgeRecycler(root) {
-  let bucket;
-  try {
-    bucket = await root.getDirectoryHandle(RECYCLE_DIR_NAME, { create: false });
-  } catch (error) {
-    if (BcaArchiveCore.isMissingError(error)) return { removed: 0, failures: [] };
-    throw error;
-  }
-  let removed = 0;
-  const failures = [];
-  for await (const entry of bucket.values()) {
-    try {
-      await bucket.removeEntry(entry.name, { recursive: true });
-      removed += 1;
-    } catch (error) {
-      failures.push(`${entry.name}：${error?.message || BcaI18n.t("删除失败")}`);
-    }
-  }
-  return { removed, failures };
-}
-
-function formatMegabytes(bytes) {
-  return `${(Number(bytes || 0) / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function reportListLine(items) {
-  if (!items.length) return [BcaI18n.t("- 没有")];
-  const lines = items.slice(0, HEALTH_REPORT_LIST_LIMIT).map((item) => `- ${item}`);
-  if (items.length > HEALTH_REPORT_LIST_LIMIT) lines.push(`- …还有 ${items.length - HEALTH_REPORT_LIST_LIMIT} 条，见归档目录`);
-  return lines;
-}
-
-
-async function convertLegacyPngCovers() {
-  if (!rootHandle) { showToast(BcaI18n.t("先选一个本地备份文件夹，再转封面。")); return; }
-  if (await archiveWriteLockedByImport()) { showToast(BcaI18n.t("导入正在跑，等它结束再转封面。")); return; }
-  const confirmed = window.confirm(BcaI18n.t("把归档目录里的「封面.png」转成 WebP 并删掉原 PNG？只动归档目录里的封面文件，视频信息和其他文件都不会变。"));
-  if (!confirmed) return;
-  const convertButton = document.getElementById("convertCoverPng");
-  if (convertButton) convertButton.disabled = true;
-  let converted = 0;
-  let failed = 0;
-  let savedBytes = 0;
-  try {
-    showToast(BcaI18n.t("正在把老封面转成 WebP…"));
-    for await (const collectionEntry of rootHandle.values()) {
-      if (collectionEntry.kind !== "directory") continue;
-      if (ARCHIVE_RESERVED_DIRS.includes(collectionEntry.name)) continue;
-      for await (const recordEntry of collectionEntry.values()) {
-        if (recordEntry.kind !== "directory") continue;
-        const names = [];
-        for await (const child of recordEntry.values()) names.push(child.name);
-        if (BcaArchiveCore.coverConvertAction(names) !== "convert") continue;
-        try {
-          const pngHandle = await recordEntry.getFileHandle(BcaArchiveCore.COVER_PNG_NAME);
-          const pngFile = await pngHandle.getFile();
-          const bitmap = await createImageBitmap(pngFile);
-          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-          canvas.getContext("2d").drawImage(bitmap, 0, 0);
-          if (typeof bitmap.close === "function") bitmap.close();
-          const blob = await canvas.convertToBlob({ type: "image/webp", quality: BcaArchiveCore.COVER_WEBP_QUALITY });
-          if (!blob || !blob.size) throw new Error("转换结果为空");
-          const webpHandle = await recordEntry.getFileHandle(BcaArchiveCore.COVER_WEBP_NAME, { create: true });
-          const writable = await webpHandle.createWritable();
-          await writable.write(blob);
-          await writable.close();
-          // 写成功了才删原 PNG：中途失败时这一张保持原样，可以重跑。
-          await recordEntry.removeEntry(BcaArchiveCore.COVER_PNG_NAME);
-          converted += 1;
-          savedBytes += Math.max(0, pngFile.size - blob.size);
-        } catch (error) {
-          failed += 1;
-          console.warn(`封面转 WebP 失败（这一张保持原样：${collectionEntry.name}/${recordEntry.name}）`, error);
-        }
-      }
-    }
-    if (!converted) {
-      showToast(failed
-        ? BcaI18n.t("封面转换失败：{message}", { message: BcaI18n.t("没有一张成功，原文件都没动。") })
-        : BcaI18n.t("这次没有需要转换的老封面。"));
-      return;
-    }
-    showToast(BcaI18n.t("封面转换完成：转了 {converted} 张，省下 {bytes}。", {
-      converted: BcaArchiveCore.formatCountText(converted),
-      bytes: BcaArchiveCore.formatBytes(savedBytes)
-    }));
-    if (failed) showToast(BcaI18n.t("另有 {count} 张没转成，原 PNG 都还在。", { count: BcaArchiveCore.formatCountText(failed) }));
-    await refreshCurrentRoot();
-  } catch (error) {
-    showToast(BcaI18n.t("封面转换失败：{message}", {
-      message: BcaArchiveCore.describeFileSystemError(error) || error?.message || BcaI18n.t("未知错误")
-    }));
-  } finally {
-    if (convertButton) convertButton.disabled = false;
-  }
-}
-// 1.7.10（facet-storage P2-2）：manifest 里没有 unlimitedStorage，chrome.storage.local
-// 是 10MB 硬配额，而配置文件正常只有几 KB。这里给一个 256KB 的闸，免得一次误选
-// （例如把导出的归档清单当配置导入）就把插件存储挤到配额边缘。
-const MAX_CONFIG_BYTES = 256 * 1024;
-
-// 导入前逐项校验：任何一项不认识就退回默认值，不让坏文件把界面写成空白
-function sanitizeConfigPreferences(raw) {
-  const source = raw && typeof raw === "object" ? raw : {};
-  // 1.8.4：文件里到底有没有 filters —— 「只导外观与档位」的文件没有这一项。
-  // 没有就必须返回 null（而不是补一套默认值），否则导入会把用户此刻的搜索词、
-  // 筛选与排序一起清成默认 —— 那不是这个按钮承诺的事。
-  const hasFilters = Boolean(source.filters) && typeof source.filters === "object";
-  const filters = hasFilters ? source.filters : {};
-  const pageSizeValue = Number(source.pageSize);
-  const search = typeof filters.search === "string" ? BcaArchiveCore.sliceCodePoints(filters.search, 200) : "";
-  const videoFilterValue = ["all", "invalid", "downloaded"].includes(filters.videoFilter) ? filters.videoFilter : "all";
-  const sortValue = ["newest", "oldest", "title", "views"].includes(filters.sort) ? filters.sort : "newest";
-  return {
-    theme: BcaTheme.isSupported(source.theme) ? source.theme : null,
-    locale: BcaI18n.isSupported(source.locale) ? source.locale : null,
-    pageSize: PAGE_SIZES.includes(pageSizeValue) ? pageSizeValue : null,
-    viewMode: source.viewMode === "list" || source.viewMode === "grid" ? source.viewMode : null,
-    // 1.7.10（facet-storage P2-2）：条数封顶不够，每一条也要封顶 —— 500 个超长字符串
-    // 一样能把 chrome.storage.local 挤到配额边缘。
-    collectionOrder: Array.isArray(source.collectionOrder)
-      ? source.collectionOrder.filter((name) => typeof name === "string").slice(0, 500).map((name) => BcaArchiveCore.sliceCodePoints(name, 120))
-      : [],
-    filters: hasFilters
-      ? {
-          search,
-          videoFilter: videoFilterValue,
-          upFilter: typeof filters.upFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.upFilter, 120) : "all",
-          tagFilter: typeof filters.tagFilter === "string" ? BcaArchiveCore.sliceCodePoints(filters.tagFilter, 120) : "all",
-          sort: sortValue
-        }
-      : null
-  };
-}
-
-async function applyConfigPreferences(preferences, rawOrder) {
-  // 主题存 localStorage（theme.js 要同步读它防闪色），所以这里调 BcaTheme.use 而不是写 chrome.storage
-  if (preferences.theme) BcaTheme.use(preferences.theme);
-  if (preferences.locale) await BcaI18n.use(preferences.locale);
-  if (preferences.pageSize) pageSize = preferences.pageSize;
-  if (preferences.viewMode) viewMode = preferences.viewMode;
-  // 1.7.10（facet-storage P2-2）：写失败原来是空 catch，用户看到「配置已导入。」
-  // 却不知道排序根本没存下来。现在每一种「没生效」都收进 warnings，由调用方
-  // 如实告诉用户 —— 宁可说「导入成功但有 N 项没生效」，也不能报喜不报忧。
-  const warnings = [];
-  // 收藏夹排序只在配置里带了排序、且本机确实有这些收藏夹时才写，
-  // 否则会把用户现有的顺序覆盖成一份对不上的清单。
-  // 1.7.10（P2-2）：只要求「至少一个对得上」不够 —— 对不上的那些照样会被写进去。
-  if (rawOrder.length) {
-    const known = new Set(collections.map((collection) => collection.name));
-    const usable = rawOrder.filter((name) => known.has(name));
-    if (!usable.length) {
-      warnings.push(BcaI18n.t("配置里的收藏夹顺序在本机一个都对不上，已忽略。"));
-    } else if (!collectionOrderLoaded) {
-      warnings.push(BcaI18n.t("这次没能读到已保存的收藏夹顺序，为避免覆盖它，配置里的顺序没有写入。"));
-    } else {
-      collectionOrder = usable;
-      try {
-        await chrome.storage.local.set({ collectionOrder });
-      } catch (error) {
-        warnings.push(BcaI18n.t("收藏夹顺序没保存成功：{message}", { message: error?.message || BcaI18n.t("插件存储不可用") }));
-      }
-    }
-  }
-  // 1.8.4：文件里没有 filters（例如「只导外观与档位」）时整段跳过 —— 用户此刻的
-  // 搜索词、三项筛选与排序保持原样，别被一份不含这些内容的文件清成默认值。
-  if (preferences.filters) {
-    searchInput.value = preferences.filters.search;
-    videoFilterSelect.value = preferences.filters.videoFilter;
-    videoFilter = videoFilterSelect.value;
-    upFilter = preferences.filters.upFilter;
-    tagFilter = preferences.filters.tagFilter;
-    sortSelect.value = preferences.filters.sort;
-  }
-  saveViewSettings();
-  applyViewMode();
-  resetPaging();
-  return warnings;
-}
-
-async function importConfigFromText(text) {
-  const source = String(text || "");
-  // 1.7.10（facet-storage P2-2）：大小闸在解析之前 —— 先量再吃，别把 10MB 的
-  // JSON.parse 结果留在内存里。文件选择处还有一道 file.size 的同款检查。
-  if (source.length > MAX_CONFIG_BYTES) {
-    throw new Error(BcaI18n.t("这个配置文件有 {size}，超过了 {limit}，为了不把插件存储挤爆，没有导入。", {
-      size: formatBytes(source.length),
-      limit: formatBytes(MAX_CONFIG_BYTES)
-    }));
-  }
-  let payload;
-  try {
-    // 导出时写了 BOM，这里去掉再解析
-    payload = JSON.parse(source.replace(/^\ufeff/, ""));
-  } catch (_) {
-    throw new Error(BcaI18n.t("这个文件不是合法的 JSON，无法导入。"));
-  }
-  if (!payload || typeof payload !== "object" || payload.app !== CONFIG_APP_ID) {
-    throw new Error(BcaI18n.t("这不是哔哩藏库导出的配置文件。"));
-  }
-  // 1.7.17（facet-privacy P1-2）：配置里带着收藏夹名 / 筛选关键词时，导入前二次确认。
-  // 那是别人（或你自己以前）的检索习惯，不该悄悄覆盖掉当前的排序与筛选。
-  const personalDetail = configPersonalSummaryText(payload);
-  if (personalDetail && !window.confirm(BcaI18n.t("这份配置里带着收藏夹名与筛选关键词：{detail}。导入会用它们覆盖当前的排序与筛选（本地归档文件不会被改动）。确定导入吗？", { detail: personalDetail }))) {
-    return false;
-  }
-  const preferences = sanitizeConfigPreferences(payload.preferences);
-  const rawOrder = Array.isArray(payload.preferences?.collectionOrder) ? preferences.collectionOrder : [];
-  // upFilter / tagFilter 指向的 UP 主或标签可能已经不在本地库里，扫描后统一落回「全部」
-  const warnings = await applyConfigPreferences(preferences, rawOrder);
-  if (rootHandle) await displayRoot(rootHandle, selectedCollection, BcaI18n.t("已导入配置"));
-  // 没有根目录时数据源是空的：选项池按空数据源重建一次（与 4.6 的行为一致，会落回「全部」）
-  else { renderCollections(); refreshVideoFilterOptions(); renderVideos(); }
-  // 1.7.10（facet-storage P2-2）：落回「全部」是 populateSelectOptions 的自愈行为，
-  // 界面不会吭声，用户只看到「导入后列表空了」，很容易以为数据被删了。这里补一句。
-  // 1.8.4：文件里没有 filters 时这两条「落回全部」的提醒也不成立（我们压根没动筛选）。
-  if (preferences.filters && preferences.filters.upFilter !== "all" && upFilter === "all") {
-    warnings.push(BcaI18n.t("配置里的 UP 主筛选在本机没有对应项，已落回「全部」。"));
-  }
-  if (preferences.filters && preferences.filters.tagFilter !== "all" && tagFilter === "all") {
-    warnings.push(BcaI18n.t("配置里的标签筛选在本机没有对应项，已落回「全部」。"));
-  }
-  return warnings;
-}
-
 
 /* ---------------- 4.4：更新视频状态 ---------------- */
 
@@ -3986,7 +3157,7 @@ function askToDeleteVideo(video) {
   pendingDeleteAction = { type: "video", video };
   confirmTitle.textContent = BcaI18n.t("删除本地归档（先移进回收站）？");
   confirmMessage.textContent = BcaI18n.t("将删除视频目录“{path}”（含封面与视频信息）。此操作不会更改 B 站账户中的收藏。", { path: `${video.collection}/${video.directory}` });
-  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件，不可恢复");
+  confirmDeleteButton.textContent = BcaI18n.t("移到回收站");
   deleteDownloadsOption.hidden = !video.hasDownloadFiles;
   deleteAssociatedDownloads.checked = false;
   deleteUnknownOption.hidden = true;
@@ -4086,7 +3257,7 @@ function closeDeleteConfirmation() {
   confirmDeleteButton.disabled = false;
   pendingDeleteAction = null;
   confirmTitle.textContent = BcaI18n.t("删除本地归档（先移进回收站）？");
-  confirmDeleteButton.textContent = BcaI18n.t("删除本地文件，不可恢复");
+  confirmDeleteButton.textContent = BcaI18n.t("移到回收站");
 }
 
 /* 1.7.10（facet-destructive P2-1）：目标里已经有同名文件时**不许静默覆盖**。
@@ -4919,7 +4090,7 @@ async function confirmPendingDelete() {
        catch 接住，弹出来的却是「删除失败」，用户只会再点一次「删除」再吃一次同样的错。 */
     const refreshError = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
     if (action.type === "collection") {
-      showResultDialog(BcaI18n.t("已删除整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      showResultDialog(BcaI18n.t("已移进回收站：整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       // 1.7.0（批次 B / P1）：原来失败清单只把**第一条**塞进 3 秒就消失的 toast，
@@ -4927,10 +4098,10 @@ async function confirmPendingDelete() {
       // 现在只要有任何一条失败就改用结果弹窗逐条列出来；全成功才继续用 toast。
       const lines = [];
       if (batchResult.failures.length) {
-        lines.push(BcaI18n.t("已删除 {deleted} 个，{failed} 个失败并保留选中。", { deleted: batchResult.deleted, failed: batchResult.failures.length }));
+        lines.push(BcaI18n.t("已移进回收站 {deleted} 个，{failed} 个失败并保留选中。", { deleted: batchResult.deleted, failed: batchResult.failures.length }));
         lines.push(...batchResult.failures);
       } else {
-        lines.push(BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }));
+        lines.push(BcaI18n.t("已移进回收站 {count} 个本地视频", { count: batchResult.deleted }));
       }
       if (downloadCleanupFailures.length) {
         lines.push(BcaI18n.t("；{count} 个下载目录未能删除", { count: downloadCleanupFailures.length }));
@@ -4946,7 +4117,7 @@ async function confirmPendingDelete() {
       }
     } else if (action.type === "unfinished") {
       // 1.8.21（P2-6）：清理结果里必须把「跳过的」也说清楚，否则用户以为删干净了。
-      const lines = [BcaI18n.t("已清理 {count} 个没写完的目录", { count: batchResult.deleted })];
+      const lines = [BcaI18n.t("已把 {count} 个没写完的目录移进回收站", { count: batchResult.deleted })];
       if (batchResult.skipped.length) {
         lines.push(BcaI18n.t("跳过 {count} 个（现在已经有 视频信息.txt 了，可能刚补完导入）：{list}", {
           count: batchResult.skipped.length,
@@ -4962,7 +4133,7 @@ async function confirmPendingDelete() {
       if (batchResult.failures.length) showResultDialog(BcaI18n.t("清理没写完的目录"), lines.join("；") + suffix, "error");
       else showToast(lines.join("；") + suffix);
     } else {
-      showResultDialog(BcaI18n.t("已删除本地归档"), [BcaI18n.t("本地归档已移进回收站。"), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      showResultDialog(BcaI18n.t("已移进回收站"), [BcaI18n.t("本地归档已移进回收站。"), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     }
   } catch (error) {
     showResultDialog(BcaI18n.t("删除失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
@@ -4975,7 +4146,7 @@ async function confirmPendingDelete() {
       deleteProgress.textContent = "";
     }
     confirmDeleteButton.disabled = false;
-    confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : action.type === "unfinished" ? BcaI18n.t("清理 {count} 个目录", { count: action.records.length }) : BcaI18n.t("删除本地文件");
+    confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : action.type === "unfinished" ? BcaI18n.t("清理 {count} 个目录", { count: action.records.length }) : BcaI18n.t("移到回收站");
   }
 }
 
@@ -6119,13 +5290,14 @@ function applySearchNow() {
   // 1.7.12（perf PF-2）：逐键这条路走带缓存的入口，连着敲 / 退格都不再重跑全表词频
   refreshVideoFilterOptionsForSearch();
   renderVideos();
+  saveViewSettings();
 }
 
 searchInput.addEventListener("input", () => {
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(applySearchNow, SEARCH_DEBOUNCE_MS);
 });
-sortSelect.addEventListener("change", () => { resetPaging(); renderVideos(); });
+sortSelect.addEventListener("change", () => { resetPaging(); saveViewSettings(); renderVideos(); });
 dismissGithubBannerButton?.addEventListener("click", dismissGithubBanner);
 dismissScanNoticeButton?.addEventListener("click", () => {
   dismissedScanNotice = scanNoticeText?.textContent || "";
@@ -6215,7 +5387,7 @@ function relabelAfterLocaleChange() {
 }
 BcaI18n.onChange(() => relabelAfterLocaleChange());
 // #videoFilter 会参与选项池的计算（matchesBaseFilters），所以它变化时要重建选项池
-videoFilterSelect.addEventListener("change", () => { resetPaging(); refreshVideoFilterOptions(); renderVideos(); });
+videoFilterSelect.addEventListener("change", () => { resetPaging(); saveViewSettings(); refreshVideoFilterOptions(); renderVideos(); });
 clearSearch.addEventListener("click", () => {
   // 清空搜索等于换了筛选条件：取消排队中的防抖，立即按空关键词重算一次
   clearTimeout(searchDebounceTimer);
@@ -6266,8 +5438,17 @@ copyFailurePathsButton?.addEventListener("click", () => {
 clearFailuresButton?.addEventListener("click", () => clearRefreshFailures());
 collectionFilterInput?.addEventListener("input", () => renderCollections());
 collectionFilterInput?.addEventListener("keydown", (event) => { if (event.key === "Escape") { collectionFilterInput.value = ""; renderCollections(); } });
-upFilterSelect?.addEventListener("change", () => { upFilter = upFilterSelect.value; resetPaging(); renderVideos(); });
+upFilterSelect?.addEventListener("change", () => { upFilter = upFilterSelect.value; resetPaging(); saveViewSettings(); renderVideos(); });
 tagFilterSelect?.addEventListener("change", () => { tagFilter = tagFilterSelect.value; resetPaging(); renderVideos(); });
+
+// 1.9.0：设置页导入配置后写进 storage，收藏库这边不重开页面也跟着生效。
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes.libraryFilters) return;
+  applyLibraryFilters(changes.libraryFilters.newValue);
+  refreshVideoFilterOptionsForSearch();
+  resetPaging();
+  renderVideos();
+});
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
 cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
@@ -6309,45 +5490,6 @@ clearActionTargetsButton.addEventListener("click", () => {
 });
 confirmBackdrop.addEventListener("click", (event) => {
   if (event.target === confirmBackdrop && !deleteInProgress) closeDeleteConfirmation();
-});
-exportConfigButton?.addEventListener("click", () => downloadConfigFile(true));
-// 1.7.17（facet-privacy P1-2）：不含收藏夹顺序与筛选的出口，点了不再弹确认
-(document.getElementById("exportConfigSlim"))?.addEventListener("click", () => downloadConfigFile(false));
-// 1.7.30（路线图第 2 项）：导出整个归档的元数据（含 schema 版本 + 校验和）
-exportArchiveButton?.addEventListener("click", () => { exportArchiveMetadata(); });
-healthCheckButton?.addEventListener("click", () => { writeHealthReport(); });
-purgeRecyclerButton?.addEventListener("click", () => { emptyRecycler(); });
-document.getElementById("convertCoverPng")?.addEventListener("click", () => { convertLegacyPngCovers(); });
-importConfigButton?.addEventListener("click", () => {
-  configFileInput.value = "";
-  configFileInput.click();
-});
-configFileInput?.addEventListener("change", async () => {
-  const file = configFileInput.files?.[0];
-  if (!file) return;
-  importConfigButton.disabled = true;
-  try {
-    // 1.7.10（facet-storage P2-2）：先按文件大小拦一道，别把超大文件整个读进内存
-    if (file.size > MAX_CONFIG_BYTES) {
-      throw new Error(BcaI18n.t("这个配置文件有 {size}，超过了 {limit}，为了不把插件存储挤爆，没有导入。", {
-        size: formatBytes(file.size),
-        limit: formatBytes(MAX_CONFIG_BYTES)
-      }));
-    }
-    const warnings = await importConfigFromText(await file.text());
-    // 1.7.17：二次确认里点了取消 —— 什么都不做，也不报「已导入」
-    if (warnings === false) return;
-    // 1.7.10（P2-2）：有没生效的项就必须说出来，不能一律报「配置已导入。」
-    showToast(warnings?.length
-      ? BcaI18n.t("配置已导入，但有 {count} 项没生效：{detail}", { count: warnings.length, detail: warnings.join("；") })
-      : BcaI18n.t("配置已导入。"));
-  } catch (error) {
-    // 导入失败必须说清楚原因，不能静默
-    showToast(BcaI18n.t("导入配置失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
-  } finally {
-    importConfigButton.disabled = false;
-    configFileInput.value = "";
-  }
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {

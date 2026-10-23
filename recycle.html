@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN" data-bca-page="recycle">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#00a1d6">
+  <title>哔哩藏库 · 回收站</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="page.css">
+  <link rel="stylesheet" href="library.css">
+  <link rel="stylesheet" href="recycle.css">
+  <script src="theme.js"></script>
+  <script src="i18n.js"></script>
+  <script src="client-errors.js"></script>
+  <script src="icons.js"></script>
+  <script src="archive-core.js"></script>
+  <script src="archive-tools.js"></script>
+</head>
+<body>
+  <!-- 1.9.0：回收站独立成页。原来「清空回收站」只是收藏库侧栏上的一个盲按钮，
+       删了什么、还剩什么用户看不到。这里和收藏库共用卡片样式，但卡片不能点开 ——
+       它展示的是「已经删掉的档案」，点开没有意义；能做的只有恢复或彻底删掉。 -->
+  <div class="recycle-shell">
+    <header class="recycle-topbar">
+      <div class="recycle-lead">
+        <button id="recycleBack" class="button button-quiet" type="button"><span data-icon="move"></span><span data-i18n="返回设置">返回设置</span></button>
+        <div class="recycle-heading">
+          <h1 data-i18n="回收站">回收站</h1>
+          <p id="recycleSummary" class="recycle-summary" role="status" data-i18n="正在读取回收站…">正在读取回收站…</p>
+        </div>
+      </div>
+      <div class="recycle-actions">
+        <button id="recycleSelectAll" class="button button-quiet" type="button" data-i18n="全选">全选</button>
+        <button id="recycleRestore" class="button button-primary" type="button" disabled><span data-icon="move"></span><span data-i18n="恢复所选">恢复所选</span></button>
+        <button id="recycleDeleteSelected" class="button button-danger" type="button" disabled><span data-icon="trash"></span><span data-i18n="彻底删除所选">彻底删除所选</span></button>
+        <button id="recyclePurge" class="button button-danger" type="button"><span data-icon="trash"></span><span data-i18n="清空回收站">清空回收站</span></button>
+      </div>
+    </header>
+
+    <p class="recycle-hint" data-i18n="删掉的归档会在这里放 30 天，过期自动清理。恢复会放回原来的收藏夹；同名目录已存在时自动加 -2，不会覆盖现有记录。彻底删除不可逆，不会进系统回收站。">删掉的归档会在这里放 30 天，过期自动清理。恢复会放回原来的收藏夹；同名目录已存在时自动加 -2，不会覆盖现有记录。彻底删除不可逆，不会进系统回收站。</p>
+
+    <p id="recycleStatus" class="row-status" role="status" hidden></p>
+    <p id="recycleError" class="row-error" role="alert" hidden></p>
+
+    <div id="recycleEmpty" class="recycle-empty" hidden>
+      <p data-i18n="回收站里现在是空的。">回收站里现在是空的。</p>
+      <p class="recycle-empty-note" data-i18n="在收藏库里删掉视频或收藏夹后，它们会先出现在这里，30 天后自动清理。">在收藏库里删掉视频或收藏夹后，它们会先出现在这里，30 天后自动清理。</p>
+    </div>
+
+    <div id="recycleGrid" class="video-grid recycle-grid" role="list"></div>
+  </div>
+
+  <script src="recycle.js"></script>
+</body>
+</html>
