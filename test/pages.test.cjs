@@ -206,6 +206,23 @@ async function suiteLibrary() {
     await settle(4);
     assert.equal(doc.querySelectorAll("#videoGrid .video-card").length, 3);
   });
+  await test("卡片封面跟着记录走：重建的卡片也能补上，刷新后不留旧图（1.9.1）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const doc = page.document;
+    const g = page.window;
+    await settle(12);
+    const coverSources = () => [...doc.querySelectorAll("#videoGrid .video-card")]
+      .map((card) => card.querySelector(".card-cover img")?.getAttribute("src") || "");
+    assert.equal(coverSources().length, 3);
+    assert.ok(coverSources().every((src) => /^blob:test\//.test(src)), "首屏三张卡都该有封面");
+    // 卡片被丢弃后重建（等价于翻页回来）：缓存里已经有 URL，1.8.23 的写法会拿 `video.cover`
+    // 当「这张卡已经有图」的判据直接跳过，新建的卡片于是永远停在占位图上。
+    doc.getElementById("videoGrid").replaceChildren();
+    g.renderVideos();
+    await settle(6);
+    assert.ok(coverSources().every((src) => /^blob:test\//.test(src)), "重建的卡片也要有封面");
+    assert.equal(doc.querySelectorAll("#videoGrid .cover-fallback").length, 0, "有封面时不该留占位图");
+  });
 
   await test("点开卡片详情后，「标记已下载」会弹出确认对话框（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });

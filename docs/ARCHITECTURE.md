@@ -276,6 +276,11 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **转入回收站的动作不变**：收藏库的删除仍然先 `recycleCollection()` / `recycleRecords()`，`pruneRecycler()` 在扫描结束后 fire-and-forget；确认框文案是「先移进 005回收站，30 天后自动清理」，**不要再出现「不可恢复」「不进系统回收站」这类字样**（stability 盯着）。
 - **「把老 PNG 封面转成 WebP」已整体移除（1.9.0）**：`archive-core.js` 的 `COVER_PNG_NAME` / `COVER_WEBP_NAME` / `COVER_WEBP_QUALITY` / `coverConvertAction()` 与 `library.js` 的 `convertLegacyPngCovers()` 都删了。归档里遗留的 `封面.png` 原样保留，读取侧照旧优先 `封面.webp`、退回 `封面.png`。
 
+### 卡片封面槽跟记录走（1.9.1）
+
+- **封面槽只有一个落笔函数**：`applyCardCover(card, cover)` 按 cover 值决定 `.card-cover` 里放 `<img>` 还是 `.cover-fallback`，只换媒体节点、不动角标与勾选框。`updateVideoCard()` 每次换记录都调它，`paintPageCovers()` 命中缓存或读完文件也调它。**判据是「槽里现在放的是不是这张图」，不是「缓存里有没有 URL」** —— 1.8.23 的卡片复用就是在这上面出的 bug：复用/重建的卡片只有占位图，而缓存里早有 URL，于是永远补不上。
+- **别再用 `video.cover` 判断卡片有没有图**：`library.js` 里另有一处 `if (video.cover) continue;` 在 1.8.16 的封面交接循环里，那是合法的；新增代码要分清位置（`stability` 的反向断言只钉 `paintPageCovers()` 函数体）。
+
 ### 已知限制（4.9 审视结论，未修的部分）
 
 一次覆盖 约 8800 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**

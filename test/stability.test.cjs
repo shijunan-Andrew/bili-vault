@@ -7553,3 +7553,17 @@ test("基准脚本把趋势追到参考区，但不进 CI 门禁（P3-14）", ()
   assert.match(bench, /"### " \+ APP_VERSION \+ " \| " \+ stamp/);
   assert.match(bench, /\| N \| " \+ COLUMNS/);
 });
+// ---- 1.9.1：卡片封面槽跟着记录走 ----
+test("卡片封面槽每次都按当前记录对齐，不再拿 video.cover 猜有没有图（1.9.1）", () => {
+  const source = readProjectFile("library.js");
+  assert.match(source, /function applyCardCover\(card, cover\) \{/, "封面槽要有一个统一的落笔函数");
+  assert.match(
+    source,
+    /card\.dataset\.videoId = video\.id;[\s\S]{0,300}?applyCardCover\(card, video\.cover\);/, 
+    "更新卡片时就要把封面槽对齐（复用卡换 id 不能留上一条的图）"
+  );
+  const paint = functionBodyOf(source, "function paintPageCovers(pageCards) {");
+  assert.doesNotMatch(paint, /if \(video\.cover\) continue;/, "不许再用 video.cover 当「这张卡已经有图」的判据");
+  assert.match(paint, /applyCardCover\(card, video\.cover\);/, "缓存里有 URL 的卡片也要重新落笔");
+  assert.match(paint, /applyCardCover\(card, url\);/, "读完封面后交给同一个落笔函数");
+});

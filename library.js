@@ -1406,6 +1406,37 @@ function safeCover(cover) {
   return `<img src="${escapeHtml(url)}" alt="" loading="lazy">`;
 }
 
+/* 1.9.1：卡片封面槽的 DOM 只由「当前这条记录手上有没有封面」决定。
+   1.8.23 把卡片改成按 id 复用之后出过一个 bug：paintPageCovers 拿 `video.cover`
+   当「这张卡已经有图」的判据 —— 可复用的卡片是新造的，天生只有占位图。于是翻页、
+   切收藏夹回来，凡是封面早就读过的记录全都卡在占位图上；详情面板直接读同一份
+   `video.cover`，看着又有图。这里每次都按 cover 值对齐槽里的媒体节点。 */
+function applyCardCover(card, cover) {
+  const holder = card && card.querySelector ? card.querySelector(".card-cover") : null;
+  if (!holder) return;
+  const url = String(cover || "");
+  const usable = /^(?:blob:|data:image\/)/i.test(url) ? url : "";
+  const current = holder.querySelector("img") || holder.querySelector(".cover-fallback");
+  if (usable) {
+    if (current && current.tagName === "IMG" && current.getAttribute("src") === usable) return;
+    const image = document.createElement("img");
+    image.setAttribute("src", usable);
+    image.setAttribute("alt", "");
+    image.setAttribute("loading", "lazy");
+    if (current) holder.insertBefore(image, current);
+    else holder.prepend(image);
+    if (current) current.remove();
+    return;
+  }
+  if (current && current.classList.contains("cover-fallback")) return;
+  const fallback = document.createElement("div");
+  fallback.className = "cover-fallback";
+  fallback.setAttribute("aria-label", BcaI18n.t("没有封面"));
+  if (current) holder.insertBefore(fallback, current);
+  else holder.prepend(fallback);
+  if (current) current.remove();
+}
+
 /* ---------------- 4.6：UP 主 / 标签 精确筛选（纯本地，不发任何请求） ---------------- */
 
 // 出现次数从多到少，同数量按字典序；用于两个下拉的选项顺序
@@ -1533,21 +1564,19 @@ function matchesVideoFilters(video, query) {
 function searchQuery() { return searchInput.value.trim().toLocaleLowerCase(); }
 
 /* 1.8.6：当前页卡片建好之后再去读封面 —— 一页最多 100 张，翻页才有 IO。
-   读完只把占位图换成 <img>，不重画卡片（重画会把焦点、选中状态都弄丢）。 */
+   读完只把占位图换成 <img>，不重画卡片（重画会把焦点、选中状态都弄丢）。
+   1.9.1：不再用 `video.cover` 判断「这张卡已经有图」—— 卡片是复用的，缓存里有 URL
+   不代表槽里就是那张图；要不要换、换成什么，统一交给 applyCardCover。 */
 function paintPageCovers(pageCards) {
   for (const { card, video } of pageCards) {
-    if (video.cover) continue;
-    const holder = card.querySelector(".card-cover");
-    if (!holder) continue;
+    if (!card || !video) continue;
+    if (video.cover) {
+      applyCardCover(card, video.cover);
+      continue;
+    }
     hydrateCover(video).then((url) => {
       if (!url || !card.isConnected) return;
-      const fallback = holder.querySelector(".cover-fallback");
-      if (!fallback) return;
-      const image = document.createElement("img");
-      image.src = url;
-      image.alt = "";
-      image.loading = "lazy";
-      fallback.replaceWith(image);
+      applyCardCover(card, url);
     }).catch(() => {});
   }
 }
@@ -1768,6 +1797,8 @@ function createVideoCard() {
 
 function updateVideoCard(card, video, query) {
   card.dataset.videoId = video.id;
+  // 1.9.1：复用卡片的封面槽可能还挂着上一条记录的图，跟 id 一起对齐。
+  applyCardCover(card, video.cover);
   card.classList.toggle("invalid-video", video.isInvalid);
   card.classList.toggle("downloaded-video", video.downloaded);
   card.classList.toggle("selected", selectedVideoIds.has(video.id));

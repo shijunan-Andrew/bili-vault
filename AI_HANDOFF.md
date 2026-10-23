@@ -72,9 +72,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1019 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 356 · archive-core 88 · stats-core 68 · background 25 · pages 33（后四套是真执行） |
+| 测试基线 | stability 357 · archive-core 88 · stats-core 68 · background 25 · pages 34（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-23 22:58，当时 HEAD `86a4754`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-23 23:19，当时 HEAD `51a51cb`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -391,7 +391,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:356 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:357 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
