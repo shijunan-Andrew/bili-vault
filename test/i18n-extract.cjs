@@ -63,7 +63,10 @@ const KEY_ARGUMENT_HELPERS = [
   // settings.js 的背景图与 UID 状态：函数体第一件事都是 BcaI18n.t(key)
   { source: "showWallpaperStatus", window: 300 },
   { source: "showWallpaperError", window: 300 },
-  { source: "showForgetUidStatus", window: 300 }
+  { source: "showForgetUidStatus", window: 300 },
+  // 1.8.22（old-p3 security P3-2）：各扩展页开头调 BcaI18n.guardTopFrame("提示", "错误")，
+  // 函数体里 t(String(message)) —— 这两个字面量同样要做成词条。
+  { source: "(?:\\bBcaI18n\\.)?\\bguardTopFrame", window: 500 }
 ];
 
 function decodeEntities(text) {

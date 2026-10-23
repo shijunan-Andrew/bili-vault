@@ -1026,6 +1026,11 @@
     rows.sort((left, right) => left.stamp.localeCompare(right.stamp) || left.attempt - right.attempt);
     return rows.slice(0, Math.max(0, rows.length - limit)).map((row) => row.name);
   }
+  /* 1.8.22（old-p3 P3-8）：下面这几个是从 api 里**保留**的测试/对照用导出 ——
+     safeCollectionName / withSourceCollection 只被 test/archive-core.test.cjs 与
+     test/stability.test.cjs 直接调；parseShareStats 与 background.js:1944 那份是等价实现，
+     stability 有「两份必须一致」的守卫；patchVolatileFields 则是生产路径在用（本体只有这一份）。
+     真要清掉前三个，得先把那些单元测试改成反射内部函数，收益不够。 */
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,

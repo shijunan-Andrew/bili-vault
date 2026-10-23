@@ -88,7 +88,7 @@
     });
   }
 
-  global.BcaIcons = Object.freeze({ svg, hydrate, names: Object.keys(PATHS) });
+  global.BcaIcons = Object.freeze({ svg, hydrate });
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => hydrate());
   else hydrate();

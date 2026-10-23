@@ -5,6 +5,46 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.22：旧 P3 清单清仓
+
+这一版把 1.7.0 审查留下、一直没人动的 `old-p3-checklist.md` 67 条（死代码、UX 可访问性、破坏性操作、存储、兼容、性能、原生助手、安全、隐私）逐条复核：能修的直接修，改不动的写清原因，过时的标过时。**清单里每一条现在都有判定**。
+
+### 改了什么
+
+- **死代码与死导出**：`pet.js` 删掉 `queueBubble`/`advanceBubble`/`applyTempLine` 整条队列机制与配套状态；`stats.js` 删掉 `clampInt`/`rangePresetOf`/`hashText`/`CHART_MIN_BAR`/`DAY_TOLERANCE`/`currentRange`；`stats.css` 删掉没人用的 `.stats-calendar-month-in`；`theme.js` 不再写没人读的 `data-theme-resolved`；`stats.js` 的 locale 回退键从根本不存在的 `"bcaLocale"` 改成 `i18n.STORAGE_KEY`；`i18n.js`/`icons.js` 的冻结导出摘掉零外部引用的成员。
+- **统计页失败不再只有四个字**：占用统计失败时直接说「统计失败，点「刷新」重试」，`title` 里给原因，控制台留一条 `console.warn`。
+- **日历格与柱状图对读屏更诚实**：格子的 `aria-label` 从 ISO 日期改成「几月几日星期几」；图表柱子包进 `role="listitem"`，轴标签整组 `aria-hidden`。
+- **删除有进度、不能中途取消也写明白**：「删除收藏夹 / 删除视频 / 清理没写完的目录」确认后在弹窗里显示「正在删除 3/12：…（不能中途取消，以免删到一半）」；空态自带「添加视频」按钮，不用再让用户去右上角找。
+- **报错与回滚不再静默**：旧错误报告清理失败、写报告失败都留 `console.warn`；取消导入拆成「收尾当前这一条 / 已写入的部分会回滚」两段，回滚每 25 项报一次 `已处理 N/M 项`，并在每个还原循环里 `keepServiceWorkerAlive`。
+- **壁纸信号与统计快照不再假装成功**：`announceWallpaperChange` 给 `storage.local.set()` 补 `.catch`；统计快照发布失败不再把「库文件已写成功」报成写库失败。
+- **同名目录会告诉你**：目标收藏夹已有同名目录、记录存成 `_2` 时，弹一条「目标收藏夹里已有同名目录，这条存成了「{name}」。」。
+- **带时区的收藏时间才按 `Date.parse` 解释**，不带时区的按本地时间构造，避免无时区 ISO 串被当成 UTC、日期整体偏一天。
+- **安全收口**：`data-i18n-html` 不再直接 `innerHTML`，改成白名单标签 + `href` 只留 http(s) 并补 `rel="noopener noreferrer"`；反嵌入守卫从 `library.js` 一处抽成 `BcaI18n.guardTopFrame()`，设置/统计/弹窗/使用说明五个页面都调用；三个扩展页的 `onMessage` 校验 `sender.id`；安装脚本拒绝 UNC 网络路径；错误报告正文落盘前统一打码 `C:\Users\<用户>`。
+- **原生目录助手的人话**：设备名（`NUL`）与「全是点」的目录名分开报；设置文件强制按严格 UTF-8 读、坏 JSON 与编码错各有中文提示；路径过长不再把 .NET 原文甩给用户；`-DownloadBasePath` 带引号能正确去掉；卸载时顺手清空的自定义宿主父目录、`-SkipRegistry` 时列出仍存在的注册表键。
+- **两处来源不明的占位**：收藏库横幅的「GitHub 开源地址」从 `https://github.com/` 换成真实仓库；配置导出的 object URL 登记 `revokeTimer` 并在 `pagehide` 时清掉。
+
+### 为什么
+
+这 67 条是 1.7.0 那轮 P3 审查的遗产，每条都有证据和修法，但一直排在 P0–P2 后面。其中真正动用户文件的三条（删除进度、回滚进度、报告清理失败）和真能让页面出问题的三条（`innerHTML` 渲染词典、扩展页无 sender 校验、安装脚本收 UNC）优先修；剩下的死代码与说明项一次清完，清单才不会永远挂在「进行中」。
+
+### 踩的坑
+
+- **`pages.test` 的 dom-harness 没有 `template.content`**：白名单渲染第一版用 `<template>` 当容器，两条导入配置用例当场 `Cannot read properties of undefined (reading 'childNodes')`；改成 `document.createElement("div")` + 返回节点数组 + `replaceChildren(...nodes)` 才过。harness 的 `attributes` 还是 `Map`（不是 NamedNodeMap），属性循环要分支。
+- **给助手函数登记词典抽取**：`guardTopFrame(message, errorMessage)` 把两条中文串作为参数传进去，`i18n-extract.cjs` 默认只扫 `t("…")` 字面量，没登记时直接报「多余 4 条」；在 `KEY_ARGUMENT_HELPERS` 里加一条（窗口 500）才收全。
+- **守卫脚本自身的转义比被测代码还难**：生成 PS1 断言时，JS 字符串把 `\\.\` 写成五个反斜杠、`\)` 多写一个、`bash -e` 又把 `\$targetPath` 的美元符吃掉。最后统一「写脚本文件 + `String.raw`」，并对 host 里那几行逐字打 `charCodeAt` 核对。
+- **截图前的探针也有坑**：手写 settings.json 时 `D:\B站` 的 `\B` 是非法转义，探针报「设置文件已损坏」其实是探针自己写错了——JSON 里必须写 `\\`。
+- **词典键就是中文原文**：这一版新增 8 个键、删掉 5 个旧键，两本词典都到 958 条；任何新增中文串不同步两本，`i18n-extract --check` 立刻红。
+
+### 没动的
+
+- `Assert-HostRootSafe` 不做 8.3 短名展开，宁可误拒（拒绝比误删安全）。
+- 原生宿主没有调用方认证：协议只能读同目录设置、对下载根做 `Test-Path`、打开已存在目录，不构成提权，写进 ARCHITECTURE「已知限制」。
+- 宿主脚本与启动器放在用户可写目录、`get-config` 回明文下载路径，都是功能取舍。
+- 统计页 `countInRange`/`normalizeDayRows` 逐渲染重算不缓存（上限 180 行，常数项远小于缓存失效成本）。
+- `视频信息.txt` 的发布时间继续带中文星期几（这是档案格式，不进词典）。
+- 卡片用相对时间、详情用原文绝对时间的分工不统一。
+- 递归删除遇到 junction/symlink 的行为只能真机验证，本轮只补了注释。
+
 ## V1.8.21：未闭环的 P0–P2 清零
 
 这一版把 1.8.20 登记在参考区 `unresolved-p0p2-checklist.md` 里的 20 条（P0 已清零，余下 P1/P2）逐条修完。删掉的不是「报告」，是报告背后还在的代码。

@@ -280,7 +280,12 @@
   const WALLPAPER_REVISION_KEY = "interfaceWallpaperRevision";
 
   function announceWallpaperChange() {
-    try { global.chrome?.storage?.local?.set({ [WALLPAPER_REVISION_KEY]: Date.now() }); } catch (_) {}
+    /* 1.8.22（old-p3 storage P3-1）：set() 返回 Promise，同步 try 抓不到它的拒绝 ——
+       配额或上下文失效时会变成 unhandled rejection，别的页面也收不到刷新信号。
+       按全仓惯例补 .catch，写失败只影响「其它页面要不要重读壁纸」，不影响这次保存。 */
+    try {
+      global.chrome?.storage?.local?.set({ [WALLPAPER_REVISION_KEY]: Date.now() })?.catch?.(() => {});
+    } catch (_) {}
   }
 
   /* 1.7.10（facet-storage P2-5）：背景图是 IndexedDB 里的一份 Blob，浏览器在磁盘吃紧时
@@ -326,7 +331,6 @@
     const root = document.documentElement;
     if (mode === "system") root.removeAttribute("data-theme");
     else root.setAttribute("data-theme", resolved());
-    root.dataset.themeResolved = resolved();
     const meta = document.querySelector?.('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", themeColor(resolved()));
     paintAppearance();

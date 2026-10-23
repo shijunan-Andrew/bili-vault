@@ -105,16 +105,79 @@
     }
   }
 
+  // 1.8.22（old-p3 security P3-1）：data-i18n-html 以前是 innerHTML = t(...)。
+  // 词表是我们自己写的，但这是扩展里唯一「字符串 → HTML」的入口：将来任何一处文案
+  // 被改坏（或词典文件被意外注入）都会在扩展页里执行脚本。这里改成白名单渲染 ——
+  // 只留少量行内标签与 http(s) 链接，其余元素拆掉、属性清掉。
+  const I18N_HTML_TAGS = new Set(["A", "SPAN", "B", "STRONG", "EM", "BR", "CODE"]);
+  const I18N_HTML_LINK_PROTOCOLS = new Set(["http:", "https:"]);
+  function sanitizeI18nHtml(markup) {
+    const holder = document.createElement("div");
+    holder.innerHTML = String(markup ?? "");
+    const clean = (parent) => {
+      let index = 0;
+      while (index < parent.childNodes.length) {
+        const node = parent.childNodes[index];
+        if (node.nodeType === 3) { index += 1; continue; }
+        if (node.nodeType !== 1) { parent.removeChild(node); continue; }
+        if (!I18N_HTML_TAGS.has(node.tagName)) {
+          // 不允许的标签：拆掉外壳，把里面的文字留下（不整段丢，免得文案缺字）
+          const children = [...node.childNodes];
+          for (const child of children) parent.insertBefore(child, node);
+          parent.removeChild(node);
+          continue;
+        }
+        const isLink = node.tagName === "A";
+        // 真浏览器是 NamedNodeMap，测试用小 dom 是 Map —— 两种都取得到名字
+        const attributeNames = node.attributes instanceof Map
+          ? [...node.attributes.keys()]
+          : [...node.attributes].map((attribute) => attribute.name);
+        for (const attributeName of attributeNames) {
+          const name = String(attributeName).toLowerCase();
+          if (isLink && name === "href") {
+            let protocol = "";
+            try { protocol = new URL(node.getAttribute("href"), global.location?.href || "about:blank").protocol; } catch (_) {}
+            if (!I18N_HTML_LINK_PROTOCOLS.has(protocol)) node.removeAttribute("href");
+            continue;
+          }
+          if (isLink && (name === "title" || name === "target" || name === "rel")) continue;
+          node.removeAttribute(name);
+        }
+        if (isLink) {
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
+        }
+        clean(node);
+        index += 1;
+      }
+    };
+    clean(holder);
+    return [...holder.childNodes];
+  }
+
+  // 1.8.22（old-p3 security P3-2）：反嵌入兜底以前只有 library.js 顶部一份。
+  // 设置页 / 统计页 / 教程页 / 弹窗同样能被别的页面嵌进 iframe 里做点击劫持，
+  // 所以判据收口到这里，各扩展页在脚本开头调一次（措辞由调用方给）。
+  function guardTopFrame(message, errorMessage) {
+    let embedded = false;
+    try { embedded = global.top !== global.self; } catch (_) { embedded = true; }
+    if (!embedded) return;
+    const text = t(String(message || ""));
+    if (document.body) document.body.textContent = text;
+    else document.documentElement.textContent = text;
+    throw new Error(t(String(errorMessage || message || "")));
+  }
+
   // 把标记过的静态节点翻译一遍。
   // data-i18n 用 textContent（只给纯文本节点用，带图标的请套一层 span）；
-  // data-i18n-html 允许内嵌标签（例如「使用须知」里的 DownKyi 链接）。
+  // data-i18n-html 允许内嵌标签（例如「使用须知」里的 DownKyi 链接），走白名单渲染。
   function apply(root = document) {
     if (!root?.querySelectorAll) return;
     root.querySelectorAll("[data-i18n]").forEach((element) => {
       element.textContent = t(element.dataset.i18n);
     });
     root.querySelectorAll("[data-i18n-html]").forEach((element) => {
-      element.innerHTML = t(element.dataset.i18nHtml);
+      element.replaceChildren(...sanitizeI18nHtml(t(element.dataset.i18nHtml)));
     });
     root.querySelectorAll("[data-i18n-title]").forEach((element) => {
       element.title = t(element.dataset.i18nTitle);
@@ -167,14 +230,12 @@
   }
 
   function locale() { return current; }
-  function locales() { return LOCALES.slice(); }
   function onChange(listener) {
     listeners.add(listener);
     return () => listeners.delete(listener);
   }
 
   global.BcaI18n = Object.freeze({
-    t, use, init, apply, locale, locales, onChange, isSupported, loadFailure,
-    LOCALES, DEFAULT_LOCALE, STORAGE_KEY
+    t, use, init, apply, guardTopFrame, locale, onChange, isSupported, loadFailure, STORAGE_KEY
   });
 })(globalThis);

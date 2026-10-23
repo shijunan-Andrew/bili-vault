@@ -418,11 +418,6 @@ body {
 }
 /* 每一列的标题：排在它自己那张表的上方（原来两个月份名挤在头部一行里）。 */
 .stats-calendar-month-block .stats-calendar-month { display: block; }
-/* 铺了两个月以上时补在表头里的月份名：占满整行，不与 7 列对齐。 */
-.stats-calendar-month-in {
-  grid-column: 1 / -1;
-  margin-bottom: var(--sp-1);
-}
 .stats-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));

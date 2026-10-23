@@ -4,10 +4,8 @@ const DB_STORE = "settings";
 // 4.3 安全加固：本地收藏库不应被任何页面嵌套。
 // 虽然已从 manifest 移除 web_accessible_resources，这里再做一层兜底，
 // 避免将来有人重新开放它时被点击劫持（在透明 iframe 上盖诱导按钮）。
-if (window.top !== window.self) {
-  document.body.textContent = BcaI18n.t("本地收藏库需要在独立标签页中打开，请不要把它嵌入其他页面。");
-  throw new Error(BcaI18n.t("本地收藏库不允许被嵌入其他页面。"));
-}
+// 1.8.22（old-p3 security P3-2）：判据收口到 BcaI18n.guardTopFrame()，各扩展页共用一份。
+BcaI18n.guardTopFrame("本地收藏库需要在独立标签页中打开，请不要把它嵌入其他页面。", "本地收藏库不允许被嵌入其他页面。");
 
 const collectionList = document.getElementById("collectionList");
 const collectionTotal = document.getElementById("collectionTotal");
@@ -85,6 +83,7 @@ const deleteAssociatedDownloads = document.getElementById("deleteAssociatedDownl
 const deleteUnknownOption = document.getElementById("deleteUnknownOption");
 const acknowledgeUnknownDelete = document.getElementById("acknowledgeUnknownDelete");
 const cancelDeleteButton = document.getElementById("cancelDelete");
+const deleteProgress = document.getElementById("deleteProgress");
 const confirmDeleteButton = document.getElementById("confirmDelete");
 const toast = document.getElementById("toast");
 const createCollectionButton = document.getElementById("createCollection");
@@ -1947,8 +1946,13 @@ function renderVideos() {
   if (!videos.length) {
     videoGrid.hidden = false;
     const emptyTitle = selectedCollection === "*" ? BcaI18n.t("本地收藏库里还没有视频") : BcaI18n.t("这个收藏夹里还没有视频");
-    const emptyCopy = selectedCollection === "*" ? BcaI18n.t("选择一个收藏夹，或新建收藏夹并添加视频。") : BcaI18n.t("点击右上角“添加视频”，输入 B 站网址、BV 号或 av 号。");
-    videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">${BcaIcons.svg("collection")}</div><h2>${escapeHtml(emptyTitle)}</h2><p>${escapeHtml(emptyCopy)}</p></div>`;
+    const emptyCopy = selectedCollection === "*" ? BcaI18n.t("选择一个收藏夹，或新建收藏夹并添加视频。") : BcaI18n.t("点下面的「添加视频」，输入 B 站网址、BV 号或 av 号。");
+    /* 1.8.22（old-p3 ux P3-7）：空态以前只让人「自己去找右上角」，
+       这里直接给一个按钮，点开的就是右上角那个对话框。 */
+    const emptyAction = selectedCollection === "*" ? "" : `<button id="emptyAddVideo" class="button button-primary" type="button">${escapeHtml(BcaI18n.t("添加视频"))}</button>`;
+    videoGrid.innerHTML = `<div class="empty-search" style="grid-column:1/-1"><div class="empty-search-icon">${BcaIcons.svg("collection")}</div><h2>${escapeHtml(emptyTitle)}</h2><p>${escapeHtml(emptyCopy)}</p>${emptyAction}</div>`;
+    const emptyAdd = videoGrid.querySelector("#emptyAddVideo");
+    if (emptyAdd) emptyAdd.addEventListener("click", openAddVideoDialog);
   }
   renderPager(matching.length);
   updateBatchControls();
@@ -2184,7 +2188,14 @@ function downloadConfigFile(includePersonal = true) {
     document.body.append(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    /* 1.8.22（old-p3 perf PF-8）：撤销定时器要能提前结束 —— 页面若在 10 秒内关掉，
+       定时器跟着页面没了倒无所谓，但「页面先关、URL 一直挂着」不该留在那儿。
+       这里登记 pagehide，关闭时立刻撤销并清掉定时器（重复撤销是空操作）。 */
+    const revokeTimer = setTimeout(() => URL.revokeObjectURL(url), 10000);
+    window.addEventListener("pagehide", () => {
+      clearTimeout(revokeTimer);
+      URL.revokeObjectURL(url);
+    }, { once: true });
     showToast(includePersonal
       ? BcaI18n.t("配置已导出（含收藏夹顺序与筛选）。")
       : BcaI18n.t("配置已导出（只含外观与档位）。"));
@@ -3031,6 +3042,8 @@ function compactDate(value) {
 // 4.6：卡片上的日期改成相对时间（今天 / 昨天 / 3 天前 / 2 个月前 / 2025.03），
 // 完整时间放在卡片 title 上；详情面板仍用 视频收藏时间 原文。
 // 按「自然日」而不是 24 小时算，所以今天 00:30 与昨天 23:30 差 1 天而不是 0 天。
+// old-p3 ux P3-9 决定不修：相对时间用于「列表里快速扫」，绝对时间用于「详情里对档案」，
+// 两种口径各自服务不同场景，刻意不统一成一种。
 function startOfDay(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
@@ -3318,8 +3331,14 @@ async function updateStorageUsage(handle, options = {}) {
     }
     // 统计期间可能已经换了根目录：只给还是当前根目录的那个写结果
     if (rootHandle === handle) storageUsage.textContent = formatBytes(total);
-  } catch (_) {
-    if (rootHandle === handle) storageUsage.textContent = BcaI18n.t("统计失败");
+  } catch (error) {
+    if (rootHandle === handle) {
+      /* 1.8.22（old-p3 ux P3-1）：「统计失败」四个字既没原因也没出路。
+         正文保持短句（顶栏那行放不下长句），原因放 title，下一步直接写「点刷新重试」。 */
+      storageUsage.textContent = BcaI18n.t("统计失败，点「刷新」重试");
+      storageUsage.title = BcaI18n.t("统计本地归档占用失败：{message}", { message: error?.message || BcaI18n.t("未知错误") });
+    }
+    console.warn("统计本地归档占用失败（只影响顶栏那行占用数字）", error);
   } finally {
     storageUsageRunning = false;
     const queued = storageUsageQueuedRoot;
@@ -3859,6 +3878,11 @@ async function copyVideoRecord(video, targetName) {
   const sourceRecord = await sourceCollection.getDirectoryHandle(video.directory);
   const targetCollection = await rootHandle.getDirectoryHandle(targetName);
   const targetRecordName = await uniqueRecordFolderName(targetCollection, video.directory);
+  // 1.8.22（old-p3 destructive P3-2）：同名目录被换名时以前一句话都不说，
+  // 用户只会觉得「我要搬的那条怎么多出来一个 _2」。换名必须看得见。
+  if (targetRecordName !== video.directory) {
+    showToast(BcaI18n.t("目标收藏夹里已有同名目录，这条存成了「{name}」。", { name: targetRecordName }));
+  }
   let targetRecord;
   try {
     targetRecord = await targetCollection.getDirectoryHandle(targetRecordName, { create: true });
@@ -4103,6 +4127,10 @@ async function copyDownloadDirectories(downloadParent, video, targetNames) {
       // 1.8.7（P2-10）：复制之前先确认空间够（不够就明确说缺多少，而不是写到一半失败）
       await ensureCopySpace(await directorySize(source.directory), source.directory.name);
       const targetNameOnDisk = await uniqueRecordFolderName(targetCollection, source.directory.name);
+      // 1.8.22（old-p3 destructive P3-2）：与 copyVideoRecord 同一口径 —— 换名要说出来。
+      if (targetNameOnDisk !== source.directory.name) {
+        showToast(BcaI18n.t("目标收藏夹里已有同名目录，这条存成了「{name}」。", { name: targetNameOnDisk }));
+      }
       const targetDirectory = await targetCollection.getDirectoryHandle(targetNameOnDisk, { create: true });
       try {
         const copyResult = await copyDirectoryContents(source.directory, targetDirectory);
@@ -4462,6 +4490,13 @@ async function confirmPendingDelete() {
   cancelDeleteButton.disabled = true;
   confirmDeleteButton.disabled = true;
   confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("正在删除收藏夹…") : action.type === "batch" ? BcaI18n.t("正在批量删除…") : action.type === "unfinished" ? BcaI18n.t("正在清理…") : BcaI18n.t("正在删除…");
+  /* 1.8.22（old-p3 ux P3-4、P3-5）：批量删除/清理原来只有一句「正在删除…」：
+     既没有 N/M 进度，也没解释为什么「取消」按钮变灰了。用对话框里那行 role="status"
+     一次说清两件事。 */
+  if (deleteProgress) {
+    deleteProgress.hidden = false;
+    deleteProgress.textContent = BcaI18n.t("正在准备删除…（这一步不能中途取消，以免删到一半）");
+  }
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
@@ -4489,6 +4524,9 @@ async function confirmPendingDelete() {
     }
     let batchResult = null;
     if (action.type === "collection") {
+      if (deleteProgress) deleteProgress.textContent = BcaI18n.t("正在删除收藏夹「{name}」及其中的文件…（这一步不能中途取消，以免删到一半）", { name: action.collection.name });
+      // 1.8.22（old-p3 security P3-6）：递归删不跟随 Windows junction 的行为
+      // 只能在真机上验证；删失败会走下面的失败分支并保留现场，这里不额外判断。
       await rootHandle.removeEntry(action.collection.name, { recursive: true });
       if (selectedCollection === action.collection.name) selectedCollection = "*";
       if (deleteDownloads && downloadParent) {
@@ -4499,6 +4537,7 @@ async function confirmPendingDelete() {
       let deleted = 0;
       const failures = [];
       for (const video of action.videos) {
+        if (deleteProgress) deleteProgress.textContent = BcaI18n.t("正在删除 {done}/{total}：{name}（不能中途取消，以免删到一半）", { done: deleted + failures.length + 1, total: action.videos.length, name: video.title });
         try {
           const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
           await collectionHandle.removeEntry(video.directory, { recursive: true });
@@ -4518,6 +4557,7 @@ async function confirmPendingDelete() {
       const failures = [];
       for (const target of action.records) {
         const label = `${target.collection}/${target.directory}`;
+        if (deleteProgress) deleteProgress.textContent = BcaI18n.t("正在清理 {done}/{total}：{name}（不能中途取消，以免删到一半）", { done: removed.length + skipped.length + failures.length + 1, total: action.records.length, name: label });
         try {
           const collectionHandle = await rootHandle.getDirectoryHandle(target.collection, { create: false });
           const recordHandle = await collectionHandle.getDirectoryHandle(target.directory, { create: false });
@@ -4593,6 +4633,10 @@ async function confirmPendingDelete() {
     deleteInProgress = false;
     publishLibraryWriteLock();
     cancelDeleteButton.disabled = false;
+    if (deleteProgress) {
+      deleteProgress.hidden = true;
+      deleteProgress.textContent = "";
+    }
     confirmDeleteButton.disabled = false;
     confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : action.type === "unfinished" ? BcaI18n.t("清理 {count} 个目录", { count: action.records.length }) : BcaI18n.t("删除本地文件");
   }
@@ -5847,7 +5891,11 @@ viewListButton?.addEventListener("click", () => setViewMode("list"));
 
 // 4.4：更新状态时的进度回报。4.6 起同时把它接到确认框的进度行上（N/M），
 // 批量更新时用户不用再盯着详情面板里那一行小字。
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
+  // 1.8.22（old-p3 security P3-3）：只接受本扩展自己发来的消息。
+  // 其他扩展 / 网页页面摸不到 chrome.runtime.onMessage，但多一道 sender 判据，
+  // 将来这条消息通道被复用时不会变成「谁都能催页面干活」。
+  if (sender && sender.id && sender.id !== chrome.runtime.id) return;
   if (message?.type !== "bca-status-progress") return;
   if (!statusRefreshInProgress) return;
   // 有进度就说明后台还活着：把看门狗往后推，正常的长任务不会被误判成卡死

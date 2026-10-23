@@ -14,7 +14,7 @@
 <body>
   <!-- 4.5.2：开源横幅。仓库地址在业务脚本的 PROJECT_REPO_URL 常量里改，一处即可 -->
   <div id="githubBanner" class="github-banner" hidden>
-    <a id="githubBannerLink" class="banner-track" href="https://github.com/" target="_blank" rel="noopener noreferrer">
+    <a id="githubBannerLink" class="banner-track" href="https://github.com/shijunan-Andrew/bili-vault" target="_blank" rel="noopener noreferrer">
       <span class="banner-scroll">
         <span class="banner-run"><span class="banner-icon" data-icon="github"></span><span data-i18n="本项目已在 GitHub 上开源，点击查看">本项目已在 GitHub 上开源，点击查看</span></span>
         <span class="banner-run" aria-hidden="true"><span class="banner-icon" data-icon="github"></span><span data-i18n="本项目已在 GitHub 上开源，点击查看">本项目已在 GitHub 上开源，点击查看</span></span>
@@ -81,6 +81,7 @@
           <span class="art-star" data-icon="sparkle"></span>
           <span class="art-play" data-icon="play"></span>
         </div>
+        <!-- 装饰性眉标（old-p3 ux P3-8 决定不修）：它是设计语言的一部分，刻意跟随视觉稿、不随界面语言变；真正会翻译的标题是下面那行 h1。 -->
         <p class="eyebrow">YOUR PERSONAL ARCHIVE</p>
         <h1 data-i18n-html="让收藏的视频，<span>一目了然</span>">让收藏的视频，<span>一目了然</span></h1>
         <p class="welcome-copy" data-i18n="首次选择本地备份文件夹后会自动记住路径，下次打开直接读取，浏览器只在本机读写。">首次选择本地备份文件夹后会自动记住路径，下次打开直接读取，浏览器只在本机读写。</p>
@@ -124,6 +125,7 @@
 
         <div class="page-heading">
           <div>
+            <!-- 同上（old-p3 ux P3-8）：英文眉标只是视觉分区，不翻译是刻意的。 -->
             <p class="eyebrow">YOUR COLLECTIONS</p>
             <h1 id="pageTitle">全部收藏</h1>
             <p id="resultSummary" class="heading-subtitle"></p>
@@ -341,6 +343,7 @@
       <p class="confirm-warning" data-i18n="本地删除不可恢复：不会进系统回收站，删掉就找不回来了。">本地删除不可恢复：不会进系统回收站，删掉就找不回来了。</p>
       <label id="deleteDownloadsOption" class="delete-downloads-option" hidden><input id="deleteAssociatedDownloads" type="checkbox"><span data-i18n="同时删除关联的本地下载文件">同时删除关联的本地下载文件</span></label>
       <label id="deleteUnknownOption" class="delete-downloads-option" hidden><input id="acknowledgeUnknownDelete" type="checkbox"><span data-i18n="我知道目录里另有不是本插件写入的文件，也会一起删掉">我知道目录里另有不是本插件写入的文件，也会一起删掉</span></label>
+      <p id="deleteProgress" class="dialog-progress" role="status" hidden></p>
       <div class="confirm-actions">
         <button id="cancelDelete" class="button button-quiet" type="button" data-i18n="取消">取消</button>
         <button id="confirmDelete" class="button button-danger" type="button">删除本地文件，不可恢复</button>

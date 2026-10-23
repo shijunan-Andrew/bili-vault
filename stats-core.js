@@ -17,7 +17,7 @@
   // 1.5.9：窗口统一成近 7 天（原来 30 天，用户报「显示近 30 天 15 个、我实际有 84 个」）。
   // 这样「近期」列、宠物那句「你近期保存最多的收藏夹是」与柱状图/近 7 天新增同一个口径。
   const RECENT_WINDOW_DAYS = 7;
-  // 数据统计页的默认柱状图天数。
+  // 数据统计页的默认柱状图天数（只作 recentDays() 的默认参数；生产调用都显式传 days）。
   const DAILY_CHART_DAYS = 14;
   // 快照里那份「按天紧凑表」（dailyRows）覆盖的天数。180 天 ≈ 半年，
   // 足够统计页做「上月 / 近 30 天 / 近半年」这类区间，又不至于把快照撑大。
@@ -100,10 +100,26 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
       const time = date.getTime();
       if (Number.isFinite(time)) return time;
     }
-    const iso = raw.match(/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?/);
+    const iso = raw.match(/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
     if (iso) {
-      const time = Date.parse(iso[0].replace(" ", "T"));
-      if (Number.isFinite(time)) return time;
+      /* 1.8.22（old-p3 compat 理论）：带时区后缀才交给 Date.parse；不带的按**本地**字段构造。
+         ES 规范里「date-time 不带偏移」按本地解释，但 date-only 按 UTC —— 这套差异加上
+         各实现的边角行为，会让「同一条档案在两个时区算出不同的天」。归档里的时间本来就是
+         用户墙上的时间，统一按本地构造，口径与上面那段中文格式完全一致。 */
+      const text = iso[0];
+      if (/Z$|[+-]\d{2}:?\d{2}$/.test(text)) {
+        const parsed = Date.parse(text);
+        if (Number.isFinite(parsed)) return parsed;
+      } else {
+        const parts = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+        if (parts) {
+          const time = new Date(
+            Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]),
+            Number(parts[4]), Number(parts[5]), Number(parts[6] || 0)
+          ).getTime();
+          if (Number.isFinite(time)) return time;
+        }
+      }
     }
     return NaN;
   }
@@ -584,6 +600,8 @@ function fallbackRowKey(videos, key) {
 
   // 按自然周（周一~周日）汇总，只列**有记录**的周，升序。
   // 长区间的柱子用它：730 天 ≈ 105 根柱子，逐日渲染会挤成一片。
+  // 1.8.22：这三个聚合（周/月/年）刻意**不设时间窗口** —— 快照要给统计页留全量历史，
+  // 统计页只按当前区间取用；一旦加窗口，「全部」区间会在半年后开始悄悄丢柱子。
   function weeklySeries(database) {
     const buckets = new Map();
     for (const entry of entriesOf(database)) {

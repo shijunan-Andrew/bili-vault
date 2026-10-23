@@ -364,6 +364,9 @@ function formatPublishDate(value) {
   if (!numeric) return "未知";
   const date = new Date(numeric > 1e12 ? numeric : numeric * 1000);
   if (Number.isNaN(date.getTime())) return "未知";
+  /* 1.8.22（old-p3 compat L239）决定不改：星期几是 视频信息.txt 里「视频发布时间」的既定格式，
+     写中文是档案的一部分（跟 BV 号、时长一样不进词典），读档与逐字节比对都依赖它。
+     它不属于界面文案，所以不需要跟着界面语言变。 */
   const week = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][date.getDay()];
   return `${formatDateTime(date)} ${week}`;
 }
@@ -801,6 +804,9 @@ function parseManualVideoIdentifier(input) {
    唯一的取舍：不再走「页面代取」，固定传 tabId = null 走后台直连。手动添加是从弹窗发起的，
    手上没有 B 站标签页 id，也就不为了省一次请求去引入对 sender.tab 的依赖。 */
 async function fetchManualVideoMetadata(identifier) {
+  // 1.8.22（old-p3 privacy P3-2）：手动添加视频走的是后台 service worker 直接 GET，
+  // 没有页面 Referer、Cookie 也不带 —— 与「在 B 站页面里点收藏」的抓包指纹不同，
+  // 这是浏览器扩展的既定实现，不是请求伪装，保留现状并在此说明。
   const video = await biliImportApiGet("/x/web-interface/view", identifier, 15000);
   if (!video || !video.title || !video.pic) throw new Error("B 站返回的视频资料不完整，缺少标题或封面。");
   let tags = [];
@@ -966,7 +972,10 @@ function storageReportLabel(path) {
 function reportText(error, context = {}) {
   const now = new Date();
   const metadata = context.metadata || {};
-  return [
+  // 1.8.22（old-p3 security P3-5）：报告正文里的 C:\Users\<用户名> 一律打码。
+  // 错误堆栈对用户排查仍然够用（盘符之后的路段都保留），但不再把账号名写进
+  // 会被复制、被贴给别人的文本里。落盘那一份也走这里。
+  const text = [
     "哔哩藏库错误报告",
     ERROR_REPORT_NOTICE,
     `发生时间：${formatChineseDateTime(now, true)}`,
@@ -979,6 +988,7 @@ function reportText(error, context = {}) {
     `详细信息：${error?.stack || "无"}`,
     ""
   ].join("\n").slice(0, 16000);
+  return maskLocalUserPaths(text);
 }
 
 // V1.4.3（P2-19）：报告目录原来只增不减 —— 每次失败都新建一份，用户又没有清理入口。
@@ -993,20 +1003,27 @@ async function trimReportDirectory(directory, keep, suffix) {
       const stamp = Number((entry.name.match(/_(\d{10,})_/) || [])[1] || 0);
       entries.push({ name: entry.name, stamp });
     }
-  } catch (_) {
+  } catch (error) {
+    // 1.8.22（old-p3 destructive P3-1）：原来这里静默返回 0，报告目录就只会涨不会清；
+    // 至少留一条日志，出问题（权限、网络盘掉线）时能查。
+    console.warn("读错误报告目录失败（这次不清理旧报告，下次写报告时再试）", error);
     return 0;
   }
   if (entries.length <= keep) return 0;
   entries.sort((a, b) => b.stamp - a.stamp || b.name.localeCompare(a.name));
   let removed = 0;
+  let failed = 0;
   for (const stale of entries.slice(keep)) {
     try {
       await directory.removeEntry(stale.name);
       removed += 1;
-    } catch (_) {
-      // 留着它不致命：下次写报告时还会再试一遍
+    } catch (error) {
+      // 留着它不致命：下次写报告时还会再试一遍。但「一直删不掉」要让日志里看得见。
+      failed += 1;
+      if (failed === 1) console.warn("清理旧错误报告失败（不致命，下次写报告时会再试）", error);
     }
   }
+  if (failed) console.warn(`有 ${failed} 份旧错误报告这次没删掉；数量超过 ${keep} 份时每次写报告都会再试`);
   return removed;
 }
 
@@ -1021,7 +1038,10 @@ async function persistErrorReport(text) {
     await writeFile(directory, filename, body);
     await trimReportDirectory(directory, REPORT_KEEP_FILES, "错误报告.txt");
     return `${root.name}/001错误报告/${filename}`;
-  } catch (_) {
+  } catch (error) {
+    // 1.8.22（old-p3 destructive P3-1）：写报告本身是尽力而为（失败不能盖掉原始错误），
+    // 但静默返回 "" 会让「报告写着写着没了」完全无从排查 —— 补一条二档日志。
+    console.warn("写错误报告失败（这次失败只留在 lastError 里，没有落盘）", error);
     return "";
   }
 }
@@ -2636,19 +2656,36 @@ async function rollbackImport(journal) {
     failures.push(`${what}：${(error && error.message) || error || "未知错误"}`);
   };
   // 先删本次新建的记录目录，再把被改写的文件还原，最后清掉本次新建的空收藏夹
+  /* 1.8.22（old-p3 destructive P3-3）：回滚上千个目录时原来全程只有一句「正在取消并回滚」，
+     界面看着像卡死。这里按「已处理 / 总数」报进度（publishImportState 自带 1.5 秒节流，
+     不会把 storage 打满），并顺带保活 —— 纯本地长循环不加保活，SW 可能被回收。 */
+  const totalSteps = journal.createdRecords.length + journal.modifiedFiles.length
+    + journal.addedFiles.length + journal.createdCollections.length;
+  let doneSteps = 0;
+  const stepRollback = async () => {
+    doneSteps += 1;
+    if (doneSteps % 25 === 0 || doneSteps === totalSteps) {
+      publishImportState({ text: `正在回滚本次导入：已处理 ${doneSteps}/${totalSteps} 项…` });
+    }
+    await keepServiceWorkerAlive("rollback");
+  };
   for (const entry of [...journal.createdRecords].reverse()) {
+    await stepRollback();
     try { await entry.collectionHandle.removeEntry(entry.name, { recursive: true }); removedRecords += 1; }
     catch (error) { noteFailure(`撤回新建的 ${entry.name}`, error); }
   }
   for (const entry of [...journal.modifiedFiles].reverse()) {
+    await stepRollback();
     try { await writeFile(entry.directoryHandle, entry.name, entry.text); restoredFiles += 1; }
     catch (error) { noteFailure(`还原 ${entry.name}`, error); }
   }
   for (const entry of [...journal.addedFiles].reverse()) {
+    await stepRollback();
     try { await entry.directoryHandle.removeEntry(entry.name); removedFiles += 1; }
     catch (error) { noteFailure(`删除新增的 ${entry.name}`, error); }
   }
   for (const entry of [...journal.createdCollections].reverse()) {
+    await stepRollback();
     try {
       let empty = true;
       for await (const child of entry.handle.values()) { void child; empty = false; break; }
@@ -3544,7 +3581,13 @@ async function commitStatsDatabase(root, read, database) {
     return false;
   }
   await syncStatsMirror(database);
-  await publishStatsSnapshot(database);
+  /* 1.8.22（old-p3 storage P3-4）：库文件与镜像都已经写成功，快照只是给界面用的次要副本 ——
+     它写失败（配额 / 上下文失效）不能让调用方以为「这次写库失败」，否则归档写进去了却报失败。 */
+  try {
+    await publishStatsSnapshot(database);
+  } catch (error) {
+    console.warn("统计快照发布失败（库文件已写成功，界面数字下次提交会补上）", error);
+  }
   return true;
 }
 
@@ -3630,7 +3673,10 @@ async function writeStatsDatabaseInner(root, records, insertedKeys = null) {
       // 也不能拿一份空库盖掉用户的历史。快照照发，至少让界面显示兜住下限的数字。
       console.warn(blocked);
       reportStatsWriteBlocked(blocked);
-      await publishStatsSnapshot(read.database);
+      // 1.8.22（old-p3 storage P3-4）：这一支只发快照、不写库；快照失败也不该让整批统计变成失败。
+      await publishStatsSnapshot(read.database).catch((error) => {
+        console.warn("统计快照发布失败（这次没写库，界面继续显示上一份）", error);
+      });
       return null;
     }
     let next = read.database;
@@ -4329,7 +4375,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
   let rollback = { removedRecords: 0, restoredFiles: 0, removedCollections: 0, removedFiles: 0, failures: [] };
   let statsRollback = { removed: 0, failed: false };
   if (cancelled) {
-    publishImportState({ text: "正在取消并回滚本次导入…" });
+    // 1.8.22（old-p3 destructive P3-3）：取消与回滚分成两段说 —— 先「取消中」（收尾当前这一条），
+    // 再由 rollbackImport 里的「已处理 n/总数」接手，不再用一句文案盖住两段。
+    publishImportState({ text: "正在取消本次导入（收尾当前这一条）…" });
     rollback = await rollbackImport(journal);
     // 1.7.18（destructive P1-3）：文件回滚完再回滚统计 —— 顺序不能反，
     // 否则统计行先没了、目录却因为回滚失败还留着，就成了「磁盘上有、统计里没有」。
@@ -5080,7 +5128,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (action === "cancel") {
       importRun.cancelled = true;
       importRun.paused = false;
-      publishImportState({ paused: false, text: "正在取消并回滚本次导入…" }, true);
+      publishImportState({ paused: false, text: "正在取消本次导入（已写入的部分会回滚）…" }, true);
       // 取消本身也要落一次断点：万一回滚途中又被回收，日志还在
       publishImportRun({ force: true });
       importReleaseWaiters();

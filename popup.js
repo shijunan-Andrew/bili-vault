@@ -1,3 +1,6 @@
+// 1.8.22（old-p3 security P3-2）：不允许被别的页面嵌进 iframe 做点击劫持（判据在 i18n.js）。
+BcaI18n.guardTopFrame("这个页面需要在独立标签页中打开，请不要把它嵌入其他页面。", "页面不允许被嵌入其他页面。");
+
 const DB_NAME = "bili-fav-archiver";
 // 4.9.4：默认下载目录名（与归档布局、已下载标记保持一致）
 const DOWNLOAD_FOLDER_NAME = "000视频下载";
@@ -960,7 +963,9 @@ clearImportFoldersButton.addEventListener("click", () => {
   updateImportSelection();
 });
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
+  // 1.8.22（old-p3 security P3-3）：只接受本扩展自己发来的消息。
+  if (sender && sender.id && sender.id !== chrome.runtime.id) return;
   if (message?.type === "bca-diff-progress") { importProgressText.textContent = message.text || ""; return; }
   if (message?.type !== "bca-import-progress") return;
   importProgressText.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在导入…");

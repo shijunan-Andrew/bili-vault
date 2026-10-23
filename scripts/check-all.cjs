@@ -233,6 +233,9 @@ function checkDocDictionary() {
 function checkDocTestCount() {
   section("文档里的测试项数…");
   const source = readText("test/stability.test.cjs") || "";
+  // 1.8.22（old-p3 P3-11）：只数**行首**的 `test(`。这条正则刻意不加 `\b`/`m` 以外的花样：
+  // 断言里那些提到 `test(` 的字符串（`includes("test(")` 之类）不该被算成测试项，
+  // 而真正的测试项一律顶格写。缩进的 `test(` 不计入，也不该计入。
   const real = (source.match(/^test\(/gm) || []).length;
   if (!real) return bad("test/stability.test.cjs 里读不到任何 test() 项");
   const problems = [];

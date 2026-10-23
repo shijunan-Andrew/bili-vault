@@ -1,5 +1,8 @@
 "use strict";
 
+// 1.8.22（old-p3 security P3-2）：不允许被别的页面嵌进 iframe 做点击劫持（判据在 i18n.js）。
+BcaI18n.guardTopFrame("这个页面需要在独立标签页中打开，请不要把它嵌入其他页面。", "页面不允许被嵌入其他页面。");
+
 /* 设置页：外观、语言、使用说明。
    主题与外观走 BcaTheme（localStorage 是权威、chrome.storage 是给内容脚本看的镜像，
    背景图单独存在 IndexedDB 的 Blob 里），语言走 BcaI18n

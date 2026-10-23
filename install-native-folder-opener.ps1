@@ -32,7 +32,15 @@ if (-not $ExtensionId) { $ExtensionId = (Read-Host "请从 chrome://extensions �
 if ($ExtensionId -notmatch "^[a-p]{32}$") { throw "扩展程序 ID 格式不正确。请复制 chrome://extensions 中显示的 32 位 ID。" }
 
 if (-not $DownloadBasePath) { $DownloadBasePath = (Read-Host "请输入视频下载目录的完整绝对路径（例如 D:\B站收藏\000视频下载）：打开你的视频下载文件夹，在文件资源管理器上方的地址栏点一下，把里面的绝对地址复制到这条命令后按回车").Trim().Trim('"') }
+  # 1.8.22（old-p3 native L196）：-DownloadBasePath 参数分支以前不做 Trim('"')，
+  # 传 "D:\B站收藏" 这种带引号的值会在下面 IsPathRooted 一步误报「必须是完整路径」。
+  # 交互分支本来就会 Trim，这里统一一次，两条入口行为一致。
+  $DownloadBasePath = $DownloadBasePath.Trim().Trim('"')
 $DownloadBasePath = [Environment]::ExpandEnvironmentVariables($DownloadBasePath)
+# 1.8.22（old-p3 security P3-4）：不接受 UNC（\\服务器\共享）下载根 ——
+# 原生助手只在本机磁盘上操作，网络路径的可达性与身份验证都不由我们控制。
+if ($DownloadBasePath.StartsWith('\\')) { throw '不支持网络路径（如 \\服务器\共享）；请填本机磁盘上的完整路径，例如 D:\B站收藏\000视频下载。' }
+
 if (-not [System.IO.Path]::IsPathRooted($DownloadBasePath)) { throw "下载目录必须是完整路径，例如 D:\B站收藏\000视频下载。" }
 $DownloadBasePath = [System.IO.Path]::GetFullPath($DownloadBasePath)
 $parentPath = [System.IO.Path]::GetDirectoryName($DownloadBasePath)

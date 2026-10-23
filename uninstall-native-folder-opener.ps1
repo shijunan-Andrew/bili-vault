@@ -64,6 +64,31 @@ if (Test-Path -LiteralPath $HostRoot) {
   }
 }
 
+# 1.8.22（old-p3 native L200）：自定义 -HostRoot 时只删子目录，父目录
+# %LOCALAPPDATA%\BcaFolderOpener 会留在盘上；父目录空着就顺手收掉。
+$defaultHostRoot = Join-Path $env:LOCALAPPDATA "BcaFolderOpener"
+$parentOfHostRoot = Split-Path -Parent $HostRoot
+if ($parentOfHostRoot -and $parentOfHostRoot -eq $defaultHostRoot -and (Test-Path -LiteralPath $parentOfHostRoot -PathType Container)) {
+  try {
+    if (-not (Get-ChildItem -LiteralPath $parentOfHostRoot -Force | Select-Object -First 1)) {
+      Remove-Item -LiteralPath $parentOfHostRoot -Force
+      $removed += "空目录 $parentOfHostRoot"
+    }
+  } catch {
+    $failures += "空目录 $parentOfHostRoot：$($_.Exception.Message)"
+  }
+}
+
+# 1.8.22（old-p3 native L200）：-SkipRegistry 是「别碰注册表」的意思，但保留的键
+# 会继续指向刚被删掉的清单文件。说清楚，别让用户以为卸干净了。
+if ($SkipRegistry) {
+  $leftKeys = @($registryPaths | Where-Object { Test-Path -LiteralPath $_ })
+  if ($leftKeys.Count) {
+    Write-Host "注册表项按 -SkipRegistry 保留着，但它们现在指向已经删掉的清单文件；下次卸载请去掉 -SkipRegistry，或手动删掉下面这些键：" -ForegroundColor Yellow
+    $leftKeys | ForEach-Object { Write-Host "  - $_" }
+  }
+}
+
 if ($removed.Count) {
   Write-Host "Windows 文件夹辅助程序已移除：" -ForegroundColor Green
   $removed | ForEach-Object { Write-Host "  - $_" }

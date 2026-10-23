@@ -166,7 +166,6 @@
   let statsLoaded = false;
   let stats = null;
   let visible = false;
-  let lineIndex = 0;      // 下一条要显示的轮播台词（只往前走，收起也不回头）
   let shownIndex = 0;     // 气泡里正显示的是第几条轮播台词（refresh / 切语言要重画它）
   let shownEgg = -1;      // 气泡里正显示的是第几条彩蛋台词（>=0 时压过轮播）
   let runClicks = 0;      // 这一轮气泡里已经出过几句（收起清零，用来数「第 5 下」）
@@ -358,15 +357,12 @@
 
   function hideBubble() {
     clearBubbleTimer();
-    // 收起 = 这一轮看完了，但**轮播指针不回头**：V1.5.4 起气泡会自己收（5s 闹钟 / 点别处），
-    // 那时把 lineIndex 归零，用户隔一会儿再点就永远回到第 1 句（他报的「只显示一个气泡、
-    // 再点也不换」）。「点满 4 句第 5 下收起」改由 onPetClick 里的 runClicks 数，
-    // 所以这里不再需要靠清零指针来兜底。
+    // 收起 = 这一轮看完了。「点满 4 句第 5 下收起」由 onPetClick 里的 runClicks 数，
+    // 不靠清零轮播指针兜底（1.8.22：那套指针已经随死代码一起删掉了）。
     runClicks = 0;
     awaitingReply = false;
     // 排队中的那一下也一起丢：收起之后它再冒出来就是「点别处又弹一句」
     pendingEgg = false;
-    pendingLines = null;
     clearTimeout(pendingBubbleTimer);
     if (!bubble) return;
     bubble.hidden = true;
@@ -374,7 +370,7 @@
   }
 
   // —— 气泡自动收起（用户第 4 条）——
-  // V1.5.3 只有「点满 4 句」这一条收起路径（advanceBubble 里 lineIndex >= lines.length），
+  // V1.5.3 只有「点满 4 句」这一条收起路径，
   // 所以一旦用户不再点，气泡就一直挂在屏幕上 —— 这就是用户报的「气泡不会自动消失」。
   // 现在出现时起一个 5s 的闹钟，每次点击（= 每次 showBubble）重新计时。
   function clearBubbleTimer() {
@@ -419,20 +415,10 @@
   }
 
   function dismissBubble() {
-    // 轮播指针（lineIndex）由 hideBubble() 统一归零，这里只管收起来 + 还焦点
+    // 轮播指针由 shownIndex 记录（hideBubble 不再清零），这里只管收起来 + 还焦点
     hideBubble();
     // 键盘用户收起后焦点得有个去处；已经用鼠标点走焦点时不抢回来
     if (visible && button && doc.activeElement === doc.body) button.focus();
-  }
-
-  // 轮播下一条。「第 5 下收起」不在这里判 —— 后台的彩蛋回复走的是另一条路
-  // （onTouchReply），收起必须在**两条路之前**判，所以挪去了 onPetClick 的 runClicks。
-  function advanceBubble(lines) {
-    shownIndex = lineIndex % lines.length;
-    shownEgg = -1;
-    showBubble(lines[shownIndex]);
-    lineIndex = (lineIndex + 1) % lines.length;
-    return true;
   }
 
   // 按下的弹性（squash & stretch）：松开时先压扁再回弹。
@@ -999,14 +985,8 @@
 
   /* ------------------------------ 交互 ------------------------------ */
 
-  // 后台回的临时台词：优先于 4 条序列，只显示一次。
-  let tempLine = "";
-
-  /* 点一下之后不立刻显示轮播那条 —— 后台的彩蛋台词总在几十毫秒后才回来，
-     先显示再被顶掉就是用户报的「点一下连出两个气泡、彩蛋被『已陪伴你 x 天』顶掉」。
-     这里先把「这一下该播哪一串」挂起来，等回复：回复里有彩蛋就直接换成彩蛋，
-     120ms 内没等到（后台没起来、没有接听方）再自己显示轮播那条。 */
-  let pendingLines = null;
+  /* 点一下之后不立刻显示彩蛋 —— 后台的回复总在几十毫秒后才回来，
+     120ms 内没等到（后台没起来、没有接听方）就用本地游标兜底。 */
   let pendingBubbleTimer = 0;
 
   /* 1.6.3：一轮气泡分两段 —— 先四句「统计信息」（已陪伴 / 帮你保存 / 今日新增 /
@@ -1017,12 +997,6 @@
   let pendingEgg = false;
   let eggCursor = 0;
 
-  function queueBubble(lines) {
-    pendingLines = lines;
-    clearTimeout(pendingBubbleTimer);
-    pendingBubbleTimer = setTimeout(flushPendingBubble, 120);
-  }
-
   function queueEgg() {
     pendingEgg = true;
     clearTimeout(pendingBubbleTimer);
@@ -1030,17 +1004,11 @@
   }
 
   function flushPendingBubble() {
-    if (pendingEgg) {
-      pendingEgg = false;
-      const index = eggCursor;
-      eggCursor = index + 1;
-      showEggLine(index);
-      return;
-    }
-    if (!pendingLines) return;
-    const lines = pendingLines;
-    pendingLines = null;
-    advanceBubble(lines);
+    if (!pendingEgg) return;
+    pendingEgg = false;
+    const index = eggCursor;
+    eggCursor = index + 1;
+    showEggLine(index);
   }
 
   /* 统计信息那几句：本地的，立刻显示（不排队、不等后台） */
@@ -1057,20 +1025,6 @@
     const count = TOUCH_LINE_COUNT;
     shownEgg = ((Math.floor(index) % count) + count) % count;
     showBubble(touchLine(shownEgg));
-  }
-
-  function applyTempLine(line, force = false) {
-    if (!line || !visible) return;
-    // 同一次点击里等到的那条：认领这一下，直接显示（轮播那条已经被取消）
-    if (force) {
-      showBubble(line);
-      return;
-    }
-    // 1.5.9：气泡正开着时**一个字都不动**。后台的回复总在点击之后几十毫秒才到
-    // （它要先写库、再发快照），当场换字就是用户报的「点一下连出两个气泡」。
-    // 只有气泡收着的时候才攒下来，下次点开时放一次 —— 与原注释同一个语义。
-    if (bubble && !bubble.hidden) return;
-    tempLine = line;
   }
 
   // 后台只回一个下标（service worker 里没有词典，它不碰 i18n），台词在这里翻。
@@ -1101,7 +1055,6 @@
       awaitingReply = false;
       // 这一下还在等：取消排队的哨兵，改放彩蛋（点一下只出一次气泡）
       clearTimeout(pendingBubbleTimer);
-      pendingLines = null;
       pendingEgg = false;
       // 记下「正显示的是哪条彩蛋」：后台每写一次库都会引来 refresh()，
       // 它必须重画这一句，而不是把别的某一句盖上来（用户报的「再点也不换」）。
@@ -1128,11 +1081,10 @@
     const turn = runClicks + 1; // 这一下是这一轮的第几句（从 1 数起）
     // 整轮都出过了：这一下把气泡收起来（SMOKE_TEST.md 的验收就是
     // 「每点一下吐一个、出完一轮再点一下收起来」）。收起这一下不再排新台词，
-    // 但「摸了一下」照样报给后台（下面那段）。判据放在这里而不是 advanceBubble：
+    // 但「摸了一下」照样报给后台（下面那段）。收起判据就放在这里：
     // 后台的彩蛋回复走的是另一条路，收起必须在两条路之前判。
     if (bubble && !bubble.hidden && runClicks >= runTotal) {
       clearTimeout(pendingBubbleTimer);
-      pendingLines = null;
       pendingEgg = false;
       awaitingReply = false;
       dismissBubble();
@@ -1143,16 +1095,8 @@
       runClicks = turn;
       awaitingReply = false;
       clearTimeout(pendingBubbleTimer);
-      pendingLines = null;
       pendingEgg = false;
       showStatsLine(lines, turn - 1);
-    } else if (tempLine) {
-      // 后台攒下来的临时台词（气泡收着的时候收到的）也是一句
-      runClicks = turn;
-      awaitingReply = false;
-      const line = tempLine;
-      tempLine = "";
-      showBubble(line);
     } else {
       // 欢迎段：挂起来等后台的彩蛋回复，120ms 内没等到再自己显示（见 queueEgg）
       runClicks = turn;
@@ -1464,8 +1408,6 @@
     if (!visible) {
       running = false;
       dragging = false;
-      lineIndex = 0;
-      tempLine = "";
       hideBubble();
       hideMenu();
       settle();

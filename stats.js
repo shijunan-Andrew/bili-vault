@@ -26,6 +26,9 @@
 (function () {
   "use strict";
 
+  // 1.8.22（old-p3 security P3-2）：不允许被别的页面嵌进 iframe 做点击劫持（判据在 i18n.js）。
+  BcaI18n.guardTopFrame("这个页面需要在独立标签页中打开，请不要把它嵌入其他页面。", "页面不允许被嵌入其他页面。");
+
   const STATS_KEY = "bcaStats";
   /* 图表尺寸：高度固定，宽度取容器实测宽度（所以 resize 时要按新宽度重画一遍） */
   const CHART_HEIGHT = 220;
@@ -36,7 +39,6 @@
   let lastChartWidth = 0;
   const CHART_PAD = { top: 20, right: 8, bottom: 24, left: 34 };
   const CHART_MAX_BAR = 34;
-  const CHART_MIN_BAR = 6;
   /* 柱子超过这个数量就不再标数值，免得数字糊成一片 */
   const CHART_VALUE_LABEL_LIMIT = 20;
   /* 横轴上最多标几个日期：再多就抽稀到「最早一根 + 今天 + 每隔几根」 */
@@ -56,8 +58,6 @@
   /* 七个预置区间，顺序就是下拉里的顺序（文案由 t() 给，不在这里写死） */
   const RANGE_PRESETS = ["today", "yesterday", "last7", "last30", "thisMonth", "lastMonth"];
   const RANGE_ALL = RANGE_PRESETS.concat(["custom"]);
-  /* 「接近一天」的容差：两端都算的 1 天区间正好是 DAY_MS 长 */
-  const DAY_TOLERANCE = 120000;
 
   const core = (typeof BcaStatsCore === "object" && BcaStatsCore) ? BcaStatsCore : null;
   /* 界面侧的天数上限：跟核心对齐（核心没加载时退成十年）。
@@ -137,7 +137,6 @@
   let yearRows = new Map();   // 「按年份累计」那张图上：柱子键 → 行
   let dayRows = [];      // 归一化后的每天明细（升序）
   let periods = [];      // 每个预置区间的计算结果（下拉与文案都读它）
-  let currentRange = null;   // 当前生效的区间
 
   /* 选择器与日历的界面状态。paged = 用户按过「上月 / 下月」，
      按过之后就不再让视图自己跟着锚点跑（手动翻页优先）。 */
@@ -203,11 +202,6 @@
   }
 
   /* ── 日期与区间 ─────────────────────────────────────────────────── */
-
-  function clampInt(value, min, max) {
-    const num = Math.round(numberOr(value, min));
-    return Math.min(max, Math.max(min, num));
-  }
 
   /* 「今天」按本地时区算：中国用户跨零点时看的是本地日期，不是 UTC */
   function fallbackDayKey(time) {
@@ -355,11 +349,6 @@
     };
   }
 
-  function rangePresetOf(range) {
-    const name = range && typeof range.preset === "string" ? range.preset : "";
-    return RANGE_PRESETS.indexOf(name) >= 0 ? name : "custom";
-  }
-
   /* 当前该用哪一段。now 由调用方给，保证同一次渲染里「今天」是同一个瞬间。 */
   function computeRangeFor(presetName, now, customIn) {
     /* 自定义区间一定要把日键换算成毫秒再交给对端：对端（旧版 stats-core）只认数字边界，
@@ -473,7 +462,10 @@
   /* ── 每天明细（dailyRows） ──────────────────────────────────────── */
 
   /* 每天明细的归一化：day 认不出的行直接跳过（坏数据不许把整页带崩），
-     byCollection 不是对象就当成空对象，count 取不到就按 0。 */
+     byCollection 不是对象就当成空对象，count 取不到就按 0。
+     1.8.22（old-p3 perf PF-10）决定不改：normalizeDayRows / countInRange 每次渲染重算，
+     但 dailyRows 上限只有 180 行（DAILY_ROWS_DAYS），一次 render 顶多几万次比较 ——
+     比「缓存一份 Map 再处理失效」便宜也简单，实测 180 行量级感知不到。 */
   function normalizeDayRows(snapshot) {
     const raw = snapshot && Array.isArray(snapshot.dailyRows) ? snapshot.dailyRows : [];
     const map = new Map();
@@ -572,16 +564,6 @@
     Object.keys(attrs).forEach((key) => node.setAttribute(key, String(attrs[key])));
     parent.appendChild(node);
     return node;
-  }
-
-  /* 字符串哈希：同一个收藏夹在任何一天、任何区间都拿到同一个色号（只用来挑 class） */
-  function hashText(text) {
-    const source = String(text == null ? "" : text);
-    let hash = 0;
-    for (let i = 0; i < source.length; i += 1) {
-      hash = (hash * 31 + source.charCodeAt(i)) % 100003;
-    }
-    return hash;
   }
 
   /* ── 柱状图 ─────────────────────────────────────────────────────── */
@@ -786,9 +768,14 @@
       const hitHeight = drawBars ? Math.max(1, baseline - pad.top) : 2;
       const tip = config.ariaLabelFor ? config.ariaLabelFor(row) : t("{day} 这一天新增了 {count} 个视频", { day: key, count: formatCount(count) });
 
+      /* 1.8.22（old-p3 P3-3）：按周 / 月 / 年聚合时整张图是 role="list"，每根柱子包进一个
+         role="listitem" 的 <g>：listitem 里放一个 role="button" 的判定层，结构才自洽。
+         以前是把判定层 button 和轴标签的 listitem 平铺在同一个 list 下，读屏会读出一锅杂拌。 */
+      const barSlot = semantic ? appendSvg(svg, "g", { role: "listitem" }) : svg;
+
       /* 看得见的柱子先画 */
       if (drawBars && count > 0) {
-        appendSvg(svg, "rect", {
+        appendSvg(barSlot, "rect", {
           /* 头一桶 / 尾一桶是整周（整月、整年），条数含区间外的记录：
              用虚线描边 + 半透明底标出来，免得用户拿区间天数去反推这根的数字 */
           class: "stats-bar" + (isToday ? " stats-bar-today" : "") + (row.partial ? " stats-bar-partial" : ""),
@@ -802,7 +789,7 @@
          否则那根看得见的柱子会顶在它上面把点击吃掉 —— 矮柱子、0 记录的日子
          正是用户说「难点」的那些列，点进来必须都落在这一层上。
          判定层自己不带 data-day，柱子按「同一列里能拿到 data-day 的那一层」找。 */
-      const bar = appendSvg(svg, "rect", {
+      const bar = appendSvg(barSlot, "rect", {
         class: "stats-bar-hit" + (selected ? " stats-bar-active" : ""),
         x: round2(center - hitWidth / 2), y: round2(baseline - hitHeight),
         width: round2(hitWidth), height: round2(hitHeight),
@@ -844,7 +831,7 @@
           ? Math.max(1, Math.ceil(rows.length / CHART_LABEL_LIMIT))
           : 1;
         if (index % yearStride !== 0 && index !== rows.length - 1) return;
-        const listed = semantic ? appendSvg(svg, "g", { class: "stats-bar-slot" }) : svg;
+        const listed = semantic ? appendSvg(svg, "g", { class: "stats-bar-slot", "aria-hidden": "true" }) : svg;
         const text = String(row.short || row.label || key);
         /* 斜着排时锚点钉在自己那格的刻度上、text-anchor 改成 end：
            文字只往左上铺，右端永远不越过刻度 —— 最后几根的标签再长也不会甩到画布外，
@@ -856,7 +843,7 @@
           class: isToday ? "stats-axis-label stats-axis-label-today" : "stats-axis-label",
           x: anchorX, y: labelY, "text-anchor": labelTilt > 0 ? "end" : "middle"
         }), text);
-        if (semantic) label.setAttribute("role", "listitem");
+        /* 轴标签只是视觉刻度，读屏读柱子自己的 aria-label 就够了（P3-3） */
         if (labelTilt > 0) {
           label.setAttribute("transform", "rotate(" + (-labelTilt) + " " + anchorX + " " + labelY + ")");
         }
@@ -1794,7 +1781,7 @@
           cell.disabled = true;
           cell.setAttribute("aria-disabled", "true");
         }
-        cell.setAttribute("aria-label", key);
+        cell.setAttribute("aria-label", weekText(key) || key);
         cell.setAttribute("aria-pressed", (key === low || key === high) ? "true" : "false");
         grid.appendChild(cell);
       }
@@ -2258,8 +2245,9 @@
     let renderTimer = 0;
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !changes) return;
-      const localeChanged = Boolean(changes[i18n ? i18n.STORAGE_KEY : "bcaLocale"]);
-      const next = changes[i18n ? i18n.STORAGE_KEY : "bcaLocale"]?.newValue;
+      const localeKey = i18n ? i18n.STORAGE_KEY : "interfaceLocale";
+      const localeChanged = Boolean(changes[localeKey]);
+      const next = changes[localeKey]?.newValue;
       let statsChanged = false;
       if (changes[STATS_KEY]) {
         const incoming = normalizeSnapshot(changes[STATS_KEY].newValue);

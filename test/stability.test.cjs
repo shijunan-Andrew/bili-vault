@@ -106,9 +106,16 @@ test("native messaging host manifest never declares the unsupported args field",
 
 // PowerShell 5.1 的 Get-Content 默认按系统 ANSI 代码页读文件，
 // UTF-8 中文下载路径会被解坏并让 ConvertFrom-Json 直接报错。
-test("native host reads its UTF-8 settings with an explicit encoding", () => {
+test("native host reads its settings strictly as UTF-8 and says so when it cannot", () => {
   const worker = readProjectFile(path.join("native", "folder-opener-host.ps1"));
-  assert.match(worker, /Get-Content[^\r\n]*-Raw[^\r\n]*-Encoding UTF8/);
+  // 1.8.22（old-p3 native L198、L208）：从 Get-Content -Encoding UTF8 改成按字节读 + 严格 UTF-8。
+  // 以前文件被另存成 ANSI（GB2312）时会静默解成乱码；现在解不开就说人话，JSON 坏了也说人话。
+  assert.match(worker, /\[System\.IO\.File\]::ReadAllBytes\(\$settingsPath\)/, "要按字节读设置文件");
+  assert.match(worker, /New-Object -TypeName System\.Text\.UTF8Encoding -ArgumentList \$false, \$true/, "要用严格 UTF-8 解码");
+  assert.match(worker, /catch \[System\.Text\.DecoderFallbackException\]/, "解不开要先接住编码异常");
+  assert.match(worker, /本地下载目录设置的编码不是 UTF-8（多半是被记事本另存成了 ANSI）/, "编码错误要说人话");
+  assert.match(worker, /本地下载目录设置文件已损坏（不是合法的 JSON）/, "JSON 错误要说人话");
+  assert.equal(/Get-Content -LiteralPath \$settingsPath -Raw -Encoding UTF8 \| ConvertFrom-Json/.test(worker), false, "别回到一把梭的读法");
 });
 
 /* ------------------------- 4.0 表现层回归检查 ------------------------- */
@@ -356,11 +363,19 @@ test("the extension never exposes its pages to web origins", () => {
 
 /* ------------------------- 4.3 安全加固 ------------------------- */
 
-test("the library refuses to run inside a frame", () => {
+test("extension pages refuse to run inside a frame (shared guard)", () => {
+  // 1.8.22（old-p3 security P3-2）：判据原来只有 library.js 一份，现在收口到 i18n.js，
+  // 设置页 / 统计页 / 教程页 / 弹窗都在脚本开头调用同一个 guardTopFrame()。
+  const i18n = readProjectFile("i18n.js");
+  assert.match(i18n, /function guardTopFrame\(message, errorMessage\)/);
+  assert.match(i18n, /embedded = global\.top !== global\.self;/);
+  for (const page of ["library.js", "settings.js", "stats.js", "popup.js", "tutorial.js"]) {
+    assert.equal(readProjectFile(page).includes("window.top !== window.self"), false, `${page} 不应再自带反嵌入判据`);
+  }
   const library = readProjectFile("library.js");
-  assert.match(library, /if \(window\.top !== window\.self\)/);
+  assert.match(library, /BcaI18n\.guardTopFrame\("本地收藏库需要在独立标签页中打开/);
   // 必须在读取本地目录之前就拦下来
-  const guardIndex = library.indexOf("window.top !== window.self");
+  const guardIndex = library.indexOf("BcaI18n.guardTopFrame(");
   const restoreIndex = library.indexOf("restoreLastRoot()");
   assert.ok(guardIndex > 0 && restoreIndex > guardIndex, "防嵌套检查必须早于目录读取");
 });
@@ -7024,4 +7039,182 @@ test("统计库不再导出无引用的常量，rangeFor 兜底留一行日志�
   assert.match(statsCore, /const DAILY_CHART_DAYS = 14;/, "内部那份常量要留着");
   assert.match(readProjectFile("stats.js"), /console\.warn\("统计库的 rangeFor 抛错，本次改用本页兜底区间", error\);/,
     "对端抛错不是日常路径，但不许静默");
+});
+
+// ---- 1.8.22：old-p3 ux 批次（统计失败文案、日历 aria-label、图表 role、删除进度、空态按钮） ----
+
+test("统计失败不再只有四个字：给原因，也给下一步（V1.8.22 / old-p3 ux P3-1）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /storageUsage\.textContent = BcaI18n\.t\("统计失败，点「刷新」重试"\);/, "正文要说下一步");
+  assert.match(library, /storageUsage\.title = BcaI18n\.t\("统计本地归档占用失败：\{message\}"/, "原因放进 title");
+  assert.match(library, /console\.warn\("统计本地归档占用失败（只影响顶栏那行占用数字）", error\);/, "也不许静默");
+  assert.ok(!library.includes('storageUsage.textContent = BcaI18n.t("统计失败")'), "旧的四字文案不许回来");
+});
+
+test("日历格给读屏的是「几月几日星期几」，不是 ISO 日期（V1.8.22 / old-p3 ux P3-2）", () => {
+  assert.match(readProjectFile("stats.js"), /cell\.setAttribute\("aria-label", weekText\(key\) \|\| key\);/, "日期要本地化");
+});
+
+test("图表 role 自洽：柱子包在 listitem 里，轴标签只是装饰（V1.8.22 / old-p3 ux P3-3）", () => {
+  const stats = readProjectFile("stats.js");
+  assert.match(stats, /const barSlot = semantic \? appendSvg\(svg, "g", \{ role: "listitem" \}\) : svg;/, "每根柱子一个 listitem");
+  assert.match(stats, /class: "stats-bar-slot", "aria-hidden": "true"/, "轴标签不进无障碍树");
+  assert.ok(!stats.includes('label.setAttribute("role", "listitem")'), "旧写法要拆掉");
+});
+
+test("删除/清理有 N/M 进度，并说明为什么不能中途取消（V1.8.22 / old-p3 ux P3-4、P3-5）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(readProjectFile("library.html"), /<p id="deleteProgress" class="dialog-progress" role="status" hidden><\/p>/, "进度行要有 role=status");
+  assert.match(library, /正在准备删除…（这一步不能中途取消，以免删到一半）/, "开头先说清代价");
+  assert.match(library, /正在删除 \{done\}\/\{total\}：\{name\}（不能中途取消，以免删到一半）/, "批量删除报 N/M");
+  assert.match(library, /正在清理 \{done\}\/\{total\}：\{name\}（不能中途取消，以免删到一半）/, "清理也报 N/M");
+  assert.match(library, /deleteProgress\.hidden = true;/, "收尾要收起来");
+});
+
+test("空态自己带动作按钮，不用用户去找右上角（V1.8.22 / old-p3 ux P3-7）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /id="emptyAddVideo" class="button button-primary"/, "空态要有按钮");
+  assert.match(library, /if \(emptyAdd\) emptyAdd\.addEventListener\("click", openAddVideoDialog\);/, "按钮要真的打开添加对话框");
+  assert.match(library, /点下面的「添加视频」，输入 B 站网址、BV 号或 av 号。/, "文案要指向下面这个按钮");
+  assert.ok(!library.includes("点击右上角“添加视频”"), "旧文案不许回来");
+});
+
+// ---- 1.8.22：old-p3 批次 3（报告清理日志、换名提示、回滚进度、壁纸信号、快照与时间解析） ----
+
+test("报告目录清理不再静默：读目录/删旧报告失败都留日志（V1.8.22 / old-p3 destructive P3-1）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /console\.warn\("读错误报告目录失败（这次不清理旧报告，下次写报告时再试）", error\);/, "读目录失败要留痕");
+  assert.match(background, /if \(failed === 1\) console\.warn\("清理旧错误报告失败（不致命，下次写报告时会再试）", error\);/, "删除失败要说一次");
+  assert.match(background, /console\.warn\("写错误报告失败（这次失败只留在 lastError 里，没有落盘）", error\);/, "整个报告写失败也要留痕");
+  assert.ok(!/\} catch \(_\) \{\s*\/\/ 留着它不致命：下次写报告时还会再试一遍/.test(background), "旧的静默 catch 不许回来");
+});
+
+test("同名目录被换名时必须说出来，不许悄悄变成 _2（V1.8.22 / old-p3 destructive P3-2）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /if \(targetRecordName !== video\.directory\) \{/, "复制路径要比对换名");
+  assert.match(library, /if \(targetNameOnDisk !== source\.directory\.name\) \{/, "搬运路径要比对换名");
+  assert.match(library, /目标收藏夹里已有同名目录，这条存成了「\{name\}」。/, "提示文案要能看懂");
+});
+
+test("取消与回滚分两段：回滚按「已处理 / 总数」报进度并保活（V1.8.22 / old-p3 destructive P3-3、perf PF-11）", () => {
+  const background = readProjectFile("background.js");
+  assert.ok(!background.includes("正在取消并回滚本次导入…"), "一条文案盖住两段的老写法要拆掉");
+  assert.match(background, /正在取消本次导入（收尾当前这一条）…/, "取消段先说自己还在收尾");
+  assert.match(background, /正在取消本次导入（已写入的部分会回滚）…/, "用户点取消时先说清代价");
+  assert.match(background, /const stepRollback = async \(\) => \{/, "回滚要有统一的步进器");
+  assert.match(background, /正在回滚本次导入：已处理 \$\{doneSteps\}\/\$\{totalSteps\} 项…/, "回滚要报 N/M");
+  assert.match(background, /await keepServiceWorkerAlive\("rollback"\);/, "纯本地长循环要保活");
+});
+
+test("壁纸变更信号：set() 的拒绝不再逃出同步 try（V1.8.22 / old-p3 storage P3-1）", () => {
+  const theme = readProjectFile("theme.js");
+  assert.match(theme, /\}\)\?\.catch\?\.\(\(\) => \{\}\);/, "Promise 要接 .catch");
+});
+
+test("统计快照发布失败不能把「库已写成功」报成失败（V1.8.22 / old-p3 storage P3-4）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /console\.warn\("统计快照发布失败（库文件已写成功，界面数字下次提交会补上）", error\);/, "commit 路径要吞掉快照错误并留痕");
+  assert.match(background, /await publishStatsSnapshot\(read\.database\)\.catch\(\(error\) => \{/, "只发快照那一支也不能让整批失败");
+});
+
+test("无时区 ISO 串按本地字段构造，不再让 Date.parse 猜（V1.8.22 / old-p3 compat 理论）", () => {
+  const statsCore = readProjectFile("stats-core.js");
+  assert.ok(statsCore.includes("if (/Z$|[+-]\\d{2}:?\\d{2}$/.test(text)) {"), "带偏移才交给 Date.parse");
+  assert.ok(statsCore.includes("Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]),"), "不带的按本地字段构造");
+});
+
+test("配置导出的撤销定时器能在 pagehide 提前收尾（V1.8.22 / old-p3 perf PF-8）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const revokeTimer = setTimeout\(\(\) => URL\.revokeObjectURL\(url\), 10000\);/, "定时器要登记");
+  assert.match(library, /window\.addEventListener\("pagehide", \(\) => \{/, "页面关掉时立刻撤销");
+  assert.match(library, /clearTimeout\(revokeTimer\);/, "并清掉定时器");
+});
+
+test("两处「刻意不修」在代码里留了说明（V1.8.22 / old-p3 perf PF-10、compat L239）", () => {
+  assert.ok(readProjectFile("stats.js").includes("old-p3 perf PF-10"), "逐渲染重算的取舍要写清");
+  assert.ok(readProjectFile("background.js").includes("old-p3 compat L239"), "星期几写进档案是设计取舍");
+});
+
+// ---- 1.8.22：old-p3 批次 4（白名单渲染、反嵌入收口、发送方校验、UNC 拒绝、报告打码、横幅地址） ----
+
+test("data-i18n-html renders through a whitelist, never raw innerHTML (old-p3 security P3-1)", () => {
+  const i18n = readProjectFile("i18n.js");
+  assert.equal(/\.innerHTML = t\(/.test(i18n), false, "data-i18n-html 不应再直接写 innerHTML");
+  assert.match(i18n, /function sanitizeI18nHtml\(markup\)/);
+  assert.match(i18n, /element\.replaceChildren\(\.\.\.sanitizeI18nHtml\(t\(element\.dataset\.i18nHtml\)\)\)/);
+  assert.match(i18n, /const I18N_HTML_TAGS = new Set\(\["A", "SPAN", "B", "STRONG", "EM", "BR", "CODE"\]\)/);
+  assert.match(i18n, /const I18N_HTML_LINK_PROTOCOLS = new Set\(\["http:", "https:"\]\)/);
+});
+
+test("extension pages all call the one shared anti-embed guard (old-p3 security P3-2)", () => {
+  const i18n = readProjectFile("i18n.js");
+  assert.match(i18n, /function guardTopFrame\(message, errorMessage\)/);
+  assert.match(i18n, /embedded = global\.top !== global\.self;/);
+  for (const page of ["settings.js", "stats.js", "popup.js", "tutorial.js"]) {
+    assert.match(readProjectFile(page), /BcaI18n\.guardTopFrame\("这个页面需要在独立标签页中打开/, page + " 也应拒绝被嵌入");
+  }
+  const library = readProjectFile("library.js");
+  assert.match(library, /BcaI18n\.guardTopFrame\("本地收藏库需要在独立标签页中打开/);
+});
+
+test("page message handlers check the sender (old-p3 security P3-3)", () => {
+  for (const page of ["favorites-import.js", "library.js", "popup.js"]) {
+    assert.match(readProjectFile(page), /sender\.id !== chrome\.runtime\.id/, page + " 的 onMessage 应校验发送方");
+  }
+});
+
+test("the native installer refuses UNC download roots (old-p3 security P3-4)", () => {
+  const install = readProjectFile("install-native-folder-opener.ps1");
+  assert.match(install, /StartsWith\('\\\\'\)/, "安装脚本应拒绝两个反斜杠开头的网络路径");
+  assert.match(install, /不支持网络路径/);
+  const bytes = fs.readFileSync(path.join(projectRoot, "install-native-folder-opener.ps1"));
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], "install-native-folder-opener.ps1 必须仍是 UTF-8 带 BOM");
+});
+
+test("error report bodies mask the local user name (old-p3 security P3-5)", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /function reportText\(error, context = \{\}\)[\s\S]{0,1400}return maskLocalUserPaths\(text\);/);
+  assert.match(background, /const REPORT_KEEP_FILES = 50;/);
+});
+
+test("the repo banner and popup link to the real repository, no placeholder (old-p3 privacy P3-1)", () => {
+  const libraryHtml = readProjectFile("library.html");
+  assert.match(libraryHtml, /id="githubBannerLink"[\s\S]{0,200}href="https:\/\/github\.com\/shijunan-Andrew\/bili-vault"/);
+  assert.equal(libraryHtml.includes('href="https://github.com/"'), false, "不应留 https://github.com/ 占位地址");
+  assert.match(readProjectFile("popup.html"), /https:\/\/github\.com\/shijunan-Andrew\/bili-vault/);
+});
+
+// ---- 1.8.22：old-p3 native 批次（设备名与全点名字、超长名、参数去引号、卸载残留） ----
+test("原生宿主把设备名与全点名字分开报（old-p3 native L184、L190）", () => {
+  const host = readProjectFile(path.join("native", "folder-opener-host.ps1"));
+  // L190：'...' 会被 GetFullPath 解析成下载根本身（等于在资源管理器里打开整根）。
+  assert.match(host, /if \(\$Value -match '\^\\\.\+\$'\) \{ throw "\$Label 不能只由点组成。" \}/, "全点名字要单独拦");
+  // L184：NUL/AUX 会被 GetFullPath 变成设备命名空间 \\.\NUL，别掉进「超出下载目录」的误导文案。
+  assert.match(host, /if \(\$targetPath\.StartsWith\('\\\\\.\\'/, "设备命名空间要单独判");
+  assert.match(host, /不是有效的文件夹名（Windows 保留设备名）/, "设备名要有自己的说法");
+});
+
+test("原生宿主把超长目录名换成人话（old-p3 native L207）", () => {
+  const host = readProjectFile(path.join("native", "folder-opener-host.ps1"));
+  assert.match(host, /if \(\$_\.Exception -is \[System\.IO\.PathTooLongException\] -or \$errorMessage -match "必须少于\|too long"\) \{/, "要认出超长路径异常");
+  assert.match(host, /目录名或路径太长（Windows 最多支持 260 个字符）/, "要给一句人话");
+  assert.match(host, /message = \$errorMessage/, "错误帧要用换过的文案");
+  assert.match(host, /errorType = \$errorType/, "类型照报，方便排查");
+});
+
+test("安装脚本对 -DownloadBasePath 参数也去引号（old-p3 native L196）", () => {
+  const install = readProjectFile("install-native-folder-opener.ps1");
+  const trimIndex = install.indexOf("$DownloadBasePath = $DownloadBasePath.Trim().Trim('\"')");
+  const expandIndex = install.indexOf("$DownloadBasePath = [Environment]::ExpandEnvironmentVariables($DownloadBasePath)");
+  const rootedIndex = install.indexOf("[System.IO.Path]::IsPathRooted($DownloadBasePath)");
+  assert.ok(trimIndex > 0, "参数分支要去掉两侧引号");
+  assert.ok(trimIndex < expandIndex && expandIndex < rootedIndex, "去引号必须排在展开环境变量与 IsPathRooted 之前");
+});
+
+test("卸载脚本收掉空的父目录，并说清 -SkipRegistry 留下的键（old-p3 native L200）", () => {
+  const uninstall = readProjectFile("uninstall-native-folder-opener.ps1");
+  assert.match(uninstall, /\$parentOfHostRoot = Split-Path -Parent \$HostRoot/);
+  assert.match(uninstall, /\$parentOfHostRoot -eq \$defaultHostRoot/, "只收默认父目录，别删到别处");
+  assert.match(uninstall, /Get-ChildItem -LiteralPath \$parentOfHostRoot -Force \| Select-Object -First 1/, "父目录空着才收");
+  assert.match(uninstall, /注册表项按 -SkipRegistry 保留着/, "要说清残留的键指向已删清单");
 });

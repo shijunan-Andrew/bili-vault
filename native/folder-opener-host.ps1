@@ -38,7 +38,23 @@ function Write-Response([System.IO.Stream]$Stream, [hashtable]$Response) {
 # 这里必须显式指定 -Encoding UTF8。
 function Get-DownloadBasePath {
   if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) { throw "找不到本地下载目录设置，请重新运行安装脚本。" }
-  $settings = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  # 1.8.22（old-p3 native L198、L208）：以前是 Get-Content -Raw -Encoding UTF8 一把梭。
+  # 文件被记事本另存成 ANSI（GB2312）时，中文下载路径会被静默解成乱码；JSON 坏了则
+  # 把 .NET 解析器原文（「传入的对象无效，应为“:”或“}”」）直接甩给用户。现在按字节读、
+  # 严格按 UTF-8 解码（解不开就明确说是编码问题），JSON 解析也换成人话错误。
+  $settingsBytes = [System.IO.File]::ReadAllBytes($settingsPath)
+  $strictUtf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $false, $true
+  try {
+    $settingsText = $strictUtf8.GetString($settingsBytes)
+  } catch [System.Text.DecoderFallbackException] {
+    throw "本地下载目录设置的编码不是 UTF-8（多半是被记事本另存成了 ANSI），请重新运行安装脚本。"
+  }
+  $settingsText = $settingsText.TrimStart([char]0xFEFF)
+  try {
+    $settings = $settingsText | ConvertFrom-Json
+  } catch {
+    throw "本地下载目录设置文件已损坏（不是合法的 JSON），请重新运行安装脚本。"
+  }
   $basePath = [string]$settings.downloadBasePath
   if ([string]::IsNullOrWhiteSpace($basePath)) { throw "本地下载目录设置不完整，请重新运行安装脚本。" }
   return [System.IO.Path]::GetFullPath($basePath)
@@ -46,6 +62,9 @@ function Get-DownloadBasePath {
 
 function Assert-SafeDirectoryName([string]$Value, [string]$Label) {
   if ([string]::IsNullOrWhiteSpace($Value)) { throw "$Label 不能为空。" }
+  # 1.8.22（old-p3 native L190）：「...」会被 GetFullPath 解析成下载根本身（打开整根目录）。
+  # 全是点的名字不是合法文件夹名，单独拦一条。
+  if ($Value -match '^\.+$') { throw "$Label 不能只由点组成。" }
   if ($Value -ne [System.IO.Path]::GetFileName($Value) -or $Value -match '[\\/:*?"<>|\x00-\x1f]') { throw "$Label 无效。" }
 }
 
@@ -58,6 +77,10 @@ function Resolve-TargetPath([string]$BasePath, [string]$CollectionName, [string]
   } else {
     $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($BasePath, $CollectionName, $DirectoryName))
   }
+  # 1.8.22（old-p3 native L184）：NUL、AUX 这类保留设备名会被 GetFullPath 变成
+  # 设备命名空间形式（\.\NUL）。它既不是「超出下载目录」，也不是合法文件夹名；
+  # 以前会掉进下面那句「目标目录超出了已设置的下载目录」的误导文案里。
+  if ($targetPath.StartsWith('\\.\', [System.StringComparison]::Ordinal)) { throw "「$DirectoryName」不是有效的文件夹名（Windows 保留设备名）。" }
   if (-not $targetPath.StartsWith($basePrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "目标目录超出了已设置的下载目录。" }
   if (-not (Test-Path -LiteralPath $targetPath -PathType Container)) { throw "找不到视频下载目录：$targetPath" }
   return $targetPath
@@ -128,10 +151,17 @@ while ($true) {
     # 扩展侧只能猜宿主是哪一版。现在 version/protocol 由 Write-Response 统一补上。
     # 另外把异常类型也报出来：裸 PowerShell 脚本的报错常常只有一句中文，
     # 排查时分不清是「参数不对」还是「脚本压根没跑起来」。
+    $errorMessage = [string]$_.Exception.Message
+    $errorType = [string]$_.Exception.GetType().Name
+    # 1.8.22（old-p3 native L207）：超长目录名会抛 PathTooLongException，原文是
+    # 「路径或文件名必须少于 260 个字符」这种系统腔调，换成人话；类型照报，方便排查。
+    if ($_.Exception -is [System.IO.PathTooLongException] -or $errorMessage -match "必须少于|too long") {
+      $errorMessage = "目录名或路径太长（Windows 最多支持 260 个字符），请把这个视频的目录名改短一些。"
+    }
     Write-Response $outputStream @{
       ok = $false
-      message = [string]$_.Exception.Message
-      errorType = [string]$_.Exception.GetType().Name
+      message = $errorMessage
+      errorType = $errorType
     }
   }
 }
