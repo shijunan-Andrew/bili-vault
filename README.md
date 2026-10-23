@@ -134,26 +134,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 ## 正式版更新
 
-> 这里**只放最新一版**的改动说明。更早的版本（V1.9.0 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
+> 这里**只放最新一版**的改动说明。更早的版本（V1.9.1 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.9.1：卡片封面不再卡在占位图
+## V1.9.2：统计的「今日新增」对得上卡片上的日期了
 
-这版只修一个显示问题：收藏库里有些卡片一直停在灰底播放键的占位图上，点开详情却能看到封面，刷新也不管用。
+这版只修一个数字：今天明明收了 5 条，统计页和宠物却说 3 条。
 
 **你会感觉到的几处**
 
-- **卡片封面会自己补上**：翻页、切收藏夹、按搜索或标签筛过再回来，卡片上的封面都跟着当前这条记录走，不再停在占位图。
-- **不会再显示「上一条视频的封面」**：卡片复用时封面槽跟着记录一起换；刷新后也不会留下已经失效的旧图。
-- 本来就没有封面的记录，仍然显示占位图，跟以前一样。
+- **「今日新增」和卡片上的日期一致了**：统计页的新增数、最近 14 天柱状图、宠物那句「今日新增收藏视频」，都按《视频信息.txt》里的「视频收藏时间」算。
+- **搬运/补档过来的老视频不再漏算**：目录名还是当初建档的时间，但只要收藏时间是今天，就算进今天。
+- **老库不用你操心**：收藏库下次打开会按新口径重算一遍统计；没写收藏时间的记录仍然退回目录名，老数字不会突然变。
 
 **开发侧（不影响使用）**
 
-- 1.8.23 的卡片复用（keyed diff）只更新了文字类节点，没管 `.card-cover`；`paintPageCovers()` 又拿 `video.cover` 当「这张卡已经有图」的判据 —— 复用的新卡片天生只有占位图，于是永远补不上。详情面板直接读 `video.cover`，所以看起来「详情有图、卡片没图」。
-- 现在封面槽只有一个落笔函数 `applyCardCover(card, cover)`：`updateVideoCard()` 每次换记录时对齐、`paintPageCovers()` 读到文件后调用同一个函数；判据从「缓存里有没有 URL」改成「槽里现在放的是不是这张图」。
-- 新增两条回归：页面套件真跑一次「丢弃卡片再重建，三张卡都得有封面」，稳定性套件钉住「不许再用 `video.cover` 猜有没有图」。
+- `recordFromVideo()` 原来只认 `source.date || source.directory`；扫描出来的记录带的是 `favoriteAt`（视频信息.txt 的「视频收藏时间」），没有 `date` 字段，于是分天一律退回目录名 —— 而目录名是**建档时间**。搬运/补档、或者重新收藏一条早就归档过的视频时，卡片显示今天、统计却算到旧的一天，「今日新增」就少了。
+- 现在统一走 `firstParsedTime([source.date, source.favoriteAt, source.directory])`：显式 `date` 优先（导入路径仍把收藏时间放在这里），其次是 `favoriteAt`，两个都认不出来才退回目录名。
+- 新增三处回归：stats-core 单测（三个来源的优先级与「未知」占位符）、pages 真执行（两条目录名三天前、收藏时间今天的记录 → 提交库里两行 `day` 都是今天、`savedToday=2`）、stability 钉住 `firstParsedTime` 的顺序与注释口径。
 
-**遗留**：无（纯显示修复）。
+**遗留**：无。
 
 ## 测试与文档
 
@@ -163,7 +163,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:357 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:358 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

@@ -283,11 +283,24 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
     return database;
   }
 
+  // 依次尝试若干个时间原文，返回第一个能解析成有限时间戳的；全都不行返回 NaN。
+  // 「未知」「-」这类占位符会解析失败，正好继续往后试目录名。
+  function firstParsedTime(candidates) {
+    for (const candidate of candidates) {
+      const parsed = parseFavoriteTime(candidate);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return NaN;
+  }
+
   // 收藏库扫描出来的 video → 数据库一条记录。
-  // video.date 是「视频收藏时间」原文，取不到时 library.js 已经回退成目录名（也是这个格式）。
+  // 时间优先取「视频收藏时间」原文（video.favoriteAt，卡片上显示的就是它）；老调用方
+  // 可能已经把原文塞在 video.date 里。两者都解析不出来才退回目录名 —— 目录名是
+  // 「这条是什么时候建档的」，搬运/补档、或者重新收藏一条早就归档过的视频时，
+  // 它会与收藏时间不是同一天，拿它分天会让「今日新增」对不上卡片上的日期。
   function recordFromVideo(video = {}, now = Date.now()) {
     const source = video && typeof video === "object" ? video : {};
-    const favoriteAt = parseFavoriteTime(source.date || source.directory || "");
+    const favoriteAt = firstParsedTime([source.date, source.favoriteAt, source.directory]);
     return {
       key: videoKey(source),
       collection: source.collection || "",

@@ -7567,3 +7567,19 @@ test("卡片封面槽每次都按当前记录对齐，不再拿 video.cover 猜�
   assert.match(paint, /applyCardCover\(card, video\.cover\);/, "缓存里有 URL 的卡片也要重新落笔");
   assert.match(paint, /applyCardCover\(card, url\);/, "读完封面后交给同一个落笔函数");
 });
+
+// ---- 1.9.2：统计的「今日新增」跟着视频收藏时间走 ----
+test("统计分天优先用「视频收藏时间」，目录名只在时间缺失时兜底（1.9.2）", () => {
+  const statsCore = readProjectFile("stats-core.js");
+  assert.match(statsCore, /function firstParsedTime\(candidates\) \{/, "要有一个按顺序试时间的助手");
+  assert.match(
+    statsCore,
+    /const favoriteAt = firstParsedTime\(\[source\.date, source\.favoriteAt, source\.directory\]\);/, 
+    "顺序必须是：显式 date → 视频收藏时间 → 目录名"
+  );
+  assert.match(statsCore, /它会与收藏时间不是同一天/, "注释要把「为什么目录名只能兜底」写清楚");
+
+  const tools = readProjectFile("archive-tools.js");
+  assert.match(tools, /const date = field\(info, "视频收藏时间"\) \|\| recordEntry\.name;/, "扫描时先取视频收藏时间，取不到退回目录名");
+  assert.match(tools, /favoriteAt: date,/, "扫描出来的记录要带上收藏时间给统计用");
+});

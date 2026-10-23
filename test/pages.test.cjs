@@ -469,6 +469,48 @@ async function suiteLibrary() {
     const database = JSON.parse(await (await file.getFile()).text());
     assert.equal(Object.keys(database.videos).length, 1, "兜底路径要把这次统计写进去");
   });
+  await test("统计分天跟着「视频收藏时间」走，不跟目录名（1.9.2）", async () => {
+    /* 搬运/补档过来的老目录名是旧的，视频信息.txt 里的收藏时间是今天的。
+       统计页和宠物都按「今日新增」这个口径报数，它必须和卡片上的日期一致。 */
+    const pad = (value) => String(value).padStart(2, "0");
+    const stampOf = (date) => `${date.getFullYear()}年${pad(date.getMonth() + 1)}月${pad(date.getDate())}日`
+      + `${pad(date.getHours())}时${pad(date.getMinutes())}分${pad(date.getSeconds())}秒`;
+    const favoriteOf = (date) => `${date.getFullYear()}年${pad(date.getMonth() + 1)}月${pad(date.getDate())}日 `
+      + `${pad(date.getHours())}时${pad(date.getMinutes())}分${pad(date.getSeconds())}秒.100`;
+    const today = new Date();
+    today.setHours(10, 0, 0, 0);
+    const earlier = new Date(today.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const tree = {
+      "另一个夹": {
+        [stampOf(earlier)]: {
+          "视频信息.txt": INFO("搬运回来的老视频", { url: "https://www.bilibili.com/video/BV1aa411c7m1/", favoriteAt: favoriteOf(today) }),
+          "封面.png": "PNG-1"
+        },
+        [stampOf(new Date(today.getTime() + 60 * 1000))]: {
+          "视频信息.txt": INFO("今天新收的视频", { url: "https://www.bilibili.com/video/BV1bb411c7m2/", favoriteAt: favoriteOf(today) }),
+          "封面.png": "PNG-2"
+        }
+      }
+    };
+    const page = dom.loadPage({ htmlFile: "library.html", chrome: makeChrome({ localData: {} }) });
+    await settle();
+    const g = page.window;
+    const sent = [];
+    g.chrome.runtime.sendMessage = async (message) => {
+      sent.push(message);
+      return { ok: true };
+    };
+    const root = await makeDirectoryTree({ "_测试归档": tree }).getDirectoryHandle("_测试归档");
+    await g.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const commits = sent.filter((item) => item && item.type === "bca-stats-commit");
+    assert.equal(commits.length, 1, "构建完应该交一次库");
+    const rows = Object.values(commits[0].database.videos);
+    assert.equal(rows.length, 2, "两条不同的视频不能合并");
+    const todayKey = g.BcaStatsCore.localDayKey(Date.now());
+    assert.deepEqual(rows.map((row) => row.day), [todayKey, todayKey], "分天要按收藏时间");
+    assert.equal(g.BcaStatsCore.snapshot(commits[0].database).savedToday, 2, "两条都要算进今天");
+  });
   await test("详情抽屉打开时宠物收起来，关掉再放回来（1.8.10）", async () => {
     const page = await openLibrary({
       tree: sampleTree(),

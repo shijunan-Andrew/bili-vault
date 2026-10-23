@@ -158,6 +158,30 @@ test("addRecord 同一条视频再来一次不新增行，保留最早的收藏�
   assert.equal(entry.collection, "dds");
 });
 
+test("recordFromVideo 用「视频收藏时间」分天，目录名只在时间缺失时兜底（1.9.2）", () => {
+  /* 搬运/补档、或者重新收藏一条早就归档过的视频时，目录名沿用旧的时间戳，
+     而卡片上显示的是 视频信息.txt 里的「视频收藏时间」。统计分天必须跟卡片一致，
+     否则「今日新增」会比用户看到的少（1.9.2 修的就是这个）。 */
+  const scanVideo = {
+    collection: "默认收藏夹",
+    title: "搬运回来的老视频",
+    bvid: "BV1aa411c7m1",
+    directory: "2026年10月08日21时15分00秒",
+    favoriteAt: "2026年10月12日09时30分00秒"
+  };
+  const record = core.recordFromVideo(scanVideo, NOW);
+  assert.equal(record.at, at(2026, 10, 12, 9, 30), "要按收藏时间分天，不能按目录名");
+  assert.equal(core.localDayKey(record.at), "2026-10-12");
+
+  const unknownFavorite = core.recordFromVideo({ ...scanVideo, favoriteAt: "未知" }, NOW);
+  assert.equal(unknownFavorite.at, at(2026, 10, 8, 21, 15), "收藏时间认不出来时退回目录名");
+
+  const explicitDate = core.recordFromVideo(
+    { ...scanVideo, date: "2026年09月30日08时00分00秒", favoriteAt: "2026年10月12日09时30分00秒" },
+    NOW
+  );
+  assert.equal(explicitDate.at, at(2026, 9, 30, 8, 0), "老调用方显式给的 date 仍然优先");
+});
 test("addRecord 没有时间就用 now，不会写出 NaN", () => {
   const database = core.emptyDatabase(NOW);
   core.addRecord(database, { bvid: "BV1Z9c7zAEbj", title: "x", collection: "c" }, NOW);
