@@ -258,9 +258,13 @@ const PATH_SEGMENT_BUDGET_CHARS = 168;
 const COLLECTION_NAME_MAX_CHARS = 120;
 const RECORD_NAME_MAX_CHARS = 100;
 
+// 1.8.21（facet-compat §3.3）：判据只留 archive-core.js 那一份，这里起个同名短别名，
+// 好让上面那句「两份逐字相同」的文案能两边一模一样地对上。
+const isMissingError = (error) => BcaArchiveCore.isMissingError(error);
+
 // 见 archive-core.js 的 describeDirectoryCreateError：同一句文案，两份逐字相同。
 function describeDirectoryCreateError(error, name) {
-  if (error?.name !== "NotFoundError") return "";
+  if (!isMissingError(error)) return "";
   return "建不出「" + name + "」这个目录：要么上级目录已经不在了，要么拼出来的完整路径超过了"
     + " Windows 的 " + WINDOWS_PATH_LIMIT_CHARS + " 个字符上限。把本地备份文件夹挪到更浅的"
     + "位置（例如 D:\\备份），或把收藏夹名 / 视频标题改短，再试一次。";
@@ -400,7 +404,7 @@ async function ensureWritePermission(handle) {
   try {
     for await (const _entry of handle.values()) break;
   } catch (error) {
-    if (error?.name === "NotFoundError") {
+    if (BcaArchiveCore.isMissingError(error)) {
       throw new Error("上次选择的本地备份文件夹已经不在了（被删除、改名或换了盘符）。请重新选择本地备份文件夹。");
     }
     const friendly = describeFileSystemError(error);
@@ -896,17 +900,25 @@ async function addManualVideo(data) {
         // S3：这一支会把上面 logError 写的 lastError 整个覆盖掉，所以 needsReauth 必须自己补上 ——
         // 覆盖掉布尔值就等于把「重新授权」按钮又抹掉了，而这里恰恰会撞上授权失效
         // （writeFile 落盘时才发现权限被回收）。判据与 logError 保持一致，走同一个 helper。
-        ...(failures.length ? { lastError: { reportPath, createdAt: Date.now(), report: maskLocalUserPaths(message), needsReauth: failures.some((item) => needsReauthFromError(item.message)) } } : { lastError: null })
+        ...(failures.length ? { lastError: { reportPath: reportPath ? storageReportLabel(reportPath) : "", createdAt: Date.now(), report: maskLocalUserPaths(message), needsReauth: failures.some((item) => needsReauthFromError(item.message)) } } : { lastError: null })
       });
     } catch (storageError) {
       console.warn("写入最近结果失败（视频已经保存成功）", storageError);
     }
     const ok = !failures.length || savedCollections.length > 0 || duplicates.length > 0;
-    return { ok, message, paths: savedPaths, added: savedCollections, skipped: duplicates, failed: failures, reportPath };
+    return { ok, message, paths: savedPaths, added: savedCollections, skipped: duplicates, failed: failures, reportPath: reportPath ? storageReportLabel(reportPath) : "" };
   } catch (error) {
     const saved = await logError(error, { metadata, folders: collectionNames.map((name) => ({ name })) });
     await chrome.storage.local.set({ lastResult: { message: `添加失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
-    return { ok: false, message: error?.message || "添加视频失败。", details: saved.reportPath };
+    // 1.8.21（PRV-P2-4）：回给页面的只能是「末两段」相对标签 —— 绝对路径里带着用户名，
+    // 而这条 details 会原样显示在 B 站页面的通知里。报告正文留在插件里，点图标能看能下载。
+    return {
+      ok: false,
+      message: error?.message || "添加视频失败。",
+      details: saved.reportPath
+        ? `错误报告已保存：${storageReportLabel(saved.reportPath)}`
+        : "错误报告保存在插件中；点击插件图标可查看并下载。"
+    };
   }
 }
 
@@ -1129,15 +1141,29 @@ async function saveFavorite(data) {
     }
     return { ok: true, message, path: savedFolders.join("\n") };
   } catch (error) {
+    // 1.8.21（补-1）：这条登记是「授权恢复后补存」的唯一凭据，写不进去就等于把用户
+    // 这次收藏丢了 —— 所以失败要显式说出来。以前这里裸 await，一抛就把整条回应吞掉。
+    let pendingRegistered = true;
     if (error?.message?.includes("写入授权已失效")) {
-      await chrome.storage.local.set({ pendingFavorite: data });
+      try {
+        await chrome.storage.local.set({ pendingFavorite: data });
+      } catch (storageError) {
+        pendingRegistered = false;
+        console.warn("登记补存失败（授权恢复后不会自动重试这条视频）", storageError);
+      }
     }
+    const retryHint = pendingRegistered ? "" : "；补存登记也没写成，请回 B 站重新收藏这条视频。";
     const saved = await logError(error, { metadata, folders });
-    await chrome.storage.local.set({ lastResult: { message: `保存失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
+    try {
+      await chrome.storage.local.set({ lastResult: { message: `保存失败：${error?.message || "未知错误"}${retryHint}`, createdAt: Date.now() } });
+    } catch (storageError) {
+      console.warn("写入最近结果失败（这次保存本来就失败了）", storageError);
+    }
     return {
       ok: false,
       message: error?.message || "保存失败。",
-      details: saved.reportPath ? `错误报告已保存：${storageReportLabel(saved.reportPath)}` : "错误报告保存在插件中；点击插件图标可查看并下载。"
+      details: (saved.reportPath ? `错误报告已保存：${storageReportLabel(saved.reportPath)}` : "错误报告保存在插件中；点击插件图标可查看并下载。")
+        + (pendingRegistered ? "" : " 补存登记也没写成，请回 B 站重新收藏这条视频。")
     };
   }
 }
@@ -1950,7 +1976,21 @@ function splitShareText(text) {
 
 const STATUS_INVALID_MARKER = "已失效视频（更新状态时检测到）";
 
-function sendStatusProgress(text) {
+/* 1.8.21（perf P2-8）：批量更新状态时一批最多 80 条，原来每条都 sendMessage 一次，
+   接收端每条都要重新 querySelector 一遍进度行（DOM 写本身已有 500ms 节流，消息没有）。
+   这里给 1500ms 窗口，窗口内只记住最后一条文案，收尾时补发，界面不会停在中途。 */
+const STATUS_PROGRESS_BROADCAST_MS = 1500;
+let statusProgressBroadcastAt = 0;
+let statusProgressPending = "";
+
+function sendStatusProgress(text, force = false) {
+  const now = Date.now();
+  if (!force && now - statusProgressBroadcastAt < STATUS_PROGRESS_BROADCAST_MS) {
+    statusProgressPending = text;
+    return;
+  }
+  statusProgressBroadcastAt = now;
+  statusProgressPending = "";
   chrome.runtime.sendMessage({ type: "bca-status-progress", text }, () => { void chrome.runtime.lastError; });
 }
 
@@ -2059,6 +2099,8 @@ async function refreshVideoStatusInner(data, tabId = null) {
     }
   });
   await Promise.all(runners);
+  // 节流窗可能刚好吞掉最后一条；补发一次，别让进度行停在「37/80」
+  if (statusProgressPending) sendStatusProgress(statusProgressPending, true);
 
   let reportPath = "";
   if (failures.length) {
@@ -2078,7 +2120,8 @@ async function refreshVideoStatusInner(data, tabId = null) {
     unchanged,
     failed,
     remaining: Math.max(0, targets.length - queue.length),
-    reportPath,
+    // 1.8.21（PRV-P2-4）：这个字段会被 library.js 拼进「完整报告」再进剪贴板，只回相对标签。
+    reportPath: reportPath ? storageReportLabel(reportPath) : "",
     message: `本次处理 ${queue.length} 条：更新 ${updated} 条，新标记失效 ${markedInvalid} 条，无变化 ${unchanged} 条，失败 ${failed} 条。`
   };
 }
@@ -2197,13 +2240,9 @@ const IMPORT_QUEUE_WAIT_TIMEOUT_MS = 30000;
 // V1.4.3（P2-6）：以前这里还有一个 IMPORT_STALE_STATE_MS = 90000，用来判断
 // local 里的 importState 是不是"被回收前的残影"。现在判据换成了 session 里有没有
 // active 快照（见 importReconcileState），残影可以立刻复位，不必再等 90 秒。
-// chrome.storage.session 默认配额 10MB。被改写的 视频信息.txt 原文只保留这么多字节，
-// 超出后只记名字：回滚时这类文件无法还原内容，会在结果里如实报出来。
-// 1.7.11（facet-privacy P2-8）：撤销真正需要的只是「目录 + 文件名 + 原文」，原文省不掉，
-// 但 2MB 意味着一次大导入能把上千条记录的简介与收藏时间整段留在会话里。读到 session 的
-// 只有后台自己（不落盘、不向内容脚本暴露），所以风险本来就低 —— 这里把窗口收窄到 1MB，
-// 够覆盖正常的一次导入，超出的部分照旧只记名字。
-const IMPORT_JOURNAL_TEXT_BUDGET_BYTES = 1 * 1024 * 1024;
+// 快照只记名字。回滚真正用的原文在内存 journal 里（`entry.text`），快照里那份正文副本
+// 从来没有人读 —— 1.8.21（perf P2-2）把原先最多 1MB 的「没人读的副本」整段删掉：
+// 它既占 chrome.storage.session 配额，又让人误以为中断后还能靠快照还原内容。
 
 // 连续命中风控的条目数（连续 N 条都撞限流就中止整轮导入，阈值常量见导入区块）
 let importRateLimitStreak = 0;
@@ -2298,7 +2337,6 @@ function importReleaseWaiters() {
 // 所以回滚日志里只存收藏夹名 / 目录名 / 文件名（handle.name 是稳定的），
 // 回滚时按名字重新取句柄。
 function importJournalSnapshot(journal) {
-  let textBudget = IMPORT_JOURNAL_TEXT_BUDGET_BYTES;
   return {
     createdCollections: [...(journal?.createdCollections || [])].map((entry) => entry.name),
     createdRecords: [...(journal?.createdRecords || [])].map((entry) => ({
@@ -2310,18 +2348,11 @@ function importJournalSnapshot(journal) {
       directory: entry.directoryHandle?.name || "",
       name: entry.name
     })),
-    modifiedFiles: [...(journal?.modifiedFiles || [])].map((entry) => {
-      const text = String(entry.text ?? "");
-      const keepText = text.length <= textBudget;
-      if (keepText) textBudget -= text.length;
-      return {
-        collection: entry.collectionHandle?.name || "",
-        directory: entry.directoryHandle?.name || "",
-        name: entry.name,
-        text: keepText ? text : "",
-        textUnavailable: !keepText
-      };
-    })
+    modifiedFiles: [...(journal?.modifiedFiles || [])].map((entry) => ({
+      collection: entry.collectionHandle?.name || "",
+      directory: entry.directoryHandle?.name || "",
+      name: entry.name
+    }))
   };
 }
 
@@ -2567,8 +2598,18 @@ function publishImportState(patch, force = false) {
   chrome.storage.local.set({ importState: persisted }).catch(() => {});
 }
 
-function importProgress(text) {
+/* 1.8.21（perf P1-3）：广播也要节流。逐条导入时每条都会 importProgress()，而它是
+   chrome.runtime.sendMessage —— 接收端每次都要重新走一遍 i18n 与 DOM 更新。storage 侧
+   1.8.7 已按 1500ms 节流，这里给广播一个 500ms 的窗口：窗口内只更新本地状态，不发消息；
+   阶段边界与每个收藏夹的最后一条传 force，保证界面不会停在一个过期的数字上。 */
+const IMPORT_PROGRESS_BROADCAST_MS = 500;
+let importProgressBroadcastAt = 0;
+
+function importProgress(text, force = false) {
   publishImportState({ text });
+  const now = Date.now();
+  if (!force && now - importProgressBroadcastAt < IMPORT_PROGRESS_BROADCAST_MS) return;
+  importProgressBroadcastAt = now;
   sendImportProgress(text);
 }
 
@@ -3418,7 +3459,7 @@ async function readStatsDatabase(root, options = {}) {
     console.warn(`本地数据库解析失败（${error?.message || error}）：${trace}`);
     chrome.storage.local.set({
       lastResult: { message: `本地数据库损坏：${trace}`, createdAt: Date.now() }
-    }).catch(() => {});
+    }).catch((storageError) => console.warn("写入「本地数据库损坏」提示失败（页面可能看不到这条说明）", storageError));
     // 1.7.0：留档失败时连原文都没保住 —— 这一份空库绝不能落盘（canWrite=false），
     // 否则就是把用户唯一的那份坏文件也覆盖掉，事后无从恢复
     if (!backupName) {
@@ -3434,12 +3475,20 @@ async function readStatsDatabase(root, options = {}) {
   }
 }
 
+let statsSnapshotPublished = "";
+
 async function publishStatsSnapshot(database) {
   // 1.5.0：snapshot() 里的 days.days 是「库里有几天」这个数字（宠物要用它数「陪伴了几天」），
   // 每日明细得另外算 —— 统计页要画最近 14 天的柱子，所以顺手带上一份 daily。
   const stats = Object.assign(BcaStatsCore.snapshot(database), {
     daily: BcaStatsCore.recentDays(database)
   });
+  /* 1.8.21（perf P1-2）：内容没变就不写。一次导入里每个收藏夹都会提交一次库，而快照里
+     的 videos/records 可能一个字都没变（全是已存在记录被跳过的那种轮次）—— 每份快照
+     ~KB 级，写一次就触发一遍 popup/library 的 onChanged 重渲染。指纹挡掉的是纯噪声。 */
+  const fingerprint = JSON.stringify(stats);
+  if (fingerprint === statsSnapshotPublished) return stats;
+  statsSnapshotPublished = fingerprint;
   await chrome.storage.local.set({ bcaStats: stats });
   return stats;
 }
@@ -3700,12 +3749,30 @@ const PET_CAPPED_WRITE_MS = 60 * 1000;
 let petCappedWriteAt = 0;
 // 1.8.12：这一分钟里不落盘，但台词下标要照常往前 —— 计一下攒了几次，交给 petLineIndex 补上。
 let petDeferredTouches = 0;
+/* 1.8.21（perf P1-2）：封顶后这一分钟里不落盘，但旧写法仍然**先把整库读出来**才判 capped
+   —— 1k~1w 条记录的 parse 只为丢弃，结果被原样扔掉。这里把上次写成功时的宠物状态留在内存里，
+   窗口内的触摸直接按它回话，一次库读都不做。 */
+let petCappedSnapshot = null;
 
 async function touchPetInDatabaseInner() {
   const root = await getRootHandle().catch(() => null);
   if (!root) return { ok: false };
   const permission = await root.queryPermission({ mode: "readwrite" }).catch(() => "denied");
   if (permission !== "granted") return { ok: false };
+  // 窗口内：不读库，按上次落盘的宠物状态 + 攒下的次数回话（capped 之后只有 totalTouch 在涨）
+  if (petCappedSnapshot && Date.now() - petCappedWriteAt < PET_CAPPED_WRITE_MS) {
+    petDeferredTouches += 1;
+    const totalTouch = petCappedSnapshot.totalTouch + 1;
+    return {
+      ok: true,
+      lineIndex: BcaStatsCore.petLineIndex(totalTouch, petDeferredTouches),
+      affinity: petCappedSnapshot.affinity,
+      todayTouch: petCappedSnapshot.todayTouch,
+      totalTouch,
+      capped: true,
+      deferred: true
+    };
+  }
   const read = await readStatsDatabase(root);
   const blocked = statsDatabaseWriteBlocked(read);
   if (blocked) {
@@ -3715,20 +3782,12 @@ async function touchPetInDatabaseInner() {
     return { ok: false, blocked: true, lineIndex: null };
   }
   const touched = BcaStatsCore.touchPet(read.database);
-  if (touched.capped && Date.now() - petCappedWriteAt < PET_CAPPED_WRITE_MS) {
-    petDeferredTouches += 1;
-    return {
-      ok: true,
-      lineIndex: BcaStatsCore.petLineIndex(touched.totalTouch, petDeferredTouches),
-      affinity: touched.affinity,
-      todayTouch: touched.todayTouch,
-      totalTouch: touched.totalTouch,
-      capped: true,
-      deferred: true
-    };
-  }
   if (!(await commitStatsDatabase(root, read, read.database))) return { ok: false };
   petCappedWriteAt = touched.capped ? Date.now() : 0;
+  // capped 时才需要这份内存态：窗口内不再读库，靠它回话；非 capped 的写清掉，下次照常读。
+  petCappedSnapshot = touched.capped
+    ? { totalTouch: touched.totalTouch, todayTouch: touched.todayTouch, affinity: touched.affinity }
+    : null;
   petDeferredTouches = 0;
   return {
     ok: true,
@@ -3919,7 +3978,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       if (limitReached) break;
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderTotal: 0 }, counts: { imported, refreshed, skipped, failed, total } });
 
-      importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`);
+      importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`, true);
       // 第 1 页读不到就整轮跳过这个收藏夹，代价太大：一次偶发的 412 会让用户以为功能坏了
       // （真机上就发生过 —— 错误报告只有一行"读取第 1 页失败"，用户完全无从判断是风控还是 bug）。
       // 这里退避重试：读超时、连接抖动这类瞬时问题能救回来。
@@ -3936,7 +3995,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
           importRethrowIfAbort(error);
           firstError = error;
           if (attempt < IMPORT_FIRST_PAGE_ATTEMPTS) {
-            importProgress(`「${folder.title}」第 1 页读取失败，第 ${attempt + 1}/${IMPORT_FIRST_PAGE_ATTEMPTS} 次尝试…`);
+            importProgress(`「${folder.title}」第 1 页读取失败，第 ${attempt + 1}/${IMPORT_FIRST_PAGE_ATTEMPTS} 次尝试…`, true);
             await importDelay(attempt * 1500);
           }
         }
@@ -4068,7 +4127,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       try {
         collection = await root.getDirectoryHandle(collectionName);
       } catch (error) {
-        if (error?.name !== "NotFoundError") throw error;
+        if (!BcaArchiveCore.isMissingError(error)) throw error;
         collectionExisted = false;
         collection = await createDirectoryOrExplain(root, collectionName);
         journal.createdCollections.push({ parentHandle: root, handle: collection, name: collectionName });
@@ -4186,7 +4245,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
         await importWaitIfPaused();
         await keepServiceWorkerAlive("cover");
         const batch = pendingItems.slice(offset, offset + 12);
-        importProgress(`正在准备「${folder.title}」的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`);
+        importProgress(`正在准备「${folder.title}」的封面：${Math.min(offset + batch.length, pendingItems.length)}/${pendingItems.length}`, true);
         await importRunLimited(batch, 4, async (item) => {
           // 命中风控的条目不会再落盘，不必为它下载封面
           if (item.rateLimited) return;
@@ -4200,7 +4259,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
         for (let index = 0; index < batch.length; index += 1) {
           await importWaitIfPaused();
           const item = batch[index];
-          importProgress(`正在导入「${folder.title}」：${offset + index + 1}/${pendingItems.length}（已保存 ${imported} 个）`);
+          // 最后一条强制发出去：节流窗可能刚好吞掉它，界面会停在一个旧的「x/y」上
+          importProgress(`正在导入「${folder.title}」：${offset + index + 1}/${pendingItems.length}（已保存 ${imported} 个）`,
+            offset + index + 1 === pendingItems.length);
           // 4.9：这条视频的详情请求撞上了风控 → 不落盘，否则会写出标签/简介/发布时间
           // 全是"未知"的残缺记录，报告里还显示成功。连续多条就中止整轮导入。
           if (item.rateLimited) {
@@ -4333,7 +4394,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
     });
     publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message, rateLimited: true }, true);
     await finishImportRunSnapshot();
-    return { ok: false, rateLimited: true, message, imported, refreshed, skipped, failed, total, reportPath };
+    return { ok: false, rateLimited: true, message, imported, refreshed, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "" };
   }
 
   reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`,
@@ -4378,7 +4439,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
   await finishImportRunSnapshot();
   publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);
-  return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath, limitReached, limitedCount };
+  return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "", limitReached, limitedCount };
 }
 
 // 4.9.x：占住"当前这一轮导入"。claimImportRun 必须在任何 await 之前调用 ——
@@ -4481,7 +4542,8 @@ async function recordFavoriteError(data) {
     ok: false,
     message: error.message,
     details: saved.reportPath ? `错误报告已保存：${storageReportLabel(saved.reportPath)}` : "错误报告保存在插件中；点击插件图标可查看并下载。",
-    reportPath: saved.reportPath
+    // 1.8.21（PRV-P2-4）：同 addManualVideo —— 回给页面的只留末两段相对标签。
+    reportPath: saved.reportPath ? storageReportLabel(saved.reportPath) : ""
   };
 }
 
@@ -4738,7 +4800,7 @@ async function diffFavoriteCollection(root, folder, tabId, onProgress) {
     const collection = await root.getDirectoryHandle(collectionName);
     existing = await readExistingImportRecords(collection);
   } catch (error) {
-    if (error?.name !== "NotFoundError") throw error;
+    if (!BcaArchiveCore.isMissingError(error)) throw error;
     collectionExists = false;
   }
 
@@ -4925,6 +4987,8 @@ async function diffBiliFavoritesInner(data, tabId = null) {
   const report = buildDiffReportText(diffs, formatChineseDateTime(new Date(), true));
   // 写文件失败不影响结果展示，reportPath 会是空串
   const reportPath = data?.writeReport === false ? "" : await persistDiffReport(report);
+  // 1.8.21（PRV-P2-4）：页面只显示/复用「末两段」相对标签，绝对路径不出后台。
+  const reportLabel = reportPath ? storageReportLabel(reportPath) : "";
   // 只留摘要：完整列表在报告文件里，界面上本来也只显示摘要
   publishDiffState({
     running: false,
@@ -4935,7 +4999,7 @@ async function diffBiliFavoritesInner(data, tabId = null) {
       // 用户点掉弹窗后由 popup 置为 true —— 否则每次打开插件都会重放一遍
       // （真机上就是这样：点「知道了」再打开，弹窗又出来了）。
       acknowledged: false,
-      reportPath,
+      reportPath: reportLabel,
       folders: diffs.map((d) => ({
         folderTitle: d.folderTitle, remoteFetched: d.remoteFetched, localTotal: d.localTotal,
         collectionExists: d.collectionExists, incomplete: d.incomplete,
@@ -4944,7 +5008,7 @@ async function diffBiliFavoritesInner(data, tabId = null) {
       }))
     }
   });
-  return { ok: true, diffs, report, reportPath };
+  return { ok: true, diffs, report, reportPath: reportLabel };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -5099,7 +5163,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         importDone: { text: failureText, acknowledged: false, failed: true, at: Date.now() }
       });
       notifyImportOutcome("导入失败", `这一轮没有跑完：${error?.message || "未知错误"}。打开插件可以看「最近状态」与错误报告。`);
-      sendResponse({ ok: false, message: error?.message || "导入失败。", reportPath: saved.reportPath });
+      // 1.8.21（PRV-P2-4）：只回末两段相对标签，绝对路径不进页面。
+      sendResponse({ ok: false, message: error?.message || "导入失败。", reportPath: saved.reportPath ? storageReportLabel(saved.reportPath) : "" });
     };
     // 4.9.x：连点第二次必须在**同步代码里**就挡掉。真正的任务要等 saveQueue 空了才跑，
     // 那段等待期里 importRun.active 还是 false，只看它挡不住第二次；但放进来排队也不行 ——

@@ -41,6 +41,8 @@ const resultSummary = document.getElementById("resultSummary");
 const scanNotice = document.getElementById("scanNotice");
 const scanNoticeText = document.getElementById("scanNoticeText");
 const dismissScanNoticeButton = document.getElementById("dismissScanNotice");
+// 1.8.21（P2-6）：扫描提示条上的「清理这些没写完的目录」。只在真有半截目录时出现。
+const cleanupUnfinishedButton = document.getElementById("cleanupUnfinished");
 const importHint = document.getElementById("importHint");
 const dismissImportHintButton = document.getElementById("dismissImportHint");
 // P2-8：导入进行中/暂停中的常驻提示条（状态来自 background 写的 storage.local.importState）
@@ -80,6 +82,8 @@ const confirmTitle = document.getElementById("confirmTitle");
 const confirmMessage = document.getElementById("confirmMessage");
 const deleteDownloadsOption = document.getElementById("deleteDownloadsOption");
 const deleteAssociatedDownloads = document.getElementById("deleteAssociatedDownloads");
+const deleteUnknownOption = document.getElementById("deleteUnknownOption");
+const acknowledgeUnknownDelete = document.getElementById("acknowledgeUnknownDelete");
 const cancelDeleteButton = document.getElementById("cancelDelete");
 const confirmDeleteButton = document.getElementById("confirmDelete");
 const toast = document.getElementById("toast");
@@ -115,6 +119,7 @@ const failurePanel = document.getElementById("failurePanel");
 const failureList = document.getElementById("failureList");
 const toggleFailuresButton = document.getElementById("toggleFailures");
 const copyFailuresButton = document.getElementById("copyFailures");
+const copyFailurePathsButton = document.getElementById("copyFailurePaths");
 const clearFailuresButton = document.getElementById("clearFailures");
 const exportConfigButton = document.getElementById("exportConfig");
 const importConfigButton = document.getElementById("importConfig");
@@ -293,7 +298,7 @@ async function readSavedSetting(key) {
     return await new Promise((resolve, reject) => {
       const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(key);
       request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取本地目录设置。")));
+      request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取本地备份文件夹设置。")));
     });
   } finally { db.close(); }
 }
@@ -307,9 +312,30 @@ const pageSequence = BcaArchiveCore.pageSequence;
 async function optionalFileHandle(directory, name) {
   try { return await directory.getFileHandle(name); }
   catch (error) {
-    if (error?.name === "NotFoundError") return null;
+    if (BcaArchiveCore.isMissingError(error)) return null;
     throw error;
   }
+}
+
+/* 1.8.21（facet-compat §3.3）：网络盘掉线时 values() 抛的也是 NotFoundError，和「这个
+   目录真的不存在」同名。能走到这里说明句柄还在手上，所以「列得出（哪怕 0 个条目）」
+   就代表连得上；抛错就代表整块盘连不上。2 秒 TTL —— 整库扫描不必每条记录都探一次。 */
+const ROOT_REACHABLE_TTL_MS = 2000;
+let rootReachableAt = 0;
+let rootReachableCached = true;
+async function rootIsReachable(handle) {
+  if (!handle) return false;
+  const now = Date.now();
+  if (now - rootReachableAt < ROOT_REACHABLE_TTL_MS) return rootReachableCached;
+  rootReachableAt = now;
+  try {
+    for await (const _entry of handle.values()) { void _entry; break; }
+    rootReachableCached = true;
+  } catch (_error) {
+    // 掉线/权限被撤都是「这次读不到」；调用方据此报「暂时连不上」而不是「不存在」
+    rootReachableCached = false;
+  }
+  return rootReachableCached;
 }
 
 /* ---------------- 4.9：封面 blob: URL 的引用计数 ----------------
@@ -445,7 +471,7 @@ async function getDownloadParentHandle(archiveRoot) {
   if (isCustom) return savedCustom;
   try { return await archiveRoot.getDirectoryHandle("000视频下载"); }
   catch (error) {
-    if (error?.name === "NotFoundError") return null;
+    if (BcaArchiveCore.isMissingError(error)) return null;
     throw error;
   }
 }
@@ -859,7 +885,7 @@ async function resolveCoverEntry(video) {
     video.coverEntry = await coverEntryFor(recordEntry);
     return video.coverEntry;
   } catch (error) {
-    if (error?.name !== "NotFoundError") console.warn("取不到这条记录的封面目录（先显示占位图）", error);
+    if (!BcaArchiveCore.isMissingError(error)) console.warn("取不到这条记录的封面目录（先显示占位图）", error);
     return null;
   }
 }
@@ -1105,11 +1131,12 @@ function refreshScanNotice() {
     }));
   }
   if (info.unfinished?.length) {
-    lines.push(BcaI18n.t("另有 {count} 个目录没写完（没有 视频信息.txt，多半是上次导入被打断）：{list}", {
+    lines.push(BcaI18n.t("另有 {count} 个目录没写完（没有 视频信息.txt，多半是上次导入被打断）：{list}（不会自动删除，可点上面的「清理这些没写完的目录」）", {
       count: info.unfinished.length,
       list: `${info.unfinished.slice(0, 3).join("；")}${info.unfinished.length > 3 ? "；…" : ""}`
     }));
   }
+  if (cleanupUnfinishedButton) cleanupUnfinishedButton.hidden = !info.unfinished?.length;
   setScanNotice(lines.join("\n"));
 }
 
@@ -1126,6 +1153,13 @@ async function isUnfinishedRecord(recordEntry) {
   return false;
 }
 
+/* 记录目录名的唯一判据（V1.8.21）：扫描与「删除收藏夹前数一数」共用一份正则，
+   避免两处各写一条、哪天改了格式只改一处。 */
+const RECORD_DIRECTORY_PATTERN = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
+function isRecordDirectoryName(name) {
+  return RECORD_DIRECTORY_PATTERN.test(String(name || ""));
+}
+
 async function scanRoot(handle, preserveDownloadStatuses = true) {
   const scanned = [];
   const issues = [];
@@ -1137,7 +1171,6 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   const forced = forceFullScan === true;
   const downloadIndex = await scanDownloadedDirectories(handle, { force: forceFullScan });
   const previousVideos = new Map(preserveDownloadStatuses ? allVideos().map((video) => [video.id, video]) : []);
-  const timestampPattern = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
   // 强制全量（「刷新」按钮）时先丢掉这个根目录的缓存
   const cacheKey = rootCacheKey(handle);
   if (forceFullScan) clearArchiveCache(handle);
@@ -1170,7 +1203,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
     for (const collectionEntry of collections) {
       const targets = [];
       for await (const recordEntry of collectionEntry.values()) {
-        if (recordEntry.kind !== "directory" || !timestampPattern.test(recordEntry.name)) continue;
+        if (recordEntry.kind !== "directory" || !isRecordDirectoryName(recordEntry.name)) continue;
         const relative = collectionEntry.name.length + 1 + recordEntry.name.length;
         if (relative > BcaArchiveCore.PATH_SEGMENT_BUDGET_CHARS) longNames.push(`${collectionEntry.name}/${recordEntry.name}`);
         targets.push(recordEntry);
@@ -2194,7 +2227,10 @@ async function exportArchiveMetadata() {
         }
       } catch (error) {
         // 读不到数据库不算导出失败：磁盘上的记录才是权威，缺的只是 stale 对照。
-        databaseState = error?.name === "NotFoundError" ? "missing" : "unreadable";
+        // 1.8.21（§3.3）：盘掉线时抛的也是 NotFoundError —— 先探一眼根目录，
+        // 连不上就记成 unreadable，别在导出文件里写成「没有数据库」。
+        if (!BcaArchiveCore.isMissingError(error)) databaseState = "unreadable";
+        else databaseState = await rootIsReachable(rootHandle) ? "missing" : "unreadable";
       }
     }
     const built = BcaArchiveCore.buildArchiveExportDocument({
@@ -2214,7 +2250,7 @@ async function exportArchiveMetadata() {
         await exportDirectory.getFileHandle(fileName);
         fileName = `${baseName}-${attempt}.json`;
       } catch (error) {
-        if (error?.name !== "NotFoundError") throw error;
+        if (!BcaArchiveCore.isMissingError(error)) throw error;
         break;
       }
     }
@@ -2628,6 +2664,8 @@ function renderFailures() {
   toggleFailuresButton.textContent = failuresExpanded ? BcaI18n.t("收起") : BcaI18n.t("查看详情");
   clearFailuresButton.hidden = refreshFailures.length < 1;
   copyFailuresButton.hidden = !hasEntries && !reportPath;
+  // 1.8.21（PRV-P2-7）：只有真有条目时「只复制路径」才有意义（报告路径不算路径项）。
+  copyFailurePathsButton.hidden = refreshFailures.length < 1;
 }
 
 function clearRefreshFailures() {
@@ -2795,7 +2833,7 @@ async function runStatusRefresh() {
   if (detailButton) detailButton.disabled = true;
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    if (permission !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     const result = await sendMessageWatched({
       type: "bca-refresh-video-stats",
       data: { targets, limit: STATUS_BATCH_LIMIT }
@@ -3600,17 +3638,51 @@ function askToDeleteVideo(video) {
   confirmDeleteButton.textContent = BcaI18n.t("删除本地文件，不可恢复");
   deleteDownloadsOption.hidden = !video.hasDownloadFiles;
   deleteAssociatedDownloads.checked = false;
+  deleteUnknownOption.hidden = true;
+  acknowledgeUnknownDelete.checked = false;
+  confirmDeleteButton.disabled = false;
   openConfirmBackdrop();
 }
 
-function askToDeleteCollection(collection) {
+/* 1.8.21（P1-2）：删除收藏夹 = 一次递归 removeEntry，不进回收站。旧确认框只报
+   collection.videos.length（本插件认得的记录数），可目录里还可能有上次导入的半截目录、
+   你自己放进去的文件 —— 它们同样会被删掉，却被说成「无法识别的文件」一笔带过。
+   这里删之前真的数一遍：几个是记录目录、几个不是；只要有不认识的，就必须先勾确认。 */
+async function askToDeleteCollection(collection) {
   if (!collection) return;
   pendingDeleteAction = { type: "collection", collection };
   confirmTitle.textContent = BcaI18n.t("删除整个本地归档？");
-  confirmMessage.textContent = BcaI18n.t("将永久删除本地归档“{name}”及其全部文件（当前识别到 {count} 个视频；目录里无法识别的文件、你自己放进去的东西也会一起删掉）。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { name: collection.name, count: collection.videos.length });
   confirmDeleteButton.textContent = BcaI18n.t("删除收藏夹");
+  let real = 0;
+  let unknown = 0;
+  let counted = false;
+  try {
+    const handle = await rootHandle?.getDirectoryHandle(collection.name);
+    if (handle) {
+      for await (const entry of handle.values()) {
+        if (entry.kind === "directory" && isRecordDirectoryName(entry.name)) real += 1;
+        else unknown += 1;
+      }
+      counted = true;
+    }
+  } catch (error) {
+    // 数不出来就退回旧口径（按已知记录数说），别把确认框卡死在「打不开」
+    if (!BcaArchiveCore.isMissingError(error)) console.warn("删除收藏夹前数目录失败，改用已知记录数", error);
+    real = collection.videos.length;
+  }
+  const detail = counted
+    ? BcaI18n.t("目录里共 {real} 个记录目录，另有 {unknown} 项不是本插件写入的；", { real, unknown })
+    : BcaI18n.t("当前识别到 {count} 个视频；", { count: collection.videos.length });
+  confirmMessage.textContent = BcaI18n.t(
+    "将永久删除本地归档“{name}”及其全部文件。{detail}这些文件都会一起删掉，不进回收站。此操作只影响本地归档，不会更改 B 站账户中的收藏。",
+    { name: collection.name, detail }
+  );
   deleteDownloadsOption.hidden = !collection.videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
+  const needsAcknowledge = counted && unknown > 0;
+  deleteUnknownOption.hidden = !needsAcknowledge;
+  acknowledgeUnknownDelete.checked = false;
+  confirmDeleteButton.disabled = needsAcknowledge;
   openConfirmBackdrop();
 }
 
@@ -3622,6 +3694,33 @@ function askToDeleteBatch(videos) {
   confirmDeleteButton.textContent = BcaI18n.t("删除 {count} 个视频", { count: videos.length });
   deleteDownloadsOption.hidden = !videos.some((video) => video.hasDownloadFiles);
   deleteAssociatedDownloads.checked = false;
+  deleteUnknownOption.hidden = true;
+  acknowledgeUnknownDelete.checked = false;
+  confirmDeleteButton.disabled = false;
+  openConfirmBackdrop();
+}
+
+/* 1.8.21（P2-6）：被打断的导入会留下没有 视频信息.txt 的半截目录，里面可能已经有
+   封面、也可能有你自己放进去的文件。旧版只报数、不处置，用户看完提示就没有下一步了。
+   这里给一条明路：确认后逐条重新判定一遍（判定变了就跳过），再删除。 */
+function askToCleanupUnfinished() {
+  const records = (lastScanInfo?.unfinished || [])
+    .map((entry) => {
+      const text = String(entry);
+      const slash = text.lastIndexOf("/");
+      return { collection: text.slice(0, slash), directory: text.slice(slash + 1) };
+    })
+    .filter((target) => target.collection && target.directory);
+  if (!records.length) return;
+  pendingDeleteAction = { type: "unfinished", records };
+  confirmTitle.textContent = BcaI18n.t("清理没写完的目录？");
+  confirmMessage.textContent = BcaI18n.t("将永久删除 {count} 个没写完的记录目录（没有 视频信息.txt，多半是上次导入被打断）及其中的文件，不进回收站。已经写好的记录不会被碰。", { count: records.length });
+  confirmDeleteButton.textContent = BcaI18n.t("清理 {count} 个目录", { count: records.length });
+  deleteDownloadsOption.hidden = true;
+  deleteAssociatedDownloads.checked = false;
+  deleteUnknownOption.hidden = true;
+  acknowledgeUnknownDelete.checked = false;
+  confirmDeleteButton.disabled = false;
   openConfirmBackdrop();
 }
 
@@ -3631,6 +3730,9 @@ function closeDeleteConfirmation() {
   confirmBackdrop.hidden = true;
   deleteDownloadsOption.hidden = true;
   deleteAssociatedDownloads.checked = false;
+  deleteUnknownOption.hidden = true;
+  acknowledgeUnknownDelete.checked = false;
+  confirmDeleteButton.disabled = false;
   pendingDeleteAction = null;
   confirmTitle.textContent = BcaI18n.t("删除本地归档（含封面与视频信息，不进回收站）？");
   confirmDeleteButton.textContent = BcaI18n.t("删除本地文件，不可恢复");
@@ -3704,7 +3806,7 @@ async function uniqueRecordFolderName(parent, originalName) {
       await parent.getDirectoryHandle(candidate);
       candidate = `${stem}_${suffix++}`;
     } catch (error) {
-      if (error?.name === "NotFoundError") return candidate;
+      if (BcaArchiveCore.isMissingError(error)) return candidate;
       if (error?.name === "TypeMismatchError") {
         candidate = `${stem}_${suffix++}`;
         continue;
@@ -3932,7 +4034,7 @@ async function getWritableDownloadParent({ create = false } = {}) {
       if (rootPermission !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限；请在插件弹窗里重新授权本地备份文件夹。"));
     }
     try { parent = await rootHandle.getDirectoryHandle("000视频下载", { create }); }
-    catch (error) { if (error?.name === "NotFoundError") return null; throw error; }
+    catch (error) { if (BcaArchiveCore.isMissingError(error)) return null; throw error; }
   }
   let permission = await parent.queryPermission({ mode: "readwrite" });
   if (permission !== "granted") permission = await parent.requestPermission({ mode: "readwrite" });
@@ -3949,7 +4051,7 @@ async function listVideoDownloadDirectories(downloadParent, video) {
   for (const collectionName of collectionNames) {
     let collectionHandle;
     try { collectionHandle = await downloadParent.getDirectoryHandle(collectionName); }
-    catch (error) { if (error?.name === "NotFoundError") continue; throw error; }
+    catch (error) { if (BcaArchiveCore.isMissingError(error)) continue; throw error; }
     for await (const entry of collectionHandle.values()) {
       if (entry.kind !== "directory") continue;
       const identifiers = BcaArchiveCore.identifiersFromDirectoryName(entry.name);
@@ -4032,6 +4134,12 @@ async function copyDownloadDirectories(downloadParent, video, targetNames) {
 }
 
 async function removeVideoDownloadDirectories(downloadParent, video) {
+  /* 1.8.21（P2-3）：认不出 BV/av 号时没法确认 000视频下载 里哪个目录属于这条视频 ——
+     旧代码直接返回空数组，结果文案里「0 个目录没能删除」和「本来就没有下载目录」
+     长得一模一样，用户会以为清理过了。这里如实报一句「没法确认」。 */
+  if (!videoIdentifierKeys(video).size) {
+    return [BcaI18n.t("“{name}”：认不出 BV/av 号，没法确认关联的下载文件夹，未清理。", { name: video.title || video.directory || "" })];
+  }
   const matches = await listVideoDownloadDirectories(downloadParent, video);
   const failures = [];
   for (const match of matches) {
@@ -4064,7 +4172,7 @@ async function removeCollectionDownloadDirectory(downloadParent, collectionName)
   let handle = null;
   try { handle = await downloadParent.getDirectoryHandle(collectionName); }
   catch (error) {
-    if (error?.name === "NotFoundError") return [];
+    if (BcaArchiveCore.isMissingError(error)) return [];
     return [`${collectionName}：${error.message}`];
   }
   if (!await collectionDownloadDirectoryLooksManaged(handle)) {
@@ -4072,7 +4180,7 @@ async function removeCollectionDownloadDirectory(downloadParent, collectionName)
   }
   try { await downloadParent.removeEntry(collectionName, { recursive: true }); invalidateDownloadIndex(rootHandle); return []; }
   catch (error) {
-    if (error?.name === "NotFoundError") return [];
+    if (BcaArchiveCore.isMissingError(error)) return [];
     return [`${collectionName}：${error.message}`];
   }
 }
@@ -4257,7 +4365,7 @@ async function confirmCollectionAction() {
   collectionActionList.querySelectorAll("input").forEach((input) => { input.disabled = true; });
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：搬运/复制是归档侧最重的写操作（复制整目录再删源），
     // 后台导入正在跑时先不动 —— 导入会把这一批目录的名字和统计写回 003database。
     if (await archiveWriteLockedByImport()) {
@@ -4353,10 +4461,10 @@ async function confirmPendingDelete() {
   publishLibraryWriteLock();
   cancelDeleteButton.disabled = true;
   confirmDeleteButton.disabled = true;
-  confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("正在删除收藏夹…") : action.type === "batch" ? BcaI18n.t("正在批量删除…") : BcaI18n.t("正在删除…");
+  confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("正在删除收藏夹…") : action.type === "batch" ? BcaI18n.t("正在批量删除…") : action.type === "unfinished" ? BcaI18n.t("正在清理…") : BcaI18n.t("正在删除…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：后台正在导入时先别删 —— 导入那边会把这一批目录的
     // 统计写回 003database，删一半的目录名会被它照着写入，留下指向已删目录的幽灵行。
     if (await archiveWriteLockedByImport()) {
@@ -4402,6 +4510,26 @@ async function confirmPendingDelete() {
         }
       }
       batchResult = { deleted, failures };
+    } else if (action.type === "unfinished") {
+      /* 1.8.21（P2-6）：不信 lastScanInfo —— 重新逐条确认「没有 视频信息.txt 且目录非空」，
+         判定变了就跳过（用户可能刚补完导入，或自己往目录里放了东西）。 */
+      const removed = [];
+      const skipped = [];
+      const failures = [];
+      for (const target of action.records) {
+        const label = `${target.collection}/${target.directory}`;
+        try {
+          const collectionHandle = await rootHandle.getDirectoryHandle(target.collection, { create: false });
+          const recordHandle = await collectionHandle.getDirectoryHandle(target.directory, { create: false });
+          if (!await isUnfinishedRecord(recordHandle)) { skipped.push(label); continue; }
+          await collectionHandle.removeEntry(target.directory, { recursive: true });
+          removed.push(label);
+        } catch (error) {
+          if (BcaArchiveCore.isMissingError(error)) skipped.push(label);
+          else failures.push(BcaI18n.t("{name}：{message}", { name: label, message: error?.message || BcaI18n.t("删除失败") }));
+        }
+      }
+      batchResult = { deleted: removed.length, failures, skipped };
     } else {
       const video = action.video;
       const collectionHandle = await rootHandle.getDirectoryHandle(video.collection);
@@ -4440,6 +4568,22 @@ async function confirmPendingDelete() {
       } else {
         showToast(lines.join("；") + suffix);
       }
+    } else if (action.type === "unfinished") {
+      // 1.8.21（P2-6）：清理结果里必须把「跳过的」也说清楚，否则用户以为删干净了。
+      const lines = [BcaI18n.t("已清理 {count} 个没写完的目录", { count: batchResult.deleted })];
+      if (batchResult.skipped.length) {
+        lines.push(BcaI18n.t("跳过 {count} 个（现在已经有 视频信息.txt 了，可能刚补完导入）：{list}", {
+          count: batchResult.skipped.length,
+          list: `${batchResult.skipped.slice(0, 3).join("；")}${batchResult.skipped.length > 3 ? "；…" : ""}`
+        }));
+      }
+      if (batchResult.failures.length) {
+        lines.push(BcaI18n.t("{count} 个没删掉：", { count: batchResult.failures.length }));
+        lines.push(...batchResult.failures);
+      }
+      const suffix = refreshFailureSuffix(refreshError);
+      if (batchResult.failures.length) showResultDialog(BcaI18n.t("清理没写完的目录"), lines.join("；") + suffix, "error");
+      else showToast(lines.join("；") + suffix);
     } else {
       showResultDialog(BcaI18n.t("已删除本地归档"), [BcaI18n.t("本地归档文件已删除。"), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     }
@@ -4450,7 +4594,7 @@ async function confirmPendingDelete() {
     publishLibraryWriteLock();
     cancelDeleteButton.disabled = false;
     confirmDeleteButton.disabled = false;
-    confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : BcaI18n.t("删除本地文件");
+    confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : action.type === "unfinished" ? BcaI18n.t("清理 {count} 个目录", { count: action.records.length }) : BcaI18n.t("删除本地文件");
   }
 }
 
@@ -4547,7 +4691,7 @@ collectionForm.addEventListener("submit", async (event) => {
   submitCreateCollectionButton.textContent = BcaI18n.t("正在创建…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：后台导入正在跑时不新建目录/搬运 ——
     // 导入那边也在建收藏夹目录、也在数目录，两边同时动会互相覆盖对方的判断。
     if (await archiveWriteLockedByImport()) {
@@ -4557,7 +4701,7 @@ collectionForm.addEventListener("submit", async (event) => {
       await rootHandle.getDirectoryHandle(name);
       throw new Error(BcaI18n.t("收藏夹“{name}”已存在。", { name }));
     } catch (error) {
-      if (error?.name !== "NotFoundError") throw error;
+      if (!BcaArchiveCore.isMissingError(error)) throw error;
     }
     await rootHandle.getDirectoryHandle(name, { create: true });
     collectionDialog.close();
@@ -4588,7 +4732,7 @@ videoForm.addEventListener("submit", async (event) => {
   submitAddVideoButton.textContent = BcaI18n.t("正在解析并保存…");
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
-    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录写入权限。"));
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：后台导入正在跑时不再往归档里加新目录 ——
     // 这条链路会经后台建目录写文件，与导入是两条独立队列，同时动会互相覆盖判断。
     if (await archiveWriteLockedByImport()) {
@@ -5419,13 +5563,13 @@ async function refreshCurrentRoot() {
   clearArchiveCache(rootHandle);
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "read" });
-    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地目录读取权限。"));
+    if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的读取权限。"));
     // 1.7.10（facet-storage P2-3）：用户明确点了「刷新」，就是明确说「按这次的扫描结果算」，
     // 所以这道人工动作要能越过「比旧库少太多就不覆盖」的那道闸门，否则真删了一大批视频的人
     // 会被永久卡在旧数字上。
     await displayRoot(rootHandle, collectionToKeep, BcaI18n.t("已刷新"), { forceStatsSync: true });
   } catch (error) {
-    if (error?.name !== "AbortError") showToast(BcaI18n.t("刷新失败：{message}", { message: error?.message || BcaI18n.t("无法读取本地目录。") }));
+    if (error?.name !== "AbortError") showToast(BcaI18n.t("刷新失败：{message}", { message: error?.message || BcaI18n.t("无法读取本地备份文件夹。") }));
   } finally { forceFullScan = false; setBusy(false); }
 }
 
@@ -5445,7 +5589,7 @@ async function ensureRootStructure(handle) {
 }
 
 async function chooseAndScan() {
-  if (!window.showDirectoryPicker) { showToast(BcaI18n.t("当前 Chrome 暂不支持本地目录访问，请更新浏览器后重试。")); return; }
+  if (!window.showDirectoryPicker) { showToast(BcaI18n.t("当前 Chrome 暂不支持选择本地备份文件夹，请更新浏览器后重试。")); return; }
   setBusy(true);
   try {
     /* 收藏库这边要建目录（见 ensureRootStructure），所以按读写要权限 ——
@@ -5509,12 +5653,8 @@ async function restoreLastRoot() {
     if (permission === "granted") {
       // 1.7.14（facet-compat C6）：授权还在，目录本身却可能已经被删 / 改名 / 换盘。
       // 这里先探一次（只读一个条目），探测失败就别再往下走成「空库」。
-      try {
-        for await (const _entry of handle.values()) break;
-      } catch (error) {
-        if (error?.name === "NotFoundError") { showRootMissing(handle.name); return; }
-        throw error;
-      }
+      // 1.8.21（§3.3）：探活在 rootIsReachable() 里只留一份，非「找不到」的错误也归为连不上。
+      if (!await rootIsReachable(handle)) { showRootMissing(handle.name); return; }
       setBusy(true, "loading-last");
       // 老用户可能只授过只读权限：建目录会失败，但那只影响目录树，不影响读归档
       try { await ensureRootStructure(handle); } catch (_) { /* 忽略 */ }
@@ -5606,6 +5746,8 @@ dismissScanNoticeButton?.addEventListener("click", () => {
   dismissedScanNotice = scanNoticeText?.textContent || "";
   if (scanNotice) scanNotice.hidden = true;
 });
+// 1.8.21（P2-6）：提示条上的清理入口，点开先弹确认框，真正删除在 confirmPendingDelete 里。
+cleanupUnfinishedButton?.addEventListener("click", askToCleanupUnfinished);
 markDownloadedGo?.addEventListener("click", runMarkDownloaded);
 markDownloadedCancel?.addEventListener("click", () => markDownloadedDialog?.close());
 let bannerResizeTimer = 0;
@@ -5720,11 +5862,17 @@ toggleFailuresButton?.addEventListener("click", () => {
   renderFailures();
 });
 /* 1.7.11（facet-privacy P2-7）：剪贴板是同机所有程序都能读的公共位置，而这批内容里
-   带的是整批失败视频的标题。原来只回一句「已复制失败清单。」，用户不知道复制走的是什么、
-   也不知道它不会自动消失。现在把条数与「含标题」「不会被自动清空」都写在提示里。 */
+   带的是整批失败项的「收藏夹/目录名」。原来只回一句「已复制失败清单。」，用户不知道
+   复制走的是什么、也不知道它不会自动消失。现在把条数与「会不会自动清空」都写在提示里。
+   1.8.21：这批内容里**没有**视频标题（只有收藏夹与目录名 + 错误信息），提示照实说；
+   另给一个「只复制路径」入口，只要目录位置、不带错误信息。 */
 copyFailuresButton?.addEventListener("click", () => {
   const lines = failureLines();
-  copyToClipboard(lines.join("\n"), BcaI18n.t("已复制 {count} 条失败项（含视频标题）。剪贴板不会被自动清空，贴完记得覆盖掉。", { count: formatCountText(lines.length) }));
+  copyToClipboard(lines.join("\n"), BcaI18n.t("已复制 {count} 条失败项（收藏夹与目录，不含视频标题）。剪贴板不会被自动清空，贴完记得覆盖掉。", { count: formatCountText(lines.length) }));
+});
+copyFailurePathsButton?.addEventListener("click", () => {
+  const lines = refreshFailures.map((failure) => failure.name);
+  copyToClipboard(lines.join("\n"), BcaI18n.t("已复制 {count} 条路径（不含错误信息）。剪贴板不会被自动清空，贴完记得覆盖掉。", { count: formatCountText(lines.length) }));
 });
 clearFailuresButton?.addEventListener("click", () => clearRefreshFailures());
 collectionFilterInput?.addEventListener("input", () => renderCollections());
@@ -5734,6 +5882,10 @@ tagFilterSelect?.addEventListener("change", () => { tagFilter = tagFilterSelect.
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
 cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
+// 1.8.21（P1-2）：目录里有不认识的条目时，勾了这句才允许点删除
+acknowledgeUnknownDelete.addEventListener("change", () => {
+  confirmDeleteButton.disabled = !acknowledgeUnknownDelete.checked;
+});
 confirmDeleteButton.addEventListener("click", confirmPendingDelete);
 cancelCreateCollectionButton.addEventListener("click", () => collectionDialog.close());
 cancelAddVideoButton.addEventListener("click", () => videoDialog.close());

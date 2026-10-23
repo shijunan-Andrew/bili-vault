@@ -70,7 +70,7 @@
           <div class="root-label"><span class="status-dot"></span><span id="rootLabel" data-i18n="尚未选择目录">尚未选择目录</span></div>
           <div class="usage-label"><span data-i18n="本地归档占用：">本地归档占用：</span><b id="storageUsage" class="tnum">—</b></div>
           <button id="diffLibrary" class="button button-quiet" type="button" disabled data-i18n="与 B 站对比" data-i18n-title="只对比收藏夹列表，不抓取每条视频的详情，很快完成">与 B 站对比</button>
-    <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地收藏目录" data-i18n-title="重新读取本地收藏目录"><span data-icon="refresh"></span><span data-i18n="刷新">刷新</span></button>
+    <button id="refreshLibrary" class="button button-quiet library-refresh" type="button" disabled title="重新读取本地备份文件夹" data-i18n-title="重新读取本地备份文件夹"><span data-icon="refresh"></span><span data-i18n="刷新">刷新</span></button>
           <button id="chooseRoot" class="button button-primary"><span class="choose-root-icon" data-icon="plus"></span><span data-busy-label="idle" data-i18n="选择本地备份文件夹">选择本地备份文件夹</span><span data-busy-label="reading" data-i18n="正在读取…" hidden>正在读取…</span><span data-busy-label="refreshing" data-i18n="正在刷新…" hidden>正在刷新…</span><span data-busy-label="connecting" data-i18n="正在连接上次目录…" hidden>正在连接上次目录…</span><span data-busy-label="loading-last" data-i18n="正在读取上次目录…" hidden>正在读取上次目录…</span></button>
         </div>
       </header>
@@ -84,7 +84,7 @@
         <p class="eyebrow">YOUR PERSONAL ARCHIVE</p>
         <h1 data-i18n-html="让收藏的视频，<span>一目了然</span>">让收藏的视频，<span>一目了然</span></h1>
         <p class="welcome-copy" data-i18n="首次选择本地备份文件夹后会自动记住路径，下次打开直接读取，浏览器只在本机读写。">首次选择本地备份文件夹后会自动记住路径，下次打开直接读取，浏览器只在本机读写。</p>
-        <button id="welcomeChoose" class="button button-primary button-large"><span data-label="choose" data-i18n="选择本地收藏目录">选择本地收藏目录</span><span data-label="authorize" data-i18n="授权并继续使用上次目录" hidden>授权并继续使用上次目录</span> <span data-icon="chevron-right"></span></button>
+        <button id="welcomeChoose" class="button button-primary button-large"><span data-label="choose" data-i18n="选择本地备份文件夹">选择本地备份文件夹</span><span data-label="authorize" data-i18n="授权并继续使用上次目录" hidden>授权并继续使用上次目录</span> <span data-icon="chevron-right"></span></button>
         <ol class="welcome-steps">
           <li class="welcome-step">
             <span class="welcome-step-index">1</span>
@@ -151,6 +151,7 @@
               <span class="failure-title" data-icon="alert"><span data-i18n="最近失败">最近失败</span></span>
               <div class="failure-tools">
                 <button id="copyFailures" class="text-button" type="button" hidden data-i18n="复制全部">复制全部</button>
+                <button id="copyFailurePaths" class="text-button" type="button" hidden data-i18n="只复制路径">只复制路径</button>
                 <button id="toggleFailures" class="text-button" type="button" aria-expanded="false" data-i18n="查看详情">查看详情</button>
                 <button id="clearFailures" class="text-button" type="button" hidden data-i18n="清空">清空</button>
               </div>
@@ -180,6 +181,7 @@
         <div id="scanProgress" class="scan-progress" hidden></div>
         <div id="scanNotice" class="scan-notice" hidden>
           <span id="scanNoticeText" class="scan-notice-text"></span>
+          <button id="cleanupUnfinished" class="text-button scan-notice-cleanup" type="button" hidden data-i18n="清理这些没写完的目录">清理这些没写完的目录</button>
           <button id="dismissScanNotice" class="scan-notice-close" type="button" aria-label="关闭" data-i18n-aria="关闭"><span data-icon="close"></span></button>
         </div>
         <div id="importRunningNotice" class="import-hint import-running-notice" role="status" hidden>
@@ -338,6 +340,7 @@
       <p id="confirmMessage"></p>
       <p class="confirm-warning" data-i18n="本地删除不可恢复：不会进系统回收站，删掉就找不回来了。">本地删除不可恢复：不会进系统回收站，删掉就找不回来了。</p>
       <label id="deleteDownloadsOption" class="delete-downloads-option" hidden><input id="deleteAssociatedDownloads" type="checkbox"><span data-i18n="同时删除关联的本地下载文件">同时删除关联的本地下载文件</span></label>
+      <label id="deleteUnknownOption" class="delete-downloads-option" hidden><input id="acknowledgeUnknownDelete" type="checkbox"><span data-i18n="我知道目录里另有不是本插件写入的文件，也会一起删掉">我知道目录里另有不是本插件写入的文件，也会一起删掉</span></label>
       <div class="confirm-actions">
         <button id="cancelDelete" class="button button-quiet" type="button" data-i18n="取消">取消</button>
         <button id="confirmDelete" class="button button-danger" type="button">删除本地文件，不可恢复</button>

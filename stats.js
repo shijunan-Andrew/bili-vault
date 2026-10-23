@@ -371,7 +371,10 @@
     if (core && typeof core.rangeFor === "function") {
       try {
         return normalizeRange(core.rangeFor(presetName, now, customArg), presetName, now, customIn);
-      } catch (_) { /* 对端实现抛错就整体走兜底 */ }
+      } catch (error) {
+        // 1.8.21（deadcode P2-1）：对端实现抛错是「真的出问题了」，不是日常路径 —— 留一行日志。
+        console.warn("统计库的 rangeFor 抛错，本次改用本页兜底区间", error);
+      }
     }
     return fallbackRange(presetName, now, customIn);
   }

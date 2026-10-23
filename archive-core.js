@@ -179,10 +179,18 @@
      清楚并给出可执行的下一步 —— 比冒出去的一句英文异常名有用得多。不是 NotFoundError 时
      返回空串，调用方照旧按 describeFileSystemError 处理。 */
   function describeDirectoryCreateError(error, name) {
-    if (error?.name !== "NotFoundError") return "";
+    if (!isMissingError(error)) return "";
     return "建不出「" + name + "」这个目录：要么上级目录已经不在了，要么拼出来的完整路径超过了"
       + " Windows 的 " + WINDOWS_PATH_LIMIT_CHARS + " 个字符上限。把本地备份文件夹挪到更浅的"
       + "位置（例如 D:\\备份），或把收藏夹名 / 视频标题改短，再试一次。";
+  }
+
+  /* 1.8.21（facet-compat §3.3）：文件系统里「这个名字不存在」「父目录没了」「整块盘都
+     连不上」抛的都是同一个 NotFoundError —— 只看错误名分不出是哪一种。判据只留这一份：
+     任何地方要问「是不是找不到」，都调这里，别再各写一遍 error?.name === "NotFoundError"。
+     （想区分「盘掉线」要靠先探一次目录能不能列，见 library.js 的 rootIsReachable。） */
+  function isMissingError(error) {
+    return error?.name === "NotFoundError";
   }
 
   function identifiersFromDirectoryName(name) {
@@ -1023,6 +1031,7 @@
     isReservedCollectionName,
     RESERVED_COLLECTION_NAMES,
     withSourceCollection,
+    isMissingError,
     identifiersFromDirectoryName,
     downloadIndexKey,
     downloadMatchIsDownloaded,

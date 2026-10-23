@@ -540,7 +540,7 @@ async function startImport(options = {}) {
   importStatus.textContent = "";
   updateImportSelection();
   importStatus.classList.remove("error");
-  importProgressText.textContent = BcaI18n.t("正在请求本地目录权限…");
+  importProgressText.textContent = BcaI18n.t("正在请求本地备份文件夹权限…");
   const startedAt = Date.now();
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });

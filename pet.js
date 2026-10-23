@@ -1492,8 +1492,9 @@
     bubble = doc.createElement("div");
     bubble.id = BUBBLE_ID;
     bubble.className = BUBBLE_CLASS;
-    bubble.setAttribute("role", "status");
-    bubble.setAttribute("aria-live", "polite");
+    // 1.8.21（ux P2-10）：气泡是装饰性闲聊，不参与实时播报。以前它和 #toast 各挂一个
+    // polite 实时区，读屏会把宠物台词和真正的操作结果混在一起念。
+    bubble.setAttribute("aria-live", "off");
     bubble.hidden = true;
     bubbleText = doc.createElement("p");
     bubbleText.className = TEXT_CLASS;

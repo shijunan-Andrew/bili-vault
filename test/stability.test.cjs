@@ -5761,12 +5761,12 @@ test("封顶后延后写盘时，台词下标仍继续走：问候语不会卡�
   assert.match(coreSource, /\n    petLineIndex,/, "导出给后台用");
   assert.match(backgroundCode, /let petDeferredTouches = 0;/, "延后窗口里要记账");
   assert.match(backgroundCode, /petDeferredTouches \+= 1;/, "每次延后 +1");
-  assert.match(backgroundCode, /lineIndex: BcaStatsCore\.petLineIndex\(touched\.totalTouch, petDeferredTouches\),/, "下标要带上 offset");
+  assert.match(backgroundCode, /lineIndex: BcaStatsCore\.petLineIndex\(totalTouch, petDeferredTouches\),/, "下标要带上 offset");
   assert.match(backgroundCode, /petDeferredTouches = 0;/, "落地后清零");
-  const deferredAt = backgroundCode.indexOf("if (touched.capped && Date.now() - petCappedWriteAt");
+  const deferredAt = backgroundCode.indexOf("if (petCappedSnapshot && Date.now() - petCappedWriteAt");
   assert.ok(deferredAt > 0, "找不到封顶延后写盘那一段");
-  const deferredBlock = backgroundCode.slice(deferredAt, deferredAt + 420);
-  assert.match(deferredBlock, /lineIndex: BcaStatsCore\.petLineIndex\(touched\.totalTouch, petDeferredTouches\)/, "延后那一段必须带 offset，不许回 touched.index（会卡住）");
+  const deferredBlock = backgroundCode.slice(deferredAt, deferredAt + 520);
+  assert.match(deferredBlock, /lineIndex: BcaStatsCore\.petLineIndex\(totalTouch, petDeferredTouches\)/, "延后那一段必须带 offset，不许回 touched.index（会卡住）");
 });
 
 test("宠物外壳不再常驻提升合成层，只在拖动时提升（V1.8.12）", () => {
@@ -6689,8 +6689,8 @@ test("宠物封顶后不再整库重写、气泡渐入不再和 clamp 打架、�
   const theme = readProjectFile("theme.js");
   const settings = readProjectFile("settings.js");
   assert.match(background, /const PET_CAPPED_WRITE_MS = 60 \* 1000;/, "封顶后合写的窗口要写在这里");
-  assert.match(background, /if \(touched\.capped && Date\.now\(\) - petCappedWriteAt < PET_CAPPED_WRITE_MS\) \{/,
-    "封顶之后的摸不该每次都整库重写");
+  assert.match(background, /if \(petCappedSnapshot && Date\.now\(\) - petCappedWriteAt < PET_CAPPED_WRITE_MS\) \{/,
+    "封顶之后的摸不该每次都整库重写（1.8.21 起连整库读也省了）");
   assert.doesNotMatch(petCss, /transform: translateY\(6px\)/, "气泡渐入的位移会和行内 clamp 打架");
   assert.match(petCss, /@keyframes bca-pet-bubble-in \{\r?\n  0%   \{ opacity: 0; \}/, "渐入只动透明度");
   assert.match(theme, /if \(document\.documentElement\.dataset\.wallpaperScope === "popup"\) return Promise\.resolve\(null\);/, "弹窗不铺背景图，就别去读 IndexedDB");
@@ -6842,4 +6842,186 @@ test("临时文件残骸在写库路径上也会被清掉，判据仍然只有 a
     "只在 003database 目录里清，别去动归档目录");
   const core = readProjectFile("archive-core.js");
   assert.match(core, /function isStaleTempFile\(lastModified, now\) \{/, "形状与年龄判据仍只有一份");
+});
+
+
+// ---- 1.8.21：术语统一到「本地备份文件夹」、宠物气泡不再抢播报、两处静默吞错 ----
+test("同一个文件夹只有一个叫法：界面与词典里不再出现「本地收藏目录 / 本地目录写入权限」（V1.8.21 / ux P2-3）", () => {
+  const uiFiles = ["library.html", "library.js", "popup.html", "popup.js", "settings.html", "settings.js",
+    "stats.html", "stats.js", "pet.js", "content.js", "background.js", "guide.html", "tutorial.html", "tutorial.js"];
+  const offenders = [];
+  for (const file of uiFiles) {
+    const source = readProjectFile(file);
+    for (const old of ["本地收藏目录", "本地目录写入权限"]) {
+      if (source.includes(old)) offenders.push(`${file}「${old}」`);
+    }
+  }
+  assert.deepEqual(offenders, [], "弹窗、收藏库、设置页、说明页对这个文件夹只能有一个叫法");
+  // 只改界面文字会留下一条查不到的旧词条 —— 词典要跟着删。
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = i18nTools.readDictionary(locale) || {};
+    for (const key of Object.keys(dictionary)) {
+      assert.ok(!/本地收藏目录|本地目录写入权限/.test(key), `${locale} 里还留着旧键：${key}`);
+    }
+  }
+});
+
+test("宠物气泡是装饰，不与 toast 抢实时播报（V1.8.21 / ux P2-10）", () => {
+  const pet = readProjectFile("pet.js");
+  // 气泡台词每点一下就换一句；polite 实时区会把读屏真正该听到的操作结果淹掉。
+  assert.match(pet, /bubble\.setAttribute\("aria-live", "off"\)/, "宠物气泡要显式关掉实时播报");
+  assert.ok(!/setAttribute\("aria-live", "polite"\)/.test(pet), "宠物气泡不许再设成 polite");
+  assert.ok(!/bubble\.setAttribute\("role", "status"\)/.test(pet), "role=status 隐含 polite，气泡不许挂");
+  // 真正的操作结果仍然由 toast 播报。
+  assert.match(readProjectFile("library.html"), /<div id="toast" class="toast" role="status"><\/div>/,
+    "toast 是这一页的状态播报出口");
+});
+
+test("补存登记与坏库提示都不再被空 catch 吞掉（V1.8.21 / 补-1、补-2）", () => {
+  const background = readProjectFile("background.js");
+  // 补-1：授权失效时那条登记是「授权恢复后补存」的唯一凭据，写失败要说出来。
+  assert.match(background, /let pendingRegistered = true;/, "先假设登记成功，失败再翻成 false");
+  assert.match(background, /pendingRegistered = false;\r?\n\s+console\.warn\("登记补存失败（授权恢复后不会自动重试这条视频）", storageError\);/,
+    "登记失败要留一条二档日志，不许静默");
+  assert.match(background, /const retryHint = pendingRegistered \? "" : "；补存登记也没写成，请回 B 站重新收藏这条视频。";/,
+    "失败要写进 lastResult 告诉用户重新收藏");
+  // 补-2：数据库损坏那条提示写不进 storage 时也不能当成没事发生。
+  assert.match(background, /\.catch\(\(storageError\) => console\.warn\("写入「本地数据库损坏」提示失败（页面可能看不到这条说明）", storageError\)\);/,
+    "坏库提示的写失败要留日志");
+  assert.doesNotMatch(background, /本地数据库损坏：\$\{trace\}[\s\S]{0,150}\.catch\(\(\) => \{\}\)/,
+    "坏库提示不许再配一个空 catch");
+});
+// ---- 1.8.21：读侧术语、perf 节流与去重、判据收口、三个删除路径的可见性 ----
+test("读权限相关的文案也统一叫「本地备份文件夹」（V1.8.21 / ux P2-3 读侧）", () => {
+  const uiFiles = ["library.html", "library.js", "popup.html", "popup.js", "settings.html", "settings.js",
+    "stats.html", "stats.js", "pet.js", "content.js", "background.js", "guide.html", "tutorial.html", "tutorial.js"];
+  const banned = ["本地收藏目录", "本地目录写入权限", "本地目录读取权限", "无法读取本地目录"];
+  const offenders = [];
+  for (const file of uiFiles) {
+    const source = readProjectFile(file);
+    for (const old of banned) if (source.includes(old)) offenders.push(`${file}「${old}」`);
+  }
+  assert.deepEqual(offenders, [], "读权限/读失败/请求授权这三类文案也要跟着统一");
+  // 「本地目录打开助手」是另一个东西（原生宿主），别顺手改掉它。
+  assert.match(readProjectFile("tutorial.html"), /本地目录打开助手/, "原生宿主的名字保持原样");
+});
+
+test("导入进度广播要节流，最后一条与阶段边界强制送达（V1.8.21 / perf P1-3）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const IMPORT_PROGRESS_BROADCAST_MS = 500;/, "广播窗口常量只有一份");
+  assert.match(background, /function importProgress\(text, force = false\) \{/,
+    "importProgress 要带 force 参数");
+  assert.match(background, /if \(!force && now - importProgressBroadcastAt < IMPORT_PROGRESS_BROADCAST_MS\) return;/,
+    "窗口内不发广播，但 storage 侧仍要照常发布");
+  assert.match(background, /offset \+ index \+ 1 === pendingItems\.length\)/,
+    "逐条导入的最后一条必须强制送达，否则界面停在旧的 x/y");
+  const forced = background.match(/importProgress\(`[^`]*`, true\)/g) || [];
+  assert.ok(forced.length >= 3, `阶段边界（读收藏夹页 / 第 1 页重试 / 准备封面）都要 force，实际只有 ${forced.length} 处`);
+});
+
+test("批量更新状态的进度广播要节流，并在收尾补发一次（V1.8.21 / perf P2-8）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const STATUS_PROGRESS_BROADCAST_MS = 1500;/, "广播窗口常量只有一份");
+  assert.match(background, /statusProgressPending = text;/, "窗口内只留最后一条，收尾补发");
+  assert.match(background, /await Promise\.all\(runners\);/, "并发跑完再补发");
+  assert.match(background, /if \(statusProgressPending\) sendStatusProgress\(statusProgressPending, true\);/,
+    "并发跑完后要把被节流吞掉的那条补发出去");
+  const doneAt = background.indexOf("await Promise.all(runners);");
+  const flushAt = background.indexOf("if (statusProgressPending) sendStatusProgress(statusProgressPending, true);");
+  assert.ok(doneAt > 0 && flushAt > doneAt, "补发必须发生在 Promise.all 之后");
+});
+
+test("统计快照按内容指纹去重、摸宠物窗口内不再整库读（V1.8.21 / perf P1-2）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /let statsSnapshotPublished = "";/, "上一次发布的内容指纹要留着");
+  assert.match(background, /if \(fingerprint === statsSnapshotPublished\) return stats;/,
+    "内容没变就不写 storage（快照只用来触发必要刷新）");
+  assert.match(background, /let petCappedSnapshot = null;/, "capped 后要靠内存态回话");
+  const pet = background.slice(background.indexOf("async function touchPetInDatabaseInner()"));
+  const early = pet.indexOf("if (petCappedSnapshot && Date.now() - petCappedWriteAt < PET_CAPPED_WRITE_MS)");
+  const read = pet.indexOf("const read = await readStatsDatabase(root);");
+  assert.ok(early > -1 && read > -1 && early < read,
+    "窗口内的早退必须发生在整库读之前 —— 否则节流只省了写、没省读");
+  assert.match(pet, /deferred: true/, "早退回话要标明这是攒下的次数");
+});
+
+test("导入快照不再带正文，回滚只认内存 journal（V1.8.21 / perf P2-2）", () => {
+  const background = readProjectFile("background.js");
+  assert.ok(!background.includes("IMPORT_JOURNAL_TEXT_BUDGET_BYTES"),
+    "快照里那张 1MB 正文预算已经删了，别再长回来");
+  assert.ok(!background.includes("textUnavailable"), "没有读者的字段不许留在快照里");
+  const snapshot = background.slice(background.indexOf("function importJournalSnapshot(journal)"));
+  const body = snapshot.slice(0, snapshot.indexOf("\n}"));
+  assert.match(body, /name: entry\.name/, "快照只记名字");
+  assert.ok(!/text:/.test(body), "快照的 modifiedFiles 不许再塞正文");
+  // 真回滚走的是内存 journal 的 entry.text（关闭页面就没了），这里只钉住它没被一起删掉。
+  assert.match(background, /writeFile\(entry\.directoryHandle, entry\.name, entry\.text\)/,
+    "回滚仍要能写回原文");
+});
+
+test("NotFoundError 判据只剩一份，盘掉线要先探活（V1.8.21 / compat §3.3）", () => {
+  const archiveCore = readProjectFile("archive-core.js");
+  assert.match(archiveCore, /function isMissingError\(error\) \{/, "判据的唯一实现在 archive-core.js");
+  assert.match(archiveCore, /return error\?\.name === "NotFoundError";/, "实现就是这一行");
+  const library = readProjectFile("library.js");
+  assert.ok(!/"NotFoundError"/.test(library), "library.js 里不许再自己判错误名");
+  const background = readProjectFile("background.js");
+  const raw = background.match(/name [!=]== "NotFoundError"/g) || [];
+  assert.equal(raw.length, 1, "background.js 只该剩与 TypeMismatchError 联合判断的那一处");
+  assert.match(library, /const ROOT_REACHABLE_TTL_MS = 2000;/, "探活结果要缓存 2 秒");
+  assert.match(library, /for await \(const _entry of handle\.values\(\)\)/,
+    "探活就是试着列一项：列得出来才说明盘还在");
+  assert.match(library, /databaseState = await rootIsReachable\(rootHandle\) \? "missing" : "unreadable"/,
+    "读不到库时要分清「不存在」与「盘掉线」");
+});
+
+test("删除收藏夹前先数一遍目录，出现不认识的项要勾确认（V1.8.21 / P1-2）", () => {
+  const html = readProjectFile("library.html");
+  assert.match(html, /id="deleteUnknownOption"/, "确认框要有「里面有别的东西」的说明位");
+  assert.match(html, /id="acknowledgeUnknownDelete"/, "要勾选才能删");
+  const library = readProjectFile("library.js");
+  assert.match(library, /const RECORD_DIRECTORY_PATTERN = /, "记录目录名的判据只有一份");
+  assert.match(library, /function isRecordDirectoryName\(name\) \{/, "扫描与删除前计数共用它");
+  const ask = library.slice(library.indexOf("async function askToDeleteCollection("));
+  assert.match(ask.slice(0, 2000), /isRecordDirectoryName\(entry\.name\)/,
+    "删之前真的枚举一层，别再只报 collection.videos.length");
+  assert.match(ask.slice(0, 3000), /confirmDeleteButton\.disabled = needsAcknowledge;/,
+    "有不认识的项时，确认按钮必须先禁用");
+  assert.ok(!library.includes("（当前识别到 {count} 个视频；目录里无法识别的文件"),
+    "旧口径「无法识别的文件一笔带过」已经换掉了");
+});
+
+test("关联下载目录认不出编号时要说「没法确认」，不许静默当没有（V1.8.21 / P2-3）", () => {
+  const library = readProjectFile("library.js");
+  const fn = library.slice(library.indexOf("async function removeVideoDownloadDirectories("));
+  assert.match(fn.slice(0, 1200), /if \(!videoIdentifierKeys\(video\)\.size\) \{\r?\n\s+return \[BcaI18n\.t\(/,
+    "认不出 BV/av 号就返回一条失败说明，别返回空数组");
+  assert.match(fn.slice(0, 1600), /认不出 BV\/av 号，没法确认关联的下载文件夹，未清理。/, "文案要说清是「没法确认」");
+});
+
+test("没写完的目录有清理入口，删前重新判定（V1.8.21 / P2-6）", () => {
+  const html = readProjectFile("library.html");
+  assert.match(html, /id="cleanupUnfinished"/, "扫描提示条上要有清理按钮");
+  const library = readProjectFile("library.js");
+  const ask = library.slice(library.indexOf("function askToCleanupUnfinished()"));
+  assert.match(ask.slice(0, 800), /lastScanInfo\?\.unfinished/, "入口按扫描结果来");
+  assert.match(library, /cleanupUnfinishedButton\?\.addEventListener\("click", askToCleanupUnfinished\);/,
+    "按钮点了要弹确认，不是直接删");
+  const confirm = library.slice(library.indexOf("async function confirmPendingDelete()"));
+  assert.match(confirm.slice(0, 8000), /if \(!await isUnfinishedRecord\(recordHandle\)\) \{ skipped\.push\(label\); continue; \}/,
+    "真删之前重新判一遍：刚补完导入的目录不能被误删");
+  assert.match(library, /（不会自动删除，可点上面的「清理这些没写完的目录」）/,
+    "提示里要说明不会自动删");
+});
+
+test("统计库不再导出无引用的常量，rangeFor 兜底留一行日志（V1.8.21 / deadcode P2-1）", () => {
+  const statsCore = readProjectFile("stats-core.js");
+  const apiStart = statsCore.indexOf("const api = {");
+  const apiEnd = statsCore.indexOf("global.BcaStatsCore = api;", apiStart);
+  assert.ok(apiStart > -1 && apiEnd > apiStart, "api 对象的边界要能找到");
+  const api = statsCore.slice(apiStart, apiEnd);
+  assert.ok(!api.includes("DAILY_CHART_DAYS"), "常量还在内部用，但不必再对外导出");
+  assert.match(statsCore, /const DAILY_CHART_DAYS = 14;/, "内部那份常量要留着");
+  assert.match(readProjectFile("stats.js"), /console\.warn\("统计库的 rangeFor 抛错，本次改用本页兜底区间", error\);/,
+    "对端抛错不是日常路径，但不许静默");
 });

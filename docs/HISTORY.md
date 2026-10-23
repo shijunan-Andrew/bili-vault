@@ -5,6 +5,42 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.8.21：未闭环的 P0–P2 清零
+
+这一版把 1.8.20 登记在参考区 `unresolved-p0p2-checklist.md` 里的 20 条（P0 已清零，余下 P1/P2）逐条修完。删掉的不是「报告」，是报告背后还在的代码。
+
+### 改了什么
+
+- **静默吞错补到二档**：授权失效时登记补存（`pendingFavorite`）失败以前会安静地把「等授权恢复后自动重试」的承诺一起吞掉，现在失败就在 `lastResult` 与错误报告里明说「补存登记也没写成，请回 B 站重新收藏这条视频」；坏库提示写 `lastResult` 失败也留一条 `console.warn`，不再 `.catch(() => {})`。
+- **术语统一到「本地备份文件夹」**：收藏库顶栏、欢迎屏、读写权限提示、`popup.js` 的授权提示全部换词，词典同步删旧键加新键。`tutorial.html` 里的「本地目录打开助手」是 native 宿主的专名，不动。
+- **宠物气泡不再抢实时播报**：`pet.js` 的气泡从 `role="status"` + `aria-live="polite"` 改成 `aria-live="off"`，同页只留 toast 一个播报区。**方向和 `HISTORY.md` 4.x 那条「toast 去掉 aria-live」相反**：这次是保留 toast、关掉气泡。
+- **错误报告里的绝对路径不再回给页面**：后台所有回给收藏库页/弹窗的 `reportPath` 与 `details` 统一过 `storageReportLabel()`（只留末两段目录名）；「复制失败清单」多一个「只复制路径」按钮，整批文案也改成实话（复制的是收藏夹与目录名，本来就没有视频标题）。
+- **「删除收藏夹」删之前先数一遍**：确认框会真的枚举一层目录，报「目录里共 N 个记录目录，另有 M 项不是本插件写入的」；M > 0 时必须勾「我知道…也会一起删掉」才允许确认。识别记录目录的规则抽成 `isRecordDirectoryName()`，扫描与删除共用同一份。
+- **被打断的导入终于有出口**：扫描提示条多一个「清理这些没写完的目录」按钮，确认后逐条**重新校验** `isUnfinishedRecord` 再删；期间补完导入的目录会被跳过，不会误删刚写好的记录。
+- **下载清理把「无法确认」说出来**：认不出 BV/av 号时不再返回空数组装没事，而是给一条「没法确认关联的下载文件夹，未清理」进结果弹窗。
+- **「不存在」的判据收口到一处**：新增 `BcaArchiveCore.isMissingError()`，`library.js`/`background.js` 里 14 处 `error?.name === "NotFoundError"` 全部走它；探活单独用 `library.js` 的 `rootIsReachable()`（2 秒 TTL），导出读库失败时能分开报「暂时连不上」和「确实没有」。
+- **死代码与兜底**：`stats-core.js` 的 `api` 不再导出零引用的 `DAILY_CHART_DAYS`（常量本身保留）；`stats.js` 的 `rangeFor` 兜底 catch 补一条 `console.warn`。
+- **性能**：导入进度广播 500ms 窗口 + 阶段边界/每个收藏夹最后一条强制发；状态更新广播 1500ms 窗口 + `Promise.all` 后补发（看门狗靠它续命）；导入中断快照不再带 `视频信息.txt` 正文（回滚本来就用内存 journal）；统计快照加内容指纹去重；摸宠物在封顶窗口内不再整库读；`content.js` 的收藏弹窗检测加廉价预筛、700ms 去抖前移到昂贵检测之前。
+- **壁纸不随配置导出**：`settings.html` 的说明改成「导出配置时不带走它，换电脑要重新选一次」。
+
+### 为什么
+
+这 20 条全是「知道但没修」：有报告、有行号、有建议，就是没人动。其中删除收藏夹、清理下载目录、清理半截目录三条都会真的删用户文件，优先级最高；术语与实时区属于「读起来不像一个产品」；性能那几条则是导入规模上去之后每次都要付的代价。
+
+### 踩的坑
+
+- **「两份逐字相同」守卫真的会咬人**：codemod 把 `archive-core.js` 的 `describeDirectoryCreateError` 改成了 `BcaArchiveCore.isMissingError(error)`，而 `background.js` 里那份副本没跟着改，`stability` 立刻报「路径预算的常量与报错文案两份逐字相同」。判据仍只有 `archive-core.js` 一份，副本统一写成 `const isMissingError = (error) => BcaArchiveCore.isMissingError(error);`。
+- **改逻辑要顺带改老测试的形状，而不是放宽**：宠物封顶从「读完库再判」改成「窗口内直接早退」之后，1.8.11/1.8.12 那两条断言钉的是旧写法，必须改成新写法（窗口内 `petCappedSnapshot` 早退、`petLineIndex(totalTouch, petDeferredTouches)`）。
+- **词典键就是中文原文**：改一句 UI 文案就要同一批「删旧键 + 加新键」，否则 `i18n-extract --check` 立刻报缺；两本词典这次都到 950 条。
+- **CRLF**：`library.js`/`background.js`/`library.html` 是 CRLF，`content.js`/`pet.js`/词典是 LF；批量脚本按 `split(/\r?\n/)` 处理、写回时保留各自的行尾。
+
+### 没动的
+
+- `视频信息.txt` 的「视频收藏时间」仍精确到秒（只补了设置页的知情说明）。
+- `.bak` 条件轮转（1.7.7 已做）、统计库攒批（1.8.6 已做）、摸宠物合写（1.8.11/1.8.12 已做）都没再动。
+- 配置格式、统计库结构、`library.js`/`background.js` 的拆分，以及旧 P3 清单，一条没碰。
+- 测试项数 306 → 319，词典 936 → 950。
+
 ## V1.8.20：交接前的最后一遍核对
 
 这一版**只改文档**：把「到底还欠什么」核清楚，让接手的人不用重建判断。

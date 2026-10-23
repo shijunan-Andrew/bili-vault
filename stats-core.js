@@ -908,7 +908,6 @@ function fallbackRowKey(videos, key) {
     DATABASE_FILE_NAME,
     DATABASE_VERSION,
     RECENT_WINDOW_DAYS,
-    DAILY_CHART_DAYS,
     DAILY_ROWS_DAYS,
     MAX_RANGE_DAYS,
     PET_LINE_COUNT,

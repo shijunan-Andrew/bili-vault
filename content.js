@@ -89,10 +89,20 @@
   /* 1.7.7（P1-4）：这里是"每个视频页每次点击"都要跑的路径，而 B 站页面上绝大多数点击
      都不是收藏弹窗。真正的开销在 visible() 的 getComputedStyle + getBoundingClientRect
      和 textOf() 的 innerText（都要一次布局）。弹窗一定是个"有子元素的容器"，所以先按
-     这一点筛掉路径上的叶子节点（占大多数），语义不变、代价小一个量级。 */
+     这一点筛掉路径上的叶子节点（占大多数），语义不变、代价小一个量级。
+     1.8.21（perf P1-4）：再加一道纯字符串预筛。innerText 只包含"渲染出来的"文字，
+     是 textContent 的子集 —— 所以 textContent 都不匹配时，innerText 一定也不匹配，
+     可以安全跳过（这一步不碰布局）。上面点完之后仍用 innerText 做最终判定，
+     不看隐藏节点里的「收藏」两个字，语义一点没变。 */
+  function mayBeFavoriteDialog(element) {
+    const raw = String(element.textContent || "").replace(/\s+/g, " ").trim();
+    return FAV_DIALOG_TITLE.test(raw) && CONFIRM_MENTION.test(raw);
+  }
+
   function findFavoriteDialog(event) {
     for (const item of event.composedPath()) {
       if (!(item instanceof Element) || !item.childElementCount) continue;
+      if (!mayBeFavoriteDialog(item)) continue;
       if (!visible(item)) continue;
       const text = textOf(item);
       if (FAV_DIALOG_TITLE.test(text) && CONFIRM_MENTION.test(text)) return item;
@@ -177,18 +187,18 @@
       ...domTags
     ].filter(Boolean))];
     /* 审查 P2：整页第一个 space 链接可能落在顶栏（那是用户自己的空间），
-       先在 UP 主信息容器里找，找不到再退回整页 —— 状态字段（owner.mid）仍然优先。
+       先在 UP 主信息容器里找，找不到就留空 —— 状态字段（owner.mid）仍然优先。
        1.7.11（facet-privacy P2-6）：只有链接确实来自 UP 主信息容器时才拿它当 UID。
        整页兜底那个可能落在顶栏 / 推荐位 / 评论区，写错 UID 比留空危险 —— 留空时
-       buildInfo 用「未知」占位，用户一眼能看出是没抓到，而不是抓成了别人。 */
+       buildInfo 用「未知」占位，用户一眼能看出是没抓到，而不是抓成了别人。
+       1.8.21（PRV-P2-6）：UP 主昵称同理 —— 裸 `.username` 在 B 站导航栏里匹配的是
+       登录用户自己，所以名字也只从 UP 主信息容器里取；两条兜底一起删掉。 */
     const upContainerLink = document.querySelector(
       '#v_upinfo a[href*="space.bilibili.com/"], .up-info a[href*="space.bilibili.com/"], .upname a[href*="space.bilibili.com/"]'
     );
-    const upLink = upContainerLink || document.querySelector('a[href*="space.bilibili.com/"]');
-    const upUrl = upLink?.href || "";
+    const linkMid = upContainerLink?.href?.match(/space\.bilibili\.com\/(\d+)/)?.[1] || "";
     const ownerMid = String(owner.mid || owner.uid || "");
-    const linkMid = upUrl.match(/space\.bilibili\.com\/(\d+)/)?.[1] || "";
-    const upMid = ownerMid || (upContainerLink ? linkMid : "");
+    const upMid = ownerMid || linkMid;
     const title = video.title || document.querySelector("h1")?.textContent?.trim() || document.title.replace(/_哔哩哔哩.*$/i, "").trim();
     const player = document.querySelector("video");
 
@@ -201,7 +211,7 @@
       category: [video.tname || video.tid_name || "", video.tname2 || ""].filter(Boolean).join(" / "),
       duration: Number(video.duration) || (Number.isFinite(player?.duration) ? Math.floor(player.duration) : 0),
       pubdate: Number(video.pubdate) || 0,
-      upName: owner.name || owner.uname || document.querySelector(".up-name, .username, .up-info .name")?.textContent?.trim() || "",
+      upName: owner.name || owner.uname || document.querySelector("#v_upinfo .username, #v_upinfo .up-name, .up-info .name, .up-info .username, .upname a")?.textContent?.trim() || "",
       upMid,
       description: video.desc || video.description || meta('meta[name="description"]') || "",
       tags
@@ -459,6 +469,9 @@
     const alive = extensionAlive();
     if (!alive && staleContextNotified) return;
     if (alive && !archiveEnabled) return;
+    // 1.8.21（perf P1-4）：700ms 去抖挪到昂贵检测之前 —— 连续点击时先在这里断掉，
+    // 不必再走一遍 visible()/innerText 的布局。
+    if (Date.now() - lastConfirmAt < 700) return;
     const dialog = findFavoriteDialog(event);
     if (!dialog || !clickedConfirm(event, dialog)) return;
     if (!alive) {
@@ -466,7 +479,6 @@
       showStaleContextNotice();
       return;
     }
-    if (Date.now() - lastConfirmAt < 700) return;
     lastConfirmAt = Date.now();
     const folders = selectedFolders(dialog);
     if (!folders.length) return;
