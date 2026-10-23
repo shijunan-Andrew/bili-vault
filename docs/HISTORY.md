@@ -155,7 +155,7 @@
 - **P3-12a 隐私说明与扩展信息**：新增 `docs/PRIVACY.md`（数据存哪、只发两类 GET 与两个域名、五个权限逐条用途、错误报告内容与掩码、删除数据、联系方式），README 与 `AI_HANDOFF.md` 都链上；`manifest.json` 在 `description` 之后补 `homepage_url`。守卫「商店上架三件套…（P3-12a）」把 `permissions` 与 `host_permissions` 也钉成白名单 —— 以后多要一个权限，测试会先红。
 - **P3-12b 发布包白名单**：`pack.ps1` 打包前核对 `$allowedTopFiles`（40 个运行期文件）+ `$allowedTopDirs`（`locales` / `native`），并卡单文件 2 MB、源目录 6 MB、zip 3 MB、文件数 150；任一超限直接抛错（zip 超限还会先删包），末尾多打一行「发布清单」。本地实际打包验证：44 个文件、源目录 1875.6 KB、zip 702.1 KB。
 - **P3-13 结构版本位**：`stats-core.js` 新增 `DATABASE_SCHEMA_VERSION = 1`；`emptyDatabase()` 同时写 `version` 与 `schemaVersion`；新增 `migrateDatabase(raw, now)` —— 只有 `version` 的老库补 `schemaVersion`、来自更新版本的库返回 `null`（调用方按空库处理，宁可显示 0 也不把不认识的字段硬塞回结构再整份写回去）；`normalizeDatabase()` 先迁移再归一。新增 3 条单测（老库抬版、垃圾/未来版本、归一化保留版本位）。
-- **P3-14 基准趋势**：`test/bench.cjs` 跑完把每组中位数追加到 `Desktopili_vault_refench.md`（一行 `### 版本 | 时间 | node | 平台` + 一张表），`--no-log` 跳过；脚本里的版本号改成从 `manifest.json` 现读；仍然不接 `check-all`、不影响退出码。
+- **P3-14 基准趋势**：`test/bench.cjs` 跑完把每组中位数追加到 `Desktop\bili_vault_ref\bench.md`（一行 `### 版本 | 时间 | node | 平台` + 一张表），`--no-log` 跳过；脚本里的版本号改成从 `manifest.json` 现读；仍然不接 `check-all`、不影响退出码。
 
 ### 为什么
 
@@ -177,7 +177,7 @@
 
 - 没有真的提交商店（需要账号、截图与审核文案）；
 - `schemaVersion` 目前只有 v1，真正的结构迁移等第一次改字段时再写；
-- 趋势文件在仓库外（`Desktopili_vault_refench.md`），CI 上没有它。
+- 趋势文件在仓库外（`Desktop\bili_vault_ref\bench.md`），CI 上没有它。
 
 ## V1.8.23：TODO 的 P0 三条、P1 前四条与 P2 四条
 

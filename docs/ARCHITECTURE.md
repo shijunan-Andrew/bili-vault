@@ -383,7 +383,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **老 PNG 封面只从归档目录里转**（1.8.8）：`convertLegacyPngCovers()` 只遍历 `rootHandle` 下的收藏夹 → 记录目录一层，只认记录目录里文件名叫「封面.png」的那一个，写「封面.webp」成功后才 `removeEntry("封面.png")`。下载目录（`000视频下载`）、`001错误报告` / `002同步报告` / `003database` / `004导出` / `005回收站` / `006报告`、`视频信息.txt` 以及用户自己放进去的文件，**一个都不碰**；保留目录名单与扫描跳过名单是同一套（`ARCHIVE_RESERVED_DIRS`）。「转不转」的判断在 `BcaArchiveCore.coverConvertAction()` 一处：已经有 `封面.webp` 就绝不重转。
 - **`004导出` 只留最近 5 份**（1.8.8）：导出成功之后用 `BcaArchiveCore.exportPruneList()` 算出该删哪几个（只认 `归档元数据-YYYYMMDD-HHMMSS(-N)?.json`，同秒撞名时本体排在 `-2` 之前），逐个 `removeEntry`。**清理失败绝不影响这次导出**：写盘已经成功，删不掉只留一条 `console.warn`。
 - **性能基准的软上界**（1.8.8）：`test/bench.cjs` 里的 `SOFT_LIMITS_MS` 记着 N = 10000 那一档的「不该再慢成什么样」（实测 × 约 2）。它**不是门禁**：默认只在汇总里打 `[!] … 超过软上界 …`，加了 `--strict` 才用退出码 1 结束。换机器请整表重标；同一台机器跑两遍再下结论。
-- **基准有趋势文件了**（1.8.24，P3-14）：`node test/bench.cjs` 跑完会把每组中位数追加到仓库外的 `Desktopili_vault_refench.md`（`版本 | 时间 | node | 平台` + 一张表），`--no-log` 跳过；仍然不进 `check-all`、不影响退出码。脚本里的版本号从 `manifest.json` 现读，别再写死。
+- **基准有趋势文件了**（1.8.24，P3-14）：`node test/bench.cjs` 跑完会把每组中位数追加到仓库外的 `Desktop\bili_vault_ref\bench.md`（`版本 | 时间 | node | 平台` + 一张表），`--no-log` 跳过；仍然不进 `check-all`、不影响退出码。脚本里的版本号从 `manifest.json` 现读，别再写死。
 - **整库校准是 8 路并发**（1.8.5）：`SCAN_READ_CONCURRENCY = 8` 的 worker 池从同一个队列里取 `视频信息.txt` 来读，读完再按原顺序拼回收藏夹。并发只加在「读」上，写盘仍然是后台那条串行队列。
 - **体积统计复用扫描字节**（1.8.5）：`scanRoot()` 顺手把每条记录（`meta.size + coverBytes`）与下载树的字节累起来，`updateStorageUsage(handle, { total })` 有现成数字就不再递归整树。
 
