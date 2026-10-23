@@ -17,6 +17,8 @@
 // 不读磁盘、不读系统时钟，「现在」也是写死的 —— 同一台机器跑两遍，数字应当基本一致。
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 
 const core = require("../archive-core.js");
@@ -24,7 +26,8 @@ const stats = require("../stats-core.js");
 
 const QUICK = process.argv.includes("--quick");
 const STRICT = process.argv.includes("--strict");
-const KNOWN_FLAGS = new Set(["--quick", "--strict"]);
+const NO_LOG = process.argv.includes("--no-log");
+const KNOWN_FLAGS = new Set(["--quick", "--strict", "--no-log"]);
 
 // 1.8.8（P3-13）：软上界 —— 不进 CI 的「review 时看得见」的阈值。
 // 数字取自 1.8.6 在本机（node 24 · win32）N = 10000 的实测中位数 × 约 1.6~1.7，
@@ -51,7 +54,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SEED = 20240501;
 // 写死「现在」：统计页的「今天」「近 7 天」都按它算，跑在 23:59:59 也不会换一天。
 const NOW = new Date(2026, 4, 20, 10, 30, 0).getTime();
-const APP_VERSION = "1.7.33";
+const APP_VERSION = require("../manifest.json").version;
+// 1.8.24（P3-14）：每次跑完把中位数追加到参考区的 bench.md，跨版本看趋势。
+// 仍然不是门禁：不接 check-all、不影响退出码；目录不存在会自己建。
+const BENCH_LOG = path.resolve(__dirname, "..", "..", "bili_vault_ref", "bench.md");
 
 // 六个收藏夹轮转，和真实用户「几个夹子 + 一个临时囤货」的分布接近。
 const COLLECTION_NAMES = [
@@ -619,10 +625,25 @@ function reportSoftLimits(results) {
   return exceeded;
 }
 
+function appendTrendLog(results) {
+  if (NO_LOG) return "";
+  const stamp = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const header = "| N | " + COLUMNS.map((column) => column.label).join(" | ") + " |";
+  const divider = "| --- |" + COLUMNS.map(() => " --- |").join("");
+  const rows = results.map((result) => "| " + result.size + " | " + COLUMNS.map((column) => formatMs(result.timings[column.key])).join(" | ") + " |");
+  const block = ["", "### " + APP_VERSION + " | " + stamp + " | node " + process.version + " | " + process.platform, header, divider].concat(rows).concat([""]).join("\n");
+  fs.mkdirSync(path.dirname(BENCH_LOG), { recursive: true });
+  if (!fs.existsSync(BENCH_LOG)) {
+    fs.writeFileSync(BENCH_LOG, ["# 数据层基准趋势（test/bench.cjs 自动追加）", "", "> 不进 CI 门禁；同一台机器上比倍率，跨机器只当参考。", ""].join("\n"), "utf8");
+  }
+  fs.appendFileSync(BENCH_LOG, block + "\n", "utf8");
+  return BENCH_LOG;
+}
+
 function main() {
   const unknown = process.argv.slice(2).filter((arg) => !KNOWN_FLAGS.has(arg));
   if (unknown.length) {
-    console.error("不认识的参数：" + unknown.join(" ") + "；只支持 --quick（冒烟模式）与 --strict（超软上界即失败）。");
+    console.error("不认识的参数：" + unknown.join(" ") + "；只支持 --quick（冒烟模式）、--strict（超软上界即失败）与 --no-log（不写趋势文件）。");
     process.exit(1);
   }
 
@@ -649,6 +670,8 @@ function main() {
   reportSoftLimits(results);
   console.log("");
   console.log("总耗时：" + ((performance.now() - startedAt) / 1000).toFixed(2) + " 秒（含数据生成、重复与取中位数）。");
+  const logPath = appendTrendLog(results);
+  if (logPath) console.log("趋势已追加：" + logPath + "（--no-log 可跳过）。");
 }
 
 main();

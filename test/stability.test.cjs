@@ -6515,7 +6515,7 @@ test("性能基准有软上界：默认只警告，--strict 才让退出码变�
   assert.match(bench, /function reportSoftLimits\(results\)/, "要有比对函数");
   assert.match(bench, /const STRICT = process.argv\.includes\("--strict"\)/, "--strict 是显式开关");
   assert.match(bench, /if \(STRICT\) \{/, "默认不动退出码");
-  assert.match(bench, /KNOWN_FLAGS = new Set\(\["--quick", "--strict"\]\)/);
+  assert.match(bench, /KNOWN_FLAGS = new Set\(\["--quick", "--strict", "--no-log"\]\)/);
   // 软上界不进门禁：check-all 与五套里都不许出现 bench
   assert.doesNotMatch(readProjectFile("scripts/check-all.cjs"), /bench\.cjs/, "基准不进 CI");
 });
@@ -7454,4 +7454,98 @@ test("HISTORY 有脚本生成的版本索引，check-all 会验它是不是最�
   const checkAll = readProjectFile(path.join("scripts", "check-all.cjs"));
   assert.match(checkAll, /function checkHistoryIndex\(\)/);
   assert.match(checkAll, /historyIndex\.check\(\)/);
+});
+// ---- 1.8.24：商店上架准备、统计库迁移位、基准趋势（TODO P3 三条） ----
+test("商店上架三件套：homepage_url、隐私说明、文档里链得上（P3-12a）", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  assert.equal(manifest.homepage_url, "https://github.com/shijunan-Andrew/bili-vault");
+  const privacy = readProjectFile("docs/PRIVACY.md");
+  assert.match(privacy, /数据存在哪里/);
+  assert.match(privacy, /api\.bilibili\.com/);
+  assert.match(privacy, /hdslb\.com/);
+  assert.match(privacy, /nativeMessaging/);
+  assert.match(privacy, /不会自动发送给任何人/);
+  assert.match(readProjectFile("README.md"), /docs\/PRIVACY\.md/);
+  assert.match(readProjectFile("AI_HANDOFF.md"), /docs\/PRIVACY\.md/);
+  // 权限集合保持最小：新增权限必须同时改隐私说明，不允许悄悄多要。
+  assert.deepEqual(manifest.permissions, [
+    "storage",
+    "unlimitedStorage",
+    "nativeMessaging",
+    "clipboardWrite",
+    "notifications"
+  ]);
+  assert.deepEqual(manifest.host_permissions, ["https://*.hdslb.com/*", "https://api.bilibili.com/*"]);
+});
+
+test("发布包有白名单和体积上限，包里不再可能混进开发文件（P3-12b）", () => {
+  const pack = readProjectFile("pack.ps1");
+  assert.match(pack, /\$allowedTopFiles = @\(/);
+  assert.match(pack, /\$allowedTopDirs = @\("locales", "native"\)/);
+  assert.match(pack, /\$maxFileBytes = 2MB/);
+  assert.match(pack, /\$maxTotalBytes = 6MB/);
+  assert.match(pack, /\$maxZipBytes = 3MB/);
+  assert.match(pack, /\$maxFileCount = 150/);
+  assert.match(pack, /if \(-not \$allowed\) \{ throw "发布清单里出现了白名单之外的文件/);
+  assert.match(pack, /if \(\$stagedBytes -gt \$maxTotalBytes\)/);
+  assert.match(pack, /if \(\$zipBytes -gt \$maxZipBytes\)/);
+  assert.match(pack, /\[OK\] 发布清单/);
+  // 运行期文件必须都在白名单里（防止有人新增文件却忘了登记）。
+  const runtime = [
+    "background.js",
+    "library.js",
+    "library.html",
+    "popup.html",
+    "settings.html",
+    "stats.html",
+    "client-errors.js",
+    "content-i18n-keys.js",
+    "tutorial.js",
+    "pet.js"
+  ];
+  for (const file of runtime) {
+    assert.ok(pack.includes(`"${file}"`), `pack.ps1 白名单里缺 ${file}`);
+  }
+  // BOM 不能被编辑器吃掉 —— 这是 PowerShell 5.1 读中文脚本的前提。
+  const bytes = fs.readFileSync(path.join(projectRoot, "pack.ps1"));
+  assert.deepEqual([...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf], "pack.ps1 必须是 UTF-8 带 BOM");
+});
+
+test("统计库有显式 schemaVersion 与迁移位，未来改结构不用再改 normalizeDatabase（P3-13）", () => {
+  const core = readProjectFile("stats-core.js");
+  assert.match(core, /const DATABASE_SCHEMA_VERSION = 1;/);
+  assert.match(core, /function migrateDatabase\(raw, now = Date\.now\(\)\) \{/);
+  // emptyDatabase 必须同时写 version 与 schemaVersion。
+  const empty = core.slice(core.indexOf("function emptyDatabase("), core.indexOf("function normalizeEntry("));
+  assert.match(empty, /version: DATABASE_VERSION,/);
+  assert.match(empty, /schemaVersion: DATABASE_SCHEMA_VERSION,/);
+  // normalizeDatabase 先过 migrateDatabase，再读字段。
+  const normalize = core.slice(core.indexOf("function normalizeDatabase("), core.indexOf("function addRecord("));
+  assert.match(normalize, /const migrated = migrateDatabase\(raw, time\);/);
+  assert.ok(
+    normalize.indexOf("migrateDatabase(raw, time)") < normalize.indexOf("database.version = numberOr("),
+    "migrateDatabase 必须在读字段之前"
+  );
+  assert.match(core, /\n {4}DATABASE_SCHEMA_VERSION,/);
+  assert.match(core, /\n {4}migrateDatabase,/);
+  // 后台读库仍然只走 normalizeDatabase（迁移只有一个入口）。
+  assert.match(readProjectFile("background.js"), /BcaStatsCore\.normalizeDatabase\(JSON\.parse\(text\)\)/);
+});
+
+test("基准脚本把趋势追到参考区，但不进 CI 门禁（P3-14）", () => {
+  const bench = readProjectFile("test/bench.cjs");
+  assert.match(bench, /require\("\.\.\/manifest\.json"\)\.version/);
+  assert.ok(!bench.includes('"1.7.33"'), "版本号不许再写死");
+  assert.match(bench, /const NO_LOG = process\.argv\.includes\("--no-log"\);/);
+  assert.match(bench, /--strict", "--no-log"/);
+  assert.match(bench, /const BENCH_LOG = path\.resolve\(__dirname, "\.\.", "\.\.", "bili_vault_ref", "bench\.md"\);/);
+  assert.match(bench, /function appendTrendLog\(results\) \{/);
+  assert.match(bench, /if \(!fs\.existsSync\(BENCH_LOG\)\)/);
+  assert.match(bench, /趋势已追加：/);
+  // 仍然不是门禁：check-all 不许引用 bench。
+  const checkAll = readProjectFile("scripts/check-all.cjs");
+  assert.ok(!checkAll.includes("bench.cjs"), "bench 不能接进 check-all");
+  // 趋势表头（写入 bench.md 的内容）带版本与机器信息，便于跨版本 grep。
+  assert.match(bench, /"### " \+ APP_VERSION \+ " \| " \+ stamp/);
+  assert.match(bench, /\| N \| " \+ COLUMNS/);
 });

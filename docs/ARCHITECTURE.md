@@ -50,6 +50,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 │   ├── archive-audit.cjs         # 本地归档的标签/简介覆盖情况体检
 │   └── import-trial.cjs          # 只读预览导入会抓到什么，不改任何文件
 ├── README.md                     # 面向使用者的安装与功能说明
+├── docs/PRIVACY.md               # 隐私说明：数据存哪、只请求哪些域名、每个权限干什么
 └── AI_HANDOFF.md                 # 本文件
 ```
 
@@ -369,6 +370,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 - **写库只有一个写者，且「拒绝」不等于「失败」**（1.8.18）：`003database/database.json` 只有 `background.js` 的 `commitStatsDatabaseFromPage` 会写（`bca-stats-commit`）。回话三态 —— `ok` / `declined`（后台明确拒绝：旧库读不出来、写失败、载荷不对）/ 通道断了。页面只在**通道断了**时才退回自己的 `writeFileAtomically`；`declined` 时连 `bcaStats` 都不发。另外扩展重载后残留的旧页面（`chrome.runtime?.id` 已失效）一个字节都不写，只提示刷新 —— 否则它会用 7 秒的换名路径把读不出来的旧库盖掉，并把回声打回来触发整树重扫。
 - **坏库只有一次留档，临时残骸跟着写库清**（1.8.19）：`database.json` 解析失败时，由「先读到它的那一方」留一份 `database.bad.<时间戳>.json`；收藏库页提交时带 `pageArchivedBroken`，`readStatsDatabase(root, { archiveBroken: false })` 据此不再归档、也不把这次提交当成读不到库。拒绝提交时**不许** `publishStatsSnapshot` 一份空库 —— 页面手上那份（已经过 `applyStatsMirror`）才是真的。`003database` 里超过 10 分钟的点号 `.tmp` 由 `cleanStatsTempFiles()` 在每次提交前清掉，形状与年龄判据仍只有 `archive-core.js` 的 `isStaleTempFile` 一份。
+- **结构版本与迁移位**（1.8.24，P3-13）：`database.json` 现在有显式 `schemaVersion`（老文件只有 `version`）。读库顺序是 `migrateDatabase()` → `normalizeDatabase()`：前者只负责把旧结构抬到当前版本，返回 `null` 表示「这份库来自更新版本的扩展」，调用方按空库处理；后者继续做「尽力保住能认的字段」。以后改字段一律在 `migrateDatabase()` 里逐级升级，不要再往 `normalizeDatabase()` 里堆兼容分支。
 - **统计快照只用来「触发必要的刷新」**（1.8.15，1.8.16 收窄）：收藏库页听到 `bcaStats` 变化时**只比条数** —— 快照的 `videos` 与界面上的记录数。相等就是自己的回声（本页写完统计库会收到，写盘原子换名要几秒，所以回声总在几秒后才到），**一条重扫都不做**。别再拿「整份快照的指纹」或「收藏夹分布」当触发条件：前者任何一处字段不同就误判，后者的两个来源排序规则不同（侧栏是用户自定义顺序、快照是名字顺序），永远不相等。同一个收藏夹内部挪记录不改变总数，这类改动由本页写入路径自己重画，跨页面改动下次打开自愈。
 - **统计库只有一个写者：后台**（1.8.17）。收藏库页只做「读 + 构建」，构建完用 `bca-stats-commit`
   消息把整份库交给后台的 `commitStatsDatabaseFromPage()`，由 `commitStatsDatabase()` 统一
@@ -381,6 +383,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **老 PNG 封面只从归档目录里转**（1.8.8）：`convertLegacyPngCovers()` 只遍历 `rootHandle` 下的收藏夹 → 记录目录一层，只认记录目录里文件名叫「封面.png」的那一个，写「封面.webp」成功后才 `removeEntry("封面.png")`。下载目录（`000视频下载`）、`001错误报告` / `002同步报告` / `003database` / `004导出` / `005回收站` / `006报告`、`视频信息.txt` 以及用户自己放进去的文件，**一个都不碰**；保留目录名单与扫描跳过名单是同一套（`ARCHIVE_RESERVED_DIRS`）。「转不转」的判断在 `BcaArchiveCore.coverConvertAction()` 一处：已经有 `封面.webp` 就绝不重转。
 - **`004导出` 只留最近 5 份**（1.8.8）：导出成功之后用 `BcaArchiveCore.exportPruneList()` 算出该删哪几个（只认 `归档元数据-YYYYMMDD-HHMMSS(-N)?.json`，同秒撞名时本体排在 `-2` 之前），逐个 `removeEntry`。**清理失败绝不影响这次导出**：写盘已经成功，删不掉只留一条 `console.warn`。
 - **性能基准的软上界**（1.8.8）：`test/bench.cjs` 里的 `SOFT_LIMITS_MS` 记着 N = 10000 那一档的「不该再慢成什么样」（实测 × 约 2）。它**不是门禁**：默认只在汇总里打 `[!] … 超过软上界 …`，加了 `--strict` 才用退出码 1 结束。换机器请整表重标；同一台机器跑两遍再下结论。
+- **基准有趋势文件了**（1.8.24，P3-14）：`node test/bench.cjs` 跑完会把每组中位数追加到仓库外的 `Desktopili_vault_refench.md`（`版本 | 时间 | node | 平台` + 一张表），`--no-log` 跳过；仍然不进 `check-all`、不影响退出码。脚本里的版本号从 `manifest.json` 现读，别再写死。
 - **整库校准是 8 路并发**（1.8.5）：`SCAN_READ_CONCURRENCY = 8` 的 worker 池从同一个队列里取 `视频信息.txt` 来读，读完再按原顺序拼回收藏夹。并发只加在「读」上，写盘仍然是后台那条串行队列。
 - **体积统计复用扫描字节**（1.8.5）：`scanRoot()` 顺手把每条记录（`meta.size + coverBytes`）与下载树的字节累起来，`updateStorageUsage(handle, { total })` 有现成数字就不再递归整树。
 

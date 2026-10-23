@@ -98,11 +98,35 @@ test("videoKey 非法 BV 号不当身份用，空标题返回空串", () => {
   assert.equal(core.videoKey({}), "");
 });
 
+/* ─────────────────── 1.8.24（P3-13）：schema 版本与迁移 ─────────────────── */
+
+test("migrateDatabase 把没有 schemaVersion 的老库抬到 v1", () => {
+  const legacy = { version: 1, videos: {}, totals: { savedTotal: 0 } };
+  const migrated = core.migrateDatabase(legacy, NOW);
+  assert.equal(migrated.schemaVersion, core.DATABASE_SCHEMA_VERSION);
+  assert.equal(migrated.version, 1);
+  assert.equal(legacy.schemaVersion, undefined, "不能原地改调用方传进来的对象");
+});
+
+test("migrateDatabase 对垃圾输入与未来版本返回 null", () => {
+  assert.equal(core.migrateDatabase(null, NOW), null);
+  assert.equal(core.migrateDatabase("nope", NOW), null);
+  assert.equal(core.migrateDatabase({ schemaVersion: 99 }, NOW), null);
+  assert.equal(core.migrateDatabase({ version: 2 }, NOW), null);
+});
+
+test("normalizeDatabase 保留 schemaVersion，老库补成当前版本", () => {
+  assert.equal(core.normalizeDatabase({}, NOW).schemaVersion, core.DATABASE_SCHEMA_VERSION);
+  assert.equal(core.normalizeDatabase({ schemaVersion: 1 }, NOW).schemaVersion, 1);
+  assert.equal(core.normalizeDatabase(null, NOW).schemaVersion, core.DATABASE_SCHEMA_VERSION);
+});
+
 /* ───────────────────────── 数据库增删 ───────────────────────── */
 
 test("emptyDatabase 的形状固定", () => {
   const database = core.emptyDatabase(NOW);
   assert.equal(database.version, core.DATABASE_VERSION);
+  assert.equal(database.schemaVersion, core.DATABASE_SCHEMA_VERSION);
   assert.deepEqual(database.videos, {});
   assert.deepEqual(database.pet, { affinity: 0, day: "2026-10-12", todayTouch: 0, totalTouch: 0 });
   assert.equal(new Date(database.createdAt).getTime(), NOW);

@@ -70,15 +70,54 @@ try {
     if ($actual | Where-Object { $_ -eq $dev -or $_ -like "$dev/*" }) { throw "开发文件 $dev 混进打包结果了" }
   }
 
+
+  # 1.8.24（P3-12）：发布清单校验 —— 白名单、单文件体积、总量、文件数。
+  # 商店审核看到包里混着源码映射、测试数据或几十 MB 的快照会直接退回；这里把
+  # 「什么可以出现在包里」显式写死，体积和数量超限都当失败，而不是打印一行警告。
+  # 新增运行期文件时，必须同时把它加进 $allowedTopFiles（或 $allowedTopDirs）。
+  $allowedTopFiles = @(
+    "archive-core.js", "background.js", "client-errors.js", "content-i18n-keys.js",
+    "content.js", "favorites-import.js", "guide.html", "i18n.js", "icons.js",
+    "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png",
+    "install-native-folder-opener.bat", "install-native-folder-opener.ps1",
+    "library.css", "library.html", "library.js", "manifest.json", "mockup.css",
+    "page.css", "pet-cat.png", "pet.css", "pet.js",
+    "popup.css", "popup.html", "popup.js",
+    "settings.css", "settings.html", "settings.js",
+    "stats-core.js", "stats.css", "stats.html", "stats.js", "theme.css", "theme.js",
+    "test-native-folder-opener.ps1", "tutorial.html", "tutorial.js",
+    "uninstall-native-folder-opener.ps1"
+  )
+  $allowedTopDirs = @("locales", "native")
+  $maxFileBytes = 2MB
+  $maxTotalBytes = 6MB
+  $maxZipBytes = 3MB
+  $maxFileCount = 150
+  foreach ($rel in $actual) {
+    $top = $rel.Split("/")[0]
+    $allowed = ($allowedTopFiles -contains $rel) -or ($allowedTopDirs -contains $top)
+    if (-not $allowed) { throw "发布清单里出现了白名单之外的文件：$rel（要发布新文件，请先加进 pack.ps1 的 $allowedTopFiles / $allowedTopDirs）" }
+    $bytes = (Get-Item -LiteralPath (Join-Path $stage ($rel.Replace("/", "\")))).Length
+    if ($bytes -gt $maxFileBytes) { throw "文件 $rel 有 $([math]::Round($bytes / 1KB, 1)) KB，超过单文件 2 MB 上限" }
+  }
+  if ($actual.Count -gt $maxFileCount) { throw "发布包里有 $($actual.Count) 个文件，超过 $maxFileCount 上限 —— 大概率是把开发文件打进来了" }
+  $stagedBytes = (Get-ChildItem -LiteralPath $stage -Recurse -File | Measure-Object -Property Length -Sum).Sum
+  if ($stagedBytes -gt $maxTotalBytes) { throw "发布包总大小 $([math]::Round($stagedBytes / 1KB, 1)) KB，超过 6 MB 上限" }
   if (-not $OutDir) { $OutDir = Split-Path $root -Parent }
   if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
   $zip = Join-Path $OutDir ("bili-vault-" + $version + ".zip")
   if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
   Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
 
-  $size = [math]::Round((Get-Item -LiteralPath $zip).Length / 1KB, 1)
+  $zipBytes = (Get-Item -LiteralPath $zip).Length
+  if ($zipBytes -gt $maxZipBytes) {
+    Remove-Item -LiteralPath $zip -Force
+    throw "zip 有 $([math]::Round($zipBytes / 1KB, 1)) KB，超过 3 MB 上限，已删掉这个包"
+  }
+  $size = [math]::Round($zipBytes / 1KB, 1)
   "[OK] $zip"
-  "[OK] 版本 $version，文件 $($actual.Count) 个，$size KB"
+  "[OK] 版本 $version，文件 $($actual.Count) 个，源目录 $([math]::Round($stagedBytes / 1KB, 1)) KB，zip $size KB"
+  "[OK] 发布清单：locales、native 两个目录 + $($allowedTopFiles.Count) 个文件，均在允许范围内"
   "[OK] 已排除（开发用）：$($excludeNames -join ", ")"
 } finally {
   Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue

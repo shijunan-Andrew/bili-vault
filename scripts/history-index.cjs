@@ -83,20 +83,35 @@ function currentBlock(text) {
 
 function withFreshBlock(text) {
   const eol = detectEol(text);
-  const block = renderBlock(text, eol);
-  if (!block) throw new Error("HISTORY.md 里一个 `## V…：` 小节都没有");
-  const existing = currentBlock(text);
-  if (existing !== null) {
-    return { text: text.replace(existing, block), eol, changed: existing !== block };
+  let current = text;
+  let firstInsert = currentBlock(current) === null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const block = renderBlock(current, eol);
+    if (!block) throw new Error("HISTORY.md 里一个 `## V…：` 小节都没有");
+    const existing = currentBlock(current);
+    let next;
+    if (existing === null) {
+      // 没标记：先插一个与最终索引等行数的占位块，再按插好之后的文本算一次行号。
+      const placeholder = Array(blockLineCount(collectSections(current).length)).fill(START_MARK).join(eol);
+      const withPlaceholder = insertBeforeSections(current, placeholder, eol);
+      const settled = renderBlock(withPlaceholder, eol);
+      if (settled.split(eol).length !== placeholder.split(eol).length) {
+        throw new Error("版本索引块的行数不稳定，拒绝写入（否则后续行号会漂）");
+      }
+      next = withPlaceholder.replace(placeholder, settled);
+      firstInsert = true;
+    } else {
+      next = current.replace(existing, block);
+    }
+    if (next === current) return { text: next, eol, changed: next !== text };
+    current = next;
+    // 新增/删除版本小节时索引会多/少一行：多算一轮，行号才跟得上。
+    if (!firstInsert && currentBlock(current) === renderBlock(current, eol)) {
+      return { text: current, eol, changed: current !== text };
+    }
+    firstInsert = false;
   }
-  // 没标记：先插一个与最终索引等行数的占位块，再按插好之后的文本算一次行号
-  const placeholder = Array(blockLineCount(collectSections(text).length)).fill(START_MARK).join(eol);
-  const withPlaceholder = insertBeforeSections(text, placeholder, eol);
-  const settled = renderBlock(withPlaceholder, eol);
-  if (settled.split(eol).length !== placeholder.split(eol).length) {
-    throw new Error("版本索引块的行数不稳定，拒绝写入（否则后续行号会漂）");
-  }
-  return { text: withPlaceholder.replace(placeholder, settled), eol, changed: true };
+  throw new Error("版本索引重算 4 轮后仍不稳定");
 }
 
 function check() {

@@ -13,6 +13,10 @@
   const DATABASE_FOLDER_NAME = "003database";
   const DATABASE_FILE_NAME = "database.json";
   const DATABASE_VERSION = 1;
+  // 1.8.24（P3-13）：显式的 schema 版本 + 迁移位。老文件里只有 version（历史包袱），
+  // 新文件同时写 schemaVersion；以后改结构时在 migrateDatabase() 里按版本逐级升级，
+  // 不要再把兼容逻辑塞回 normalizeDatabase()（否则每加一版都会多长一层 if）。
+  const DATABASE_SCHEMA_VERSION = 1;
   // 「近期」的窗口：宠物那句「你近期保存最多的收藏夹是」与排行榜的「近期」列都用它。
   // 1.5.9：窗口统一成近 7 天（原来 30 天，用户报「显示近 30 天 15 个、我实际有 84 个」）。
   // 这样「近期」列、宠物那句「你近期保存最多的收藏夹是」与柱状图/近 7 天新增同一个口径。
@@ -141,6 +145,7 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
     const time = numberOr(now, Date.now());
     return {
       version: DATABASE_VERSION,
+      schemaVersion: DATABASE_SCHEMA_VERSION,
       createdAt: new Date(time).toISOString(),
       firstSeenAt: new Date(time).toISOString(),
       updatedAt: new Date(time).toISOString(),
@@ -179,13 +184,38 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
     };
   }
 
+  // 迁移入口：只负责把「上一版的结构」抬到当前 schema 版本，不改字段语义。
+  // 目前只有 v1：历史文件里没有 schemaVersion，用 version 补上。
+  // 返回 null 表示这份库来自更新版本的扩展 —— 调用方按空库处理（宁可显示 0，
+  // 也不要把不认识的字段硬塞进当前结构、再整份写回去）。
+  function migrateDatabase(raw, now = Date.now()) {
+    void now;
+    if (!raw || typeof raw !== "object") return null;
+    const declared = numberOr(raw.schemaVersion, NaN);
+    const legacy = numberOr(raw.version, NaN);
+    const source = Number.isFinite(declared) ? declared : Number.isFinite(legacy) ? legacy : 0;
+    if (source > DATABASE_SCHEMA_VERSION) return null;
+    let migrated = raw;
+    if (!Number.isFinite(declared)) {
+      // 老文件只有 version（甚至两个都没有）：补一个明确的 schemaVersion，
+      // 但不动 version —— 那个字段老版本还会读到。
+      const target = source >= 1 ? Math.min(source, DATABASE_SCHEMA_VERSION) : DATABASE_SCHEMA_VERSION;
+      migrated = Object.assign({}, raw, { schemaVersion: target });
+    }
+    return migrated;
+  }
+
   // 读到的东西可能是手改坏的、旧版本的、或者干脆不是 JSON 解析出来的对象。
   // 这里只做「尽力保住能认的字段」，绝不抛异常。
   function normalizeDatabase(raw, now = Date.now()) {
     const time = numberOr(now, Date.now());
     const database = emptyDatabase(time);
     if (!raw || typeof raw !== "object") return database;
+    const migrated = migrateDatabase(raw, time);
+    if (!migrated) return database;
+    raw = migrated;
     database.version = numberOr(raw.version, DATABASE_VERSION);
+    database.schemaVersion = numberOr(raw.schemaVersion, DATABASE_SCHEMA_VERSION);
     const createdAt = Date.parse(String(raw.createdAt || ""));
     if (Number.isFinite(createdAt)) database.createdAt = new Date(createdAt).toISOString();
     const updatedAt = Date.parse(String(raw.updatedAt || ""));
@@ -925,6 +955,7 @@ function fallbackRowKey(videos, key) {
     DATABASE_FOLDER_NAME,
     DATABASE_FILE_NAME,
     DATABASE_VERSION,
+    DATABASE_SCHEMA_VERSION,
     RECENT_WINDOW_DAYS,
     DAILY_ROWS_DAYS,
     MAX_RANGE_DAYS,
@@ -955,6 +986,7 @@ function fallbackRowKey(videos, key) {
     parseFavoriteTime,
     videoKey,
     emptyDatabase,
+    migrateDatabase,
     normalizeDatabase,
     addRecord,
     removeRecords,
