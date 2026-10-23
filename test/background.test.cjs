@@ -80,6 +80,32 @@ function titleRecord(title, at) {
 
 const now = () => Date.now();
 
+/** 1.9.4：saveFavorite 要读 IndexedDB 里的根目录句柄，这里给它一个只会返回 rootHandle 的桩。 */
+function makeRootDb(rootHandle) {
+  const task = (result) => {
+    const request = { result: null, onsuccess: null, onerror: null };
+    setImmediate(() => {
+      request.result = result;
+      if (request.onsuccess) request.onsuccess();
+    });
+    return request;
+  };
+  return {
+    open() {
+      const request = { result: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+      setImmediate(() => {
+        request.result = {
+          transaction: () => ({ objectStore: () => ({ get: () => task(rootHandle) }) }),
+          close() {}
+        };
+        if (request.onsuccess) request.onsuccess();
+      });
+      return request;
+    }
+  };
+}
+
+
 /* ---------------- 统计库：读 ---------------- */
 
 async function suite() {
@@ -113,28 +139,36 @@ async function suite() {
 
   await test("收藏时用接口补真实 UP 主与互动数据，接口失败就退回页面元数据（1.9.3）", async () => {
     const pageMetadata = { bvid: bv("A1"), upName: "推荐位里的名字", upMid: "999", title: "页面标题" };
-    const fetchOk = async () => ({
-      ok: true,
-      json: async () => ({
-        code: 0,
-        data: {
-          bvid: bv("A1"),
-          aid: 123,
-          title: "真标题",
-          desc: "真简介",
-          pubdate: 1700000000,
-          duration: 120,
-          pic: "https://i0.hdslb.com/bfs/archive/cover.jpg",
-          owner: { mid: 4925207, name: "真 UP" },
-          stat: { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 }
-        }
-      })
-    });
+    const fetchOk = async (url) => {
+      if (String(url).includes("/x/relation/stat")) {
+        return { ok: true, json: async () => ({ code: 0, data: { mid: 4925207, follower: 30205 } }) };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          code: 0,
+          data: {
+            bvid: bv("A1"),
+            aid: 123,
+            title: "真标题",
+            desc: "真简介",
+            pubdate: 1700000000,
+            duration: 120,
+            pic: "https://i0.hdslb.com/bfs/archive/cover.jpg",
+            owner: { mid: 4925207, name: "真 UP" },
+            stat: { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 }
+          }
+        })
+      };
+    };
     const bg = loadBackground({ chrome: makeChrome({ localData: {} }), fetch: fetchOk });
     const merged = await bg.__test.enrichFavoriteMetadata(pageMetadata);
     assert.equal(merged.upName, "真 UP");
     assert.equal(merged.upMid, "4925207");
     assert.deepEqual(merged.stats, { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 });
+    // 1.9.4：第一次收藏就要有粉丝数（以前要等「更新视频状态」），简介只认接口给的真简介
+    assert.equal(merged.upFans, "30205");
+    assert.equal(merged.description, "真简介");
 
     const failing = loadBackground({ chrome: makeChrome({ localData: {} }) });
     const fallback = await failing.__test.enrichFavoriteMetadata(pageMetadata);
@@ -142,6 +176,70 @@ async function suite() {
     assert.equal(fallback.stats, undefined);
   });
 
+
+  /* ---------------- 1.9.4：简介、所属收藏夹、已存在就跳过 ---------------- */
+
+  await test("buildInfo 的「所属收藏夹」写收藏夹名，简介只认真简介（1.9.4）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const shareText = "测试标题, 视频播放量 157608、弹幕量 746、点赞数 5862、投硬币枚数 166、收藏人数 1127、转发人数 197, 视频作者 某人, 作者简介 简介文字, 相关视频：别的视频标题";
+    const build = (title, description) => bg.__test.buildInfo({
+      metadata: { title, url: "https://www.bilibili.com/video/" + bv("A1") + "/", bvid: bv("A1"), description, stats: {} },
+      favoriteAt: Date.parse("2026-10-24T01:12:36+08:00")
+    }, "游戏解说", new Date("2026-10-24T01:12:37+08:00"));
+    const lines = (text) => text.split(/\r?\n/);
+    const field = (text, name) => lines(text).find((item) => item.startsWith(name)) || "";
+    const description = (text) => {
+      const all = lines(text);
+      const at = all.indexOf("【视频简介】");
+      return at < 0 ? "" : all.slice(at + 1).join("\n").trim();
+    };
+
+    const real = build("测试标题", "真正的简介第一行\n真正的第二行");
+    assert.equal(field(real, "所属收藏夹："), "所属收藏夹：游戏解说");
+    assert.equal(description(real), "真正的简介第一行\n真正的第二行");
+
+    assert.equal(description(build("测试标题", shareText)), "无", "分享文案不算简介");
+    assert.equal(description(build("测试标题", "测试标题")), "无", "简介就是标题时也不算");
+    assert.equal(description(build("测试标题", "")), "未知", "没有简介就记未知");
+  });
+
+  await test("本地已有同一条视频就整条跳过：不请求接口、不写盘（1.9.4）", async () => {
+    const bvid = bv("A1");
+    const infoText = [
+      "【基本信息】",
+      "视频收藏时间：2026年10月08日21时15分00秒.000",
+      "信息保存于：2026年10月08日21时15分00秒",
+      "所属收藏夹：测试收藏夹",
+      "视频标题：老的标题",
+      "视频链接：https://www.bilibili.com/video/" + bvid + "/",
+      "BV号：" + bvid,
+      "",
+      "【视频简介】",
+      "老的简介"
+    ].join("\r\n");
+    const root = await makeDirectoryTree({ 测试收藏夹: { "2026年10月08日21时15分00秒": { "视频信息.txt": infoText, "封面.webp": "PNG" } } });
+    const collectionFolder = await root.getDirectoryHandle("测试收藏夹");
+    let fetchCalls = 0;
+    const bg = loadBackground({
+      chrome: makeChrome({ localData: { biliVaultBvIndex: { 测试收藏夹: { [bvid]: "2026年10月08日21时15分00秒" } } } }),
+      indexedDB: makeRootDb(root),
+      fetch: async () => {
+        fetchCalls += 1;
+        throw new Error("已经存过就不该再请求接口");
+      }
+    });
+    const result = await bg.__test.saveFavorite({
+      metadata: { bvid, url: "https://www.bilibili.com/video/" + bvid + "/", title: "新的标题" },
+      folders: [{ name: "测试收藏夹" }],
+      favoriteAt: Date.now()
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.match(result.message, /已在本地，跳过/);
+    assert.equal(fetchCalls, 0, "跳过时不应该请求 B 站接口");
+    const recordFolder = await collectionFolder.getDirectoryHandle("2026年10月08日21时15分00秒");
+    const text = await (await (await recordFolder.getFileHandle("视频信息.txt")).getFile()).text();
+    assert.equal(text, infoText, "跳过的记录不该被改写");
+  });
 
   await test("新目录第一次读库：给空库、允许写、reason 是 empty", async () => {
     const bg = loadBackground({ chrome: chromeWithMirror(null) });

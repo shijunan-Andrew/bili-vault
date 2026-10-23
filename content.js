@@ -226,7 +226,10 @@
       pubdate: Number(video.pubdate) || 0,
       upName: owner.name || owner.uname || upNameText || "",
       upMid,
-      description: video.desc || video.description || meta('meta[name="description"]') || "",
+      // 1.9.4（用户报「没有简介的视频被存成标题+播放量+UP主简介+相关视频标题」）：
+      // B 站页面 <meta name="description"> 是自动生成的分享文案，不是视频简介，不能当兜底。
+      // 真正的简介只认页面数据里的 video.desc / video.description，拿不到就留空（写入时记「未知」）。
+      description: video.desc || video.description || "",
       tags
     };
   }

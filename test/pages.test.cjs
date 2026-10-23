@@ -48,27 +48,31 @@ async function settle(rounds = 8) {
   for (let i = 0; i < rounds; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-const INFO = (title, extra = {}) => [
-  "\uFEFF【基本信息】",
-  `视频收藏时间：${extra.favoriteAt || "2026年10月09日 01时19分50秒.175"}`,
-  `视频标题：${title}`,
-  `视频链接：${extra.url || "https://www.bilibili.com/video/BV1xx411c7mD/"}`,
-  "视频状态：正常",
-  "",
-  "【UP主】",
-  `UP主昵称：${extra.upName || "某人"}`,
-  `UP主UID：${extra.upMid || "12345"}`,
-  "",
-  "【互动数据】",
-  `播放量：${extra.view || "1000"}`,
-  "弹幕量：20",
-  "",
-  "【标签】",
-  "标签一、标签二",
-  "",
-  "【视频简介】",
-  "第一行简介"
-].join("\r\n");
+const INFO = (title, extra = {}) => {
+  // 1.9.4：简介要能分别造「真简介 / 分享文案 / 就是标题 / 没有」几种样本
+  const description = extra.description === undefined ? "第一行简介" : extra.description;
+  return [
+    "\uFEFF【基本信息】",
+    `视频收藏时间：${extra.favoriteAt || "2026年10月09日 01时19分50秒.175"}`,
+    `视频标题：${title}`,
+    `视频链接：${extra.url || "https://www.bilibili.com/video/BV1xx411c7mD/"}`,
+    "视频状态：正常",
+    "",
+    "【UP主】",
+    `UP主昵称：${extra.upName || "某人"}`,
+    `UP主UID：${extra.upMid || "12345"}`,
+    "",
+    "【互动数据】",
+    `播放量：${extra.view || "1000"}`,
+    "弹幕量：20",
+    "",
+    "【标签】",
+    "标签一、标签二",
+    "",
+    "【视频简介】",
+    ...(description === null ? [] : [description])
+  ].join("\r\n");
+};
 
 /** 一份两收藏夹三视频的归档目录树。 */
 function sampleTree() {
@@ -247,6 +251,34 @@ async function suiteLibrary() {
     assert.ok(dialog, "要有标记已下载的对话框");
     assert.equal(dialog.open, true, "点了之后要弹出来");
     assert.match(textOf(doc.getElementById("markDownloadedPath")), /\S/, "对话框里要写清目标目录");
+  });
+
+  await test("详情里的简介来自【视频简介】：分享文案与「简介就是标题」都按没有简介处理（1.9.4）", async () => {
+    const shareText = "分享文案测试, 视频播放量 157608、弹幕量 746、点赞数 5862、投硬币枚数 166、收藏人数 1127、转发人数 197, 视频作者 某人, 作者简介 简介文字, 相关视频：别的视频标题";
+    const tree = {
+      "小鲸鱼测试": {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("真简介视频", { description: "真正的简介第一行\n真正的第二行" }), "封面.png": "PNG-1" },
+        "2026年10月10日02时20分00秒": { "视频信息.txt": INFO("分享文案视频", { description: shareText }), "封面.png": "PNG-2" },
+        "2026年10月11日03时30分00秒": { "视频信息.txt": INFO("标题当简介视频", { description: "标题当简介视频" }), "封面.png": "PNG-3" }
+      }
+    };
+    const page = await openLibrary({ tree });
+    const doc = page.document;
+    const openByTitle = async (title) => {
+      const card = [...doc.querySelectorAll("#videoGrid .video-card")]
+        .find((item) => textOf(item.querySelector(".card-title")) === title);
+      assert.ok(card, "找不到卡片：" + title);
+      card.click();
+      await settle(6);
+      // 没有简介时 library.js 会把该类名整个换成 detail-empty，所以两种都要找
+      const box = doc.querySelector("#detailContent .detail-description") || doc.querySelector("#detailContent p.detail-empty");
+      assert.ok(box, "详情面板里要有简介容器");
+      return box.classList.contains("detail-empty") ? "" : box.textContent;
+    };
+
+    assert.equal(await openByTitle("真简介视频"), "真正的简介第一行\n真正的第二行");
+    assert.equal(await openByTitle("分享文案视频"), "", "分享文案不算简介");
+    assert.equal(await openByTitle("标题当简介视频"), "", "简介就是标题时也不显示");
   });
 
   await test("删除确认对话框：文案与按钮按「删一个视频」渲染，取消后关闭且不动磁盘（1.7.23）", async () => {

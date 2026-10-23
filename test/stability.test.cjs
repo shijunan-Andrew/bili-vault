@@ -5984,14 +5984,14 @@ test("归档只取一次封面，收藏夹之间并行落盘（V1.8.0）", () =>
   // 真机上 5 个目录里的 封面.webp 是同一份 11046 字节。
   assert.equal((body.match(/loadCoverPng\(/g) || []).length, 1, "封面只能取一次");
   assert.match(body, /const cover = await loadCoverPng\(metadata\.cover\);/, "取到的封面要在循环外复用");
-  assert.match(body, /await Promise\.allSettled\(uniqueFolders\.map\(/, "收藏夹之间要并行落盘");
+  assert.match(body, /await Promise\.allSettled\(pendingFolders\.map\(/, "收藏夹之间要并行落盘");
   assert.ok(body.indexOf("await Promise.allSettled(") < body.indexOf("await writeFile(recordFolder,"), "落盘必须发生在并行分支里，不能在串行 for 里");
   // 并行只发生在收藏夹之间：每个收藏夹内部仍然是「先封面、后 txt」，txt 是完成标记（4.9）
   const coverAt = body.indexOf("await writeFile(recordFolder, COVER_FILE_NAME, cover);");
   const infoAt = body.indexOf("await writeFile(recordFolder, \"视频信息.txt\"");
   assert.ok(coverAt > 0 && infoAt > coverAt, "每个收藏夹内部仍然先封面、后 txt");
   // 全部失败才算失败；部分成功要如实返回，不许整次报「归档失败」（那是用户报过的假红灯）
-  assert.match(body, /if \(!savedFolders\.length\) throw/, "一个都没存上才算失败");
+  assert.match(body, /if \(!savedFolders\.length\) {/, "一个都没存上才算失败");
   assert.match(body, /partial: true/, "部分成功要单独返回");
 });
 
@@ -7599,11 +7599,11 @@ test("收藏前用 /x/web-interface/view 补真实 UP 主与互动数据，UP �
   assert.match(source, /async function enrichFavoriteMetadata\(pageMetadata\) \{/);
   assert.ok(source.includes('await biliImportApiGet("/x/web-interface/view", bvid ? { bvid } : { aid }, SAVE_ENRICH_TIMEOUT_MS)'), "收藏时要请求视频详情接口");
   assert.match(source, /upName: importIsPlaceholder\(owner\.name\) \? metadata\.upName : owner\.name,/);
-  assert.match(source, /const metadata = await enrichFavoriteMetadata\(pageMetadata\);/);
+  assert.match(source, /metadata = await enrichFavoriteMetadata\(pageMetadata\);/);
   assert.match(source, /console\.warn\("收藏时没能补上互动数据（这次先按页面抓到的存，之后可以用「更新视频状态」补）", error\);/);
 });
 
-test("同一条视频在同一个收藏夹里只留一份：按 BV 索引复用目录，并保留原「视频收藏时间」（1.9.3）", () => {
+test("BV 索引与已有目录判定都还在（1.9.3；1.9.4 起命中就整条跳过，不再改写原目录）", () => {
   const source = readProjectFile("background.js");
   assert.match(source, /const BV_INDEX_KEY = "biliVaultBvIndex";/);
   assert.match(source, /function bvOfInfoText\(text\) \{/);
@@ -7611,13 +7611,7 @@ test("同一条视频在同一个收藏夹里只留一份：按 BV 索引复用�
   assert.match(source, /if \(bvOfInfoText\(text\) !== bvid\) return null;/);
   assert.match(source, /return \{ directory, favoriteLine: favoriteLineOfInfoText\(text\) \};/);
   assert.match(source, /const bvIndex = await loadBvIndex\(\);/);
-  assert.match(source, /const existing = await readExistingRecordFolder\(collectionFolder, indexedDirectory, savedBvid\);/);
-  assert.match(source, /const recordFolder = existing\?\.directory \|\| \(await uniqueTimeFolder\(collectionFolder, dateFolderName\)\);/);
-  assert.match(source, /infoText = infoText\.replace\(\/\^视频收藏时间：\.\*\$\/m, \(\) => existing\.favoriteLine\);/);
   assert.match(source, /await saveBvIndex\(bvIndex\);/);
-  assert.match(source, /const reusedSuffix = reusedCount \? `（其中 \$\{reusedCount\} 条更新的是已有记录）` : "";/);
-  assert.match(source, /const partialMessage = `已保存到 \$\{savedFolders\.length\} 个收藏夹\$\{reusedSuffix\}/);
-  assert.match(source, /const message = `已保存到 \$\{savedFolders\.length\} 个收藏夹\$\{reusedSuffix\}。`;/);
 });
 
 test("收藏库扫描后把「收藏夹 → BV → 目录名」发布给后台（1.9.3）", () => {
@@ -7626,4 +7620,72 @@ test("收藏库扫描后把「收藏夹 → BV → 目录名」发布给后台�
   assert.match(source, /function publishBvIndex\(collections\) \{/);
   assert.match(source, /BcaArchiveCore|chrome\.storage\.local\.set\(\{ \[BV_INDEX_KEY\]: index \}\)/);
   assert.match(source, /rememberArchiveCacheLimit\(cacheKey, stats\.total\);\r?\n  \/\/ 1\.9\.3：把「收藏夹 → BV → 目录名」发布给后台[^\r\n]*\r?\n  publishBvIndex\(scanned\);/);
+});
+
+/* --------------------------------------------------------------------------- */
+/* ---- 1.9.4：简介读写、收藏前判重、粉丝数 ---- */
+/* --------------------------------------------------------------------------- */
+test("简介读写都走【视频简介】：分享文案和「简介就是标题」按没有简介处理（1.9.4）", () => {
+  const tools = stripComments(readProjectFile("archive-tools.js"));
+  const split = functionBodyOf(tools, "function splitDescription(info) {");
+  assert.match(split, /BcaArchiveCore\.descriptionFromInfo\(info\)/, "简介要从 info.sections 读");
+  assert.match(split, /BcaArchiveCore\.splitShareText\(raw\)/);
+  assert.match(split, /split\.isShareText \|\| \(title && split\.description === title\) \? ""/, "分享文案与「简介就是标题」都按没有简介处理");
+
+  const content = stripComments(readProjectFile("content.js"));
+  assert.match(content, /description: video\.desc \|\| video\.description \|\| ""/, "内容脚本只取视频自己的简介");
+  assert.doesNotMatch(content, /meta\[name="description"\]/, "B 站 meta 是自动生成的分享文案，不能当简介");
+
+  const background = stripComments(readProjectFile("background.js"));
+  const build = functionBodyOf(background, "function buildInfo(data, folderName, savedAt) {");
+  assert.match(build, /descriptionSplit\.isShareText \|\| rawDescription === title \? "无"/, "分享文案与标题都不写进档案");
+  assert.match(build, /!rawDescription\s*\?\s*"未知"/, "没有简介写「未知」");
+  assert.match(build, /所属收藏夹：\$\{infoLineValue\(folderName\)\}/, "所属收藏夹要写收藏夹名");
+});
+
+test("「所属收藏夹」四处写入都传收藏夹名，不再传时间戳目录名（1.9.4）", () => {
+  const background = stripComments(readProjectFile("background.js"));
+  const calls = background.match(/buildInfo\(\{/g) || [];
+  assert.equal(calls.length, 4, "buildInfo 的四个调用点都要在");
+  for (const [note, anchor] of [
+    ["手动添加", "}, target.name, new Date());"],
+    ["自动收藏", "}, folderName, savedAt);"],
+    ["刷新导入", "}, collection.name, new Date());"],
+    ["导入保存", "}, collectionName, new Date()));"]
+  ]) {
+    assert.ok(background.includes(anchor), `${note}那个调用点要传收藏夹名：${anchor}`);
+  }
+});
+
+test("收藏前先按「收藏夹 + BV」判重，已存在就整条跳过（1.9.4）", () => {
+  const background = stripComments(readProjectFile("background.js"));
+  const library = stripComments(readProjectFile("library.js"));
+  assert.match(background, /const BV_INDEX_KEY = "biliVaultBvIndex";/);
+  assert.match(library, /const BV_INDEX_KEY = "biliVaultBvIndex";/);
+  assert.match(background, /readExistingRecordFolder\(collectionFolder, indexedDirectory, pageBvid\)/);
+  assert.match(background, /const skippedFolders = plans\.filter\(\(plan\) => plan\.existing\);/);
+  assert.match(background, /const pendingFolders = plans\.filter\(\(plan\) => !plan\.error && !plan\.existing\);/);
+  assert.match(background, /if \(!pendingFolders\.length\) \{/);
+  assert.match(background, /已在本地，跳过（/);
+  assert.match(background, /return \{ ok: true, skipped: true, message, path:/);
+  assert.match(background, /await saveBvIndex\(bvIndex\);/);
+
+  // 顺序：判重放在补资料之前，已在本地就不该再请求接口
+  const body = functionBodyOf(background, "async function saveFavorite(data) {");
+  const skipAt = body.indexOf("const pendingFolders = plans.filter");
+  const enrichAt = body.indexOf("metadata = await enrichFavoriteMetadata(pageMetadata);");
+  assert.ok(skipAt > 0 && enrichAt > skipAt, "先判重、再补资料");
+  assert.doesNotMatch(body, /existing\?\.favoriteLine/, "已存在的记录不再改写成新时间");
+});
+
+test("第一次收藏就补 UP 主粉丝数，简介只认接口返回值（1.9.4）", () => {
+  const background = stripComments(readProjectFile("background.js"));
+  assert.match(background, /function bvidOfMetadata\(metadata\) \{/);
+  const enrich = functionBodyOf(background, "async function enrichFavoriteMetadata(pageMetadata) {");
+  assert.match(enrich, /bvidOfMetadata\(metadata\)/, "补资料前先算 BV 号");
+  assert.match(enrich, /await fetchUpFans\(/, "第一次收藏就取粉丝数");
+  assert.match(enrich, /upFans: fans \|\| metadata\.upFans,/, "取不到粉丝数就退回页面值");
+  assert.match(enrich, /description: String\(video\.desc \|\| ""\)\.trim\(\) \|\| metadata\.description,/, "简介只认接口值");
+  assert.match(enrich, /biliImportApiGet\("\/x\/web-interface\/view"/);
+  assert.match(enrich, /收藏时没能补上互动数据/, "取不到就退回页面元数据，不挡收藏");
 });

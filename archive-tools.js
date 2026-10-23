@@ -194,9 +194,17 @@
   }
 
   function splitDescription(info) {
-    const raw = (info.fields && info.fields["视频简介"]) || "";
-    const split = BcaArchiveCore.splitShareText ? BcaArchiveCore.splitShareText(raw) : null;
-    return { description: split && split.description !== undefined ? split.description : raw, stats: (split && split.stats) || {} };
+    /* 1.9.4（用户报「txt 里明明有视频简介，详情却显示『这个归档没有记录简介』」）：
+       简介解析出来放在 info.sections 里，info.fields 里没有这一项 —— 1.9.0 起这里一直读的是空，
+       于是每条记录的详情都退化成「没有记录简介」。统一走 archive-core 的 descriptionFromInfo()。
+       旧版本还会把 B 站页面 meta 的分享文案（标题 + 播放量 + UP 主简介 + 相关视频标题）当简介存进 txt，
+       所以这里再判两道：分享文案、以及「简介就是标题」，都不算真简介 —— 详情显示「没有记录简介」才对。 */
+    const raw = BcaArchiveCore.descriptionFromInfo(info);
+    if (!raw) return { description: "", stats: {} };
+    const split = BcaArchiveCore.splitShareText(raw);
+    const title = (info.fields && info.fields["视频标题"]) || "";
+    const description = split.isShareText || (title && split.description === title) ? "" : split.description;
+    return { description, stats: split.stats || {} };
   }
 
   function cacheEntryFor(store, name, size, lastModified) {

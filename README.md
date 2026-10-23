@@ -134,25 +134,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 ## 正式版更新
 
-> 这里**只放最新一版**的改动说明。更早的版本（V1.9.1 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
+> 这里**只放最新一版**的改动说明。更早的版本（V1.9.3 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.9.3：收藏时抓对 UP 主、补上互动数据、同一条视频不再存两份
+## V1.9.4：简介只认真简介、已有记录直接跳过、第一次收藏就补粉丝数
 
 **你会感觉到的几处**
 
-- **收藏时抓的就是这条视频的 UP 主**：以前新版 B 站页面没有老的选择器，插件会误把右侧推荐位那条视频的 UP 主写进去（名字、UID、主页全错）。现在只从视频自己的信息区取，取不到就留「未知」，不会再写别人的名字。
-- **收藏时就补上播放量、点赞、投币这些数据**：以前要等「更新视频状态」才会有；现在收藏时顺手请求一次视频详情，接口失败才退回页面抓到的（之后仍可用「更新视频状态」补）。
-- **同一条视频在同一个收藏夹里不会存成两份**：收藏前先看收藏库的索引，已经存过就更新那一份；目录名和「视频收藏时间」都保留第一次收藏时的值，统计也仍然算在第一次入库那天（按 1.9.1 的统计口径）。
+- **详情里的「视频简介」回来了**：1.9.0 起详情面板一律显示「这个归档没有记录简介」——简介在《视频信息.txt》里有，但读取时找错了段落。修好后详情按【视频简介】显示。
+- **收藏时不会再存「假简介」**：以前从 B 站页面抓到的分享文案（「标题, 视频播放量…、UP简介…相关视频…」）会被当简介写进去。现在分享文案、以及「简介恰好等于标题」都按「没有简介」记录，真简介照常保存；分享文案里带的互动数据仍会回收进统计。
+- **已经存过的视频，再收藏一次就直接跳过**：不请求接口、不改写文件，消息里会说「已在本地，跳过」。
+- **第一次收藏就有 UP 主粉丝数**：收藏时顺手补上（以前要等「更新视频状态」）。
+- **`所属收藏夹` 写的是收藏夹名**：以前误写成了记录目录名（形如 `2026年10月24日01时12分36秒`）。新写入的按收藏夹名记录，旧文件保持原样。
 
 **开发侧**
 
-- `content.js` 新增 `findOwnerAnchor()`：只认 `#v_upinfo` / `.up-info` 里的 `space.bilibili.com` 链接，推荐位卡片（也在 `a.up-name` 上）排除；`upName` 用该链接的文字兜底。
-- `background.js` 新增 `enrichFavoriteMetadata()`（`SAVE_ENRICH_TIMEOUT_MS = 8000`，`/x/web-interface/view`，`importIsPlaceholder` 逐字段回退）与 BV 去重：`BV_INDEX_KEY = "biliVaultBvIndex"`、`bvOfInfoText()`、`readExistingRecordFolder()`、`saveBvIndex()`；复用目录时用原「视频收藏时间」那行覆盖新文本，消息里注明「其中 N 条更新的是已有记录」。
-- `library.js` 扫描结束后 `publishBvIndex(scanned)` 把「收藏夹 → BV → 目录名」发布到 storage（老记录没有「BV号：」行时从视频链接取）。
-- 新增 4 条 stability 守卫 + 2 条 background 真执行用例（补资料成功/失败回退、BV 对不上不复用）+ 1 条 pages 真执行用例（扫描后索引已发布）。
+- `archive-tools.js` 的 `splitDescription()` 改走 `BcaArchiveCore.descriptionFromInfo(info)`（简介在 `info.sections["视频简介"]`；1.9.0–1.9.3 读的是 `info.fields`，所以详情一直空）。`splitShareText()` 判为分享文案、或简介与标题相同时返回空简介，`stats` 仍从分享文案里解析。
+- `content.js` 的 `description` 去掉 `meta[name="description"]` 兜底（B 站那个 meta 是自动生成的分享文案）。
+- `background.js`：新增 `bvidOfMetadata()`；`enrichFavoriteMetadata()` 用接口补 `description` 与 `upFans`（`fetchUpFans`，失败只 warn）；`buildInfo()` 简介写「真简介 / 无 / 未知」，四处 `buildInfo()` 的收藏夹参数改成收藏夹名；`saveFavorite()` 重排成「先判重、再补资料」——`plans` → `pendingFolders` / `skippedFolders`，没有待写的收藏夹时走「已在本地，跳过」出口，不请求接口也不写盘。
+- 测试：`test/harness.cjs` 的 `BACKGROUND_EXPORTS` 增加 `buildInfo`、`loadBackground()` 支持注入 `indexedDB`；background +2（简介规则、整条跳过）、pages +1（详情简介渲染）、stability +4（简介读写、收藏夹名、判重跳过、首次补粉丝数），并调整 3 条旧守卫的形状。
 
-**遗留**：接口失败时只能退回页面元数据（互动数据那几项会缺，需再点「更新视频状态」）；索引只覆盖收藏库扫过的收藏夹。
+**遗留**：已有记录里的「假简介」和错误「所属收藏夹」不会自动回写——只影响新写入；「更新视频状态」也不会重写简介（需要重新收藏一次才会按新规则写）。
 
 ## 测试与文档
 
@@ -162,7 +164,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:362 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:366 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

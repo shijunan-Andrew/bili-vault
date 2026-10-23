@@ -359,7 +359,7 @@ const BACKGROUND_EXPORTS = [
   "archiveBrokenStatsDatabase",
   "createDirectoryOrExplain", "describeDirectoryCreateError",
   "saveFavorite", "readExistingRecordFolder", "bvOfInfoText", "favoriteLineOfInfoText",
-  "loadBvIndex", "saveBvIndex", "enrichFavoriteMetadata",
+  "loadBvIndex", "saveBvIndex", "enrichFavoriteMetadata", "buildInfo",
   "writeFile", "fileExists"
 ];
 
@@ -385,6 +385,8 @@ function loadBackground(options = {}) {
   };
   sandbox.self = sandbox;
   sandbox.globalThis = sandbox;
+  // 1.9.4：saveFavorite 要读 IndexedDB 里的根目录句柄。默认不给桩，需要时由用例传 options.indexedDB。
+  if (options.indexedDB) sandbox.indexedDB = options.indexedDB;
   sandbox.BcaStatsCore = require("../stats-core.js");
   sandbox.BcaArchiveCore = require("../archive-core.js");
   const context = vm.createContext(sandbox);
