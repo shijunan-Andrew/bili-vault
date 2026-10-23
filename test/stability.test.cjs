@@ -7567,3 +7567,16 @@ test("卡片封面槽每次都按当前记录对齐，不再拿 video.cover 猜�
   assert.match(paint, /applyCardCover\(card, video\.cover\);/, "缓存里有 URL 的卡片也要重新落笔");
   assert.match(paint, /applyCardCover\(card, url\);/, "读完封面后交给同一个落笔函数");
 });
+
+test("统计分天按「首次入库时间」（目录名），不按「视频收藏时间」——这是特性不是 bug（2026-10-24）", () => {
+  const core = stripComments(readProjectFile("stats-core.js"));
+  assert.match(
+    core,
+    /const favoriteAt = parseFavoriteTime\(source\.date \|\| source\.directory \|\| ""\);/,
+    "分天只认「视频日期 / 目录名」，目录名就是首次入库时间"
+  );
+  assert.doesNotMatch(core, /firstParsedTime/, "1.9.2 的「优先 favoriteAt」已被用户否决，不许再出现");
+  assert.doesNotMatch(core, /source\.favoriteAt/, "不要把「视频收藏时间」喂进分天逻辑");
+  const doc = readProjectFile("docs/ARCHITECTURE.md");
+  assert.match(doc, /统计分天按「首次入库时间」（目录名）/, "这条特性要写进已知限制，免得下一个人又当 bug 修");
+});

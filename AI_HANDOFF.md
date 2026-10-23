@@ -72,9 +72,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1019 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 357 · archive-core 88 · stats-core 68 · background 25 · pages 34（后四套是真执行） |
+| 测试基线 | stability 358 · archive-core 88 · stats-core 68 · background 25 · pages 34（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-23 23:19，当时 HEAD `51a51cb`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-24 00:32，当时 HEAD `21082b4`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -391,7 +391,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:357 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:358 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -701,6 +701,11 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     3. **数据库只存明细**：`003database/database.json` 里只有「一条视频一条记录」，总数 / 今日 / 近 7 天 / 排行榜 / 柱状图全部由 `stats-core.js` 现算（`snapshot()`）。存了汇总就一定要同步更新，早晚会出现「图表和列表对不上」这类无法解释的 bug。
     4. **纯函数模块要能被 node `require`**：`stats-core.js` 与 `archive-core.js` 一样，IIFE 挂 `globalThis` 给浏览器、末尾 `module.exports = api` 给 node —— 这样 `test/stats-core.test.cjs` 能在 node 里真跑（61 条），而不是只做文本断言。`scripts/check-all.cjs` 里这两套都要跑（发版第 4 步与 CI 都会调它）。
     5. **整份重建而不是增量合并**：收藏库扫描完调 `syncStatsDatabase()`，用 `databaseFromVideos(videos, { previous })` 把数据库整份重写（只保留 `createdAt` 与宠物状态）。扫描看得到的才算数 —— 用户在收藏库里删掉的视频不该继续留在统计里。
+
+31. **统计分天按「首次入库时间」（目录名），不是「视频收藏时间」；这是特性，用户明确要求按旧逻辑。**（2026-10-24 定。）
+    1. `stats-core.js` 的 `recordFromVideo()` 只读 `parseFavoriteTime(source.date || source.directory || "")`，**不要**改成优先 `favoriteAt`。老视频重新收藏 / 补档 / 搬运时目录名沿用旧时间，统计就落在第一次进库那天；卡片与详情上的日期来自 `视频信息.txt` 的「视频收藏时间」，两者本来就可以不同。
+    2. 1.9.2 曾改成 `firstParsedTime([source.date, source.favoriteAt, source.directory])` 去「修」这件事，用户判定是 bug 并要求回退（已回退到 V1.9.1 基线，`stability` 有守卫钉住 `firstParsedTime` 不许再出现）。**看到「今日新增」比卡片上的「今天」少，先想想是不是这个特性，不要动统计口径。**
+    3. 真要改这个权衡，得用户先下指令，并且同时改 `docs/ARCHITECTURE.md` 的已知限制和这条守卫。
 
 ## 已知限制与历史背景
 
