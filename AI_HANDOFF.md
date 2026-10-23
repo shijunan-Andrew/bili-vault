@@ -195,7 +195,7 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 判断标准只有一句：**少了这个文件，别人 clone 下来就做不成项目** —— 是，就进仓库；**只是这次排查 / 审查 / 调试用得上的** —— 进 `bili_vault_ref`。
 
 - **进仓库** `Desktop\bili-vault\`：扩展代码（`*.js` / `*.html` / `*.css`）、`manifest.json`、`test/`、`docs/`、`native/`、`locales/`、`scripts/`（`check-all.cjs`：发版与 CI 共用的检查）、`.github/`（`workflows/ci.yml`）、`pack.ps1` / `release.ps1` / `test-native-*.ps1`、`README.md` / `SMOKE_TEST.md` / `AI_HANDOFF.md`。
-- **进** `Desktop\bili_vault_ref\`：审查报告与分面材料、一次性补丁脚本、探针与反编译脚本、调试用的临时 `.cjs` / `.ps1`、截图与取证数据、批次简报、页面试验台，以及**待办清单 `TODO.md`**、**旧 P3 清单 `old-p3-checklist.md`**（67 条，状态列是 2026-10-23 的核对结论）与**未闭环问题清单 `unresolved-p0p2-checklist.md`**（22 条 P0–P2 复核结论，配套证据是四份 `_chk_*.md`）。
+- **进** `Desktop\bili_vault_ref\`：审查报告与分面材料、一次性补丁脚本、探针与反编译脚本、调试用的临时 `.cjs` / `.ps1`、截图与取证数据、批次简报、页面试验台，以及**待办清单 `TODO.md`**、**旧 P3 清单 `old-p3-checklist.md`**（67 条，状态列是 2026-10-23 的核对结论）与**未闭环问题清单 `unresolved-p0p2-checklist.md`**（22 行 P0–P2 复核结论，去重后 20 条不同问题，配套证据是四份 `_chk_*.md`）。
 - **不要往扩展根目录丢临时文件。** Chrome 拒绝加载任何以 `_` 开头的文件或目录（`Filenames starting with "_" are reserved`），插件会整个加载不了；`release.ps1` 第 1 步也会因为这类条目直接拒绝发版。排查脚本一律写在 `bili_vault_ref` 里，需要跑就用绝对路径调用。
 - `bili_vault_ref` **不是仓库的一部分**，没有 git 历史；里面的脚本大多写死了当时的绝对路径、补丁也早已应用，只能当参考读，别直接重跑。
 

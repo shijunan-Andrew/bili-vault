@@ -152,7 +152,7 @@ chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets, l
 - **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频状态」（`library.html:144` 的 `#updateSelected`），`library.js:5572` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:957` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
 - **上限**：`library.js:2477` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
 - **后台实现**（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。风控的顾虑不是靠「不做批量」解决的，而是靠**确认框 + 80 条上限 + 串行间隔**（`IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`）。**不要再把无确认的单条刷新加回来。**
-- 上面几处行号是 V1.8.19 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
+- 上面几处行号是 V1.8.20 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
 ### CSS 覆盖顺序（4.8.3 的教训）
 
 **同一组件的规则必须写在它的基础规则之后。** 4.7 给 `.import-card` 加橘黄时把新规则写在了 `.import-card > summary { … }` 前面，结果：
