@@ -983,6 +983,7 @@ function reportText(error, context = {}) {
     `发生时间：${formatChineseDateTime(now, true)}`,
     `错误：${error?.message || String(error)}`,
     `错误类型：${error?.name || "未知"}`,
+    ...(context.source ? [`来源：${context.source}`] : []),
     ...(lastRenameFailureNote ? [`最近一次换名覆盖失败：${lastRenameFailureNote}`] : []),
     `视频标题：${metadata.title || "未知"}`,
     `视频链接：${metadata.url || "未知"}`,
@@ -1070,6 +1071,43 @@ async function logError(error, context = {}) {
     console.warn("写入错误报告失败（报告正文仍会返回给调用方）", storageError);
   }
   return { report, reportPath };
+}
+
+// 1.8.23（TODO P2-9）：收藏库 / 设置 / 统计 / 弹窗里抛出来的异常，以前只有一条
+// console.warn，用户看不到、事后也查不了。「001错误报告」原来只有后台自己会写。
+// 这里给页面开一个只写的入口：同一条错误（页面 + 消息 + 栈前两行）24 小时内只留
+// 一份、其余合并计数，正文各截一段，免得同一个循环异常把报告目录刷满 50 份。
+const CLIENT_ERROR_MERGE_MS = 24 * 60 * 60 * 1000;
+const CLIENT_ERROR_MESSAGE_LIMIT = 2000;
+const CLIENT_ERROR_STACK_LIMIT = 4000;
+const CLIENT_ERROR_CACHE_LIMIT = 80;
+const clientErrorSeen = new Map();
+
+function clientErrorSignature(page, message, stack) {
+  const head = String(stack || "").split(/\r?\n/).slice(0, 2).join("\n");
+  return `${page}\n${message}\n${head}`;
+}
+
+async function logClientError(payload) {
+  const page = String(payload?.page || "unknown").slice(0, 40);
+  const message = String(payload?.message || "未知错误").slice(0, CLIENT_ERROR_MESSAGE_LIMIT);
+  const stack = String(payload?.stack || "").slice(0, CLIENT_ERROR_STACK_LIMIT);
+  const signature = clientErrorSignature(page, message, stack);
+  const now = Date.now();
+  const seen = clientErrorSeen.get(signature);
+  if (seen && now - seen.at < CLIENT_ERROR_MERGE_MS) {
+    seen.count += 1;
+    seen.at = now;
+    console.warn(`页面（${page}）又报了一次同样的错，已合并计数（${seen.count} 次），不再重复写报告：${message}`);
+    return { ok: true, merged: true, count: seen.count };
+  }
+  if (clientErrorSeen.size >= CLIENT_ERROR_CACHE_LIMIT) clientErrorSeen.clear();
+  clientErrorSeen.set(signature, { at: now, count: 1 });
+  const error = new Error(message);
+  error.name = "ClientError";
+  if (stack) error.stack = stack;
+  const saved = await logError(error, { source: `页面（${page}）` });
+  return { ok: true, merged: false, reportPath: storageReportLabel(saved.reportPath) };
 }
 
 async function saveFavorite(data) {
@@ -5175,15 +5213,32 @@ async function diffBiliFavoritesInner(data, tabId = null) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "bca-client-error") {
+    // 1.8.23（TODO P2-9）：扩展页的异常也进「001错误报告」（后台负责去重与落盘）
+    logClientError(message.payload).then(sendResponse).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (message?.type === "bca-locale") {
     // 4.5：内容脚本跑在网页里，fetch 扩展资源需要 web_accessible_resources，
     // 而 4.3 起我们不把任何扩展资源暴露给网页。所以由后台代读词典：
     // service worker 读自己的资源不受同源限制。
     const locale = String(message.locale || "");
     if (!/^(zh-TW|en)$/.test(locale)) { sendResponse({ ok: false }); return true; }
+    // 1.8.23（TODO P2-10）：内容脚本会带一份自己用得到的键（content-i18n-keys.js），
+    // 那就只回这些键 —— 别把整本词典塞进每个 B 站视频页。扩展页不带 keys，照旧全量。
+    const wantedKeys = Array.isArray(message.keys)
+      ? message.keys.filter((key) => typeof key === "string" && key.length <= 200).slice(0, 200)
+      : null;
     fetch(chrome.runtime.getURL(`locales/${locale}.json`))
       .then((response) => (response.ok ? response.json() : null))
-      .then((dictionary) => sendResponse({ ok: Boolean(dictionary), dictionary }))
+      .then((dictionary) => {
+        if (!dictionary || !wantedKeys) { sendResponse({ ok: Boolean(dictionary), dictionary }); return; }
+        const pruned = Object.create(null);
+        for (const key of wantedKeys) {
+          if (Object.prototype.hasOwnProperty.call(dictionary, key)) pruned[key] = dictionary[key];
+        }
+        sendResponse({ ok: true, dictionary: pruned, filtered: true });
+      })
       .catch(() => sendResponse({ ok: false }));
     return true;
   }  if (message?.type === "bca-open-library") {

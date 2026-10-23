@@ -247,14 +247,21 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **60 秒定时重扫已移除**（那条 `setInterval` 在 10000 条时每分钟打 12000 次文件系统调用）。触发路径只剩 `focus` / `visibilitychange` / `downloadRevision` 变化。**不要加回来。**
 - **`background.js` 已纳入 i18n 提取器的扫描范围**（`test/i18n-extract.cjs` 的 `SOURCE_FILES`）。它用 `BcaI18n.t("字面量")` + 一个存在性兜底；不纳入扫描的话新词条永远进不了词典——4.9 的 6 条就是这样漏掉过一次。
 
-### 回收站、归档体检与导入断点（1.10.0）
+### 回收站、归档体检与导入断点（1.8.23）
 
 - **删除一律先挪进 `005回收站`**：`recycleCollection()` / `recycleRecords()` 把收藏夹或记录目录整体移到 `005回收站/<YYYYMMDD-HHMMSS>/<收藏夹>[/<目录>]`，同秒撞名追加 `-2`、`-3`。优先用 `DirectoryHandle.move()`；本机不支持时退化成「复制整棵树 → `directoryFingerprint()` 逐文件比 `名字:字节数` → 一致才删源」，不一致抛「复制到回收站后校验不一致，源目录没有删除。」并把源目录留在原地。`pruneRecycler()` 只删名字是 `recycleStamp()` 时间戳、且年龄 ≥ `RECYCLE_KEEP_DAYS = 30` 天的目录，每次扫描结束后 fire-and-forget 跑一次；`purgeRecycler()` 是工具栏「清空回收站」的实现。**任何删除路径都不要再直接 `removeEntry(..., { recursive: true })` 用户的记录目录**——新增删除动作必须走这两个函数，测试会盯着。
 - **`005回收站` / `006报告` 是保留目录**：与 `000视频下载`…`004导出` 同一套名单（`archive-core.js` 的 `RESERVED_COLLECTION_NAMES`、`background.js` 的同名 Set、`library.js` 的扫描跳过 / 新建收藏夹拦截 / `ARCHIVE_RESERVED_DIRS`，共 9 个名字）。扫描不把它们当收藏夹，用户也不能新建同名收藏夹。
 - **归档体检只读**：`writeHealthReport()` 复用 `scanRoot(rootHandle, true)` 的 `diagnostics`（`missingText` / `missingCover` / `brokenText` / `tempFiles`，由 `readArchiveRecord()` 在一次遍历里顺手收集，不额外读盘），写成 `006报告/体检-<YYYYMMDD-HHMMSS>.md`。报告只描述现状、不修任何东西；每类最多列 `HEALTH_REPORT_LIST_LIMIT = 20` 条，多出来的折成「…还有 N 条」。
 - **storage 写入兜底只覆盖关键路径**：`safeLocalSet(patch, label)` 失败等 `STORAGE_WRITE_RETRY_MS = 200` 毫秒重试一次，仍失败写一条 `console.warn` + `lastStorageError`（`{ label, message, at }`）并返回 `false`——**它不抛错**，调用方必须看返回值；`setBcaStatsSnapshot()` 是统计快照专用包装，内部保留 `chrome.storage.local.set({ bcaStats: stats })` 字面量（`stability:5627` 钉着），最终失败才抛。弹窗读 `lastStorageError` 展示「本地存储没写进去」，点「知道了」把键删掉。
 - **导入断点续跑**：中断时 `writeImportResume(snapshot)` 把「收藏夹名 / 页号 / 已写入数 / 总数 / folderIds」写进 `chrome.storage.local` 的 `bcaImportResume`（不含回滚日志与视频正文，重启浏览器仍然在）。弹窗据此显示「继续上次导入」；后台 `importBiliFavoritesInner` 按 `data.resume.folder` 找收藏夹下标，从那个收藏夹起跑。**匹配用的是收藏夹名**：用户中途改名或删掉收藏夹，就回退成从头开始（会写一行说明），不会崩。
-- **版本号只有 `manifest.json` 一处**（1.10.0，P1-6）：`library.html` 的 `#sideVersion` 是空标签，`library.js` 启动时用 `displayVersion(chrome.runtime.getManifest().version)` 填；`release.ps1` 只替换 `manifest.json`，界面与测试里不许再出现硬编码版本号（测试盯着）。
+- **版本号只有 `manifest.json` 一处**（1.8.23，P1-6）：`library.html` 的 `#sideVersion` 是空标签，`library.js` 启动时用 `displayVersion(chrome.runtime.getManifest().version)` 填；`release.ps1` 只替换 `manifest.json`，界面与测试里不许再出现硬编码版本号（测试盯着）。
+
+### 内容脚本词典、页面错误留档、卡片复用与 HISTORY 索引（1.8.23）
+
+- **内容脚本只拿自己用得到的词条**：`content-i18n-keys.js` 在 `i18n.js` 之前加载，把 `globalThis.__BCA_CONTENT_I18N_KEYS` 的 14 条键挂出来；`i18n.js` 的 `contentScriptKeys()` 只在这个全局存在时返回数组，`loadTable()` 把它塞进 `bca-locale` 消息；`background.js` 收到 `keys` 就只回这些键（限 200 条、`filtered: true`）。**白名单必须与 `content.js` 里 `BcaI18n.t("…")` 的字面量逐条一致**（`stability` 钉着）；新增一条界面文字时三处一起改：字面量、白名单、两本词典。
+- **扩展页的异常也进错误报告**：`client-errors.js` 认 `<html data-bca-page>`，装 `error` / `unhandledrejection`，`report()` 10 秒内同签名只发一次（`CLIENT_REPORT_INTERVAL_MS`），消息类型 `bca-client-error`。后台 `logClientError()` 在内存里按「页面 + message + 栈前两行」合并，`CLIENT_ERROR_MERGE_MS = 24h`、缓存上限 80 条；真正落档仍走 `logError()`，报告正文多一行「来源：页面（…）」。**去重表不持久**是刻意的（不往 storage 堆状态）。
+- **视频卡按 `video.id` 复用**：`renderVideos()` 先把当前页记录塞进 `pageVideoById`，再按 id 从 `videoGrid` 现有子节点里找卡片，找不到才 `createVideoCard()`，随后 `updateVideoCard(card, video, query)` 刷内容；顺序不同才逐位 `insertBefore`，多余子节点 `removeChild`。卡片的事件处理器只绑一次，**一律用 `pageVideoById.get(card.dataset.videoId)` 取当前记录**——闭包捕获旧 video 会让筛选后的点击落到上一条记录上。`paintPageCovers()` 仍按页统一读封面。
+- **HISTORY 版本索引**：`scripts/history-index.cjs` 在 `docs/HISTORY.md` 顶部维护「版本 → 行号」表；`--write` 重算、`--check` 验新鲜度，`scripts/check-all.cjs` 第 7 项调它。**行号按 `blockLineCount(rows) = rows + 6` 先占位再回填**，别按插入前的行号直接写。新增/删除版本小节后跑一次 `node scripts/history-index.cjs --write`。
 
 ### 已知限制（4.9 审视结论，未修的部分）
 
@@ -283,10 +290,14 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **卡片用相对时间、详情用绝对时间是刻意分工**（1.8.22 复核，不修）：列表要能一眼扫「刚存的还是很久以前的」，详情要能和磁盘上的目录名逐字对上。**别为了「统一」把两处改成同一种格式。**
 - **统计页的小表每次渲染都重算**（1.8.22 复核，不修）：`normalizeDayRows` 逐渲染重建 Map，`dailyRows` 上限 180 行，常数项远小于缓存 + 失效判断的成本。要改先量 `test/bench.cjs`。
 - **递归删除遇到 junction / symlink 的行为只做过说明、没有自动化断言**（1.8.22）：FSA 的 `removeEntry(..., { recursive: true })` 在不同 Windows 版本上对 junction 的处理无法在 CI 里复现，只能真机验证。删除失败走失败分支并保留现场，不会静默成功。
-- **回收站只按整份 30 天清理，没有「撤销这一条」**（1.10.0）：要提前捞回来只能自己从资源管理器把 `005回收站/<时间戳>/` 下的目录拖回收藏夹；`pruneRecycler()` 只认自己写的时间戳目录名，用户改过名的目录不会被自动清理，也不会被误删。
-- **`safeLocalSet()` 只接了三条关键路径**（1.10.0）：统计镜像、补存登记、统计快照。其余几十处 `chrome.storage.local.set` 仍是裸写——它们失败最多丢一条界面状态，不值得逐个改；新增关键写入时再往 `safeLocalSet` 里接。
-- **归档体检只描述、不修**（1.10.0）：七类问题里「只有骨架」「缺封面」这类含历史遗留的正常现象，报告不做去重也不做合并；每点一次都重新全量扫一遍（8 路并发读）。
-- **`bcaImportResume` 按收藏夹名匹配**（1.10.0）：中途给收藏夹改名或删掉它，续跑就回退成从头开始（会写一行说明）。续跑只保证「不重复写已经有 `视频信息.txt` 的记录」，不保证页内顺序与上次完全一致。
+- **回收站只按整份 30 天清理，没有「撤销这一条」**（1.8.23）：要提前捞回来只能自己从资源管理器把 `005回收站/<时间戳>/` 下的目录拖回收藏夹；`pruneRecycler()` 只认自己写的时间戳目录名，用户改过名的目录不会被自动清理，也不会被误删。
+- **`safeLocalSet()` 只接了三条关键路径**（1.8.23）：统计镜像、补存登记、统计快照。其余几十处 `chrome.storage.local.set` 仍是裸写——它们失败最多丢一条界面状态，不值得逐个改；新增关键写入时再往 `safeLocalSet` 里接。
+- **归档体检只描述、不修**（1.8.23）：七类问题里「只有骨架」「缺封面」这类含历史遗留的正常现象，报告不做去重也不做合并；每点一次都重新全量扫一遍（8 路并发读）。
+- **`bcaImportResume` 按收藏夹名匹配**（1.8.23）：中途给收藏夹改名或删掉它，续跑就回退成从头开始（会写一行说明）。续跑只保证「不重复写已经有 `视频信息.txt` 的记录」，不保证页内顺序与上次完全一致。
+- **页面错误去重只在内存里**（1.8.23）：`clientErrorSeen` 上限 80 条，刷新页面或重启浏览器就清零，同一条错误可能再进一次「001错误报告」。刻意不把去重状态写进 storage——它会随着每次上报增长，且丢了最多多一份报告，不影响正确性。
+- **卡片复用依赖 `video.id` 稳定**（1.8.23）：id 变了（比如目录被改名后重新扫描）就会建新卡、丢焦点，这是可接受的降级；`updateVideoCard()` 每页都会重写标题/角标/时间，不依赖旧闭包。
+- **`content-i18n-keys.js` 是手写白名单**（1.8.23）：`content.js` 新增界面文字时如果忘了加，内容脚本那条会静默回退中文（不报错、不崩），守卫只能发现「白名单与字面量不一致」，发现不了「你本来想给某个词加译文」。
+- **HISTORY 索引要手动重算**（1.8.23）：`--write` 不接在 release.ps1 里（发版第 1 步先比对 tag，插索引会动行号）；发了版忘了跑，`check-all` 会以「版本索引不是最新」失败。
 
 
 ### 图标与外链（4.8.1）
@@ -317,7 +328,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 版本渠道与界面约定（4.7）
 
-- **界面版本号带渠道前缀**：`displayVersion()` 在 `library.js` 与 `popup.js` 各有一份，**必须保持同步**（测试会抽出两份实现比对同一批输入的输出）。改渠道只需把 `RELEASE_CHANNEL` 从 `"beta"` 改成别的值：beta 显示 `beta4.7`（去掉末尾的 `.0`），正式版显示 `V1.0.0`。界面上的版本号字符串以 `manifest.json` 为唯一来源（1.10.0）：`#sideVersion` 在 HTML 里是空标签，启动时由 `library.js` 现读填入。
+- **界面版本号带渠道前缀**：`displayVersion()` 在 `library.js` 与 `popup.js` 各有一份，**必须保持同步**（测试会抽出两份实现比对同一批输入的输出）。改渠道只需把 `RELEASE_CHANNEL` 从 `"beta"` 改成别的值：beta 显示 `beta4.7`（去掉末尾的 `.0`），正式版显示 `V1.0.0`。界面上的版本号字符串以 `manifest.json` 为唯一来源（1.8.23）：`#sideVersion` 在 HTML 里是空标签，启动时由 `library.js` 现读填入。
 - **顶部横幅的跑马灯**由 `buildBannerMarquee()` 在显示横幅后构建、窗口 resize 时重建。它按容器宽度补足份数并保证前后两半等宽（位移 50% 才能无缝）。`library.css` 里有一条 `@media (prefers-reduced-motion: reduce)` 显式豁免——**不要删**：`theme.css` 的全局规则会把动画压成「跑一次就弹回原位」，而 `animation-fill-mode` 默认是 `none`，元素会退回无位移状态，跑马灯就完全不动了。
 - **工具栏的下拉框有固定宽度**（`.video-filter select` 132px、`.sort-select select` 124px）。工具栏是 `justify-content: flex-end` 右对齐的，**如果让 select 宽度跟着选中项文字变，整行都会左右窜**。
 - **颜色令牌新增 `--feature` / `--feature-soft` / `--feature-line`**（橘黄，用于突出「导入或更新」这类主入口）。浅色 `#a5560a`、深色 `#efa45a`，对比度 4.76 / 7.39。深色那两处仍然必须完全一致。

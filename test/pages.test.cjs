@@ -119,7 +119,7 @@ function idsIn(root, selector) {
 async function suiteLibrary() {
   await test("library.html 整页真加载：七个脚本都跑了，侧栏版本号来自 manifest", async () => {
     const page = await openLibrary();
-    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "icons.js", "archive-core.js", "stats-core.js", "library.js", "pet.js"]);
+    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "archive-core.js", "stats-core.js", "library.js", "pet.js"]);
     assert.equal(page.document.getElementById("sideVersion").textContent, "V1.7.23");
     assert.equal(page.warnings.length, 0, `加载期不该有 warning：${page.warnings.join(" | ")}`);
   });
@@ -236,7 +236,7 @@ async function suiteLibrary() {
     await settle(4);
 
     assert.equal(doc.getElementById("confirmBackdrop").hidden, false, "对话框要打开");
-    // 1.10.0（TODO P0-1）：删除改成了「先移进 005回收站」，标题口径跟着换
+    // 1.8.23（TODO P0-1）：删除改成了「先移进 005回收站」，标题口径跟着换
     assert.equal(textOf(doc.getElementById("confirmTitle")), "删除本地归档（先移进回收站）？");
     assert.match(textOf(doc.getElementById("confirmMessage")), /将删除视频目录“/);
     assert.equal(textOf(doc.getElementById("confirmDelete")).length > 0, true);
@@ -667,7 +667,7 @@ async function suitePopup() {
     const chrome = makeChrome({ version: "1.7.23", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
     await settle();
-    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "icons.js", "popup.js"]);
+    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "popup.js"]);
     assert.equal(page.warnings.length, 0, `加载期不该有 warning：${page.warnings.join(" | ")}`);
     assert.ok(page.document.getElementById("lastError"));
     assert.equal(page.document.getElementById("lastError").getAttribute("role"), "alert");

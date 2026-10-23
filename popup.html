@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" data-wallpaper-scope="popup">
+<html lang="zh-CN" data-bca-page="popup" data-wallpaper-scope="popup">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,6 +10,7 @@
   <script src="theme.js"></script>
   <!-- 4.5：i18n.js 要排在页面自己的脚本之前；中文原文就是 key，简体中文不需要词典 -->
   <script src="i18n.js"></script>
+  <script src="client-errors.js"></script>
 </head>
 <body>
   <main>
@@ -177,7 +178,7 @@
            第一屏看到的是「B站收藏夹本地导入报告 / 插件版本 / 提示…」，真正那句失败
            埋在几十行以后。现在：role="alert" 让读屏立刻播报，先给人话摘要，
            报告全文折进 <details>，要发给开发者的人一样拿得到全文。 -->
-      <!-- 1.10.0（TODO P0-3）：chrome.storage 写入兜底失败时，后台把原因记在 lastStorageError。
+      <!-- 1.8.23（TODO P0-3）：chrome.storage 写入兜底失败时，后台把原因记在 lastStorageError。
            这一行是它唯一的出口 —— 别让「设置没存上」在折叠卡片里静默消失。 -->
       <div id="storageErrorRow" class="error-block" role="alert" hidden>
         <div class="error-title"><span data-icon="alert"></span><span data-i18n="本地存储没写进去">本地存储没写进去</span></div>

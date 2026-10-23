@@ -68,6 +68,21 @@
     );
   }
 
+  // 1.8.23（TODO P2-10）：内容脚本在 i18n.js 之前还会加载 content-i18n-keys.js，
+  // 声明它自己真正用得到的十几条文案。这里把这份键表一起发给后台，只取回这些键 ——
+  // 以前每个 B 站视频页都会把整本词典（1000+ 条）读进内存，而 content.js 只用十几条。
+  // 扩展页没有这个全局，照旧取整本。
+  function contentScriptKeys() {
+    try {
+      const keys = globalThis.__BCA_CONTENT_I18N_KEYS;
+      if (!Array.isArray(keys) || !keys.length) return null;
+      const cleaned = keys.filter((key) => typeof key === "string" && key);
+      return cleaned.length ? cleaned : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function loadTable(locale) {
     if (locale === DEFAULT_LOCALE) return Object.create(null);
     try {
@@ -76,8 +91,12 @@
       // （否则 B 站页面能把收藏库嵌进 iframe 做点击劫持）。
       // 所以内容脚本改由后台代取词典——service worker 读自己的资源不受此限。
       if (!inExtensionPage()) {
+        const contentKeys = contentScriptKeys();
+        const request = contentKeys
+          ? { type: "bca-locale", locale, keys: contentKeys }
+          : { type: "bca-locale", locale };
         const response = await withTimeout(
-          chrome.runtime.sendMessage({ type: "bca-locale", locale }),
+          chrome.runtime.sendMessage(request),
           LOCALE_REQUEST_TIMEOUT_MS
         );
         const dictionary = response?.ok ? response.dictionary : null;

@@ -736,7 +736,7 @@ async function refreshStatus() {
   const folderLabel = rootHandle?.name || "";
   folderName.textContent = folderLabel || BcaI18n.t("尚未选择文件夹");
   folderName.classList.toggle("unselected", !folderLabel);
-  /* 1.10.0（TODO P0-3）：background 的 safeLocalSet 重试一次仍失败时会把原因写进
+  /* 1.8.23（TODO P0-3）：background 的 safeLocalSet 重试一次仍失败时会把原因写进
      lastStorageError。这里是它唯一的展示位；关掉弹窗也不会自动清，点「知道了」才清。 */
   if (status.lastStorageError) {
     const storageError = status.lastStorageError;

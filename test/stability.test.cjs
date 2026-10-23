@@ -5140,7 +5140,7 @@ test("背景图存 IndexedDB 的 Blob，不进 chrome.storage（静态回归）"
 
   // 弹窗不铺背景图：靠 <html data-wallpaper-scope="popup"> 认出来；
   // 而且「页面让出底色」那条规则要放过它，否则弹窗只剩浏览器窗口色。
-  assert.match(readProjectFile("popup.html"), /<html lang="zh-CN" data-wallpaper-scope="popup">/);
+  assert.match(readProjectFile("popup.html"), /<html lang="zh-CN"[^>]*data-wallpaper-scope="popup">/);
   assert.match(theme, /dataset\.wallpaperScope === "popup"/);
   assert.match(
     css,
@@ -6209,7 +6209,7 @@ test("扫描不再为了先知道总数多枚举一遍，下载索引也有缓�
   assert.match(body, /const knownTotal = lastScanRecordCount\.get\(cacheKey\) \|\| 0;/);
   assert.match(body, /if \(stats\.total < stats\.processed\) stats\.total = stats\.processed;/, "估少了就地扩容");
   assert.match(body, /rememberArchiveCacheLimit\(cacheKey, stats\.total\);/, "扫完把真条数记下来");
-  // 1.10.0（P0-2）：返回值中间多了 diagnostics（归档体检要用），所以这里只核首尾
+  // 1.8.23（P0-2）：返回值中间多了 diagnostics（归档体检要用），所以这里只核首尾
   assert.match(body, /return \{ collections: scanned, issues, unfinished, longNames,/, "longNames（和 1.8.5 的 forced 标记）要带回界面");
   assert.match(body, /forced, stats: \{ hits: stats\.hits, reads: stats\.reads, total: stats\.total, bytes: stats\.bytes \} \};/, "forced 与 stats 必须原样带回界面");
   assert.match(body, /scanDownloadedDirectories\(handle, \{ force: forceFullScan \}\)/, "手动刷新要强制重算下载索引");
@@ -6312,7 +6312,8 @@ test("V1.8.6：封面只在要显示时才读，扫描阶段不再把整库封�
   assert.match(library, /async function hydrateCover\(video\) \{/, "封面按需加载");
   assert.match(library, /async function coverEntryFor\(recordEntry\) \{/);
   assert.match(library, /function paintPageCovers\(pageCards\) \{/, "一页建好之后再去读封面");
-  assert.match(library, /paintPageCovers\(pageCards\);/, "renderVideos 要真的调它");
+  assert.match(library, /paintPageCovers\(pageCards\.map\(\(card, index\) => \(\{ card, video: pageVideos\[index\] \}\)\)\);/,
+    "renderVideos 要真的调它（1.8.23 起传的是复用后的卡片数组）");
   // videoFromArchiveRecord 不再持有扫描期 URL
   const toVideo = sliceBetween(library, "function videoFromArchiveRecord(", "/* ---------------- 4.6：扫描进度提示");
   assert.ok(toVideo, "videoFromArchiveRecord 要还在");
@@ -6532,7 +6533,7 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
   // ReferenceError（数据其实已经存好了，用户却看到「导入失败」）。必须是两空格缩进的函数作用域，
   // 而且要在收藏夹循环之前。
   assert.match(backgroundCode, /^ {2}const importLimit = Math\.max\(0, Number\(data\?\.limit\) \|\| 0\);$/m, "importLimit 要声明在函数作用域里（两空格缩进），不能藏在循环里");
-  // 1.10.0（TODO P1-7）：循环起点改成 startFolderIndex（「继续上次导入」从断点那一段开始），
+  // 1.8.23（TODO P1-7）：循环起点改成 startFolderIndex（「继续上次导入」从断点那一段开始），
   // importLimit 与起点都必须在收藏夹循环之前声明。
   assert.ok(backgroundCode.indexOf("let startFolderIndex = 0;") < backgroundCode.indexOf("for (let folderIndex = startFolderIndex;"),
     "startFolderIndex 要先声明，收藏夹循环才能用");
@@ -6752,7 +6753,7 @@ test("内容没变就不重建网格：快照画完再扫一遍时页面不该�
   assert.match(body, /if \(\s*renderSignature === lastVideoRenderSignature/, "签名相同就短路");
   assert.match(body, /paintPageCovers\(pageVideos\.map\(/, "短路时只补封面");
   const shortAt = body.indexOf("renderSignature === lastVideoRenderSignature");
-  const rebuildAt = body.indexOf("videoGrid.replaceChildren(");
+  const rebuildAt = body.indexOf("videoGrid.insertBefore(");
   assert.ok(shortAt > 0 && rebuildAt > shortAt, "短路必须发生在重建网格之前");
 });
 
@@ -7249,7 +7250,7 @@ test("卸载脚本收掉空的父目录，并说清 -SkipRegistry 留下的键�
   assert.match(uninstall, /注册表项按 -SkipRegistry 保留着/, "要说清残留的键指向已删清单");
 });
 
-// ---- 1.10.0（TODO.md P0/P1）：回收站、归档体检、storage 兜底、继续上次导入、设置页测试、读屏细节 ----
+// ---- 1.8.23（TODO.md P0/P1）：回收站、归档体检、storage 兜底、继续上次导入、设置页测试、读屏细节 ----
 
 test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", () => {
   const library = readProjectFile("library.js");
@@ -7375,4 +7376,82 @@ test("结果计数会播报，宠物挂件不挡读屏与 Tab（TODO P1-5）", (
   assert.equal(pet.includes("button.tabIndex = visible ? 0 : -1;"), false,
     "applyVisibility 不许再把 tabindex 顶回 0");
   assert.match(readProjectFile(path.join("test", "pages.test.cjs")), /结果计数会播报、宠物挂件不挡读屏与 Tab/);
+});
+
+// ---- 1.8.23：P2（内容词典裁剪、页面错误留档、卡片按 video.id 复用、HISTORY 版本索引） ----
+
+test("内容脚本只向后台要自己用得到的词条，后台也只回这些键（P2-10）", () => {
+  const content = readProjectFile("content.js");
+  const used = new Set([...content.matchAll(/BcaI18n\.t\("((?:[^"\\]|\\.)*)"\)/g)].map((match) => match[1]));
+  assert.ok(used.size >= 10, `content.js 里的字面量太少（${used.size}），正则可能没生效`);
+  const whitelist = readProjectFile("content-i18n-keys.js");
+  assert.ok(whitelist.includes("__BCA_CONTENT_I18N_KEYS"), "词表文件要挂 __BCA_CONTENT_I18N_KEYS");
+  const arraySource = whitelist.slice(whitelist.indexOf("__BCA_CONTENT_I18N_KEYS"), whitelist.lastIndexOf("]"));
+  const keys = [...arraySource.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) => match[1]);
+  assert.deepEqual(new Set(keys), used, "content-i18n-keys.js 必须与 content.js 用到的字面量逐条一致");
+
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  const videoGroup = manifest.content_scripts.find((group) => group.js.includes("content.js"));
+  assert.deepEqual(videoGroup.js, ["content-i18n-keys.js", "i18n.js", "content.js"], "词表必须在 i18n.js 之前加载");
+  const favGroup = manifest.content_scripts.find((group) => group.js.includes("favorites-import.js"));
+  assert.ok(favGroup && favGroup.js.includes("content-i18n-keys.js") === false, "收藏夹导入用不到这份词表");
+
+  const i18n = readProjectFile("i18n.js");
+  assert.match(i18n, /function contentScriptKeys\(\)/);
+  assert.match(i18n, /keys: contentKeys/, "内容脚本要把键表一起发给后台");
+  const background = readProjectFile("background.js");
+  assert.match(background, /const wantedKeys = Array\.isArray\(message\.keys\)/);
+  assert.match(background, /sendResponse\(\{ ok: true, dictionary: pruned, filtered: true \}\)/, "后台要按 keys 裁剪词典");
+});
+
+test("扩展页的异常也进 001错误报告，同一条 24 小时只留一份（P2-9）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const CLIENT_ERROR_MERGE_MS = 24 \* 60 \* 60 \* 1000;/);
+  assert.match(background, /async function logClientError\(payload\) \{/);
+  assert.match(background, /if \(seen && now - seen\.at < CLIENT_ERROR_MERGE_MS\)/);
+  assert.match(background, /if \(message\?\.type === "bca-client-error"\)/);
+  assert.match(background, /\.\.\.\(context\.source \? \[`来源：\$\{context\.source\}`\] : \[\]\),/);
+  const helper = readProjectFile("client-errors.js");
+  assert.match(helper, /CLIENT_REPORT_INTERVAL_MS = 10000;/);
+  assert.match(helper, /addEventListener\("unhandledrejection"/);
+  assert.match(helper, /dataset\?\.bcaPage/);
+  const pages = [["library", "library.html"], ["settings", "settings.html"], ["stats", "stats.html"], ["popup", "popup.html"], ["tutorial", "tutorial.html"], ["guide", "guide.html"]];
+  for (const [page, file] of pages) {
+    const html = readProjectFile(file);
+    assert.match(html, new RegExp(`data-bca-page="${page}"`), `${file} 要认领自己的页面名`);
+    const i18nAt = html.indexOf('<script src="i18n.js"></script>');
+    const errorsAt = html.indexOf('<script src="client-errors.js"></script>');
+    assert.ok(i18nAt >= 0 && errorsAt > i18nAt, `${file} 要在 i18n.js 之后加载 client-errors.js`);
+  }
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  for (const group of manifest.content_scripts) {
+    assert.equal(group.js.includes("client-errors.js"), false, "内容脚本不加载页面错误上报");
+  }
+});
+
+test("翻页/筛选按 video.id 复用卡片，不再整块重建（P2-8）", () => {
+  const source = readProjectFile("library.js");
+  assert.match(source, /let pageVideoById = new Map\(\);/);
+  assert.match(source, /function createVideoCard\(\) \{/);
+  assert.match(source, /function updateVideoCard\(card, video, query\) \{/);
+  assert.match(source, /const card = existingCards\.get\(video\.id\) \|\| createVideoCard\(\);/);
+  assert.match(source, /videoGrid\.insertBefore\(card, current \|\| null\);/);
+  assert.match(source, /paintPageCovers\(pageCards\.map\(\(card, index\) => \(\{ card, video: pageVideos\[index\] \}\)\)\);/);
+  assert.equal(source.includes("videoGrid.replaceChildren(...pageCards"), false, "不许再整块 replaceChildren 建卡");
+  assert.match(source, /const video = pageVideoById\.get\(card\.dataset\.videoId\);/, "卡片事件要按 id 取当前记录，别闭包捕获旧 video");
+});
+
+test("HISTORY 有脚本生成的版本索引，check-all 会验它是不是最新（P2-11）", () => {
+  const script = readProjectFile(path.join("scripts", "history-index.cjs"));
+  assert.match(script, /const START_MARK = "<!-- history-index:start -->";/);
+  assert.match(script, /function check\(\) \{/);
+  assert.match(script, /module\.exports = \{ check, withFreshBlock, collectSections, START_MARK, END_MARK \};/);
+  const history = readProjectFile(path.join("docs", "HISTORY.md"));
+  assert.ok(history.includes("<!-- history-index:start -->") && history.includes("<!-- history-index:end -->"), "HISTORY 里要有索引标记");
+  const index = require(path.join(projectRoot, "scripts", "history-index.cjs"));
+  const result = index.check();
+  assert.equal(result.ok, true, result.message);
+  const checkAll = readProjectFile(path.join("scripts", "check-all.cjs"));
+  assert.match(checkAll, /function checkHistoryIndex\(\)/);
+  assert.match(checkAll, /historyIndex\.check\(\)/);
 });

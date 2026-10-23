@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-bca-page="library">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="pet.css">
   <script src="theme.js"></script>
   <script src="i18n.js"></script>
+  <script src="client-errors.js"></script>
 </head>
 <body>
   <!-- 4.5.2：开源横幅。仓库地址在业务脚本的 PROJECT_REPO_URL 常量里改，一处即可 -->
@@ -56,9 +57,9 @@
           <!-- 1.7.30（路线图第 2 项）：把整个归档的元数据导成单个 JSON，写进归档根目录的 004导出/。 -->
           <button id="exportArchive" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="download"></span><span data-i18n="导出归档元数据">导出归档元数据</span></button>
           <button id="convertCoverPng" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="download"></span><span data-i18n="把老 PNG 封面转成 WebP">把老 PNG 封面转成 WebP</span></button>
-          <!-- 1.10.0（TODO P0-2）：把扫描出来的问题落成一份只读报告，写进归档根目录的 006报告/。 -->
+          <!-- 1.8.23（TODO P0-2）：把扫描出来的问题落成一份只读报告，写进归档根目录的 006报告/。 -->
           <button id="healthCheck" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="shield"></span><span data-i18n="归档体检">归档体检</span></button>
-          <!-- 1.10.0（TODO P0-1）：删除先进 005回收站，这里给一个「现在就清空」的出口。 -->
+          <!-- 1.8.23（TODO P0-1）：删除先进 005回收站，这里给一个「现在就清空」的出口。 -->
           <button id="purgeRecycler" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="trash"></span><span data-i18n="清空回收站">清空回收站</span></button>
           <input id="configFileInput" type="file" accept="application/json,.json" hidden>
         </div>

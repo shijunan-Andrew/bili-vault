@@ -17,6 +17,7 @@
  *   4. test/i18n-extract.cjs --check（缺词条、多余词条都算失败；1.7.34 已把多余清零）
  *   5. 三份文档的 <!-- i18n-count:N --> 与实际词典条数一致
  *   6. 三份文档的 <!-- test-count:N --> 与 stability.test.cjs 的 test() 项数一致
+ *   7. docs/HISTORY.md 的「版本 → 起始行」索引是最新的（1.8.23，TODO P2-11）
  *
  * 刻意不做的事：Windows 专属自检（test-native-folder-opener.ps1、csc 编译原生助手）不进
  * 这里，它们只能在真机上跑；CI 是 ubuntu-latest，那些检查留给人肉验证（见 SMOKE_TEST.md）。
@@ -262,6 +263,23 @@ function checkDocTestCount() {
   return ok(`三处文档都记着 ${real} 项`);
 }
 
+// ───────── 7. HISTORY 的版本索引 ─────────
+//
+// 1.8.23（TODO P2-11）：HISTORY 两千多行，发版第 1 步要拿 git tag 逐条比对「这一版
+// 有没有小节」。索引由 scripts/history-index.cjs 生成，这里只负责问一句「过期了吗」——
+// 忘了重排的话发版会被这一步拦住，而不是让人肉去翻文件。
+function checkHistoryIndex() {
+  section("HISTORY 的版本索引…");
+  const historyIndex = require("./history-index.cjs");
+  const result = historyIndex.check();
+  if (!result.ok) {
+    bad(result.message);
+    note("改法：node scripts/history-index.cjs --write");
+    return undefined;
+  }
+  return ok(result.message);
+}
+
 function main() {
   checkSyntax();
   for (const [label, file] of SUITES) checkSuite(label, file);
@@ -270,6 +288,7 @@ function main() {
   reportOrphans();
   checkDocDictionary();
   checkDocTestCount();
+  checkHistoryIndex();
   console.log("");
   if (failed) {
     console.log(`[FAIL] 检查未通过（${failures.length} 处），修好之后重新跑：node scripts/check-all.cjs`);

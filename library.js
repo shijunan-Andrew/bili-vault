@@ -201,6 +201,9 @@ let upFilter = "all";
 let tagFilter = "all";
 let selectedVideoIds = new Set();
 let visibleVideoIds = [];
+// 1.8.23（TODO P2-8）：当前页卡片复用的查表（video.id -> 当前这条记录）。
+// 卡片节点现在会跨翻页复用，事件监听器只绑一次，靠这张表拿当前数据。
+let pageVideoById = new Map();
 /* 1.8.14：上一次网格/侧栏是照着什么内容画出来的。
    打开收藏库时「快照先画一遍、整库扫完再画一遍」，即使两次内容一模一样也会整块重建
    DOM —— 真机上看到的就是「页面闪两下」。内容签名相同就只补当前页还缺的封面。 */
@@ -1183,7 +1186,7 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   const scanned = [];
   const issues = [];
   const unfinished = [];
-  // 1.10.0（TODO P0-2）：归档体检查的是「扫描时被悄悄跳过的东西」——缺 视频信息.txt、
+  // 1.8.23（TODO P0-2）：归档体检查的是「扫描时被悄悄跳过的东西」——缺 视频信息.txt、
   // 有 txt 却没封面、txt 里没有【基本信息】、以及写盘留下的点号 .tmp。平时它们不影响
   // 列表，但恰恰是档案出问题的地方。
   const diagnostics = { missingText: [], missingCover: [], brokenText: [], tempFiles: [] };
@@ -1298,7 +1301,7 @@ function recycledSuffix(paths) {
   return BcaI18n.t("已移到 {path}（{days} 天后自动清理），这段时间里还能自己捞回来。", { path: label, days: RECYCLE_KEEP_DAYS });
 }
 
-/* 1.10.0（TODO P0-2）：归档体检 = 重新扫一遍 + 把「平时被悄悄跳过的东西」写成一份
+/* 1.8.23（TODO P0-2）：归档体检 = 重新扫一遍 + 把「平时被悄悄跳过的东西」写成一份
    只读 Markdown，放进归档根目录的 006报告/。不修任何东西，也不碰 B 站。 */
 async function writeHealthReport() {
   if (!rootHandle) {
@@ -1375,7 +1378,7 @@ async function writeHealthReport() {
   }
 }
 
-/* 1.10.0（TODO P0-1）：清空回收站 = 把 005回收站 里所有时间戳目录整批删掉。 */
+/* 1.8.23（TODO P0-1）：清空回收站 = 把 005回收站 里所有时间戳目录整批删掉。 */
 async function emptyRecycler() {
   if (!rootHandle) {
     showToast(BcaI18n.t("先选择本地备份文件夹，再看回收站。"));
@@ -2000,82 +2003,30 @@ function renderVideos() {
     : query || upFilter !== "all" || tagFilter !== "all" ? BcaI18n.t("{shown} / {total} 个视频", { shown: formatCountText(matching.length), total: formatCountText(videos.length) }) : BcaI18n.t("{count} 个视频", { count: formatCountText(videos.length) });
   const pageLabel = pageCount > 1 ? ` · ${BcaI18n.t("第 {page}/{pages} 页", { page: currentPage, pages: pageCount })}` : "";
   resultSummary.textContent = (selectedCollection === "*" ? BcaI18n.t("{count}，来自 {collections} 个收藏夹", { count: countLabel, collections: formatCountText(collections.length) }) : countLabel) + pageLabel;
-  // 1.8.6：先把卡片都建好，再一页一页地补封面（见 paintPageCovers）
+  // 1.8.23（TODO P2-8）：卡片按 video.id 复用 —— 翻页/筛选/排序只更新变化的内容，
+  // 不再整块 replaceChildren。旧做法每次重建 25 张卡，焦点、滚动位置、已经解码的
+  // 封面全丢；现在同一个 id 拿回同一张 DOM 节点，顺序变了才 insertBefore 挪一下。
+  pageVideoById = new Map(pageVideos.map((video) => [video.id, video]));
+  const existingCards = new Map();
+  for (const child of [...videoGrid.children]) {
+    if (child.dataset?.videoId) existingCards.set(child.dataset.videoId, child);
+  }
   const pageCards = pageVideos.map((video) => {
-    const card = document.createElement("article");
-    card.className = "video-card";
-    card.classList.toggle("invalid-video", video.isInvalid);
-    card.classList.toggle("downloaded-video", video.downloaded);
-    card.dataset.videoId = video.id;
-    card.classList.toggle("selected", selectedVideoIds.has(video.id));
-    card.tabIndex = 0;
-    card.setAttribute("role", "button");
-    card.setAttribute("aria-label", selectionMode ? BcaI18n.t("选择视频：{title}", { title: video.title }) : BcaI18n.t("查看视频：{title}", { title: video.title }));
-    card.innerHTML = `<div class="card-cover">${safeCover(video.cover)}<span class="invalid-badge">${escapeHtml(BcaI18n.t("已失效"))}</span><span class="downloaded-badge"${video.downloaded ? "" : " hidden"}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("已下载"))}</span><span class="cover-badge"></span><span class="cover-views tnum" hidden></span><input class="card-select" type="checkbox" aria-label="${escapeHtml(BcaI18n.t("选择视频"))}"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date tnum"></span></div></div>`;
-    const checkbox = card.querySelector(".card-select");
-    checkbox.checked = selectedVideoIds.has(video.id);
-    checkbox.addEventListener("click", (event) => event.stopPropagation());
-    checkbox.addEventListener("change", () => setVideoSelected(video.id, checkbox.checked));
-    card.querySelector(".cover-badge").textContent = video.collection;
-    // 4.5：播放量放在封面右下角，没有数据的记录不显示
-    const viewsBadge = card.querySelector(".cover-views");
-    const viewsText = formatCount(video.stats?.view);
-    if (viewsText) {
-      viewsBadge.textContent = `${viewsText} ${BcaI18n.t("播放")}`;
-      viewsBadge.hidden = false;
-    }
-    card.querySelector(".card-title").innerHTML = highlightMatches(video.title, query);
-    // 失效视频的副标题位置改说原因：有原因就「已失效 · UP主自行删除」，
-    // 老存档没写原因就只显示「已失效」。有效视频一个字都不变。
-    card.querySelector(".card-up").textContent = video.isInvalid
-      ? (video.invalidReason ? `${BcaI18n.t("已失效")} · ${video.invalidReason}` : BcaI18n.t("已失效"))
-      : (video.upName || video.bvid || BcaI18n.t("本地收藏视频"));
-    // 4.6：卡片上显示相对时间，完整时间放到 title 上（详情面板保持原样）
-    // ux P2-11：完整时间原来**只**写在 card.title 上 —— title 读屏不播报、也不能键盘聚焦，
-    //   读屏用户永远拿不到精确收藏时间。这里换成真正的 <time datetime>，并把完整时间放进
-    //   它的 aria-label。卡片是 role=button + tabindex=0，聚焦时计算可访问名会把子元素的
-    //   aria-label 一起读出来，所以键盘与读屏都能拿到；title 只留作鼠标悬停的视觉补充。
-    const dateText = relativeTime(video.favoriteAt);
-    const dateCell = card.querySelector(".card-date");
-    if (dateText) {
-      const stampText = `${video.favoriteAt}（${compactDate(video.favoriteAt)}）`;
-      const raw = String(video.favoriteAt || "");
-      const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw) ? raw.replace(" ", "T")
-        : (/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "");
-      const stamp = document.createElement("time");
-      if (iso) stamp.dateTime = iso;
-      stamp.textContent = dateText;
-      stamp.title = stampText;
-      stamp.setAttribute("aria-label", stampText);
-      dateCell.textContent = "";
-      dateCell.appendChild(stamp);
-      card.title = stampText;
-    } else {
-      dateCell.textContent = dateText;
-    }
-    card.addEventListener("click", (event) => {
-      if (!selectionMode) { openDetail(video, card); return; }
-      if (event.shiftKey) { selectVideoRange(video.id); return; }
-      lastSelectedVideoId = video.id;
-      setVideoSelected(video.id, !selectedVideoIds.has(video.id));
-    });
-    card.addEventListener("keydown", (event) => {
-      if (event.target !== card) return;
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        if (selectionMode) setVideoSelected(video.id, !selectedVideoIds.has(video.id));
-        else openDetail(video, card);
-        return;
-      }
-      // 4.6：方向键在卡片间移动焦点。左右按顺序走，上下按当前列数跳行；
-      // 输入框/下拉框里的事件不会走到这里（event.target !== card）。
-      if (!ARROW_KEYS.has(event.key)) return;
-      if (moveCardFocus(event.key)) event.preventDefault();
-    });
-    return { card, video };
+    const card = existingCards.get(video.id) || createVideoCard();
+    updateVideoCard(card, video, query);
+    return card;
   });
-  videoGrid.replaceChildren(...pageCards.map((entry) => entry.card));
-  paintPageCovers(pageCards);
+  // 顺序没变就一点 DOM 都不动；变了才 insertBefore 挪（不 detach 整块，焦点不丢）
+  const orderMatches = videoGrid.children.length === pageCards.length
+    && pageCards.every((card, index) => videoGrid.children[index] === card);
+  if (!orderMatches) {
+    pageCards.forEach((card, index) => {
+      const current = videoGrid.children[index];
+      if (current !== card) videoGrid.insertBefore(card, current || null);
+    });
+    for (const stale of [...videoGrid.children].slice(pageCards.length)) videoGrid.removeChild(stale);
+  }
+  paintPageCovers(pageCards.map((card, index) => ({ card, video: pageVideos[index] })));
   emptySearch.hidden = matching.length > 0 || videos.length === 0;
   if (!matching.length && videos.length) {
     emptySearch.querySelector("h2").textContent = videoFilter === "invalid" ? BcaI18n.t("没有已失效视频") : videoFilter === "downloaded" ? BcaI18n.t("没有已下载视频") : BcaI18n.t("没有找到相关视频");
@@ -2098,6 +2049,87 @@ function renderVideos() {
   }
   renderPager(matching.length);
   updateBatchControls();
+}
+
+/* 1.8.23（TODO P2-8）：卡片骨架只建一次，之后的翻页/筛选/排序只走 updateVideoCard 改内容。
+   事件监听器也只绑一次：闭包里不再捕获某一条 video 对象，而是每次用 card.dataset.videoId
+   去 pageVideoById 里取「现在挂在这张卡上的那一条」—— 否则复用节点后点开的会是旧数据。 */
+function createVideoCard() {
+  const card = document.createElement("article");
+  card.className = "video-card";
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  card.innerHTML = `<div class="card-cover">${safeCover("")}<span class="invalid-badge">${escapeHtml(BcaI18n.t("已失效"))}</span><span class="downloaded-badge" hidden>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("已下载"))}</span><span class="cover-badge"></span><span class="cover-views tnum" hidden></span><input class="card-select" type="checkbox" aria-label="${escapeHtml(BcaI18n.t("选择视频"))}"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date tnum"></span></div></div>`;
+  const checkbox = card.querySelector(".card-select");
+  checkbox.addEventListener("click", (event) => event.stopPropagation());
+  checkbox.addEventListener("change", () => {
+    const video = pageVideoById.get(card.dataset.videoId);
+    if (video) setVideoSelected(video.id, checkbox.checked);
+  });
+  card.addEventListener("click", (event) => {
+    const video = pageVideoById.get(card.dataset.videoId);
+    if (!video) return;
+    if (!selectionMode) { openDetail(video, card); return; }
+    if (event.shiftKey) { selectVideoRange(video.id); return; }
+    lastSelectedVideoId = video.id;
+    setVideoSelected(video.id, !selectedVideoIds.has(video.id));
+  });
+  card.addEventListener("keydown", (event) => {
+    if (event.target !== card) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const video = pageVideoById.get(card.dataset.videoId);
+      if (!video) return;
+      if (selectionMode) setVideoSelected(video.id, !selectedVideoIds.has(video.id));
+      else openDetail(video, card);
+      return;
+    }
+    // 4.6：方向键在卡片间移动焦点（输入框/下拉框里的按键不会走到这里）
+    if (!ARROW_KEYS.has(event.key)) return;
+    if (moveCardFocus(event.key)) event.preventDefault();
+  });
+  return card;
+}
+
+function updateVideoCard(card, video, query) {
+  card.dataset.videoId = video.id;
+  card.classList.toggle("invalid-video", video.isInvalid);
+  card.classList.toggle("downloaded-video", video.downloaded);
+  card.classList.toggle("selected", selectedVideoIds.has(video.id));
+  card.setAttribute("aria-label", selectionMode ? BcaI18n.t("选择视频：{title}", { title: video.title }) : BcaI18n.t("查看视频：{title}", { title: video.title }));
+  const checkbox = card.querySelector(".card-select");
+  checkbox.checked = selectedVideoIds.has(video.id);
+  card.querySelector(".cover-badge").textContent = video.collection;
+  card.querySelector(".downloaded-badge").hidden = !video.downloaded;
+  // 4.5：播放量放在封面右下角，没有数据的记录不显示
+  const viewsBadge = card.querySelector(".cover-views");
+  const viewsText = formatCount(video.stats?.view);
+  viewsBadge.textContent = viewsText ? `${viewsText} ${BcaI18n.t("播放")}` : "";
+  viewsBadge.hidden = !viewsText;
+  card.querySelector(".card-title").innerHTML = highlightMatches(video.title, query);
+  // 失效视频的副标题位置改说原因；有效视频一个字都不变。
+  card.querySelector(".card-up").textContent = video.isInvalid
+    ? (video.invalidReason ? `${BcaI18n.t("已失效")} · ${video.invalidReason}` : BcaI18n.t("已失效"))
+    : (video.upName || video.bvid || BcaI18n.t("本地收藏视频"));
+  // 4.6：卡片上显示相对时间，完整时间放进 <time aria-label>（ux P2-11）
+  const dateText = relativeTime(video.favoriteAt);
+  const dateCell = card.querySelector(".card-date");
+  if (dateText) {
+    const stampText = `${video.favoriteAt}（${compactDate(video.favoriteAt)}）`;
+    const raw = String(video.favoriteAt || "");
+    const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw) ? raw.replace(" ", "T")
+      : (/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "");
+    const stamp = document.createElement("time");
+    if (iso) stamp.dateTime = iso;
+    stamp.textContent = dateText;
+    stamp.title = stampText;
+    stamp.setAttribute("aria-label", stampText);
+    dateCell.replaceChildren(stamp);
+    card.title = stampText;
+  } else {
+    dateCell.textContent = "";
+    card.removeAttribute("title");
+  }
 }
 
 /* ---------------- 4.1：分页与视图切换 ---------------- */
@@ -2461,7 +2493,7 @@ async function exportArchiveMetadata() {
    002同步报告 / 003database / 004导出、视频信息.txt，以及用户自己放进去的文件，一个都不碰。 */
 const ARCHIVE_RESERVED_DIRS = ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出", "005回收站", "006报告"];
 
-/* 1.10.0（TODO P0-1）：删除不再直接 removeEntry —— 要删的目录先整体挪进
+/* 1.8.23（TODO P0-1）：删除不再直接 removeEntry —— 要删的目录先整体挪进
    本地备份文件夹里的 005回收站/<时间戳>/<收藏夹>/<目录>，30 天后（或用户点
    「清空回收站」时）才真正从磁盘删掉。挪动优先用 handle.move()（一次换名、
    零复制）；本机不支持时才退回「复制 → 逐文件校验 → 才删源」，与搬归档的规矩一致。 */
@@ -4819,7 +4851,7 @@ async function confirmPendingDelete() {
     // ReferenceError: Cannot access 'downloadCleanupNotes' before initialization。
     // 它被下面的 catch 接住，用户看到「删除失败」——而文件其实已经删掉了（更吓人）。
     const downloadCleanupNotes = [];
-    // 1.10.0（TODO P0-1）：这次删除在回收站里的落点，结果弹窗要告诉用户去哪捞
+    // 1.8.23（TODO P0-1）：这次删除在回收站里的落点，结果弹窗要告诉用户去哪捞
     const recycledPaths = [];
     if (deleteDownloads && !downloadParent) {
       downloadCleanupNotes.push(BcaI18n.t("没找到下载文件夹（000视频下载），关联的下载文件这次一个都没动。"));
@@ -4827,7 +4859,7 @@ async function confirmPendingDelete() {
     let batchResult = null;
     if (action.type === "collection") {
       if (deleteProgress) deleteProgress.textContent = BcaI18n.t("正在删除收藏夹「{name}」及其中的文件…（这一步不能中途取消，以免删到一半）", { name: action.collection.name });
-      // 1.10.0（P0-1）：不再直接 removeEntry —— 整个收藏夹先挪进 005回收站/<时间戳>/。
+      // 1.8.23（P0-1）：不再直接 removeEntry —— 整个收藏夹先挪进 005回收站/<时间戳>/。
       // （move() 优先、复制+校验+删源兜底，见 moveDirectoryInto。）
       recycledPaths.push(await recycleCollection(rootHandle, action.collection.name));
       if (selectedCollection === action.collection.name) selectedCollection = "*";
@@ -5540,7 +5572,7 @@ async function displayRoot(handle, collectionToSelect = "*", toastVerb = BcaI18n
   if (result.stats?.total) lastScanRecordCount.set(rootCacheKey(handle), result.stats.total);
   // 1.8.5：把这一轮结果写成快照，下次打开先把界面填起来（异步，不等）
   saveScanSnapshot(handle, result.collections);
-  // 1.10.0（TODO P0-1）：顺手清一眼回收站里过期的（保留 30 天），失败不影响这次扫描
+  // 1.8.23（TODO P0-1）：顺手清一眼回收站里过期的（保留 30 天），失败不影响这次扫描
   pruneRecycler(handle)
     .then((removed) => { if (removed) console.info(`回收站里 ${removed} 个过期目录已清理`); })
     .catch((error) => console.warn("回收站过期清理失败（下次扫描再试）", error));

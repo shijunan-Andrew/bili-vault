@@ -137,9 +137,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.8.22 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.0：删除先进回收站、归档体检、导入断点续跑
+## V1.8.23：删除先进回收站、归档体检、断点续跑、翻页不再重建
 
-这版把 TODO 里的三条 P0 与四条 P1 做完了（`library.js` 拆分按你的要求没动）。
+这版把 TODO 里的三条 P0、四条 P1 与四条 P2 都做完了（`library.js` 拆分按你的要求没动）。
 
 **你会感觉到的几处**
 
@@ -151,7 +151,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **键盘与读屏**：视频卡片能 Tab 到、Enter/Space 打开、方向键在网格里移动；筛选结果条数变化会播报；右下角宠物挂件不再占据读屏与 Tab（它只是装饰，开关都在设置页）。
 - **版本号只剩一处**：`manifest.json` 的 `version`，侧栏版本号由脚本现读；发版脚本不再手改界面文件和测试文件。
 
-**遗留**：`library.js` 仍是单文件（拆分按你说的先不做）；回收站只按 30 天整份清理，没有「单独撤销某一条」。
+- **翻页、筛选不再整块重画**：视频卡按记录 id 复用，翻页或改筛选时只改每张卡的标题、封面、角标、时间这些内容——焦点、已经解码好的封面都留在原地，不再闪一下。
+- **扩展页出错也会留档**：收藏库、设置、统计这些页面里的异常会写进 `001错误报告`，同一条错误 24 小时内只留一份（去重表在内存里，刷新后重新计）。
+- **内容脚本不再背整本词典**：B 站视频页只向后台要 `content.js` 真正用到的那十几条，整本 1001 条不再跟着注入每个视频页。
+- **HISTORY 加了版本索引**：2000 多行的 `docs/HISTORY.md` 顶部现在有一份「版本 → 行号」索引，由 `node scripts/history-index.cjs --write` 生成，`check-all` 会验它是不是最新。
+
+**遗留**：`library.js` 仍是单文件（拆分按你说的先不做）；回收站只按 30 天整份清理，没有「单独撤销某一条」；HISTORY 仍是单文件（只加索引，没拆成多份）。
 
 ## 测试与文档
 
@@ -161,7 +166,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:349 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)。<!-- test-count:353 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

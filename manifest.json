@@ -43,6 +43,7 @@
         "https://m.bilibili.com/video/*"
       ],
       "js": [
+        "content-i18n-keys.js",
         "i18n.js",
         "content.js"
       ],
