@@ -71,10 +71,10 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 <!-- status:begin -->
 | 项 | 值 |
 |---|---|
-| 词典 | 958 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 342 · archive-core 89 · stats-core 65 · background 25 · pages 29（后四套是真执行） |
+| 词典 | 1001 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
+| 测试基线 | stability 349 · archive-core 89 · stats-core 65 · background 25 · pages 33（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-23 21:14，当时 HEAD `8899013`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-23 21:44，当时 HEAD `d2c2015`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -107,7 +107,7 @@ node test/i18n-extract.cjs --check
 pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 ```
 
-它会：检查工作区干净与能不能到 GitHub → 改写 3 处版本号 → 跑全部检查（`node scripts/check-all.cjs`，与 GitHub Actions 同一套）→ 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
+它会：检查工作区干净与能不能到 GitHub → 改写 manifest.json 这一处版本号（界面上的版本由脚本从 manifest 现读，测试只验格式）→ 跑全部检查（`node scripts/check-all.cjs`，与 GitHub Actions 同一套）→ 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
 
 **十条不能破的硬规则**（来由见「修改原则」）
 
@@ -391,7 +391,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:342 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:349 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -546,7 +546,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
    - 发版时的手工动作只有一步：把**上一版**的小节从 `README.md` 剪到 `docs/HISTORY.md` 对应位置，再把这一版写进 `README.md`。
 
    （这条规矩的来由：以前所有版本都堆在 README 里，涨到 1800 行、和 HISTORY 大量重复，改一处漏一处。V1.1.4–V1.1.13 漏过 9 个 tag 的小节，V1.4.0 的标题也被一次编辑误删过 —— 全量核对就是那时加的。）
-2. **发布走 `release.ps1`，不要手工改版本号**。它会检查工作区与能不能到 GitHub → 改 3 处版本号 → 跑全部检查 → 不过就回滚 → 提交 → 打 tag → 推送。用法（**版本号不带 `V` 前缀，位置参数**）：`pwsh -NoProfile -File .\release.ps1 1.7.26 "说明" -Yes`。**GitHub 访问不用开系统代理**：脚本里的 `Invoke-GitRemote` 先直连，不通才自动加 `-c http.proxy=http://127.0.0.1:7897` 重试；只要 Clash Verge 的内核（`verge-mihomo.exe`）在跑，混合端口就一直在监听，跟「系统代理」那个开关无关（开着全局代理反而让浏览国内网站变卡）。真连不上时只需要打开 Clash Verge。发布前照 `SMOKE_TEST.md` 走一遍真机验证。
+2. **发布走 `release.ps1`，不要手工改版本号**。它会检查工作区与能不能到 GitHub → 改 manifest.json 一处版本号 → 跑全部检查 → 不过就回滚 → 提交 → 打 tag → 推送。用法（**版本号不带 `V` 前缀，位置参数**）：`pwsh -NoProfile -File .\release.ps1 1.7.26 "说明" -Yes`。**GitHub 访问不用开系统代理**：脚本里的 `Invoke-GitRemote` 先直连，不通才自动加 `-c http.proxy=http://127.0.0.1:7897` 重试；只要 Clash Verge 的内核（`verge-mihomo.exe`）在跑，混合端口就一直在监听，跟「系统代理」那个开关无关（开着全局代理反而让浏览国内网站变卡）。真连不上时只需要打开 Clash Verge。发布前照 `SMOKE_TEST.md` 走一遍真机验证。
 
    **绝对不要用 `powershell.exe`（Windows PowerShell 5.1）跑它。** V1.7.18 发布时踩过：5.1 跑在沙箱里时，`Invoke-Native` 里 `& $Node ... | ForEach-Object` 拿不到子进程的任何输出（`$LASTEXITCODE` 仍是 0，所以测试套件的「未全过」也不报），于是「文档里的词典条数」那一步读到 0 种、报「没能从词典检查的输出里读出唯一的条数」并回滚版本号 —— 看着像词典坏了，其实词典完全正常。**判断方法**：如果第 4 步里 `ℹ tests/pass/fail` 那些行没打印出来，就是这个坑，换 `pwsh` 重跑即可。
 3. 先读本文件、`README.md`、相关页面和消息两端，不要只改单侧响应协议。

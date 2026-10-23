@@ -343,7 +343,7 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.version, "1.8.22");
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
   assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
   // notifications 是 1.7.3 加的：导入要跑几分钟，用户多半已经关掉弹窗，只把结果写进
@@ -3287,9 +3287,9 @@ test("导出归档元数据：格式身份、校验和、保留目录名与写�
   assert.ok(archiveList.includes('"004导出"'), "权威保留名单要含 004导出");
   const backgroundList = (background.match(/const RESERVED_COLLECTION_NAMES = new Set\(\[[\s\S]*?\]\);/) || [""])[0];
   assert.ok(backgroundList.includes('"004导出"'), "后台那份逐字副本也要含 004导出");
-  assert.ok(library.includes('["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"].includes(collectionEntry.name)'),
+  assert.ok(library.includes('["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出", "005回收站", "006报告"].includes(collectionEntry.name)'),
     "扫描时要跳过 004导出，否则它会被当成一个收藏夹");
-  assert.ok(library.includes('["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database", "004导出"].includes(name)'),
+  assert.ok(library.includes('["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database", "004导出", "005回收站", "006报告"].includes(name)'),
     "新建收藏夹时也要拦 004导出");
   // ⑤ 接线：按钮、处理函数、写盘用的是 core 给的目录名
   assert.match(html, /id="exportArchive"/);
@@ -4560,6 +4560,30 @@ test("示意图里的版本号从 manifest 现读，不许写死（静态回归�
   assert.match(tutorialJs, /getManifest\(\)\.version/);
 });
 
+test("版本号只有 manifest.json 一处（P1-6，静态回归）", () => {
+  // 以前发版要同时改 manifest、测试里的字面量、library.html 的静态文本三处，
+  // 漏一处就会出现「界面显示旧版本、测试断言新版本」这种自相矛盾的状态。
+  // 现在界面的版本号在运行时从 manifest 现读，测试只验格式。
+  const libraryHtml = readProjectFile("library.html");
+  assert.match(libraryHtml, /<span id="sideVersion"><\/span>/,
+    "侧栏版本号必须留空，由 library.js 从 manifest 现读填进去");
+  assert.doesNotMatch(libraryHtml, /id="sideVersion"[^<]*V?\d+\.\d+\.\d+/,
+    "library.html 里不许再写死版本号");
+
+  const libraryJs = readProjectFile("library.js");
+  assert.match(libraryJs, /sideVersion\.textContent = displayVersion\(chrome\.runtime\.getManifest\(\)\.version\)/,
+    "library.js 要用 getManifest().version 填侧栏版本号");
+
+  const release = readProjectFile("release.ps1");
+  assert.match(release, /Set-FileText 'manifest\.json'/, "发版脚本仍然只改 manifest.json 的版本号");
+  assert.doesNotMatch(release, /Set-FileText 'library\.html'/,
+    "发版脚本不该再改 library.html 的版本号");
+  assert.doesNotMatch(release, /Set-FileText 'test\/stability\.test\.cjs'/,
+    "发版脚本不该再改测试里的版本号");
+  assert.match(release, /@\('checkout', '--', 'manifest\.json'\)/,
+    "回滚清单里只该有 manifest.json");
+});
+
 test("完成提示弹窗不会因为两个来源抢着弹而丢掉一条（静态回归）", () => {
   const popupJs = readProjectFile("popup.js");
 
@@ -5385,7 +5409,7 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
   // 保留目录名（扫描时要跳过的一整份名单）与固定目录名（选完目录就建出来的那几个）
   // 是两种形状：1.5.0 起 003database 同时属于两者。
   // 1.7.30：多了 004导出（归档元数据导出目录）
-  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "003database", "004导出", "视频下载", "错误报告"].join("|");
+  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "003database", "004导出", "005回收站", "006报告", "视频下载", "错误报告"].join("|");
   const shapeStructure = ["000视频下载", "001错误报告", "002同步报告", "003database"].join("|");
   const shapes = reservedLists.map(([literal]) => namesOf(literal).join("|"));
   assert.ok(shapes.filter((shape) => shape === shapeReserved).length >= 2,
@@ -6185,7 +6209,9 @@ test("扫描不再为了先知道总数多枚举一遍，下载索引也有缓�
   assert.match(body, /const knownTotal = lastScanRecordCount\.get\(cacheKey\) \|\| 0;/);
   assert.match(body, /if \(stats\.total < stats\.processed\) stats\.total = stats\.processed;/, "估少了就地扩容");
   assert.match(body, /rememberArchiveCacheLimit\(cacheKey, stats\.total\);/, "扫完把真条数记下来");
-  assert.match(body, /return \{ collections: scanned, issues, unfinished, longNames, forced, stats:/, "longNames（和 1.8.5 的 forced 标记）要带回界面");
+  // 1.10.0（P0-2）：返回值中间多了 diagnostics（归档体检要用），所以这里只核首尾
+  assert.match(body, /return \{ collections: scanned, issues, unfinished, longNames,/, "longNames（和 1.8.5 的 forced 标记）要带回界面");
+  assert.match(body, /forced, stats: \{ hits: stats\.hits, reads: stats\.reads, total: stats\.total, bytes: stats\.bytes \} \};/, "forced 与 stats 必须原样带回界面");
   assert.match(body, /scanDownloadedDirectories\(handle, \{ force: forceFullScan \}\)/, "手动刷新要强制重算下载索引");
   // 下载索引缓存
   assert.match(library, /const DOWNLOAD_INDEX_TTL_MS = \d+ \* 60 \* 1000;/);
@@ -6460,7 +6486,7 @@ test("老 PNG 封面转换只走归档根目录、只碰 封面.png 与 封面.w
   assert.doesNotMatch(body, /removeEntry\([^)]*collectionEntry\.name/, "不许删整个收藏夹");
   assert.doesNotMatch(body, /downloadParent|getDownloadParentHandle/, "不碰下载目录那一侧");
   // 保留目录名单与扫描跳过名单是同一套
-  assert.match(library, /const ARCHIVE_RESERVED_DIRS = \["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出"\];/);
+  assert.match(library, /const ARCHIVE_RESERVED_DIRS = \["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出", "005回收站", "006报告"\];/);
 });
 
 test("导出归档元数据之后按 5 份裁剪旧文件，清理失败也不许说导出失败（V1.8.8）", () => {
@@ -6506,7 +6532,11 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
   // ReferenceError（数据其实已经存好了，用户却看到「导入失败」）。必须是两空格缩进的函数作用域，
   // 而且要在收藏夹循环之前。
   assert.match(backgroundCode, /^ {2}const importLimit = Math\.max\(0, Number\(data\?\.limit\) \|\| 0\);$/m, "importLimit 要声明在函数作用域里（两空格缩进），不能藏在循环里");
-  assert.ok(backgroundCode.indexOf("const importLimit = Math.max") < backgroundCode.indexOf("for (let folderIndex = 0;"), "importLimit 的声明必须在收藏夹循环之前");
+  // 1.10.0（TODO P1-7）：循环起点改成 startFolderIndex（「继续上次导入」从断点那一段开始），
+  // importLimit 与起点都必须在收藏夹循环之前声明。
+  assert.ok(backgroundCode.indexOf("let startFolderIndex = 0;") < backgroundCode.indexOf("for (let folderIndex = startFolderIndex;"),
+    "startFolderIndex 要先声明，收藏夹循环才能用");
+  assert.ok(backgroundCode.indexOf("const importLimit = Math.max") < backgroundCode.indexOf("for (let folderIndex = startFolderIndex;"), "importLimit 的声明必须在收藏夹循环之前");
   assert.match(popupCode, /function selectedImportLimit\(\) \{/, "界面要有一个读上限的地方");
   assert.match(popupCode, /if \(options\.limit\) payload\.limit = options\.limit;/, "载荷里要带上 limit");
   assert.match(relay, /if \(message\.limit\) payload\.limit = message\.limit;/, "中转那层别把 limit 丢了");
@@ -6896,7 +6926,7 @@ test("补存登记与坏库提示都不再被空 catch 吞掉（V1.8.21 / 补-1�
   const background = readProjectFile("background.js");
   // 补-1：授权失效时那条登记是「授权恢复后补存」的唯一凭据，写失败要说出来。
   assert.match(background, /let pendingRegistered = true;/, "先假设登记成功，失败再翻成 false");
-  assert.match(background, /pendingRegistered = false;\r?\n\s+console\.warn\("登记补存失败（授权恢复后不会自动重试这条视频）", storageError\);/,
+  assert.match(background, /pendingRegistered = false;\r?\n\s+console\.warn\("登记补存失败（授权恢复后不会自动重试这条视频）"\);/,
     "登记失败要留一条二档日志，不许静默");
   assert.match(background, /const retryHint = pendingRegistered \? "" : "；补存登记也没写成，请回 B 站重新收藏这条视频。";/,
     "失败要写进 lastResult 告诉用户重新收藏");
@@ -7217,4 +7247,132 @@ test("卸载脚本收掉空的父目录，并说清 -SkipRegistry 留下的键�
   assert.match(uninstall, /\$parentOfHostRoot -eq \$defaultHostRoot/, "只收默认父目录，别删到别处");
   assert.match(uninstall, /Get-ChildItem -LiteralPath \$parentOfHostRoot -Force \| Select-Object -First 1/, "父目录空着才收");
   assert.match(uninstall, /注册表项按 -SkipRegistry 保留着/, "要说清残留的键指向已删清单");
+});
+
+// ---- 1.10.0（TODO.md P0/P1）：回收站、归档体检、storage 兜底、继续上次导入、设置页测试、读屏细节 ----
+
+test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const RECYCLE_DIR_NAME = "005回收站";/);
+  assert.match(library, /const RECYCLE_KEEP_DAYS = 30;/);
+  assert.match(library, /async function recycleCollection\(root, collectionName\) \{/);
+  assert.match(library, /async function recycleRecords\(root, items, onProgress\) \{/);
+  // move() 优先；用不了就复制 + 逐文件比字节 + 才删源；校验不过不许删源
+  assert.match(library, /await sourceHandle\.move\(targetParent, targetName\)/);
+  assert.match(library, /async function directoryFingerprint\(directory, prefix = ""\) \{/);
+  assert.match(library, /复制到回收站后校验不一致，源目录没有删除。/);
+  assert.match(library, /async function pruneRecycler\(root\) \{/);
+  assert.match(library, /pruneRecycler\(handle\)/, "每次扫描顺手清过期回收站");
+  // 四个删除分支都不再直接 removeEntry 记录目录
+  const start = library.indexOf("async function confirmPendingDelete(");
+  assert.ok(start > 0, "找不到 confirmPendingDelete");
+  const body = library.slice(start, start + 16000);
+  assert.equal(body.includes("collectionHandle.removeEntry("), false,
+    "删除记录目录不许再直接 removeEntry，必须先走回收站");
+  assert.ok((body.match(/recycleRecords\(rootHandle, \[/g) || []).length >= 3,
+    "批量 / 单条 / 清理未完成三条路都要走回收站");
+  assert.match(body, /recycleCollection\(rootHandle, action\.collection\.name\)/, "整个收藏夹删除也要先进回收站");
+  assert.match(body, /recycledSuffix\(recycledPaths\)/, "删除结果要告诉用户去哪捞回来");
+  // 界面出口与文案口径
+  const html = readProjectFile("library.html");
+  assert.match(html, /id="purgeRecycler"/);
+  assert.match(html, /data-i18n="清空回收站"/);
+  assert.match(html, /删除本地归档（先移进回收站）？/);
+  assert.equal(html.includes("不进回收站"), false, "确认文案不许再说「不进回收站」");
+});
+
+test("归档体检把「扫描时被悄悄跳过的东西」写成 006报告（TODO P0-2）", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const HEALTH_DIR_NAME = "006报告";/);
+  assert.match(library, /async function writeHealthReport\(\) \{/);
+  assert.match(library, /const name = `体检-\$\{recycleStamp\(\)\}\.md`;/);
+  assert.match(library, /await writable\.write\(lines\.join\("\\r\\n"\)\);/);
+  // 七节明细一个都不能少
+  for (const section of [
+    "读不出来的目录（{count}）",
+    "没写完的目录（{count}）",
+    "有 视频信息.txt 但缺封面的目录（{count}）",
+    "视频信息.txt 缺【基本信息】或标题（{count}）",
+    "只有骨架、还没有 视频信息.txt 的目录（{count}）",
+    "目录名太长（{count}）",
+    "写盘留下的临时文件（{count}）"
+  ]) {
+    assert.ok(library.includes(section), "体检报告少了这一节：" + section);
+  }
+  // 数据来源：scanRoot 的 diagnostics
+  assert.match(library, /const diagnostics = \{ missingText: \[\], missingCover: \[\], brokenText: \[\], tempFiles: \[\] \};/);
+  assert.match(library, /diagnostics\.tempFiles\.push\(/);
+  assert.match(library, /diagnostics\.missingCover\.push\(/);
+  assert.match(library, /diagnostics\.missingText\.push\(/);
+  assert.match(library, /diagnostics\.brokenText\.push\(/);
+  assert.match(library, /healthCheckButton\?\.addEventListener\("click", \(\) => \{ writeHealthReport\(\); \}\);/);
+  // 报告是只读产物：只新建 006报告/，不碰归档记录
+  assert.match(library, /const directory = await subdirectoryHandle\(rootHandle, HEALTH_DIR_NAME\);/);
+  assert.match(readProjectFile("library.html"), /data-i18n="归档体检"/);
+});
+
+test("chrome.storage 写入失败要重试一次并留下可见痕迹（TODO P0-3）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const STORAGE_WRITE_RETRY_MS = 200;/);
+  assert.match(background, /async function safeLocalSet\(patch, label\) \{/);
+  const start = background.indexOf("async function safeLocalSet(patch, label) {");
+  const body = background.slice(start, start + 1200);
+  assert.match(body, /await new Promise\(\(resolve\) => setTimeout\(resolve, STORAGE_WRITE_RETRY_MS\)\);/, "失败要等 200ms 重试一次");
+  assert.match(body, /return true;/, "成功要给调用方一个明确值");
+  assert.match(body, /return false;/, "失败也要给调用方一个明确值，不许静默吞掉");
+  assert.match(background, /async function rememberStorageError\(label, error\) \{/);
+  assert.match(background, /lastStorageError: \{/);
+  assert.match(background, /await rememberStorageError\(label, retryError\);/);
+  // 关键路径都改接兜底
+  assert.match(background, /const written = await safeLocalSet\(\{ \[STATS_MIRROR_KEY\]: next \}, "统计镜像"\);/);
+  assert.match(background, /const registered = await safeLocalSet\(\{ pendingFavorite: data \}, "补存登记"\);/);
+  assert.match(background, /if \(!registered\) \{/);
+  assert.match(background, /async function setBcaStatsSnapshot\(stats\) \{/);
+  assert.match(background, /chrome\.storage\.local\.set\(\{ bcaStats: stats \}\)/, "快照那条字面量要保留（页面与宠物都靠它读）");
+  // 弹窗要有出口
+  assert.match(background, /"lastStorageError"\]\)/, "get-status 要把 lastStorageError 带回界面");
+  const popup = readProjectFile("popup.js");
+  assert.match(popup, /if \(status\.lastStorageError\) \{/);
+  assert.match(popup, /storageErrorRow\.hidden = false;/);
+  assert.match(popup, /chrome\.storage\.local\.remove\("lastStorageError"\)/, "「知道了」要能清掉提示");
+  assert.match(readProjectFile("popup.html"), /id="storageErrorRow"/);
+});
+
+test("导入断了能从上次的收藏夹接着跑（TODO P1-7）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const IMPORT_RESUME_KEY = "bcaImportResume";/);
+  assert.match(background, /async function writeImportResume\(snapshot\) \{/);
+  assert.match(background, /async function clearImportResume\(\) \{/);
+  assert.match(background, /await writeImportResume\(snapshot\);/);
+  assert.match(background, /folderIds: \(Array\.isArray\(folderIds\) \? folderIds : \[\]\)\.map\(String\)/);
+  assert.match(background, /const resume = data\?\.resume && typeof data\.resume === "object" \? data\.resume : null;/);
+  assert.match(background, /let startFolderIndex = 0;/);
+  assert.match(background, /for \(let folderIndex = startFolderIndex; folderIndex < folders\.length; folderIndex \+= 1\) \{/);
+  assert.match(background, /await clearImportResume\(\);/, "开始跑之后要清断点，别让人重复点");
+  const popup = readProjectFile("popup.js");
+  assert.match(popup, /async function readImportResume\(\) \{/);
+  assert.match(popup, /function renderResumeImport\(\) \{/);
+  assert.match(popup, /payload\.resume = \{ folder: String\(resume\.folder \|\| ""\), page: Math\.max\(1, Number\(resume\.page\) \|\| 1\) \};/);
+  assert.match(readProjectFile("popup.html"), /id="resumeImport"/);
+});
+
+test("设置页的三件事有真执行测试（TODO P1-4）", () => {
+  const pages = readProjectFile(path.join("test", "pages.test.cjs"));
+  assert.match(pages, /function suiteSettings\(\) \{/);
+  assert.match(pages, /await suiteSettings\(\);/, "suiteSettings 要挂进 suite()");
+  assert.match(pages, /function makeFakeIndexedDb\(\) \{/, "壁纸状态测试要有内存版 IndexedDB");
+  assert.match(pages, /滑杆 input 连发只写一次 storage/);
+  assert.match(pages, /背景图状态跟着 IndexedDB 里的 Blob 走/);
+  assert.match(pages, /切到英文后设置页所有 data-i18n 都重译/);
+});
+
+test("结果计数会播报，宠物挂件不挡读屏与 Tab（TODO P1-5）", () => {
+  const html = readProjectFile("library.html");
+  assert.match(html, /id="resultSummary"[^>]*aria-live="polite"/, "结果计数要让读屏播报");
+  const pet = readProjectFile("pet.js");
+  assert.match(pet, /container\.setAttribute\("aria-hidden", "true"\)/, "装饰挂件不该进读屏树");
+  assert.match(pet, /button\.setAttribute\("tabindex", "-1"\)/, "装饰挂件不该占 Tab 位");
+  assert.equal(pet.includes("button.tabIndex = visible ? 0 : -1;"), false,
+    "applyVisibility 不许再把 tabindex 顶回 0");
+  assert.match(readProjectFile(path.join("test", "pages.test.cjs")), /结果计数会播报、宠物挂件不挡读屏与 Tab/);
 });

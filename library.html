@@ -41,7 +41,7 @@
       <button id="createCollection" class="collection-create collection-create-tail" type="button"><span data-icon="plus"></span><span data-i18n="新建收藏夹">新建收藏夹</span></button>
       <div class="sidebar-bottom">
         <div class="privacy-note"><span class="lock-icon" data-icon="shield"></span><span data-i18n-html="归档文件只在本地管理<br>添加视频时向 B 站查询资料">归档文件只在本地管理<br>添加视频时向 B 站查询资料</span></div>
-        <div class="side-version"><span data-i18n="哔哩藏库">哔哩藏库</span> · <span id="sideVersion">V1.8.22</span></div>
+        <div class="side-version"><span data-i18n="哔哩藏库">哔哩藏库</span> · <span id="sideVersion"></span></div>
         <!-- 4.8.1：一键三连与仓库入口。地址与 popup.html 保持一致 -->
         <div class="side-support">
           <a class="support-link" href="https://space.bilibili.com/1515305135" target="_blank" rel="noopener noreferrer"><span data-icon="tv"></span><span data-i18n="给 up 一个一键三连">给 up 一个一键三连</span></a>
@@ -56,6 +56,10 @@
           <!-- 1.7.30（路线图第 2 项）：把整个归档的元数据导成单个 JSON，写进归档根目录的 004导出/。 -->
           <button id="exportArchive" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="download"></span><span data-i18n="导出归档元数据">导出归档元数据</span></button>
           <button id="convertCoverPng" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="download"></span><span data-i18n="把老 PNG 封面转成 WebP">把老 PNG 封面转成 WebP</span></button>
+          <!-- 1.10.0（TODO P0-2）：把扫描出来的问题落成一份只读报告，写进归档根目录的 006报告/。 -->
+          <button id="healthCheck" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="shield"></span><span data-i18n="归档体检">归档体检</span></button>
+          <!-- 1.10.0（TODO P0-1）：删除先进 005回收站，这里给一个「现在就清空」的出口。 -->
+          <button id="purgeRecycler" class="button button-quiet config-button config-button-wide" type="button"><span data-icon="trash"></span><span data-i18n="清空回收站">清空回收站</span></button>
           <input id="configFileInput" type="file" accept="application/json,.json" hidden>
         </div>
       </div>
@@ -128,7 +132,7 @@
             <!-- 同上（old-p3 ux P3-8）：英文眉标只是视觉分区，不翻译是刻意的。 -->
             <p class="eyebrow">YOUR COLLECTIONS</p>
             <h1 id="pageTitle">全部收藏</h1>
-            <p id="resultSummary" class="heading-subtitle"></p>
+            <p id="resultSummary" class="heading-subtitle" aria-live="polite"></p>
           </div>
           <div class="page-heading-actions">
             <button id="batchManage" class="button button-success" type="button" aria-pressed="false"><span data-label="manage" data-i18n="批量管理">批量管理</span><span data-label="done" data-i18n="完成" hidden>完成</span></button>
@@ -338,7 +342,7 @@
   <div id="confirmBackdrop" class="confirm-backdrop" hidden>
     <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="confirm-icon" data-icon="alert"></div>
-      <h2 id="confirmTitle">删除本地归档（含封面与视频信息，不进回收站）？</h2>
+      <h2 id="confirmTitle">删除本地归档（先移进回收站）？</h2>
       <p id="confirmMessage"></p>
       <p class="confirm-warning" data-i18n="本地删除不可恢复：不会进系统回收站，删掉就找不回来了。">本地删除不可恢复：不会进系统回收站，删掉就找不回来了。</p>
       <label id="deleteDownloadsOption" class="delete-downloads-option" hidden><input id="deleteAssociatedDownloads" type="checkbox"><span data-i18n="同时删除关联的本地下载文件">同时删除关联的本地下载文件</span></label>

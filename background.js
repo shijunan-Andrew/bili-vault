@@ -339,7 +339,9 @@ const RESERVED_COLLECTION_NAMES = new Set([
   // 1.5.0：本地数据库根目录（003database），收藏夹不许占用
   "003database",
   // 1.7.30：归档元数据导出目录（004导出），收藏夹不许占用
-  "004导出"
+  "004导出",
+  "005回收站",
+  "006报告"
 ]);
 
 function collectionNameIsReserved(name) {
@@ -1165,11 +1167,11 @@ async function saveFavorite(data) {
     // 这次收藏丢了 —— 所以失败要显式说出来。以前这里裸 await，一抛就把整条回应吞掉。
     let pendingRegistered = true;
     if (error?.message?.includes("写入授权已失效")) {
-      try {
-        await chrome.storage.local.set({ pendingFavorite: data });
-      } catch (storageError) {
+      // safeLocalSet 不抛错，只回 true/false：这里按返回值判「补存登记」有没有写成
+      const registered = await safeLocalSet({ pendingFavorite: data }, "补存登记");
+      if (!registered) {
         pendingRegistered = false;
-        console.warn("登记补存失败（授权恢复后不会自动重试这条视频）", storageError);
+        console.warn("登记补存失败（授权恢复后不会自动重试这条视频）");
       }
     }
     const retryHint = pendingRegistered ? "" : "；补存登记也没写成，请回 B 站重新收藏这条视频。";
@@ -2248,7 +2250,11 @@ let importStatePublishAt = 0;
         后台其实没有活动导入"时强制复位并落盘，同时明确告诉用户发生了什么。
    ========================================================================== */
 
-const IMPORT_RUN_SESSION_KEY = "bcaImportRun";                  // 正在进行的导入（断点 + 回滚日志）
+const IMPORT_RUN_SESSION_KEY = "bcaImportRun";
+/* P1-7（2026-10 审阅）：中断后要能「接着上次跑」，所以把断点里那句「停在哪」
+   缩小成一条极小的记录放进 local —— 它只含收藏夹名、页号、三个计数与收藏夹 id，
+   不含回滚日志、不含视频正文，重启浏览器后照样能读到（session 里的会被清掉）。 */
+const IMPORT_RESUME_KEY = "bcaImportResume";                  // 正在进行的导入（断点 + 回滚日志）
 // 必须明显小于 30 秒的回收阈值，留出一次请求的最长耗时（15 秒）的余量
 const IMPORT_KEEPALIVE_INTERVAL_MS = 20000;
 const IMPORT_RUN_PUBLISH_INTERVAL_MS = 15000;                   // 断点落盘节流（1.7.7：5000 → 15000，会话快照最多 2MB，别每 5 秒序列化一次）
@@ -2386,9 +2392,10 @@ function writeImportRunSnapshot() {
   return importRunPublishChain;
 }
 
-function resetImportRunSnapshot(journal) {
+function resetImportRunSnapshot(journal, folderIds = []) {
   importRunSnapshot = {
     active: true, paused: false, cancelled: false,
+    folderIds: (Array.isArray(folderIds) ? folderIds : []).map(String),
     startedAt: importState.startedAt || Date.now(), updatedAt: Date.now(),
     rateLimitStreak: 0, text: importState.text || "",
     cursor: { folder: "", page: 0, saved: 0, folderTotal: 0 },
@@ -2452,6 +2459,37 @@ async function clearImportRunSnapshot() {
   await importRunPublishChain;
 }
 
+// P1-7：把「上次停在哪」写成一条可跨重启的小记录（只有收藏夹名 / 页号 / 计数 / 收藏夹 id）
+async function writeImportResume(snapshot) {
+  const cursor = snapshot?.cursor || {};
+  const counts = snapshot?.counts || {};
+  const folder = String(cursor.folder || "");
+  if (!folder) return;
+  const folderIds = Array.isArray(snapshot?.folderIds) ? snapshot.folderIds : [];
+  const record = {
+    folder,
+    page: Math.max(1, Number(cursor.page) || 1),
+    saved: Math.max(0, Number(cursor.saved) || 0),
+    imported: Math.max(0, Number(counts.imported) || 0),
+    total: Math.max(0, Number(counts.total) || 0),
+    folderIds,
+    at: Date.now()
+  };
+  try {
+    await chrome.storage.local.set({ [IMPORT_RESUME_KEY]: record });
+  } catch (error) {
+    console.warn("断点记录没写进去（这次中断后不会出现「继续上次导入」）", error);
+  }
+}
+
+async function clearImportResume() {
+  try {
+    await chrome.storage.local.remove(IMPORT_RESUME_KEY);
+  } catch (error) {
+    console.warn("断点记录没清掉（下次可能提示一个已经过期的「继续上次导入」）", error);
+  }
+}
+
 /* V1.4.2：这一轮导入"已经跑到底了"，只是还没把 session 键删掉。
    三种收尾（成功 / 取消 / 风控中止）都必须先走这里，再删键。
 
@@ -2505,6 +2543,8 @@ async function importAnnounceInterruption(snapshot) {
   const activityAt = Number(snapshot?.updatedAt) || Number(snapshot?.startedAt) || 0;
   importState = { ...importState, running: false, paused: false, finishedAt: Date.now(), updatedAt: Date.now(), text, summary: text, interrupted: true };
   await chrome.storage.local.set({ importState }).catch(() => {});
+  // P1-7：写一份跨重启的断点，让弹窗能给出「继续上次导入」
+  await writeImportResume(snapshot);
   const stored = await chrome.storage.local.get("lastResult").catch(() => ({}));
   if ((Number(stored?.lastResult?.createdAt) || 0) <= activityAt) {
     await chrome.storage.local.set({ lastResult: { message: text, createdAt: Date.now() } }).catch(() => {});
@@ -3371,19 +3411,69 @@ async function readStatsMirror() {
   }
 }
 
+/* P0-3（2026-10 审阅）：storage 写入原来全是裸 set + `.catch(() => {})` ——
+   配额满、扩展更新、磁盘异常时静默丢数据。这里给「关键路径」统一一个兜底：
+   失败重试一次，仍失败就 console.warn + 把原因写进 lastStorageError（弹窗会显示）。
+   普通的一次性写入（界面偏好之类）不必都换过来 —— 那些丢了不影响数据完整性，
+   全换反而把每处调用点都读得更吵。 */
+const STORAGE_WRITE_RETRY_MS = 200;
+
+async function rememberStorageError(label, error) {
+  try {
+    await chrome.storage.local.set({
+      lastStorageError: {
+        label: String(label || "本地存储"),
+        message: String(error?.message || error || "未知错误"),
+        at: Date.now()
+      }
+    });
+  } catch (_) {
+    // 兜底本身也写不进去：这时候只剩控制台，不要再套一层递归
+  }
+}
+
+async function safeLocalSet(patch, label) {
+  try {
+    await chrome.storage.local.set(patch);
+    return true;
+  } catch (error) {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, STORAGE_WRITE_RETRY_MS));
+      await chrome.storage.local.set(patch);
+      return true;
+    } catch (retryError) {
+      console.warn(`写入${label || "本地存储"}失败（重试一次仍失败，界面可能看不到最新数据）`, retryError);
+      await rememberStorageError(label, retryError);
+      return false;
+    }
+  }
+}
+
+// 统计快照单独一份：`chrome.storage.local.set({ bcaStats: … })` 这个字面量被
+// test/stability.test.cjs 钉着（页面与宠物都靠它读），所以重试逻辑必须包着同一行。
+async function setBcaStatsSnapshot(stats) {
+  try {
+    await chrome.storage.local.set({ bcaStats: stats });
+  } catch (error) {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, STORAGE_WRITE_RETRY_MS));
+      await chrome.storage.local.set({ bcaStats: stats });
+    } catch (retryError) {
+      console.warn("统计快照写不进去（界面数字会停在上一版）", retryError);
+      await rememberStorageError("统计快照", retryError);
+      throw retryError;
+    }
+  }
+}
+
 // 只在真的变了的时候才写 storage：读库比写库频繁（扫描、摸头、每次导入批次），
 // 镜像没变就不该多写一次
 async function syncStatsMirror(database) {
   const next = statsMirrorOf(database);
   const current = await readStatsMirror();
   if (current && JSON.stringify(current) === JSON.stringify(next)) return next;
-  try {
-    await chrome.storage.local.set({ [STATS_MIRROR_KEY]: next });
-  } catch (error) {
-    // 镜像写不进去不影响这一次扫描，但统计页会停在上一版数字上 —— 留个原因，
-    // 别让下一个人对着不动的数字猜是「数据没变」还是「写失败了」。
-    console.warn("统计镜像写不进去（统计页会停在上一版数字）", error);
-  }
+  const written = await safeLocalSet({ [STATS_MIRROR_KEY]: next }, "统计镜像");
+  if (!written) console.warn("统计镜像写不进去（统计页会停在上一版数字）");
   return next;
 }
 
@@ -3526,7 +3616,7 @@ async function publishStatsSnapshot(database) {
   const fingerprint = JSON.stringify(stats);
   if (fingerprint === statsSnapshotPublished) return stats;
   statsSnapshotPublished = fingerprint;
-  await chrome.storage.local.set({ bcaStats: stats });
+  await setBcaStatsSnapshot(stats);
   return stats;
 }
 
@@ -3982,7 +4072,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
   publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "", interrupted: false, rateLimited: false }, true);
   // 断点落盘：ImportRun 的关键字段（active/paused/cancelled/游标/计数）与回滚日志
   // 写进 chrome.storage.session，SW 被回收后还能知道"上次跑到哪、写了哪些目录"
-  resetImportRunSnapshot(journal);
+  resetImportRunSnapshot(journal, data?.folderIds);
 
   let imported = 0, refreshed = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
   // 1.8.8：「最多导入 N 条」用到的两个状态。limitReached 一旦为真，后面的收藏夹
@@ -4008,7 +4098,32 @@ async function importBiliFavoritesInner(data, tabId = null) {
     const folders = allFolders.filter((folder) => selectedIds.has(String(folder.id)));
     if (!folders.length) throw new Error("所选收藏夹已不存在或没有读取权限，请刷新列表后重试。");
 
-    for (let folderIndex = 0; folderIndex < folders.length; folderIndex += 1) {
+    /* P1-7：上次被打断时记下的断点。只在「这次是继续」时才用；找不到那个收藏夹
+       （改名 / 取消勾选 / 换了账号）就从第一个收藏夹从头导 —— 宁可多跑一遍，
+       也不能因为对不上就整轮不干活。断点本身不带任何视频正文，只是「停在哪」。 */
+    const resume = data?.resume && typeof data.resume === "object" ? data.resume : null;
+    let startFolderIndex = 0;
+    if (resume) {
+      const wanted = String(resume.folder || "");
+      const foundIndex = wanted ? folders.findIndex((folder) => folder.title === wanted) : -1;
+      const startPage = Math.max(1, Number(resume.page) || 1);
+      if (foundIndex >= 0) {
+        startFolderIndex = foundIndex;
+        const line = `继续上次导入：从「${folders[foundIndex].title}」第 ${startPage} 页往后接着跑，它前面的收藏夹上次已经处理过。`;
+        reportLines.push("", line);
+        folderNotes.push(line);
+        importProgress(line, true);
+      } else {
+        const line = "上次停在的收藏夹这次没找到（可能改名或这次没勾选），这一轮从第一个收藏夹重新开始。";
+        reportLines.push("", line);
+        folderNotes.push(line);
+        importProgress(line, true);
+      }
+    }
+    // 断点只对「这一次继续」有效：真跑起来就把它清掉，免得下次再提示一条过期的
+    await clearImportResume();
+
+    for (let folderIndex = startFolderIndex; folderIndex < folders.length; folderIndex += 1) {
       await importWaitIfPaused();
       const folder = folders[folderIndex];
       const folderLog = [];
@@ -5314,7 +5429,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     importReconcileState()
       .catch(() => {})
       .then(() => { importState = { ...importState, active: importRun.active }; })
-      .then(() => chrome.storage.local.get(["lastResult", "lastError", "pendingFavorite", "authorizedErrorAt"]))
+      .then(() => chrome.storage.local.get(["lastResult", "lastError", "pendingFavorite", "authorizedErrorAt", "lastStorageError"]))
       .then((status) => {
         sendResponse({ ...status, importState });
       })

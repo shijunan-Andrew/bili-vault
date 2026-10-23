@@ -204,11 +204,9 @@ function Set-FileText($path, $from, $to, $label) {
   Say "  [$([char]0x2713)] $label" $C_GREEN
 }
 
-$rollback = { Invoke-Native $Git @('checkout', '--', 'manifest.json', 'test/stability.test.cjs', 'library.html') | Out-Null }
+$rollback = { Invoke-Native $Git @('checkout', '--', 'manifest.json') | Out-Null }
 try {
   Set-FileText 'manifest.json' "`"version`": `"$oldVersion`"" "`"version`": `"$版本`"" 'manifest.json'
-  Set-FileText 'test/stability.test.cjs' "assert.equal(manifest.version, `"$oldVersion`");" "assert.equal(manifest.version, `"$版本`");" 'test/stability.test.cjs'
-  Set-FileText 'library.html' "<span id=`"sideVersion`">V$oldVersion</span>" "<span id=`"sideVersion`">$Tag</span>" 'library.html'
 } catch {
   & $rollback
   Die "改版本号失败，已回滚：$($_.Exception.Message)"

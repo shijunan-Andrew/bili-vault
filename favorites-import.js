@@ -56,6 +56,8 @@
       const payload = { type: "import-bili-favorites", uid: pageUid(), folderIds: message.folderIds };
       if (message.recentDays) payload.recentDays = message.recentDays;
       if (message.limit) payload.limit = message.limit;
+      // P1-7：继续上次导入时把断点原样带下去（收藏夹名 + 页号）
+      if (message.resume && typeof message.resume === "object") payload.resume = message.resume;
       let answered = false;
       const answer = (payload) => {
         if (answered) return;

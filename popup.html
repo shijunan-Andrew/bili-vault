@@ -112,6 +112,11 @@
         </div>
         <div id="importPanel">
           <div id="importSelectionView">
+            <!-- P1-7：上次导入被打断过就把断点摆到最上面，「继续上次导入」不用重新勾选 -->
+            <div id="resumeImportRow" hidden>
+              <p id="resumeImportText" class="import-warning"></p>
+              <button id="resumeImport" class="secondary" type="button" data-i18n="继续上次导入">继续上次导入</button>
+            </div>
             <div class="import-heading">
               <span class="import-selection-label" data-i18n="收藏夹列表">收藏夹列表</span>
               <span id="importSelectedCount" class="import-selected-count" data-i18n="已选 0 个">已选 0 个</span>
@@ -172,6 +177,13 @@
            第一屏看到的是「B站收藏夹本地导入报告 / 插件版本 / 提示…」，真正那句失败
            埋在几十行以后。现在：role="alert" 让读屏立刻播报，先给人话摘要，
            报告全文折进 <details>，要发给开发者的人一样拿得到全文。 -->
+      <!-- 1.10.0（TODO P0-3）：chrome.storage 写入兜底失败时，后台把原因记在 lastStorageError。
+           这一行是它唯一的出口 —— 别让「设置没存上」在折叠卡片里静默消失。 -->
+      <div id="storageErrorRow" class="error-block" role="alert" hidden>
+        <div class="error-title"><span data-icon="alert"></span><span data-i18n="本地存储没写进去">本地存储没写进去</span></div>
+        <p id="storageErrorText" class="error-summary"></p>
+        <button id="dismissStorageError" class="secondary" type="button" data-i18n="知道了">知道了</button>
+      </div>
       <div id="lastError" class="error-block" role="alert" hidden>
         <div class="error-title" id="errorTitle" tabindex="-1"><span data-icon="alert"></span><span data-i18n="最近一次错误">最近一次错误</span></div>
         <p id="errorSummary" class="error-summary"></p>

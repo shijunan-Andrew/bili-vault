@@ -236,7 +236,8 @@ async function suiteLibrary() {
     await settle(4);
 
     assert.equal(doc.getElementById("confirmBackdrop").hidden, false, "对话框要打开");
-    assert.equal(textOf(doc.getElementById("confirmTitle")), "删除本地归档（含封面与视频信息，不进回收站）？");
+    // 1.10.0（TODO P0-1）：删除改成了「先移进 005回收站」，标题口径跟着换
+    assert.equal(textOf(doc.getElementById("confirmTitle")), "删除本地归档（先移进回收站）？");
     assert.match(textOf(doc.getElementById("confirmMessage")), /将删除视频目录“/);
     assert.equal(textOf(doc.getElementById("confirmDelete")).length > 0, true);
 
@@ -639,6 +640,24 @@ async function suiteLibrary() {
     const collectionNames = [...page.document.querySelectorAll("#collectionList .collection-name")].map(textOf);
     assert.equal(collectionNames.includes("004导出"), false, `004导出 被当成收藏夹扫出来了：${JSON.stringify(collectionNames)}`);
   });
+
+  await test("结果计数会播报、宠物挂件不挡读屏与 Tab（P1-5 真执行）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+
+    // 1) 结果计数是 polite 实时区：换页/筛选后读屏能听到「多少个视频」
+    const summary = page.document.getElementById("resultSummary");
+    assert.ok(summary, "顶栏应该有 #resultSummary");
+    assert.equal(summary.getAttribute("aria-live"), "polite", "结果计数要挂 aria-live=polite");
+    assert.ok(summary.textContent.trim().length > 0, "加载归档后结果计数不该是空的");
+
+    // 2) 宠物是装饰挂件：整块 aria-hidden，按钮移出 Tab 序列（开关在设置页）
+    const pet = page.document.getElementById("bcaPet");
+    assert.ok(pet, "library.html 里宠物脚本应该已经把挂件建出来");
+    assert.equal(pet.getAttribute("aria-hidden"), "true", "宠物挂件要从无障碍树里摘掉");
+    const petButton = pet.querySelector("button");
+    assert.ok(petButton, "宠物按钮应该存在");
+    assert.equal(petButton.getAttribute("tabindex"), "-1", "宠物按钮不该落在 Tab 序列里");
+  });
 }
 
 /* ---------------- popup.html ---------------- */
@@ -815,12 +834,147 @@ async function suiteContent() {
   });
 }
 
+/* ---------------- settings.html ---------------- */
+
+/** 内存版 IndexedDB：只够 theme.js 的壁纸存取（open / transaction / get / put / delete）。 */
+function makeFakeIndexedDb() {
+  const data = new Map();
+  const request = (result) => ({ result, error: null, onsuccess: null, onerror: null, onupgradeneeded: null });
+  const db = {
+    objectStoreNames: { contains: () => true },
+    createObjectStore() {},
+    close() {},
+    transaction() {
+      const tx = { error: null, oncomplete: null, onerror: null, onabort: null };
+      tx.objectStore = () => ({
+        get: (key) => request(data.has(key) ? data.get(key) : undefined),
+        put: (value, key) => { data.set(key, value); return request(undefined); },
+        delete: (key) => { data.delete(key); return request(undefined); }
+      });
+      setTimeout(() => { if (tx.oncomplete) tx.oncomplete(); }, 0);
+      return tx;
+    }
+  };
+  return {
+    open() {
+      const opened = request(db);
+      setTimeout(() => {
+        if (opened.onupgradeneeded) opened.onupgradeneeded();
+        if (opened.onsuccess) opened.onsuccess();
+      }, 0);
+      return opened;
+    }
+  };
+}
+
+/** 起一页 settings.html（`globals` 可注 fetch 等桩）。 */
+async function openSettings(options = {}) {
+  const chrome = makeChrome({ version: "1.8.23", localData: options.localData || {} });
+  const page = dom.loadPage({ htmlFile: "settings.html", chrome, globals: options.globals });
+  page.__chrome = chrome;
+  await settle();
+  return page;
+}
+
+async function suiteSettings() {
+  await test("设置页滑杆 input 连发只写一次 storage，松手落最后一次（1.8.12 真执行）", async () => {
+    const page = await openSettings();
+    const blur = page.document.getElementById("wallpaperBlur");
+    assert.ok(blur, "设置页应该有毛玻璃强度滑杆");
+
+    // theme.js 里每次 setAppearance 都会镜像一份到 chrome.storage.local
+    const writes = [];
+    const area = page.chrome.storage.local;
+    const originalSet = area.set;
+    area.set = (patch) => { writes.push(patch); return originalSet(patch); };
+    const appearanceWrites = () => writes.filter((patch) => patch && Object.prototype.hasOwnProperty.call(patch, "interfaceAppearance"));
+
+    // 拖着走：连续 5 帧 input
+    for (const value of [12, 16, 20, 24, 28]) {
+      blur.value = String(value);
+      dom.fireUserEvent(blur, "input");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(appearanceWrites().length, 0, "拖动过程中不该每一帧都写一次 storage");
+    assert.match(page.document.getElementById("wallpaperBlurValue").textContent.trim(), /^28\s*px$/, "数值文本要即时跟上");
+
+    // 攒批窗口过去以后只剩一次写，值是最后一帧
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await settle();
+    assert.equal(appearanceWrites().length, 1, `五帧 input 只该合并成一次写，实际 ${appearanceWrites().length} 次`);
+    const saved = JSON.parse(appearanceWrites()[0].interfaceAppearance);
+    assert.equal(saved.blur, 28, "写进去的必须是最后一帧的值");
+
+    // 松手（change）立刻落盘：再拖一次然后 change，不该等 120ms
+    blur.value = "30";
+    dom.fireUserEvent(blur, "input");
+    dom.fireUserEvent(blur, "change");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const afterChange = JSON.parse(appearanceWrites()[appearanceWrites().length - 1].interfaceAppearance);
+    assert.equal(afterChange.blur, 30, "松手要立刻落最后一次，不能被节流吞掉");
+  });
+
+  await test("设置页的背景图状态跟着 IndexedDB 里的 Blob 走（有图 / 移除后 / 再选）", async () => {
+    const page = await openSettings();
+    const choose = page.document.getElementById("wallpaperChoose");
+    assert.ok(choose, "设置页应该有背景图片按钮");
+    assert.equal(choose.textContent.trim(), BcaT(page, "选择背景图片"), "一开始没有背景图");
+
+    // BcaTheme 是冻结对象，改不了它的方法；把 indexedDB 换成内存版，走的是真代码路径
+    page.window.indexedDB = makeFakeIndexedDb();
+    const blob = new page.window.Blob(["fake-png"], { type: "image/png" });
+    await page.window.BcaTheme.saveWallpaper(blob);
+    await page.window.refreshWallpaperState();
+    assert.equal(choose.textContent.trim(), BcaT(page, "更换背景图片"), "存进 Blob 以后按钮要变成「更换」");
+
+    await page.window.BcaTheme.clearWallpaper();
+    await page.window.refreshWallpaperState();
+    assert.equal(choose.textContent.trim(), BcaT(page, "选择背景图片"), "移除之后按钮要回到「选择」");
+
+    await page.window.BcaTheme.saveWallpaper(blob);
+    await page.window.refreshWallpaperState();
+    assert.equal(choose.textContent.trim(), BcaT(page, "更换背景图片"), "再选一张又要变回「更换」");
+  });
+
+  await test("切到英文后设置页所有 data-i18n 都重译（1.8.23 真执行）", async () => {
+    // 用设置页自己的 data-i18n 键现造一份「英文」词典：只要重译真的发生了，
+    // 每个元素的文字都会以 EN:: 开头 —— 键名本身不重要，覆盖率才是重点。
+    const html = harness.readSource("settings.html");
+    const keys = new Set([...html.matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?="([^"]+)"/g)].map((match) => match[1]));
+    assert.ok(keys.size > 40, `设置页应该有大量 data-i18n 键，实际 ${keys.size}`);
+    const dictionary = {};
+    for (const key of keys) dictionary[key] = `EN::${key}`;
+
+    const page = await openSettings({
+      globals: { fetch: async () => ({ ok: true, status: 200, json: async () => dictionary }) }
+    });
+    await page.window.BcaI18n.use("en");
+    await settle();
+
+    assert.equal(page.document.documentElement.lang, "en");
+    const elements = [...page.document.querySelectorAll("[data-i18n]")];
+    assert.ok(elements.length > 40, `应该有大量 data-i18n 元素，实际 ${elements.length}`);
+    const stale = elements.filter((element) => !element.textContent.includes(`EN::${element.dataset.i18n}`));
+    assert.deepEqual(stale.map((element) => element.dataset.i18n), [],
+      "切语言后还有元素停在原文（没被重译）");
+
+    // 切回中文：词典表清空，data-i18n 元素要回到中文原文
+    await page.window.BcaI18n.use("zh-CN");
+    await settle();
+    const backStale = [...page.document.querySelectorAll("[data-i18n]")]
+      .filter((element) => element.textContent.includes("EN::"));
+    assert.deepEqual(backStale.map((element) => element.dataset.i18n), [],
+      "切回中文后不该还有英文残留");
+  });
+}
+
 /* ---------------- 跑 ---------------- */
 
 async function suite() {
   await suiteLibrary();
   await suitePopup();
   await suiteContent();
+  await suiteSettings();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

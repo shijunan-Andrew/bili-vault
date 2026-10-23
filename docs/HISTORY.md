@@ -5,6 +5,38 @@
 > 用户可见的版本说明在 [`README.md`](../README.md) —— README 只保留**最新一版**，更早的都归档到这里，避免同一段历史写两遍、改一处漏一处。
 > 「现在该遵守什么」看 `AI_HANDOFF.md` 的「修改原则」；行号会随代码漂移，本文里的行号按「当时那一版」记，查证时以 grep 当前代码为准。
 
+## V1.10.0：TODO 的 P0 三条与 P1 前四条
+
+### 改了什么
+
+- **P0-1 删除先进回收站**：`005回收站` 进保留目录名单（`archive-core.js` 的 `RESERVED_COLLECTION_NAMES`、`background.js` 的同名 Set、`library.js` 的扫描跳过 / 新建拦截 / `ARCHIVE_RESERVED_DIRS` 共 5 处，`stability` 的形状断言同步成 9 个名字）。`recycleCollection()` / `recycleRecords()` 把收藏夹或目录整体挪到 `005回收站/<YYYYMMDD-HHMMSS>/<收藏夹>[/<目录>]`：优先 `DirectoryHandle.move()`，本机不支持时退回复制 → `directoryFingerprint()` 逐文件比「名字:字节数」→ 一致才删源，不一致抛「复制到回收站后校验不一致，源目录没有删除。」。`pruneRecycler()` 只删时间戳目录且年龄 ≥ 30 天（`recycleStamp()` 命名的目录），每次扫描后 fire-and-forget；`purgeRecycler()` 支撑工具栏「清空回收站」。删除结果文案统一附「已移到 <路径>（30 天后自动清理），这段时间里还能自己捞回来。」，确认框标题改成「删除本地归档（先移进回收站）？」。
+- **P0-2 归档体检**：`readArchiveRecord()` 多收一个 `diagnostics`（`missingText` / `missingCover` / `brokenText` / `tempFiles`），`scanRoot()` 的返回里带 `diagnostics`。`writeHealthReport()` 把七类问题写成 `006报告/体检-<时间戳>.md`（CRLF、只读、每类最多列 20 条然后「…还有 N 条」），工具栏加「归档体检」按钮。
+- **P0-3 storage 兜底**：`safeLocalSet(patch, label)` 失败等 200ms 重试一次，仍失败 `console.warn` + 写 `lastStorageError`（`{ label, message, at }`），**返回 false 不抛错**；`setBcaStatsSnapshot()` 内部保留 `chrome.storage.local.set({ bcaStats: stats })` 字面量（`stability:5627` 钉着它），最终失败才抛。统计镜像、补存登记、统计快照三条关键路径接入。弹窗新增「本地存储没写进去」块（`role="alert"`），点「知道了」删掉这个键。
+- **P1-4 设置页真执行测试**：`test/pages.test.cjs` 新增 `suiteSettings()` 三条 —— 滑杆连发只写一次存储、壁纸状态跟着 IndexedDB 的 Blob 走、切到英文后所有 `data-i18n` 重译且切回无残留。
+- **P1-5 键盘与读屏**：`#resultSummary` 加 `aria-live="polite"`；宠物 dock 加 `aria-hidden="true"`、按钮 `tabindex="-1"`（`applyVisibility()` 里原来的 `button.tabIndex = 0` 会把按钮顶回 Tab 序列，改成 `setAttribute`）。
+- **P1-6 版本单一来源**：`library.html` 的 `#sideVersion` 清空，`library.js` 启动时用 `displayVersion(chrome.runtime.getManifest().version)` 填；`release.ps1` 只改 `manifest.json` 一处、回滚清单也只剩它；`stability:346` 从 `assert.equal(manifest.version, "1.8.22")` 改成 `/^\d+\.\d+\.\d+$/`，另加一条守卫盯住「html 里不许再出现版本号、release.ps1 不许再 patch 界面文件」。
+- **P1-7 继续上次导入**：新增 `bcaImportResume`（收藏夹名、页号、已写入/总数、收藏夹 id 列表），中断时 `writeImportResume()` 落盘（失败只 warn）；`importBiliFavoritesInner` 按 `data.resume.folder` 找收藏夹下标，从那个收藏夹起跑并写一行「继续上次导入：从「X」第 N 页往后接着跑」；`favorites-import.js` 透传 `resume`；弹窗顶部新增续跑行与「继续上次导入」按钮（复用现有样式，无新 CSS）。
+- 计数：测试 stability 342 → **349**、pages 29 → **33**；词典 958 → **1001**。
+
+### 为什么
+
+P0 三条都是「会丢东西或看不见问题」：删归档没有任何后悔药、扫描时被静默跳过的目录用户永远不知道、storage 写失败在界面上完全静默。P1 四条是覆盖与可达性：设置页此前没有任何真执行测试、视频卡片纯鼠标操作、发一次版要手改三处版本号、导入断了只能从头再来。
+
+### 踩的坑
+
+- `safeLocalSet` 设计成不抛错，于是「补存登记失败要提示」如果只看异常就悄悄失效了 —— 改成看返回值（1.8.21 的 `retryHint` 语义差点因此被废掉）。
+- `scanRoot` 的返回对象中间插了 `diagnostics`，V1.8.4 那条老守卫的整串正则失配，改成分首段/尾段两截断言。
+- `renderResumeImport` 是同步函数（守卫按 async 写会红）；`directoryFingerprint` 是 async 的。
+- 词典第一次图省事用 `JSON.stringify` 整体重写，把整份 locale 按 zh-CN 排序重排、产生一百多行假 diff，回滚后改用行级插入脚本。
+- `ops_bash` 里 heredoc 一次写 200+ 行脚本会被截断（here-document 未终止），改成落 `.py` 文件再跑；`node -e` 里的 `C:\Users\...` 反斜杠会被 shell 吃掉，改正斜杠路径。
+- `test/pages.test.cjs` 是 CRLF，python 替换必须 `\r\n` 对齐；dom-harness 的元素不反射 `tabIndex` 属性，只能用 `setAttribute` + 读 attribute 断言。
+
+### 没动的
+
+- `library.js` 拆分（用户明确「暂时不做」）。
+- 回收站不做「单独撤销某一条」，只有整份 30 天清理 + 手动清空。
+- 其余几十处 `chrome.storage.local.set` 仍是裸写（只把统计镜像、补存登记、统计快照三条关键路径收进 `safeLocalSet`）。
+
 ## V1.8.22：旧 P3 清单清仓
 
 这一版把 1.7.0 审查留下、一直没人动的 `old-p3-checklist.md` 67 条（死代码、UX 可访问性、破坏性操作、存储、兼容、性能、原生助手、安全、隐私）逐条复核：能修的直接修，改不动的写清原因，过时的标过时。**清单里每一条现在都有判定**。

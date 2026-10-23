@@ -1404,7 +1404,9 @@
   function applyVisibility() {
     visible = statsLoaded && configEnabled;
     if (container) container.classList.toggle(HIDDEN_CLASS, !visible);
-    if (button) button.tabIndex = visible ? 0 : -1;
+    /* P1-5：整块 dock 是 aria-hidden 的装饰件，按钮任何时候都不该进 Tab 序列
+       （以前是 visible 时给 0，于是显隐一跑就又把 tabindex 顶回去）。 */
+    if (button) button.setAttribute("tabindex", "-1");
     if (!visible) {
       running = false;
       dragging = false;
@@ -1430,6 +1432,10 @@
     container = doc.createElement("div");
     container.id = ROOT_ID;
     container.className = "bca-pet-dock";
+    /* P1-5（2026-10 审阅）：这只猫是装饰性挂件，会一直在屏幕上动、台词每几秒换一句。
+       读屏用户没法「跳过」它，焦点也可能落进来。整块 dock 从无障碍树里摘掉，
+       同时把按钮移出 Tab 序列 —— 宠物的开关、尺寸、暂停全在设置页，功能不会丢。 */
+    container.setAttribute("aria-hidden", "true");
 
     bubble = doc.createElement("div");
     bubble.id = BUBBLE_ID;
@@ -1450,6 +1456,9 @@
     button = doc.createElement("button");
     button.type = "button";
     button.className = PET_CLASS;
+    /* P1-5：外层 dock 已 aria-hidden，里面再放一个可聚焦按钮就是「焦点进得去、
+       读屏念不出来」—— 把按钮也移出 Tab 序列，点击/拖拽行为一个字节都没变。 */
+    button.setAttribute("tabindex", "-1");
     // 无障碍名就用「宠物」这条词条本身（走 translate()，切语言时会跟着变）
     button.setAttribute("aria-label", translate("宠物"));
     button.setAttribute("aria-expanded", "false");

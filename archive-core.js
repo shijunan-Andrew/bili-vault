@@ -100,7 +100,9 @@
     "视频下载",
     "000视频下载",
     "003database",
-    "004导出"
+    "004导出",
+    "005回收站",
+    "006报告"
   ];
 
   function isReservedCollectionName(name) {
