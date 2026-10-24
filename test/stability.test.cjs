@@ -2463,7 +2463,7 @@ test("快捷键交给读屏，失败时弹窗给出人话摘要，移除背景�
   // 移除背景图：先问一句，成了要给 role=status 的反馈。
   const settings = readProjectFile("settings.js");
   assert.match(settings, /const WALLPAPER_STATUS_MS = \d+;/);
-  assert.match(settings, /window\.confirm\(BcaI18n\.t\("移除后要重新选图才能恢复，确定移除背景图片吗？"\)\)/);
+  assert.match(settings, /askConfirm\("移除后要重新选图才能恢复，确定移除背景图片吗？"\)/);
   assert.match(settings, /showWallpaperStatus\("背景图已移除"\)/);
   assert.match(readProjectFile("settings.html"), /id="wallpaperStatus" role="status" hidden/);
 });
@@ -7899,4 +7899,47 @@ test("扫描缓存持久化与缩略图：判断只有一处，卡片不再整�
   assert.match(library, /function clearThumbnailUrls\(\) \{/);
   const dropFn = library.slice(library.indexOf("function dropRootCaches("), library.indexOf("function touchArchiveCacheRoot("));
   assert.match(dropFn, /clearThumbnailUrls\(\);/, "丢根目录缓存时要连缩略图一起丢");
+});
+
+test("巡检的缺封面只认 diagnostics，不许再读 video.cover（1.10.3）", () => {
+  const core = readProjectFile("archive-core.js");
+  const start = core.indexOf("function integritySummary(scan) {");
+  assert.ok(start > 0, "archive-core.js 里找不到 integritySummary");
+  const end = core.indexOf("function buildMarkdownInventory(", start);
+  assert.ok(end > start, "找不到 integritySummary 的结尾");
+  const body = core.slice(start, end);
+  assert.match(body, /const missingCover = \(Array\.isArray\(issues\.missingCover\)/, "缺封面要来自 diagnostics.missingCover");
+  // 注释里解释「为什么不能读 video.cover」也算读，所以只对剥掉注释的代码断言。
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  assert.doesNotMatch(code, /video\.cover/, "video.cover 在扫描阶段恒为空串，读了就会把有封面的记录全算成缺封面");
+});
+
+test("设置页的动作按钮先确认、后回执，确认只有 askConfirm 一处（1.10.3）", () => {
+  const page = readProjectFile("settings.js");
+  assert.equal((page.match(/window\.confirm\(/g) || []).length, 1,
+    "window.confirm 只准出现在 askConfirm 里，别让每个按钮各写一份");
+  assert.match(page, /function askConfirm\(key, vars\) \{/);
+
+  // 动作 → 回执函数。少一个就是「点了没反应」或者「做完不说话」。
+  const actions = [
+    ["downloadConfigFile", "flashTransfer"],
+    ["importConfigText", "askConfirm"],
+    ["exportArchiveMetadata", "flashTransfer"],
+    ["exportMarkdownInventory", "showMarkdownMessage"],
+    ["writeHealthReport", "showMaintenanceMessage"],
+    ["scanIntegrity", "showIntegrityMessage"],
+    ["fillMissingStats", "showIntegrityMessage"],
+    ["forgetRememberedUid", "showForgetUidStatus"]
+  ];
+  for (const [name, receipt] of actions) {
+    const start = page.indexOf(`async function ${name}(`);
+    assert.ok(start > 0, `settings.js 里找不到 ${name}`);
+    const end = page.indexOf("\n}", start);
+    assert.ok(end > start, `找不到 ${name} 的结尾`);
+    const body = page.slice(start, end);
+    assert.match(body, /askConfirm\(/, `${name} 必须先问一句再动手`);
+    assert.match(body, new RegExp(`${receipt}\\(`), `${name} 干完要有回执`);
+  }
+  // 导入的回执在 change 处理器里（文件选完才有结果）
+  assert.match(page, /flashTransfer\(BcaI18n\.t\("配置已导入。"\)\)/);
 });

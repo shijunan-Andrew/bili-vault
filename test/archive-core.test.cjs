@@ -1022,6 +1022,43 @@ test("thumbnailEligible / thumbnailFit / thumbnailKey：缩略图的判断只有
   assert.equal(core.THUMBNAIL_TYPE, "image/webp");
   assert.ok(core.THUMBNAIL_QUALITY > 0 && core.THUMBNAIL_QUALITY < 1);
 });
+test("巡检：进了 videos 的记录带封面，就不该被算成缺封面（1.10.3）", () => {
+  // 真实形状：recordToVideo() 的 cover 恒为空串（句柄在 coverEntry），缺封面只能看 diagnostics。
+  const scan = {
+    collections: [{
+      name: "小鲸鱼测试",
+      videos: [
+        { directory: "d1", cover: "", description: "有简介", stats: { view: "100" } },
+        { directory: "d2", cover: "", description: "", stats: { view: "200" } }
+      ]
+    }],
+    diagnostics: { missingText: [], missingCover: [], brokenText: [], tempFiles: [] }
+  };
+  const summary = core.integritySummary(scan);
+  assert.equal(summary.records, 2);
+  assert.equal(summary.missingCover, 0, "有封面的记录不许因为 cover 是空串就被算成缺封面");
+  assert.deepEqual(summary.missingCoverLabels, []);
+  assert.equal(summary.missingDescription, 1, "缺简介仍按简介字段判");
+  assert.equal(summary.attention, 1, "需要看一眼 = 缺简介 1 条");
+});
+
+test("巡检：缺封面只认 diagnostics 里那些没进 records 的目录（1.10.3）", () => {
+  const scan = {
+    collections: [{ name: "甲", videos: [{ directory: "d1", cover: "", description: "有", stats: { view: "1" } }] }],
+    diagnostics: {
+      missingText: [{ collection: "甲", directory: "空" }],
+      missingCover: [{ collection: "甲", directory: "无封面" }],
+      brokenText: [],
+      tempFiles: []
+    }
+  };
+  const summary = core.integritySummary(scan);
+  assert.equal(summary.records, 1, "只有读得出来的记录进 videos");
+  assert.equal(summary.missingCover, 1);
+  assert.equal(summary.missingText, 1);
+  assert.equal(summary.attention, 2, "缺封面 1 + 缺文本 1");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

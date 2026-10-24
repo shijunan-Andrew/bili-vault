@@ -112,6 +112,7 @@ function showForgetUidStatus(key) {
 }
 
 async function forgetRememberedUid() {
+  if (!askConfirm("忘记之后，下次打开收藏库要重新和 B 站对比一次。确定忘记吗？")) return;
   try {
     await chrome.storage.local.remove("lastImportUid");
     showForgetUidStatus("已忘记记住的 B 站 UID，下次对比会重新问你一次。");
@@ -481,6 +482,13 @@ function showRowMessage(row, text, isError = false) {
   setVisible(status, Boolean(text));
 }
 
+/* 1.10.3：设置页的动作按钮一律「先确认、后回执」。
+   确认只有这一处（askConfirm），回执复用三个行状态（transfer / maintenance / integrity），
+   都不许在按钮的 click 里内联 —— 这样 guard 才能一次数清楚谁忘了问。 */
+function askConfirm(key, vars) {
+  return window.confirm(vars === undefined ? BcaI18n.t(key) : BcaI18n.t(key, vars));
+}
+
 function showTransferMessage(text, isError = false) {
   showRowMessage(transferRow, text, isError);
 }
@@ -575,10 +583,12 @@ async function downloadConfigFile(includePersonal) {
     const payload = BcaArchiveCore.buildConfigPayload(preferences, { includePersonal });
     if (includePersonal) {
       const detail = configPersonalSummary(payload);
-      if (detail) {
-        const ok = window.confirm(BcaI18n.t("这份配置会带上你自己的内容：{detail}。发给别人就等于把这些一起公开。确定导出吗？", { detail }));
-        if (!ok) return;
-      }
+      const ok = detail
+        ? askConfirm("这份配置会带上你自己的内容：{detail}。发给别人就等于把这些一起公开。确定导出吗？", { detail })
+        : askConfirm("会导出一份配置文件（主题、语言、每页数量、视图模式，外加收藏夹顺序与筛选），直接下载到本机。确定导出吗？");
+      if (!ok) return;
+    } else if (!askConfirm("只导出外观与档位（主题、语言、每页数量、视图模式），直接下载到本机。确定导出吗？")) {
+      return;
     }
     const text = `\ufeff${JSON.stringify(payload, null, 2)}\n`;
     const blob = new Blob([text], { type: "application/json" });
@@ -662,10 +672,10 @@ async function importConfigText(rawText) {
   if (!payload || payload.app !== BcaArchiveCore.CONFIG_APP_ID) {
     throw new Error(BcaI18n.t("这不是哔哩藏库导出的配置文件。"));
   }
-  if (BcaArchiveCore.configHasPersonalData(payload)) {
-    const ok = window.confirm(BcaI18n.t("这份配置里有你自己的内容（收藏夹顺序或筛选）。导入会覆盖本机的对应设置，确定导入吗？"));
-    if (!ok) return false;
-  }
+  const ok = BcaArchiveCore.configHasPersonalData(payload)
+    ? askConfirm("这份配置里有你自己的内容（收藏夹顺序或筛选）。导入会覆盖本机的对应设置，确定导入吗？")
+    : askConfirm("导入会覆盖本机的对应设置（主题、语言、每页数量、视图模式），确定导入吗？");
+  if (!ok) return false;
   await applyImportedPreferences(sanitizeImportedPreferences(payload.preferences));
   return true;
 }
@@ -708,7 +718,8 @@ async function exportArchiveMetadata() {
     const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
     if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
-    showMaintenanceMessage(BcaI18n.t("正在导出归档元数据…"));
+    if (!askConfirm("会把整个归档的元数据导成一份 JSON，写进本地备份文件夹的 004导出/。只读归档，不改任何一条记录。确定导出吗？")) return;
+    flashTransfer(BcaI18n.t("正在导出归档元数据…"));
     const scan = await BcaArchiveTools.scanArchive(handle);
     const collections = scan.collections.map((collection) => ({
       name: collection.name,
@@ -775,12 +786,12 @@ async function exportArchiveMetadata() {
     } catch (error) {
       console.warn("清理旧导出文件失败（不影响这次导出）", error);
     }
-    showMaintenanceMessage(BcaI18n.t("已导出 {count} 条记录到 {file}。", {
+    flashTransfer(BcaI18n.t("已导出 {count} 条记录到 {file}。", {
       count: BcaArchiveCore.formatCountText(built.payload.counts.records),
       file: fileName
     }));
   } catch (error) {
-    showMaintenanceMessage(BcaI18n.t("导出归档元数据失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }), true);
+    flashTransfer(BcaI18n.t("导出归档元数据失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }), true);
   }
 }
 
@@ -817,6 +828,7 @@ async function exportMarkdownInventory() {
     const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
     if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+    if (!askConfirm("会把每个收藏夹的标题、UP 主、收藏时间、链接和 BV 号导出成一份 .md，写进 004导出/。只读归档，不改任何一条记录。确定导出吗？")) return;
     showMarkdownMessage(BcaI18n.t("正在读归档…"));
     const scan = await BcaArchiveTools.scanArchive(handle);
     const collections = scan.collections.map((collection) => ({
@@ -921,7 +933,10 @@ async function scanIntegrity(options = {}) {
     const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
     if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
-    if (!options.silent) showIntegrityMessage(BcaI18n.t("正在读归档…"));
+    if (!options.silent) {
+      if (!askConfirm("会重新读一遍归档，只说清有多少条缺互动数据、缺封面、缺简介，不改任何文件。确定开始吗？")) return null;
+      showIntegrityMessage(BcaI18n.t("正在读归档…"));
+    }
     const scan = await BcaArchiveTools.scanArchive(handle, { diagnostics: true });
     const collections = scan.collections.map((collection) => ({
       name: collection.name,
@@ -956,6 +971,10 @@ async function fillMissingStats() {
   const button = $("fillMissingStats");
   const batchSize = INTEGRITY_FILL_BATCH * INTEGRITY_FILL_BATCHES;
   const picked = integrityFillable.slice(0, batchSize);
+  const fillCount = BcaArchiveCore.formatCountText(picked.length);
+  // 一整行写死、以「);」收尾：test/i18n-extract.cjs 的 askConfirm 抽词正则就吃这个形状。
+  const fillAsked = askConfirm("这条要真写盘：会逐条请求 B 站接口补上缺的互动数据，一次最多 {count} 条、每条之间隔 0.8 秒，只改 视频信息.txt 里的互动数据与 UP 主粉丝数。确定开始吗？", { count: fillCount });
+  if (!fillAsked) return { updated: 0, failed: 0, remaining: integrityFillable.length };
   if (button) button.disabled = true;
   let updated = 0;
   let failed = 0;
@@ -1028,6 +1047,7 @@ async function writeHealthReport() {
     const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
     if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+    if (!askConfirm("会重新读一遍归档，把读不出来、缺封面、缺基本信息、半截目录和残留临时文件写成一份 Markdown，放进 006报告/。只读归档，不改任何一条记录。确定开始吗？")) return;
     showMaintenanceMessage(BcaI18n.t("正在做归档体检：重新读一遍归档…"));
     const result = await BcaArchiveTools.scanArchive(handle, { diagnostics: true });
     const diagnostics = result.diagnostics || { missingText: [], missingCover: [], brokenText: [], tempFiles: [] };
@@ -1141,7 +1161,7 @@ async function rebuildStatsDatabase() {
     if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
     // 重建会按归档里数出来的条数覆盖「总数」这类累计数字，属于不可逆的覆盖 —— 先问一句。
-    const confirmed = window.confirm(BcaI18n.t("会按本地归档重算统计库（总数、每日新增、收藏夹排行、宠物记录），并把现在这份库另存成一份带时间戳的副本。视频文件夹一个都不动。要开始吗？"));
+    const confirmed = askConfirm("会按本地归档重算统计库（总数、每日新增、收藏夹排行、宠物记录），并把现在这份库另存成一份带时间戳的副本。视频文件夹一个都不动。要开始吗？");
     if (!confirmed) return false;
     showRebuildStatsMessage(BcaI18n.t("正在读归档…"));
     const scan = await BcaArchiveTools.scanArchive(handle);
@@ -1349,7 +1369,7 @@ async function boot() {
     // 就再也回不到这张背景了 —— 这种不可逆操作不能点一下就算。
     // 用原生 confirm 而不是自建对话框：设置页没有对话框组件（收藏库那套在 library.js 里，
     // 两边是各自独立的页面），为一句确认搬一整套 DOM + 焦点管理不划算。
-    if (!window.confirm(BcaI18n.t("移除后要重新选图才能恢复，确定移除背景图片吗？"))) return;
+    if (!askConfirm("移除后要重新选图才能恢复，确定移除背景图片吗？")) return;
     clearWallpaperError();
     clearWallpaperStatus();
     Promise.resolve(BcaTheme.clearWallpaper())

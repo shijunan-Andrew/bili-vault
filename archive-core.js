@@ -1099,8 +1099,13 @@
     const groups = Array.isArray(scan && scan.collections) ? scan.collections : [];
     const issues = (scan && scan.diagnostics) || {};
     const countOf = (value) => (Array.isArray(value) ? value.length : 0);
+    /* 1.10.3（用户报「4 条都有封面，巡检却说 4 条缺封面」）：缺封面只能从 diagnostics 读。
+       readRecord() 碰到没有封面文件的目录会直接返回 null、把路径记进 diagnostics.missingCover ——
+       这类目录根本不进 collections[].videos；反过来，进了 videos 的 recordToVideo() 结果里
+       cover 恒为空串（封面句柄单独放在 record.coverEntry，页面渲染时才换成 blob URL）。
+       1.10.1 判的是 video.cover，于是「每条有封面的记录」都被算成缺封面。 */
+    const missingCover = (Array.isArray(issues.missingCover) ? issues.missingCover : []).map(String);
     const fillable = [];
-    const missingCover = [];
     const missingDescription = [];
     let records = 0;
     for (const group of groups) {
@@ -1112,7 +1117,6 @@
         const missingStats = STAT_KEYS.some((key) => String(stats[key] == null ? "" : stats[key]).trim() === "N/A");
         if (missingStats) fillable.push(video);
         const label = `${name}/${String((video && video.directory) || "")}`;
-        if (!String((video && video.cover) || "").trim()) missingCover.push(label);
         if (!String((video && video.description) || "").trim()) missingDescription.push(label);
       }
     }

@@ -1210,12 +1210,13 @@ async function suiteSettings() {
         loadRootHandle: async () => ({ name: "归档" }),
         ensureRootPermission: async () => true,
         scanArchive: async () => scan,
-        // 甲/d1：缺互动数据；甲/d2：缺封面。三种缺失各一条，断言才有区分度。
+        // 甲/d1：缺互动数据；甲/d2：缺封面（缺封面只由 diagnostics 反映，见 1.10.3）。
+        // cover 一律给空串：真实 recordToVideo() 就是这个形状（句柄在 record.coverEntry）。
         recordToVideo: (collection, entry) => ({
           collection,
           directory: entry.name,
           title: entry.name,
-          cover: entry.name === "d1" ? "COVER" : "",
+          cover: "",
           description: entry.name === "d2" ? "说明" : "",
           stats: entry.name === "d1"
             ? { view: "N/A", danmaku: "N/A", like: "N/A", coin: "N/A", favorite: "N/A", share: "N/A" }
@@ -1274,7 +1275,7 @@ async function suiteSettings() {
         recordToVideo: (collection, entry) => ({
           collection,
           directory: entry.name,
-          cover: "C",
+          cover: "",
           description: "D",
           stats: { view: "N/A", danmaku: "N/A", like: "N/A", coin: "N/A", favorite: "N/A", share: "N/A" }
         })
@@ -1313,6 +1314,139 @@ async function suiteSettings() {
       "补了 {updated} 条；现在还剩 {remaining} 条缺互动数据。", { updated: "25", remaining: "0" }),
       "补完要报补了多少条、还剩多少");
     assert.equal(doc.getElementById("fillMissingStats").hidden, true, "没东西可补了就把按钮收起来");
+  });
+
+  // ---- 1.10.3：动作按钮先确认后回执 ----
+
+  await test("归档体检 / 导出清单 / 完整度巡检都是先问再做，取消就一步都不走（1.10.3 真执行）", async () => {
+    let scans = 0;
+    const page = await openSettings();
+    page.window.BcaArchiveTools = {
+      loadRootHandle: async () => ({ name: "归档" }),
+      ensureRootPermission: async () => true,
+      scanArchive: async () => { scans += 1; return { collections: [], diagnostics: {}, issues: [], unfinished: [], longNames: [], bytes: 0, recordCount: 0 }; },
+      recordToVideo: () => null,
+      subdirectoryHandle: async () => ({ getFileHandle: async () => ({ createWritable: async () => ({ write: async () => {}, close: async () => {} }) }) })
+    };
+    page.window.confirm = () => false;
+    const doc = page.document;
+    dom.fireUserEvent(doc.getElementById("settingsHealthCheck"), "click");
+    await settle(8);
+    dom.fireUserEvent(doc.getElementById("settingsExportMarkdown"), "click");
+    await settle(8);
+    dom.fireUserEvent(doc.getElementById("runIntegrityCheck"), "click");
+    await settle(8);
+    assert.equal(scans, 0, "用户点了「取消」，一次扫描都不该发生");
+    assert.equal(doc.getElementById("maintenanceStatus").hidden, true, "取消后不要留任何回执");
+    assert.equal(doc.getElementById("exportMarkdownStatus").hidden, true, "取消后不要留任何回执");
+    assert.equal(doc.getElementById("integrityStatus").hidden, true, "取消后不要留任何回执");
+  });
+
+  await test("导出归档元数据的回执落在「导入与导出」这张卡，不是跑到「归档维护」去（1.10.3 真执行）", async () => {
+    // 导出会走 handle.getDirectoryHandle：004导出 要真给一个目录，003database 当没有（缺库也能导）。
+    const exportDirectory = () => ({
+      getFileHandle: async (name) => ({ name, createWritable: async () => ({ write: async () => {}, close: async () => {} }) }),
+      values: async function* () {}
+    });
+    const rootHandle = {
+      name: "归档",
+      getDirectoryHandle: async (name) => {
+        if (name === "004导出") return exportDirectory();
+        const error = new Error("没有这个目录");
+        error.name = "NotFoundError";
+        throw error;
+      }
+    };
+    const page = await openSettings();
+    page.window.BcaArchiveTools = {
+      loadRootHandle: async () => rootHandle,
+      ensureRootPermission: async () => true,
+      scanArchive: async () => ({
+        collections: [{ name: "甲", records: [{ directory: "d1", record: {} }] }],
+        diagnostics: { missingText: [], missingCover: [], brokenText: [], tempFiles: [] },
+        issues: [], unfinished: [], longNames: [], bytes: 0, recordCount: 1
+      }),
+      recordToVideo: (collection, entry) => ({ collection, directory: entry.name, title: "t", bvid: "BV1aaaaaaaaa", url: "", upName: "", upMid: "", upHome: "", upFans: "", favoriteAt: "", savedAt: "", timestamp: "", category: "", duration: "", publishDate: "", description: "", stats: {}, tags: [], isInvalid: false, invalidReason: "", cover: "", info: {}, searchIndex: "" }),
+      subdirectoryHandle: async () => exportDirectory(),
+      formatMegabytes: () => "0 B"
+    };
+    page.window.confirm = () => true;
+    const doc = page.document;
+    dom.fireUserEvent(doc.getElementById("settingsExportArchive"), "click");
+    await settle(10);
+    const transfer = doc.getElementById("transferStatus");
+    assert.equal(transfer.hidden, false, "回执要用导出按钮所在那张卡的状态行");
+    assert.match(transfer.textContent, /已导出 1 条记录到/, "回执要说清导出了多少条");
+    assert.equal(doc.getElementById("maintenanceStatus").hidden, true, "别把回执甩到另一张卡上");
+  });
+
+  await test("补全互动数据先问一句，取消就不发任何请求（1.10.3 真执行）", async () => {
+    const scan = {
+      collections: [{ name: "甲", records: [{ directory: "d1", record: {} }] }],
+      diagnostics: { missingText: [], missingCover: [], brokenText: [], tempFiles: [] },
+      issues: [], unfinished: [], longNames: [], bytes: 0, recordCount: 1
+    };
+    const page = await openSettings();
+    page.window.BcaArchiveTools = {
+      loadRootHandle: async () => ({ name: "归档" }),
+      ensureRootPermission: async () => true,
+      scanArchive: async () => scan,
+      recordToVideo: (collection, entry) => ({
+        collection, directory: entry.name, title: "t", cover: "", description: "有",
+        stats: { view: "N/A", danmaku: "N/A", like: "N/A", coin: "N/A", favorite: "N/A", share: "N/A" }
+      })
+    };
+    let sent = 0;
+    page.chrome.runtime.sendMessage = (message, callback) => {
+      if (message && message.type === "bca-refresh-video-stats") sent += 1;
+      if (typeof callback === "function") { callback({ ok: true, updated: 1, failed: 0 }); return undefined; }
+      return Promise.resolve({ ok: true, updated: 1, failed: 0 });
+    };
+    page.window.confirm = () => true;
+    const doc = page.document;
+    dom.fireUserEvent(doc.getElementById("runIntegrityCheck"), "click");
+    await settle(10);
+    page.window.confirm = () => false;
+    dom.fireUserEvent(doc.getElementById("fillMissingStats"), "click");
+    await settle(10);
+    assert.equal(sent, 0, "取消之后一条请求都不该发出去");
+  });
+
+  await test("忘记记住的 UID 先问一句，取消就什么都不清（1.10.3 真执行）", async () => {
+    const page = await openSettings({ localData: { lastImportUid: "12345" } });
+    page.window.confirm = () => false;
+    const doc = page.document;
+    dom.fireUserEvent(doc.getElementById("forgetUid"), "click");
+    await settle(6);
+    const dump = page.chrome.storage.local.dump();
+    assert.equal(dump.lastImportUid, "12345", "取消之后 UID 还得在");
+    assert.equal(doc.getElementById("forgetUidStatus").hidden, true, "取消后不要留回执");
+  });
+
+  await test("九句确认都说清「会做什么、不会动什么」（1.10.3）", async () => {
+    const said = [];
+    const page = await openSettings({ localData: { lastImportUid: "1" } });
+    page.window.confirm = (message) => { said.push(String(message)); return false; };
+    page.window.BcaArchiveTools = {
+      loadRootHandle: async () => ({ name: "归档" }),
+      ensureRootPermission: async () => true,
+      scanArchive: async () => ({ collections: [], diagnostics: { missingText: [], missingCover: [], brokenText: [], tempFiles: [] }, issues: [], unfinished: [], longNames: [], bytes: 0, recordCount: 0 }),
+      recordToVideo: () => null,
+      subdirectoryHandle: async () => ({ getFileHandle: async () => ({ createWritable: async () => ({ write: async () => {}, close: async () => {} }) }) })
+    };
+    const doc = page.document;
+    for (const id of ["settingsExportConfig", "settingsExportConfigSlim", "settingsExportArchive", "settingsExportMarkdown", "settingsHealthCheck", "runIntegrityCheck", "forgetUid"]) {
+      dom.fireUserEvent(doc.getElementById(id), "click");
+      await settle(6);
+    }
+    assert.equal(said.length, 7, `七个按钮各问一句，实际 ${said.length} 句`);
+    for (const message of said) {
+      assert.ok(message.length > 12, `确认文案太短，说不清要做什么：${message}`);
+      assert.match(message, /确定|要开始吗|确定开始吗/, `确认文案要有一句明确的问法：${message}`);
+    }
+    assert.ok(said.some((message) => message.includes("004导出/")), "导出类文案要点明写到哪");
+    assert.ok(said.some((message) => message.includes("006报告/")), "体检文案要点明报告写到哪");
+    assert.ok(said.some((message) => message.includes("006报告/") && message.includes("只读归档")), "体检要说明不动归档");
   });
 }
 

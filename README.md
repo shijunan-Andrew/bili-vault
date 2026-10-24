@@ -137,29 +137,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.2：缩略图、迁移演练、宿主认证
+## V1.10.3：动手前先问一句，做完说清做了什么
 
-- **冷启动不再重读全部 txt（量过才动手）**：`node test/bench.cjs` 显示统计侧放大是线性的（1000 → 10000 条，「年度」0.20 ms → 2.73 ms，13.6 倍，与 10 倍同量级，没有平方项）；而「扫描归档」这一项 bench 里根本没有 —— 于是去读代码，发现这条早就做完了（1.8.5 起 `paintSnapshot()` 就把快照灌回内存缓存，命中判据是 `size + lastModified`）。本轮没有动扫描逻辑，只补了两条守卫断言（快照必须先灌缓存、`readRecord` 必须先查缓存再读正文），免得以后重构悄悄把它拆掉。
-- **卡片改用缩略图**：封面缩到长边 320 的 WebP 再上卡片，详情面板仍是原图。老档案的封面是真 PNG（平均 1.7 MB、最大 7.3 MB），而卡片位只有几十像素高 —— 之前一页 25 张就是 25 次整图解码，翻页的内存峰值全在这里。缩一张 10–30 ms，缓存上限 240 张，换根目录或点「刷新」一起清掉。
-- **缩略图的尺寸口径只有一处**：`BcaArchiveCore.thumbnailEligible / thumbnailFit / thumbnailKey`，`library.js` 只负责「取图 → canvas → blob: URL」，不许再写死 320。
-- **统计库迁移位从摆设变成能跑的**：`migrateDatabase(raw, now, options)` 按 `DATABASE_MIGRATIONS` 表逐级升级、逐级盖 `schemaVersion`、不重复跑，传 `options.migrations` 可以注入假步骤演练。默认表是空的（当前就是 v1），但演练用例证明 v1→v2→v3 会按序跑、能盖章、不动入参。
-- **原生宿主加了调用方认证（协议 4）**：每条请求自报 `extensionId` + `protocol`，宿主先核对再干活 —— id 必须是 32 位扩展 id、协议号必须相等、配了白名单就只放名单里的 id。没配白名单时按「单用户机器」放行，响应里用 `auth` 字段把这次是 `whitelisted` 还是 `open` 说清楚。
-- **自检脚本也跟着升级**：`test-native-folder-opener.ps1` 会自报身份、核对 `auth`，白名单非空时用假 id 打一发确认真的被拒。
-- **词典 1079 条不变**、五套测试 **375 / 89 / 72 / 30 / 51**。
+- **九个动作按钮改了点击行为**：「导出配置」「只导外观与档位」「导入配置」「导出归档元数据」「导出清单」「归档体检」「开始巡检」「补全互动数据」「忘记记住的 UID」现在都是**先弹确认、再做**。确认框统一交代三件事：会做什么、会把东西写到哪里、不会动什么（比如「只读归档，不改任何一条记录」）。
+- **确认只有一处实现**：`askConfirm()`。九个按钮都调它，不许各自写 `window.confirm` —— 有一条守卫断言盯着这个（`window.confirm(` 在 `settings.js` 里只准出现一次）。
+- **执行完一定说一声**：「导出归档元数据」的成功/失败回执以前跑到「归档维护」那张卡上（按钮在「导入与导出」，回执在另一张卡，看着像没反应），现在回到自己这张卡；体检、巡检、补数据各自在「归档维护」里报结果；导出配置会先说「正在打包」再说「已导出 N 个文件」；忘记 UID 会报「已忘记」。
+- **顺带修掉巡检的「缺封面」误报**：旧版按 `recordToVideo().cover` 判缺封面，而那个字段在扫描阶段恒为空串（封面句柄是单独字段，要等渲染才变成图片地址），于是四条都有封面的库被报成「4 条缺封面」。现在只认扫描阶段真正的 `diagnostics.missingCover`（读 txt 之后找不到封面文件的那种），归档体检一直用的是这个口径，所以体检报告本来就是对的。
+- **词典 1088 条**（新增九句确认文案），五套测试 **377 / 91 / 72 / 30 / 56**。
 
 **遗留** - 无。
-
-- 无。
 
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1079 条**<!-- i18n-count:1079 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1088 条**<!-- i18n-count:1088 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:375 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:377 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

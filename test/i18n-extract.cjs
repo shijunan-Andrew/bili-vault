@@ -68,6 +68,8 @@ const KEY_ARGUMENT_HELPERS = [
   { source: "showWallpaperStatus", window: 300 },
   { source: "showWallpaperError", window: 300 },
   { source: "showForgetUidStatus", window: 300 },
+  // 1.10.3：设置页的确认统一走 askConfirm(key, vars)，key 同样是词条。
+  { source: "askConfirm", window: 400 },
   // 1.8.22（old-p3 security P3-2）：各扩展页开头调 BcaI18n.guardTopFrame("提示", "错误")，
   // 函数体里 t(String(message)) —— 这两个字面量同样要做成词条。
   { source: "(?:\\bBcaI18n\\.)?\\bguardTopFrame", window: 500 }
