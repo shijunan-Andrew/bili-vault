@@ -137,22 +137,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.17：空态三张步骤卡压成两张，弹窗说明并成一句
+## V1.10.18：「配置」一行收成「导出配置 + 更多导出」，导入仍在明面上
 
-- **空态两步走**：收藏库空态原来三张卡（选文件夹 / 自动归档 / 批量导入），后两张其实都在讲「资料怎么进来」，合成一张「收藏时自动归档，也能批量导入」，栅格跟着从三列改两列。
-- **弹窗瘦身**：「本地备份文件夹」下面原来两段提示共 5 行，并成一句（同一个位置 + 记住路径 + 按收藏夹与时间建目录）。
-- **范围**：`library.html` 一块、`library.css` 一条、`popup.html` 一处、两本词典删 6 加 3（1090 → **1087**）；`test/pages.test.cjs` 加两条真执行用例（页面套件 61 → **63**）。
+- **三个按钮并排的语义问题**：「导出配置」带个人内容、「只导外观与档位」只有外观与档位，两个都是导出，并排放着分不清主次。
+- **改法**：「导出配置」留作主按钮，「只导外观与档位」收进「更多导出」下拉（原生 `<details>`，开合与键盘可达交给浏览器，不引字符图标）；「导入配置」方向相反，仍留在明面上。
+- **收起行为**：选完一项自动收起，点空白处或按 Esc 也收起。
+- **范围**：`settings.html` 一行、`settings.css` 七条 `.export-more` 规则、`settings.js` 下拉收起、词典加 1 条（**1088**）；`test/pages.test.cjs` 加 1 条真执行用例（页面套件 63 → **64**），`test/stability.test.cjs` 加 1 条守卫（381 → **382**）。
 
 **遗留** - 无。
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1087 条**<!-- i18n-count:1087 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1088 条**<!-- i18n-count:1088 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:381 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:382 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

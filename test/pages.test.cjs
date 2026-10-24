@@ -337,6 +337,29 @@ async function suiteLibrary() {
     assert.equal(doc.getElementById("confirmBackdrop").hidden, true, "取消后要关掉");
   });
 
+  await test("「只导外观与档位」收进「更多导出」下拉，选完自己收起（1.10.18 真执行）", async () => {
+    const page = await openSettings({ localData: {} });
+    const doc = page.document;
+    const more = doc.getElementById("exportMore");
+    assert.ok(more, "配置行要有「更多导出」下拉");
+    assert.ok(more.contains(doc.getElementById("settingsExportConfigSlim")), "精简导出必须在下拉里面");
+    assert.equal(more.open, false, "下拉默认收起");
+
+    const blobs = [];
+    const originalCreate = page.window.URL.createObjectURL;
+    page.window.URL.createObjectURL = (blob) => { blobs.push(blob); return "blob:test/slim"; };
+    page.window.confirm = () => true;
+    try {
+      more.open = true;
+      doc.getElementById("settingsExportConfigSlim").click();
+      await settle(6);
+      assert.equal(blobs.length, 1, "点下拉里的项仍然能导出");
+      assert.equal(more.open, false, "选完要自己收起，别一直挡着下面的行");
+    } finally {
+      page.window.URL.createObjectURL = originalCreate;
+    }
+  });
+
   await test("设置页导出配置：完整导出带个人内容，精简导出只有外观与档位（1.9.0）", async () => {
     const page = await openSettings({
       localData: {

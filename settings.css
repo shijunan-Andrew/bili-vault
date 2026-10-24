@@ -198,6 +198,14 @@
 /* 1.10.5：说明太长时控件会换到下一行。自动外边距把它顶到右边，和没换行时的位置一样 ——
    否则 flex-wrap 下它独占一行，justify-content: space-between 只剩一个子项，会贴到左边去。 */
 .setting-row-control { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; gap: var(--sp-2); margin-left: auto; white-space: nowrap; }
+/* 1.10.18（S-2）：「更多导出」用原生 details 做下拉，开合与键盘可达都交给浏览器；
+   小三角用边框拼，不引字符图标。 */
+.export-more { position: relative; }
+.export-more > summary { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); background: var(--surface); font-size: var(--fs-base); cursor: pointer; list-style: none; }
+.export-more > summary::-webkit-details-marker { display: none; }
+.export-more > summary::after { content: ""; width: 0; height: 0; border: 4px solid transparent; border-top-color: currentColor; transform: translateY(2px); }
+.export-more[open] > summary { border-color: var(--brand); color: var(--brand-deep); }
+.export-more > .button { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 12; box-shadow: var(--shadow-md); white-space: nowrap; }
 /* 1.7.14（facet-compat C5）：词典没读出来时的说明可能很长，让它独占一行 ——
    塞在 .setting-row-control（nowrap + flex:0 0 auto）里会把左边的说明挤成一条竖线。 */
 .setting-row { flex-wrap: wrap; }

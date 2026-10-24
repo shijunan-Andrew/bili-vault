@@ -1282,7 +1282,19 @@ async function copyDiagnostics() {
 
 function wireTransferAndMaintenance() {
   $("settingsExportConfig")?.addEventListener("click", () => { downloadConfigFile(true); });
-  $("settingsExportConfigSlim")?.addEventListener("click", () => { downloadConfigFile(false); });
+  // 1.10.18（S-2）：「更多导出」是原生 details 下拉，选完一项就收起；
+  // 点空白处或按 Esc 也收起，免得它一直开着挡住下面的行。
+  const exportMore = $("exportMore");
+  $("settingsExportConfigSlim")?.addEventListener("click", () => {
+    if (exportMore) exportMore.open = false;
+    downloadConfigFile(false);
+  });
+  document.addEventListener("click", (event) => {
+    if (exportMore?.open && !exportMore.contains(event.target)) exportMore.open = false;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && exportMore?.open) exportMore.open = false;
+  });
   $("settingsImportConfig")?.addEventListener("click", () => {
     const input = $("settingsConfigFileInput");
     if (input) input.click();

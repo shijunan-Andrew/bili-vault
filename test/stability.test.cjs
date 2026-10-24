@@ -8048,3 +8048,29 @@ test("1.10.4：分区整条链路都不许回来", () => {
   const tools = readProjectFile("archive-tools.js");
   assert.doesNotMatch(tools, /field\(info, "分区"\)/, "recordToVideo 不许再读分区行");
 });
+
+test("1.10.18：三种导出收成「导出配置 + 更多导出」，不再三个按钮并排", () => {
+  const html = readProjectFile("settings.html");
+  const row = html.slice(
+    html.indexOf('id="settingsExportConfig"'),
+    html.indexOf('id="settingsImportConfig"')
+  );
+  assert.ok(row.includes('id="exportMore"'), "配置行要有「更多导出」下拉");
+  assert.ok(row.includes("<details"), "「更多导出」要用原生 details 做下拉");
+  assert.ok(row.includes('data-i18n="更多导出"'), "下拉的标题要能翻译");
+  const rowOutsideMenu = row.split('id="exportMore"')[0];
+  assert.ok(rowOutsideMenu.includes('id="settingsExportConfig"'), "主按钮「导出配置」要在下拉外面");
+  assert.ok(!rowOutsideMenu.includes('id="settingsExportConfigSlim"'), "精简导出不许再和主按钮并排");
+
+  const css = readProjectFile("settings.css");
+  assert.match(css, /\.export-more > summary/, "下拉要有自己的样式");
+  assert.match(
+    css,
+    /\.export-more > summary::-webkit-details-marker\s*\{\s*display:\s*none/,
+    "别让浏览器再画一个默认三角"
+  );
+
+  const js = readProjectFile("settings.js");
+  assert.match(js, /const exportMore = \$\("exportMore"\);/, "下拉要能被脚本收起");
+  assert.match(js, /if \(exportMore\) exportMore\.open = false;/, "选完一项要收起");
+});

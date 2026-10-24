@@ -353,9 +353,14 @@
             <p class="setting-row-desc" data-i18n="主题、语言、每页数量、视图模式，以及收藏夹顺序和筛选。文件里默认带着收藏夹名与搜索词，发给别人前先想想。">主题、语言、每页数量、视图模式，以及收藏夹顺序和筛选。文件里默认带着收藏夹名与搜索词，发给别人前先想想。</p>
           </div>
           <div class="setting-row-control">
+            <!-- 1.10.18（S-2）：原来三个按钮并排，「导出配置」和「只导外观与档位」都是导出、
+                 语义重叠。现在主按钮只留「导出配置」，另一种导出收进「更多导出」下拉。 -->
             <button id="settingsExportConfig" class="button button-quiet" type="button"><span data-icon="download"></span><span data-i18n="导出配置">导出配置</span></button>
+            <details class="export-more" id="exportMore">
+              <summary data-i18n="更多导出">更多导出</summary>
+              <button id="settingsExportConfigSlim" class="button button-quiet" type="button"><span data-icon="download"></span><span data-i18n="只导外观与档位">只导外观与档位</span></button>
+            </details>
             <button id="settingsImportConfig" class="button button-quiet" type="button"><span data-icon="file"></span><span data-i18n="导入配置">导入配置</span></button>
-            <button id="settingsExportConfigSlim" class="button button-quiet" type="button"><span data-icon="download"></span><span data-i18n="只导外观与档位">只导外观与档位</span></button>
             <input id="settingsConfigFileInput" type="file" accept="application/json,.json" hidden>
           </div>
         </div>
