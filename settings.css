@@ -181,6 +181,10 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-5);
+  /* 1.10.11：说明太长时右侧控件会换到下一行（见下面 .setting-row-control 的自动外边距）。
+     没有行间距时，换行后的按钮会和上一行说明、下一行标题挤成同一档，分组感就没了；
+     row-gap 只在真的换行时生效，不换行的行一点不受影响。 */
+  row-gap: var(--sp-2);
   padding: var(--sp-3) 0;
   border-top: 1px solid var(--line);
   /* 搜索跳到这里时留出顶栏的高度，同时给 1.5s 的高亮留个落脚点 */

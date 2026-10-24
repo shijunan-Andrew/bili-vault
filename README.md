@@ -137,13 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.10：开源横幅改成静态单行，不再满屏重复同一句话
+## V1.10.11：设置页换行后的控件和上一行拉开一点
 
-- **症状**：收藏库顶部那条绿色横幅是跑马灯，`buildBannerMarquee()` 按容器宽度复制同一句话，宽屏上一眼能看到 4–5 份「本项目已在 GitHub 上开源，点击查看」并排滚过去。
-- **改法**：拆掉整套跑马灯 —— 标记里只留一段文字，删掉 `.banner-scroll` 容器、`@keyframes banner-scroll`、悬停暂停与 `prefers-reduced-motion` 的豁免规则，也删掉 `buildBannerMarquee()` 和窗口 resize 时的重建；`.banner-run` 改成静态单行，装不下时 `text-overflow: ellipsis`。
-- **行为不变**：仍是整条可点的链接（新窗口 + `rel` 保护）、仍可关闭（`githubBannerDismissed`）、出现时页面仍靠 `banner-visible` 让出 42px 高度。
-- **测试**：三条 stability 用例按静态口径改写（含「不许再有 `banner-scroll` / `@keyframes` / `buildBannerMarquee`」的反向断言），`pages` 新增一条真渲染用例（一段文字、无滚动容器、`banner-visible` 在）。
-- **范围**：只动 `library.html` / `library.css` / `library.js` 与两条测试；不新增文案，词典仍 **1083 条**，五套测试 **380 / 91 / 69 / 30 / 56**。
+- **症状**：说明太长时右侧控件会换到下一行（1.10.5 用自动外边距把它顶到了右边），但它与上面的说明、下面的标题间距一样，读起来像同一档内容。
+- **改法**：`.setting-row` 加一行 `row-gap: var(--sp-2)`。`gap` 与 `row-gap` 只在真的换行时生效，没换行的行一个像素都没变。
+- **范围**：只动 `settings.css` 一处；不动 HTML、JS、文案，词典仍 **1083 条**，五套测试 **380 / 91 / 69 / 30 / 56**（纯间距改动，没加用例）。
 
 **遗留** - 无。
 
