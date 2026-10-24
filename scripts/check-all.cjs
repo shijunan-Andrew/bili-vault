@@ -18,6 +18,8 @@
  *   5. 三份文档的 <!-- i18n-count:N --> 与实际词典条数一致
  *   6. 三份文档的 <!-- test-count:N --> 与 stability.test.cjs 的 test() 项数一致
  *   7. docs/HISTORY.md 的「版本 → 起始行」索引是最新的（1.8.23，TODO P2-11）
+ *   8. 发布清单与体积（1.10.1）：pack.ps1 的白名单要覆盖根目录下全部运行期文件，
+ *      单文件 / 总量 / 文件数上限全部从 pack.ps1 读 —— 阈值只有一处权威。
  *
  * 刻意不做的事：Windows 专属自检（test-native-folder-opener.ps1、csc 编译原生助手）不进
  * 这里，它们只能在真机上跑；CI 是 ubuntu-latest，那些检查留给人肉验证（见 SMOKE_TEST.md）。
@@ -280,6 +282,22 @@ function checkHistoryIndex() {
   return ok(result.message);
 }
 
+function checkPackageSize() {
+  section("发布清单与体积（pack.ps1 说了算）…");
+  const result = runNode(["scripts/check-package-size.cjs"]);
+  if (result.code !== 0) {
+    bad("pack.ps1 的发布清单或体积上限不满足");
+    printTail(result.output, 12);
+    note("改法：新增运行期文件要同时加进 pack.ps1 的 $allowedTopFiles / $allowedTopDirs；"
+      + " 体积超标就看是不是把开发文件算进来了。");
+    return undefined;
+  }
+  for (const line of result.output.split(/\r?\n/)) {
+    if (line.trim()) console.log(line);
+  }
+  return ok("发布清单与体积都在 pack.ps1 的规则内");
+}
+
 function main() {
   checkSyntax();
   for (const [label, file] of SUITES) checkSuite(label, file);
@@ -289,6 +307,7 @@ function main() {
   checkDocDictionary();
   checkDocTestCount();
   checkHistoryIndex();
+  checkPackageSize();
   console.log("");
   if (failed) {
     console.log(`[FAIL] 检查未通过（${failures.length} 处），修好之后重新跑：node scripts/check-all.cjs`);

@@ -13,6 +13,9 @@
   <script src="client-errors.js"></script>
 </head>
 <body>
+  <!-- 1.10.1（P1-8）：键盘用户第一个 Tab 就能跳过侧栏/顶栏。平时藏在视口上方，
+       拿到焦点才滑下来；落点见 mainArea（有 tabindex="-1"，否则跳过去焦点不会跟过去）。 -->
+  <a class="skip-link" href="#mainArea" data-i18n="跳到主要内容">跳到主要内容</a>
   <!-- 4.5.2：开源横幅。仓库地址在业务脚本的 PROJECT_REPO_URL 常量里改，一处即可 -->
   <div id="githubBanner" class="github-banner" hidden>
     <a id="githubBannerLink" class="banner-track" href="https://github.com/shijunan-Andrew/bili-vault" target="_blank" rel="noopener noreferrer">
@@ -51,7 +54,7 @@
       </div>
     </aside>
 
-    <main class="main-area">
+    <main class="main-area skip-target" id="mainArea" tabindex="-1">
       <header class="topbar">
         <!-- 面包屑第一段显示**真实的根目录名**（与右上角 rootLabel 同源），
              写死的「本地资料」看不出数据到底存在哪个盘哪个文件夹。 -->

@@ -17,10 +17,13 @@
   <script src="archive-tools.js"></script>
 </head>
 <body>
+  <!-- 1.10.1（P1-8）：键盘用户第一个 Tab 就能跳过侧栏/顶栏。平时藏在视口上方，
+       拿到焦点才滑下来；落点见 mainArea（有 tabindex="-1"，否则跳过去焦点不会跟过去）。 -->
+  <a class="skip-link" href="#mainArea" data-i18n="跳到主要内容">跳到主要内容</a>
   <!-- 1.9.0：回收站独立成页。原来「清空回收站」只是收藏库侧栏上的一个盲按钮，
        删了什么、还剩什么用户看不到。这里和收藏库共用卡片样式，但卡片不能点开 ——
        它展示的是「已经删掉的档案」，点开没有意义；能做的只有恢复或彻底删掉。 -->
-  <div class="recycle-shell">
+  <div class="recycle-shell skip-target" id="mainArea" tabindex="-1">
     <header class="recycle-topbar">
       <div class="recycle-lead">
         <button id="recycleBack" class="button button-quiet" type="button"><span data-icon="move"></span><span data-i18n="返回设置">返回设置</span></button>

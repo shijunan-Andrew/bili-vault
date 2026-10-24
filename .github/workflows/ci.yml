@@ -4,7 +4,9 @@
 # 已经红了。检查逻辑不写在这里 —— 全在 scripts/check-all.cjs（release.ps1 第 4 步跑的
 # 也是它），所以 CI 与本地只有一套真相。要加检查项就改那个脚本，别在 workflow 里另写命令。
 #
-# 平台：ubuntu-latest + Node 22。Windows 专属自检（原生目录打开助手、原生助手编译）只能在
+# 平台：ubuntu-latest + Node 20 / 22 / 24 三条线（1.10.1 起是矩阵；扩展本身没有构建步骤、
+# 零 npm 依赖，这里只是提前发现「新 Node 把某个 API 改了」这类问题）。
+# Windows 专属自检（原生目录打开助手、原生助手编译）只能在
 # 真机上跑，不进 CI —— 人工清单见 SMOKE_TEST.md。仓库零 npm 依赖，所以没有任何安装步骤。
 name: CI
 
@@ -23,15 +25,19 @@ concurrency:
 
 jobs:
   check:
-    name: 五套测试 + 词典 + 语法 + 状态 + 文档标记
+    name: 五套测试 + 词典 + 语法 + 状态 + 文档标记（Node ${{ matrix.node }}）
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22", "24"]
     steps:
       - name: 取代码
         uses: actions/checkout@v4
-      - name: 装 Node 22
+      - name: 装 Node ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ matrix.node }}
       - name: 跑检查（与 release.ps1 第 4 步同一套）
         run: node scripts/check-all.cjs

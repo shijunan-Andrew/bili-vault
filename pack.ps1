@@ -76,13 +76,14 @@ try {
   # 「什么可以出现在包里」显式写死，体积和数量超限都当失败，而不是打印一行警告。
   # 新增运行期文件时，必须同时把它加进 $allowedTopFiles（或 $allowedTopDirs）。
   $allowedTopFiles = @(
-    "archive-core.js", "background.js", "client-errors.js", "content-i18n-keys.js",
+    "archive-core.js", "archive-tools.js", "background.js", "client-errors.js", "content-i18n-keys.js",
     "content.js", "favorites-import.js", "guide.html", "i18n.js", "icons.js",
     "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png",
     "install-native-folder-opener.bat", "install-native-folder-opener.ps1",
     "library.css", "library.html", "library.js", "manifest.json", "mockup.css",
     "page.css", "pet-cat.png", "pet.css", "pet.js",
     "popup.css", "popup.html", "popup.js",
+    "recycle.css", "recycle.html", "recycle.js",
     "settings.css", "settings.html", "settings.js",
     "stats-core.js", "stats.css", "stats.html", "stats.js", "theme.css", "theme.js",
     "test-native-folder-opener.ps1", "tutorial.html", "tutorial.js",

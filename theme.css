@@ -240,6 +240,35 @@ button { cursor: pointer; }
   box-shadow: var(--focus-ring);
 }
 
+/* 1.10.1（P1-8）：跳到主要内容。键盘用户第一个 Tab 就能跳过整条侧栏 / 顶栏。
+   平时整条藏在视口上方，拿到焦点才滑下来；z-index 比通用对话框（10）还高一层，
+   因为它只在「还没打开任何浮层」的时候出现，露出来就必须是最上面那一层。 */
+.skip-link {
+  position: fixed;
+  top: 0;
+  left: var(--sp-3);
+  z-index: 20;
+  transform: translateY(-140%);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-base);
+  text-decoration: none;
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* 跳过去之后落到的那个容器：它只为了让 focus 有个落脚点（tabindex="-1"），
+   不该在整块内容上画一圈焦点外圈。 */
+.skip-target:focus {
+  outline: none;
+}
+
 /* 图标：统一尺寸、描边与基线，替代原来混用的 ▦▤▶♫＋↻ 等字符 */
 .icon {
   display: inline-block;

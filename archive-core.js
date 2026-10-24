@@ -1005,18 +1005,138 @@
      所以按名字升序就是按时间升序；不认识的条目一律不碰，返回的是「该删的那几个」。 */
   const EXPORT_KEEP_FILES = 5;
 
-  function exportPruneList(fileNames, keep = EXPORT_KEEP_FILES) {
+  /* 1.10.1（P1-6）：004导出 里现在有两种产物 —— 归档元数据（.json）与归档清单（.md）。
+     「同一秒撞名先写本体、再按时间升序截断」的逻辑只有一份，两个出口各传自己的行。 */
+  function pruneStampRows(rows, keep) {
     const limit = Math.max(1, Math.floor(Number(keep) || EXPORT_KEEP_FILES));
+    rows.sort((left, right) => left.stamp.localeCompare(right.stamp) || left.attempt - right.attempt);
+    return rows.slice(0, Math.max(0, rows.length - limit)).map((row) => row.name);
+  }
+
+  function exportPruneList(fileNames, keep = EXPORT_KEEP_FILES) {
     const rows = [];
     for (const raw of Array.isArray(fileNames) ? fileNames : []) {
       const name = String(raw);
       const match = /^归档元数据-(\d{8}-\d{6})(?:-(\d+))?\.json$/.exec(name);
       if (!match) continue;
-      // 同一秒撞名时本体（无后缀）先写，所以排在有 -2、-3 的那几份前面。
       rows.push({ stamp: match[1], attempt: match[2] ? Number(match[2]) : 0, name });
     }
-    rows.sort((left, right) => left.stamp.localeCompare(right.stamp) || left.attempt - right.attempt);
-    return rows.slice(0, Math.max(0, rows.length - limit)).map((row) => row.name);
+    return pruneStampRows(rows, keep);
+  }
+
+  /* 1.10.1（P1-6）：归档清单（Markdown）—— 按收藏夹列「标题 / UP 主 / 收藏时间 / 链接 / BV 号」，
+     写进 004导出/，方便贴日记或者导进笔记软件。
+
+     和归档元数据导出一样是**只读**的：入参就是扫描结果（recordToVideo 的输出），
+     函数本身不碰任何句柄，所以 archive-core 的单测能直接喂假数据。
+
+     正文不翻译 —— 与错误报告、视频信息.txt 同一个口径：它是给人贴出去看的产物，
+     翻译会把用户的标题、UP 主名和链接弄乱。 */
+  const MARKDOWN_FILE_PREFIX = "归档清单";
+  const MARKDOWN_KEEP_FILES = 5;
+
+  function markdownFileName(date = new Date()) {
+    return `${MARKDOWN_FILE_PREFIX}-${exportFileStamp(date)}.md`;
+  }
+
+  function markdownPruneList(fileNames, keep = MARKDOWN_KEEP_FILES) {
+    const rows = [];
+    for (const raw of Array.isArray(fileNames) ? fileNames : []) {
+      const name = String(raw);
+      const match = /^归档清单-(\d{8}-\d{6})(?:-(\d+))?\.md$/.exec(name);
+      if (!match) continue;
+      rows.push({ stamp: match[1], attempt: match[2] ? Number(match[2]) : 0, name });
+    }
+    return pruneStampRows(rows, keep);
+  }
+
+  // 标题里的 [ ] \ 会把 Markdown 链接语法撑坏（标题是用户数据，什么都可能有）
+  function markdownTitleText(title) {
+    return String(title || "").replace(/[\\[\]]/g, (char) => `\\${char}`);
+  }
+
+  /* 1.10.1（P1-5）：完整度巡检的判定只留这一份。
+     入参就是 scanArchive() 的结果，不碰句柄、不写盘、不请求网络。
+     分三类是因为「能不能补」不一样：
+       · 缺互动数据 —— 六项里任一项是 N/A，能靠「更新视频数据」那条队列补回来；
+       · 缺封面 / 缺简介 —— 只报数，现成的队列不补这两样（补封面要重新下载）；
+       · 读不出来 —— 直接来自 diagnostics（缺 txt / txt 坏了 / 残留临时文件）。
+     文案不在这里拼：改语言时不用碰这个文件。 */
+  function integritySummary(scan) {
+    const groups = Array.isArray(scan && scan.collections) ? scan.collections : [];
+    const issues = (scan && scan.diagnostics) || {};
+    const countOf = (value) => (Array.isArray(value) ? value.length : 0);
+    const fillable = [];
+    const missingCover = [];
+    const missingDescription = [];
+    let records = 0;
+    for (const group of groups) {
+      const name = String((group && group.name) || "");
+      const videos = Array.isArray(group && group.videos) ? group.videos : [];
+      for (const video of videos) {
+        records += 1;
+        const stats = (video && video.stats) || {};
+        const missingStats = STAT_KEYS.some((key) => String(stats[key] == null ? "" : stats[key]).trim() === "N/A");
+        if (missingStats) fillable.push(video);
+        const label = `${name}/${String((video && video.directory) || "")}`;
+        if (!String((video && video.cover) || "").trim()) missingCover.push(label);
+        if (!String((video && video.description) || "").trim()) missingDescription.push(label);
+      }
+    }
+    return {
+      records,
+      collections: groups.length,
+      fillable,
+      missingStats: fillable.length,
+      missingCover: missingCover.length,
+      missingDescription: missingDescription.length,
+      missingCoverLabels: missingCover,
+      missingDescriptionLabels: missingDescription,
+      missingText: countOf(issues.missingText),
+      brokenText: countOf(issues.brokenText),
+      tempFiles: countOf(issues.tempFiles),
+      missingTextLabels: Array.isArray(issues.missingText) ? issues.missingText : [],
+      // 「需要看一眼」只算补不了的项；缺互动数据能补，单独算。
+      attention: missingCover.length + missingDescription.length + countOf(issues.missingText)
+        + countOf(issues.brokenText) + countOf(issues.tempFiles)
+    };
+  }
+
+  function buildMarkdownInventory(collections = [], options = {}) {
+    const groups = Array.isArray(collections) ? collections : [];
+    const stamp = String((options && options.generatedAt) || "").trim();
+    const sections = [];
+    let total = 0;
+    for (const group of groups) {
+      const name = String((group && group.name) || "").trim() || "未命名收藏夹";
+      const videos = Array.isArray(group && group.videos) ? group.videos : [];
+      const lines = [];
+      for (const video of videos) {
+        const title = String((video && video.title) || "").trim() || String((video && video.directory) || "").trim() || "（没有标题）";
+        const url = String((video && video.url) || "").trim();
+        const notes = [];
+        const up = String((video && video.upName) || "").trim();
+        if (up) notes.push(`UP：${up}`);
+        const saved = String((video && video.favoriteAt) || "").trim();
+        if (saved) notes.push(`收藏于 ${saved}`);
+        const bvid = String((video && video.bvid) || "").trim();
+        if (bvid) notes.push(bvid);
+        // 没有链接就退化成一个纯文本项，不拼出空链接（空 URL 会把整行变成链接语法）
+        const label = url ? `[${markdownTitleText(title)}](${url})` : markdownTitleText(title);
+        lines.push(notes.length ? `- ${label} · ${notes.join(" · ")}` : `- ${label}`);
+      }
+      total += lines.length;
+      sections.push(...[`## ${name}（${lines.length} 条）`, ""], ...(lines.length ? lines : ["（这个收藏夹里没有记录）"]), "");
+    }
+    const head = ["# 哔哩藏库 · 归档清单", ""];
+    if (stamp) head.push(`生成于 ${stamp}。`, "");
+    head.push(`共 ${groups.length} 个收藏夹、${total} 条记录。`, "");
+    if (!groups.length) head.push("（归档里还没有收藏夹）", "");
+    return {
+      text: `${[...head, ...sections].join("\n").replace(/\n+$/, "")}\n`,
+      collections: groups.length,
+      records: total
+    };
   }
   /* 1.8.22（old-p3 P3-8）：下面这几个是从 api 里**保留**的测试/对照用导出 ——
      safeCollectionName / withSourceCollection 只被 test/archive-core.test.cjs 与
@@ -1054,6 +1174,14 @@
     // 1.8.8（P3）：004导出 只留最近几份
     EXPORT_KEEP_FILES,
     exportPruneList,
+    // 1.10.1（P1-6）：归档清单（Markdown）导出
+    MARKDOWN_FILE_PREFIX,
+    MARKDOWN_KEEP_FILES,
+    markdownFileName,
+    markdownPruneList,
+    buildMarkdownInventory,
+    // 1.10.1（P1-5）：完整度巡检（只读判定，与 diagnostics 口径一致）
+    integritySummary,
     EXPORT_CHECKSUM_ALGORITHM,
     sha256Hex,
     exportFileName,

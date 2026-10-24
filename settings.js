@@ -784,6 +784,241 @@ async function exportArchiveMetadata() {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * 1.10.1（P1-6）：导出归档清单（Markdown）
+ * 和「导出归档元数据」同一条路子：只读归档，只往 004导出/ 写一个 .md。
+ * 正文不翻译 —— 清单是要贴进笔记软件给人看的文档，跟错误报告、视频信息.txt 一个口径。
+ * ------------------------------------------------------------------ */
+const markdownRow = { status: "exportMarkdownStatus", error: "exportMarkdownError" };
+
+function showMarkdownMessage(text, isError = false) {
+  showRowMessage(markdownRow, text, isError);
+}
+
+// 「还没选文件夹」「导入正在跑」这几种不是故障，是让用户照做的一句话；
+// 它们不该被套上「导出清单失败：」的壳 —— 用户看到的应该就是下一步该做什么。
+const INSTRUCTION_HINTS = [
+  "先选一个本地备份文件夹，再导出清单。",
+  "先选一个本地备份文件夹，再做完整度巡检。",
+  "没有获得本地备份文件夹的写入权限。",
+  "导入正在跑，等它结束再试。"
+];
+
+function isInstructionMessage(message) {
+  return INSTRUCTION_HINTS.some((hint) => message === BcaI18n.t(hint));
+}
+
+async function exportMarkdownInventory() {
+  const button = $("settingsExportMarkdown");
+  if (button) button.disabled = true;
+  try {
+    const handle = await BcaArchiveTools.loadRootHandle();
+    if (!handle) throw new Error(BcaI18n.t("先选一个本地备份文件夹，再导出清单。"));
+    const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
+    if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
+    if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+    showMarkdownMessage(BcaI18n.t("正在读归档…"));
+    const scan = await BcaArchiveTools.scanArchive(handle);
+    const collections = scan.collections.map((collection) => ({
+      name: collection.name,
+      videos: collection.records.map(({ directory, record }) => (
+        BcaArchiveTools.recordToVideo(collection.name, { name: directory }, record)
+      ))
+    }));
+    const built = BcaArchiveCore.buildMarkdownInventory(collections, { generatedAt: humanTimestamp() });
+    const exportDirectory = await handle.getDirectoryHandle(BcaArchiveCore.EXPORT_DIR_NAME, { create: true });
+    // 同秒连点两次也不覆盖前一份：撞名就加 -2、-3。
+    const baseName = BcaArchiveCore.markdownFileName(new Date()).replace(/\.md$/, "");
+    let fileName = `${baseName}.md`;
+    for (let attempt = 2; attempt < 100; attempt += 1) {
+      try {
+        await exportDirectory.getFileHandle(fileName);
+        fileName = `${baseName}-${attempt}.md`;
+      } catch (error) {
+        if (!BcaArchiveCore.isMissingError(error)) throw error;
+        break;
+      }
+    }
+    const exportFile = await exportDirectory.getFileHandle(fileName, { create: true });
+    const writable = await exportFile.createWritable();
+    await writable.write(built.text);
+    await writable.close();
+    // 清单只留最近 5 份；清理失败不影响这次导出。
+    try {
+      const names = [];
+      for await (const entry of exportDirectory.values()) names.push(entry.name);
+      for (const name of BcaArchiveCore.markdownPruneList(names)) {
+        try {
+          await exportDirectory.removeEntry(name);
+        } catch (error) {
+          console.warn(`旧清单删不掉（留着不影响这次导出）：${name}`, error);
+        }
+      }
+    } catch (error) {
+      console.warn("清理旧清单失败（不影响这次导出）", error);
+    }
+    showMarkdownMessage(BcaI18n.t("已导出 {count} 条记录到 {file}。", {
+      count: BcaArchiveCore.formatCountText(built.records),
+      file: fileName
+    }));
+    return fileName;
+  } catch (error) {
+    const message = error?.message || BcaI18n.t("本地文件操作失败。");
+    if (isInstructionMessage(message)) showMarkdownMessage(message);
+    else showMarkdownMessage(BcaI18n.t("导出清单失败：{message}", { message }), true);
+    return "";
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 1.10.1（P1-5）：完整度巡检 + 就地补全
+ * 巡检只读：scanArchive({ diagnostics: true }) 的判定在 archive-core.integritySummary()，
+ * 这里只负责把它说成人话。补全不新写请求逻辑 —— 走「更新视频数据」那条队列
+ * （bca-refresh-video-stats：每条一次请求、按后台限速跑、补完写回视频信息.txt），
+ * 一批 20 条、一次最多 3 批，剩下的留给用户再点一次：一个按钮点下去在后台跑几千条
+ * 请求不合适，而且用户得能随时停下。
+ * ------------------------------------------------------------------ */
+const integrityRow = { status: "integrityStatus", error: "integrityError" };
+const INTEGRITY_FILL_BATCH = 20;
+const INTEGRITY_FILL_BATCHES = 3;
+let integrityFillable = [];
+
+function showIntegrityMessage(text, isError = false) {
+  showRowMessage(integrityRow, text, isError);
+}
+
+function integritySummaryText(summary) {
+  return BcaI18n.t("扫完 {count} 条记录：{stats} 条缺互动数据、{cover} 条缺封面、{description} 条缺简介，读不出来的目录 {broken} 个。", {
+    count: BcaArchiveCore.formatCountText(summary.records),
+    stats: BcaArchiveCore.formatCountText(summary.missingStats),
+    cover: BcaArchiveCore.formatCountText(summary.missingCover),
+    description: BcaArchiveCore.formatCountText(summary.missingDescription),
+    broken: BcaArchiveCore.formatCountText(summary.missingText + summary.brokenText + summary.tempFiles)
+  });
+}
+
+// 「补全互动数据」按钮只在真的有东西可补时出现：没有可补的就别摆一个点了没反应的按钮。
+function syncIntegrityFillButton() {
+  const button = $("fillMissingStats");
+  if (!button) return;
+  button.hidden = integrityFillable.length === 0;
+  if (!button.hidden) {
+    button.title = BcaI18n.t("缺互动数据的 {count} 条会分批补，一次最多 {batch} 条。", {
+      count: BcaArchiveCore.formatCountText(integrityFillable.length),
+      batch: BcaArchiveCore.formatCountText(INTEGRITY_FILL_BATCH * INTEGRITY_FILL_BATCHES)
+    });
+  }
+}
+
+async function scanIntegrity(options = {}) {
+  const button = $("runIntegrityCheck");
+  if (button) button.disabled = true;
+  try {
+    const handle = await BcaArchiveTools.loadRootHandle();
+    if (!handle) throw new Error(BcaI18n.t("先选一个本地备份文件夹，再做完整度巡检。"));
+    const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
+    if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
+    if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+    if (!options.silent) showIntegrityMessage(BcaI18n.t("正在读归档…"));
+    const scan = await BcaArchiveTools.scanArchive(handle, { diagnostics: true });
+    const collections = scan.collections.map((collection) => ({
+      name: collection.name,
+      videos: collection.records.map(({ directory, record }) => (
+        BcaArchiveTools.recordToVideo(collection.name, { name: directory }, record)
+      ))
+    }));
+    const summary = BcaArchiveCore.integritySummary({ collections, diagnostics: scan.diagnostics });
+    integrityFillable = summary.fillable;
+    syncIntegrityFillButton();
+    if (!options.silent) showIntegrityMessage(integritySummaryText(summary));
+    return summary;
+  } catch (error) {
+    integrityFillable = [];
+    syncIntegrityFillButton();
+    if (!options.silent) {
+      const message = error?.message || BcaI18n.t("本地文件操作失败。");
+      if (isInstructionMessage(message)) showIntegrityMessage(message);
+      else showIntegrityMessage(BcaI18n.t("完整度巡检失败：{message}", { message }), true);
+    }
+    return null;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function fillMissingStats() {
+  if (!integrityFillable.length) {
+    showIntegrityMessage(BcaI18n.t("没有缺互动数据的记录，不用补。"));
+    return { updated: 0, failed: 0, remaining: 0 };
+  }
+  const button = $("fillMissingStats");
+  const batchSize = INTEGRITY_FILL_BATCH * INTEGRITY_FILL_BATCHES;
+  const picked = integrityFillable.slice(0, batchSize);
+  if (button) button.disabled = true;
+  let updated = 0;
+  let failed = 0;
+  try {
+    for (let index = 0; index < picked.length; index += INTEGRITY_FILL_BATCH) {
+      const batch = picked.slice(index, index + INTEGRITY_FILL_BATCH);
+      showIntegrityMessage(BcaI18n.t("正在补互动数据：第 {done}/{total} 条…", {
+        done: BcaArchiveCore.formatCountText(index),
+        total: BcaArchiveCore.formatCountText(picked.length)
+      }));
+      const response = await new Promise((resolve) => {
+        const timer = window.setTimeout(() => resolve({ ok: false, reason: "timeout" }), 120000);
+        try {
+          chrome.runtime.sendMessage({
+            type: "bca-refresh-video-stats",
+            targets: batch.map((video) => ({ collection: video.collection, directory: video.directory })),
+            limit: batch.length
+          }, (reply) => {
+            window.clearTimeout(timer);
+            resolve(reply || { ok: false, reason: "no-response" });
+          });
+        } catch (error) {
+          window.clearTimeout(timer);
+          resolve({ ok: false, reason: "no-runtime" });
+        }
+      });
+      if (response && response.ok) {
+        updated += Number(response.updated) || 0;
+        failed += Number(response.failed) || 0;
+      } else {
+        // 一批失败就把这一批整批算失败：不假装它们补上了。
+        failed += batch.length;
+        if (response && (response.reason === "no-runtime" || response.reason === "no-response")) break;
+      }
+    }
+    const after = await scanIntegrity({ silent: true });
+    const remaining = after ? after.missingStats : Math.max(0, integrityFillable.length);
+    if (!after) {
+      integrityFillable = [];
+      syncIntegrityFillButton();
+    }
+    if (failed) {
+      showIntegrityMessage(BcaI18n.t("补了 {updated} 条，{failed} 条没补上；现在还剩 {remaining} 条缺互动数据。", {
+        updated: BcaArchiveCore.formatCountText(updated),
+        failed: BcaArchiveCore.formatCountText(failed),
+        remaining: BcaArchiveCore.formatCountText(remaining)
+      }), true);
+    } else {
+      showIntegrityMessage(BcaI18n.t("补了 {updated} 条；现在还剩 {remaining} 条缺互动数据。", {
+        updated: BcaArchiveCore.formatCountText(updated),
+        remaining: BcaArchiveCore.formatCountText(remaining)
+      }));
+    }
+    return { updated, failed, remaining };
+  } catch (error) {
+    showIntegrityMessage(BcaI18n.t("补互动数据失败：{message}", { message: error?.message || BcaI18n.t("本地文件操作失败。") }), true);
+    return { updated, failed, remaining: integrityFillable.length };
+  } finally {
+    if (button) button.disabled = false;
+    syncIntegrityFillButton();
+  }
+}
+
 /* 归档体检：只读扫一遍，把「扫描时被悄悄跳过的东西」写成 Markdown。
    报告的小节与措辞和收藏库时代一致 —— 两份格式必须能互相替代，用户手里的旧报告还得看得懂。 */
 async function writeHealthReport() {
@@ -1033,6 +1268,18 @@ function wireTransferAndMaintenance() {
     if (input) input.click();
   });
   $("settingsConfigFileInput")?.addEventListener("change", () => { handleConfigFileInput($("settingsConfigFileInput")); });
+  $("settingsExportMarkdown")?.addEventListener("click", () => {
+    exportMarkdownInventory();
+  });
+
+  $("runIntegrityCheck")?.addEventListener("click", () => {
+    scanIntegrity();
+  });
+
+  $("fillMissingStats")?.addEventListener("click", () => {
+    fillMissingStats();
+  });
+
   $("settingsExportArchive")?.addEventListener("click", () => { exportArchiveMetadata(); });
   $("settingsHealthCheck")?.addEventListener("click", () => { writeHealthReport(); });
   $("settingsOpenRecycle")?.addEventListener("click", openRecyclePage);
@@ -1048,6 +1295,9 @@ globalThis.BcaSettingsTransfer = Object.freeze({
   downloadConfigFile,
   currentConfigPreferences,
   exportArchiveMetadata,
+  exportMarkdownInventory,
+  scanIntegrity,
+  fillMissingStats,
   writeHealthReport,
   rebuildStatsDatabase,
   renderRecentErrors,

@@ -1174,6 +1174,146 @@ async function suiteSettings() {
     assert.deepEqual(backStale.map((element) => element.dataset.i18n), [],
       "切回中文后不该还有英文残留");
   });
+
+  // ---- 1.10.1：导出清单 / 完整度巡检 / 补全互动数据 ----
+
+  await test("设置页「导出清单」没选备份文件夹时说清下一步，不是一句失败（1.10.1 真执行）", async () => {
+    const page = await openSettings();
+    const doc = page.document;
+    dom.fireUserEvent(doc.getElementById("settingsExportMarkdown"), "click");
+    await settle(8);
+    // 「还没选文件夹」不是故障，走状态行；错误行不该同时亮着。
+    const status = doc.getElementById("exportMarkdownStatus");
+    assert.equal(status.hidden, false, "状态行要露出来");
+    assert.equal(status.textContent.trim(), BcaT(page, "先选一个本地备份文件夹，再导出清单。"));
+    assert.equal(doc.getElementById("exportMarkdownError").hidden, true, "这不是报错，别用红色错误行");
+    assert.equal(doc.getElementById("settingsExportMarkdown").disabled, false, "按钮要还回来");
+  });
+
+  await test("设置页「完整度巡检」扫完报清三种缺失，并把补全按钮放出来（1.10.1 真执行）", async () => {
+    const scan = {
+      collections: [
+        { name: "甲", records: [{ directory: "d1", record: {} }, { directory: "d2", record: {} }] }
+      ],
+      diagnostics: {
+        missingText: [{ collection: "甲", directory: "d1" }],
+        missingCover: [{ collection: "甲", directory: "d2" }],
+        brokenText: [],
+        tempFiles: []
+      },
+      issues: { missingText: [], brokenText: [], tempFiles: [] },
+      recordCount: 2,
+      bytes: 0
+    };
+    const globals = {
+      BcaArchiveTools: {
+        loadRootHandle: async () => ({ name: "归档" }),
+        ensureRootPermission: async () => true,
+        scanArchive: async () => scan,
+        // 甲/d1：缺互动数据；甲/d2：缺封面。三种缺失各一条，断言才有区分度。
+        recordToVideo: (collection, entry) => ({
+          collection,
+          directory: entry.name,
+          title: entry.name,
+          cover: entry.name === "d1" ? "COVER" : "",
+          description: entry.name === "d2" ? "说明" : "",
+          stats: entry.name === "d1"
+            ? { view: "N/A", danmaku: "N/A", like: "N/A", coin: "N/A", favorite: "N/A", share: "N/A" }
+            : { view: "100" }
+        })
+      }
+    };
+    // settings.html 自己会加载 archive-tools.js，把 globals 里的同名桩盖掉，
+    // 所以等脚本跑完再换 —— 页面调用时按全局名取，换完就吃到桩。
+    const page = await openSettings();
+    page.window.BcaArchiveTools = globals.BcaArchiveTools;
+    const doc = page.document;
+    // archive-core.js 是页面自己真加载的，integritySummary 走真代码。
+    const fillButton = doc.getElementById("fillMissingStats");
+    assert.equal(fillButton.hidden, true, "还没巡检的时候补全按钮不该露面");
+
+    dom.fireUserEvent(doc.getElementById("runIntegrityCheck"), "click");
+    await settle(10);
+
+    const status = doc.getElementById("integrityStatus");
+    assert.equal(status.hidden, false, "巡检结果要显示出来");
+    assert.equal(status.textContent.trim(), BcaT(page,
+      "扫完 {count} 条记录：{stats} 条缺互动数据、{cover} 条缺封面、{description} 条缺简介，读不出来的目录 {broken} 个。", {
+        count: page.window.BcaArchiveCore.formatCountText(2),
+        stats: page.window.BcaArchiveCore.formatCountText(1),
+        cover: page.window.BcaArchiveCore.formatCountText(1),
+        description: page.window.BcaArchiveCore.formatCountText(1),
+        broken: page.window.BcaArchiveCore.formatCountText(1)
+      }));
+    assert.equal(fillButton.hidden, false, "有东西可补的时候要把补全按钮放出来");
+    assert.equal(doc.getElementById("runIntegrityCheck").disabled, false, "巡检按钮要还回来");
+  });
+
+  await test("「补全互动数据」按批发 bca-refresh-video-stats，补完报还剩多少（1.10.1 真执行）", async () => {
+    let scans = 0;
+    const scanOnce = () => {
+      scans += 1;
+      // 第一次巡检 25 条都缺；补完再巡 0 条。
+      const count = scans === 1 ? 25 : 0;
+      return {
+        collections: [{
+          name: "甲",
+          records: Array.from({ length: count }, (unused, index) => ({ directory: `d${index}`, record: {} }))
+        }],
+        diagnostics: { missingCover: [], missingDescription: [] },
+        issues: { missingText: [], brokenText: [], tempFiles: [] },
+        recordCount: count,
+        bytes: 0
+      };
+    };
+    const globals = {
+      BcaArchiveTools: {
+        loadRootHandle: async () => ({ name: "归档" }),
+        ensureRootPermission: async () => true,
+        scanArchive: async () => scanOnce(),
+        recordToVideo: (collection, entry) => ({
+          collection,
+          directory: entry.name,
+          cover: "C",
+          description: "D",
+          stats: { view: "N/A", danmaku: "N/A", like: "N/A", coin: "N/A", favorite: "N/A", share: "N/A" }
+        })
+      }
+    };
+    // settings.html 自己会加载 archive-tools.js，把 globals 里的同名桩盖掉，
+    // 所以等脚本跑完再换 —— 页面调用时按全局名取，换完就吃到桩。
+    const page = await openSettings();
+    page.window.BcaArchiveTools = globals.BcaArchiveTools;
+    const doc = page.document;
+    const batches = [];
+    // settings.js 用的是回调式 sendMessage（和扩展里一致），桩要记得回 callback。
+    page.chrome.runtime.sendMessage = (message, callback) => {
+      let reply;
+      if (message && message.type === "bca-refresh-video-stats") {
+        batches.push(message.targets.map((target) => target.directory));
+        reply = { ok: true, processed: message.targets.length, updated: message.targets.length, failed: 0, remaining: 0 };
+      }
+      if (typeof callback === "function") { callback(reply); return undefined; }
+      return Promise.resolve(reply);
+    };
+
+    dom.fireUserEvent(doc.getElementById("runIntegrityCheck"), "click");
+    await settle(10);
+    assert.equal(doc.getElementById("fillMissingStats").hidden, false, "25 条缺数据，补全按钮要露面");
+
+    dom.fireUserEvent(doc.getElementById("fillMissingStats"), "click");
+    await settle(30);
+
+    assert.equal(batches.length, 2, `25 条要分两批（20 + 5），实际 ${batches.length} 批`);
+    assert.equal(batches[0].length, 20, "第一批 20 条");
+    assert.equal(batches[1].length, 5, "第二批 5 条");
+    const status = doc.getElementById("integrityStatus");
+    assert.equal(status.hidden, false);
+    assert.equal(status.textContent.trim(), BcaT(page,
+      "补了 {updated} 条；现在还剩 {remaining} 条缺互动数据。", { updated: "25", remaining: "0" }),
+      "补完要报补了多少条、还剩多少");
+    assert.equal(doc.getElementById("fillMissingStats").hidden, true, "没东西可补了就把按钮收起来");
+  });
 }
 
 /* ---------------- 回收站页（1.10.0） ----------------
@@ -1377,6 +1517,90 @@ async function suiteStats() {
     assert.equal(button.disabled, false);
     assert.equal(button.textContent.trim(), BcaT(page, "重新读取统计库"));
   });
+
+  await test("统计页「分区构成」按快照里的 categories 画条，没标分区的那一格单列（1.10.1 真执行）", async () => {
+    const page = await openStats({
+      localData: {
+        bcaStats: {
+          ...snapshot,
+          categories: [{ name: "动画", count: 6 }, { name: "音乐", count: 3 }, { name: "", count: 1 }]
+        }
+      }
+    });
+    const doc = page.document;
+    const card = doc.getElementById("statsCategoryCard");
+    assert.equal(card.hidden, false, "有分区数据就要显示这张卡");
+    const rows = [...doc.querySelectorAll("#statsCategoryList .stats-category-row")];
+    assert.equal(rows.length, 3, "三个分区（含未标注）要各占一行");
+    assert.deepEqual(rows.map((row) => textOf(row.querySelector(".stats-category-name"))),
+      ["动画", "音乐", BcaT(page, "未标注分区")], "空名字要换成「未标注分区」");
+    assert.equal(rows[0].querySelector(".stats-category-fill").style.width, "100%", "最多的分区条要占满");
+    assert.equal(rows[1].querySelector(".stats-category-fill").style.width, "50%", "3/6 应该是半条");
+    assert.match(textOf(rows[2].querySelector(".stats-category-count")), /10%/, "最少的那个也要给出百分比");
+  });
+
+  await test("统计页没有分区数据时整张「分区构成」卡都收起来（1.10.1 真执行）", async () => {
+    const page = await openStats({ localData: { bcaStats: snapshot } });
+    assert.equal(page.document.getElementById("statsCategoryCard").hidden, true, "categories 为空就不该占版面");
+  });
+}
+
+/* ---------------- 可访问性（1.10.1） ----------------
+   1.9.x 起焦点陷阱已经会还原焦点，但没有测试盯着；四个页面也一直没有「跳到主要内容」的入口。
+   这里盯的是这两件事本身，不是它们的实现方式。 */
+
+async function suiteA11y() {
+  await test("四个页面都有「跳到主要内容」，而且指向真的能接住焦点的主区域（1.10.1 真执行）", async () => {
+    const emptySnapshot = {
+      videos: 1, days: 1, totals: { savedTotal: 1 }, firstSeen: "2026-05-01", collections: 1,
+      topCollection: { name: "默认收藏夹", count: 1 }, dailyRows: [], weekly: [], monthly: [], yearly: []
+    };
+    const cases = [
+      { name: "library.html", open: () => openLibrary() },
+      { name: "settings.html", open: () => openSettings() },
+      { name: "stats.html", open: () => openStats({ localData: { bcaStats: emptySnapshot } }) },
+      { name: "recycle.html", open: () => openRecycle() }
+    ];
+    for (const item of cases) {
+      const page = await item.open();
+      const doc = page.document;
+      const link = doc.querySelector("a.skip-link");
+      assert.ok(link, `${item.name} 缺「跳到主要内容」的入口`);
+      assert.equal(link.dataset.i18n, "跳到主要内容", `${item.name} 的跳过链接要能跟着换语言`);
+      const target = link.getAttribute("href");
+      assert.ok(target && target.startsWith("#") && target.length > 1, `${item.name} 的跳过链接要有 href`);
+      const element = doc.querySelector(target);
+      assert.ok(element, `${item.name} 的跳过链接指向不存在的 ${target}`);
+      assert.equal(element.getAttribute("tabindex"), "-1", `${item.name} 的主区域要能接住焦点（tabindex=-1）`);
+    }
+  });
+
+  await test("对话框焦点陷阱放开后，焦点回到把对话框打开的那个按钮（1.10.1 真执行）", async () => {
+    // trapFocus / releaseFocusTrap 在 library.js 里，所以这一条起收藏库。
+    const page = await openLibrary();
+    const doc = page.document;
+    const opener = doc.createElement("button");
+    opener.textContent = "open";
+    const panel = doc.createElement("div");
+    const first = doc.createElement("button");
+    first.textContent = "ok";
+    const last = doc.createElement("button");
+    last.textContent = "cancel";
+    panel.append(first, last);
+    doc.body.append(opener, panel);
+    opener.focus();
+    assert.equal(doc.activeElement, opener, "前置条件：焦点在打开对话框的按钮上");
+
+    page.window.trapFocus(panel, first);
+    assert.equal(doc.activeElement, first, "陷阱一开，焦点要落在首选按钮上");
+
+    last.focus();
+    last.dispatchEvent(new page.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    assert.equal(doc.activeElement, first, "在最后一个按钮上按 Tab 要回到第一个");
+
+    page.window.releaseFocusTrap(panel);
+    assert.equal(doc.activeElement, opener, "放开陷阱后焦点要回到打开它的按钮");
+  });
 }
 
 /* ---------------- 跑 ---------------- */
@@ -1388,6 +1612,7 @@ async function suite() {
   await suiteSettings();
   await suiteRecycle();
   await suiteStats();
+  await suiteA11y();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

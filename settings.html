@@ -14,6 +14,9 @@
   <script src="icons.js"></script>
 </head>
 <body>
+  <!-- 1.10.1（P1-8）：键盘用户第一个 Tab 就能跳过侧栏/顶栏。平时藏在视口上方，
+       拿到焦点才滑下来；落点见 mainArea（有 tabindex="-1"，否则跳过去焦点不会跟过去）。 -->
+  <a class="skip-link" href="#mainArea" data-i18n="跳到主要内容">跳到主要内容</a>
   <!-- 顶部固定条：左边是页面标题 + 面包屑，右边是返回收藏库 + 搜索。
        它是 grid 的第 1 行、横向铺满两栏（见 settings.css 的 grid-template-areas）——
        放进去的话会把导航挤到第二行去。
@@ -98,7 +101,7 @@
       </nav>
     </aside>
 
-    <main class="settings-main">
+    <main class="settings-main skip-target" id="mainArea" tabindex="-1">
       <!-- 卡片里的每一行都要能搜索：settings.js 按行取「标题 + 副说明」做多词匹配。
            行的文案一律「一个元素一句话」，data-i18n 的元素里不放子元素（textContent
            会连子元素一起清掉），带图标的按钮就把文字包一层 span。 -->
@@ -367,6 +370,22 @@
           </div>
         </div>
 
+
+        <!-- 1.10.1（P1-6）：归档清单 —— 只读归档，只往 004导出/ 写一个 .md。
+             行状态挂在卡片自己的两个 <p> 上，不借「归档维护」那对（那张卡在另一屏）。 -->
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="清单（Markdown）">清单（Markdown）</p>
+            <p class="setting-row-desc" data-i18n="把每个收藏夹的标题、UP 主、收藏时间、链接和 BV 号汇成一份 .md，写进本地备份文件夹的 004导出/，方便贴日记或导进笔记软件。只读归档，不改任何一条记录。">把每个收藏夹的标题、UP 主、收藏时间、链接和 BV 号汇成一份 .md，写进本地备份文件夹的 004导出/，方便贴日记或导进笔记软件。只读归档，不改任何一条记录。</p>
+          </div>
+          <div class="setting-row-control">
+            <button id="settingsExportMarkdown" class="button button-quiet" type="button"><span data-icon="download"></span><span data-i18n="导出清单">导出清单</span></button>
+          </div>
+        </div>
+
+        <p class="row-status" id="exportMarkdownStatus" role="status" hidden></p>
+        <p class="row-error" id="exportMarkdownError" role="alert" hidden></p>
+
         <p class="row-status" id="transferStatus" role="status" hidden></p>
         <p class="row-error" id="transferError" role="alert" hidden></p>
       </section>
@@ -387,6 +406,24 @@
           </div>
         </div>
 
+
+
+        <!-- 1.10.1（P1-5）：体检写报告，「完整度巡检」只报数 + 给一个就地补全的入口。
+             补全走后台的「更新视频数据」队列（bca-refresh-video-stats），所以限速、
+             并发、错误报告都还是那一套，这里不新增任何请求逻辑。 -->
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="完整度巡检">完整度巡检</p>
+            <p class="setting-row-desc" data-i18n="只读扫一遍，说清有多少条缺互动数据、缺封面、缺简介。缺互动数据能就地补，走的就是「更新视频数据」那条队列：每条一次请求，按限速跑，补完会写回视频信息.txt。">只读扫一遍，说清有多少条缺互动数据、缺封面、缺简介。缺互动数据能就地补，走的就是「更新视频数据」那条队列：每条一次请求，按限速跑，补完会写回视频信息.txt。</p>
+          </div>
+          <div class="setting-row-control">
+            <button id="runIntegrityCheck" class="button button-quiet" type="button"><span data-icon="shield"></span><span data-i18n="开始巡检">开始巡检</span></button>
+            <button id="fillMissingStats" class="button button-quiet" type="button" hidden><span data-icon="refresh"></span><span data-i18n="补全互动数据">补全互动数据</span></button>
+          </div>
+        </div>
+
+        <p class="row-status" id="integrityStatus" role="status" hidden></p>
+        <p class="row-error" id="integrityError" role="alert" hidden></p>
 
         <p class="row-status" id="maintenanceStatus" role="status" hidden></p>
         <p class="row-error" id="maintenanceError" role="alert" hidden></p>

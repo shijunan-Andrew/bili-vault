@@ -2491,10 +2491,10 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 4,
     "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径（导出与封面转换 1.9.0 搬去设置页）都要先查闸门");
   assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
-  // 设置页的「导出归档元数据 / 归档体检 / 重建统计库」在导入期间拒绝扫半成品
+  // 设置页的「导出归档元数据 / 归档体检 / 重建统计库 / 导出清单 / 完整度巡检」在导入期间拒绝扫半成品
   assert.match(settings, /async function importIsRunning\(\) \{/);
-  assert.equal([...settings.matchAll(/if \(await importIsRunning\(\)\) throw new Error/g)].length, 3,
-    "导出元数据、归档体检与 1.10.0 的重建统计库都要先问一句");
+  assert.equal([...settings.matchAll(/if \(await importIsRunning\(\)\) throw new Error/g)].length, 5,
+    "导出元数据、归档体检、1.10.0 的重建统计库，以及 1.10.1 的导出清单与完整度巡检，都要先问一句");
   // 只清自己那一把：不能把别人后写进来的锁顺手抹掉
   assert.match(background, /if \(!lock \|\| !kind \|\| lock\.kind === kind\) await chrome\.storage\.session\.remove/);
 });
@@ -3357,6 +3357,28 @@ test("长任务要分阶段推进，这条规矩必须写在交接文档里", ()
   }
 });
 
+// ---- V1.10.1（发布工程：版本小节骨架只有一份）----
+test("版本小节骨架写在 docs/RELEASE-NOTES-TEMPLATE.md，最新一版必须照着写（1.10.1）", () => {
+  const template = readProjectFile(path.join("docs", "RELEASE-NOTES-TEMPLATE.md"));
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  const history = readProjectFile(path.join("docs", "HISTORY.md"));
+
+  // 1. 模板四节齐全（改了骨架就一起改模板，别让模板悄悄过期）
+  for (const heading of ["### 改了什么", "### 为什么", "### 踩的坑", "### 没动的"]) {
+    assert.ok(template.includes(heading), "版本小节模板里要有「" + heading + "」");
+  }
+  assert.match(template, /## V<版本>：/, "模板要给出「## V<版本>：<一句话标题>」的标题骨架");
+
+  // 2. 发版流程要指向这份模板（否则等于没有）
+  assert.ok(handoff.includes("docs/RELEASE-NOTES-TEMPLATE.md"), "AI_HANDOFF 的发版流程要指向版本小节模板");
+
+  // 3. HISTORY 最新一节真的用了四节：模板只有被照着写才有意义
+  const chunks = history.split(/^## V\d+\.\d+\.\d+：/m);
+  const latest = chunks[1] || "";
+  for (const heading of ["### 改了什么", "### 为什么", "### 踩的坑", "### 没动的"]) {
+    assert.ok(latest.includes(heading), "docs/HISTORY.md 最新一节要有「" + heading + "」");
+  }
+});
 // ---- V1.7.32（交接前一致性：README 只放最新一版）----
 test("README 只放最新一版，旧版一律归 docs/HISTORY.md（V1.7.32）", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
@@ -5888,9 +5910,10 @@ test("CI 与发版跑同一套检查，检查清单只有一份（P0 工程）",
   const shared = readProjectFile("scripts/check-all.cjs");
   const release = readProjectFile("release.ps1");
 
-  // CI 侧：ubuntu + Node 22，只跑一个入口
+  // CI 侧：ubuntu + Node 20 / 22 / 24 矩阵，只跑一个入口（1.10.1 把单版本扩成三条线）
   assert.match(workflow, /runs-on:\s*ubuntu-latest/, "CI 跑在 ubuntu-latest 上（Windows 专属自检不进来）");
-  assert.match(workflow, /node-version:\s*["']?22["']?/, "CI 用 Node 22");
+  assert.match(workflow, /node:\s*\[\s*"20",\s*"22",\s*"24"\s*\]/, "CI 要跑 Node 20 / 22 / 24 三条线");
+  assert.match(workflow, /node-version:\s*\$\{\{\s*matrix\.node\s*\}\}/, "装 Node 的步骤要用矩阵变量");
   assert.match(workflow, /push:/, "推 main 就要跑");
   assert.match(workflow, /pull_request:/, "PR 也要跑");
   assert.match(workflow, /run:\s*node scripts\/check-all\.cjs/, "CI 要跑 scripts/check-all.cjs");
@@ -5906,10 +5929,36 @@ test("CI 与发版跑同一套检查，检查清单只有一份（P0 工程）",
   assert.ok(shared.includes("i18n-count") && shared.includes("test-count"), "check-all.cjs 要核三处文档标记");
   assert.match(shared, /function listScripts/, "check-all.cjs 要遍历全仓 .js / .cjs");
   assert.match(shared, /"--check", path\.join\(root, file\)/, "每个脚本都要过 node --check");
+  assert.ok(shared.includes("scripts/check-package-size.cjs"), "check-all.cjs 要跑发布清单与体积检查（1.10.1）");
 
   // 发版侧：只调用共用脚本，不许自己再列一遍测试
   assert.match(release, /Invoke-Native \$Node @\('scripts\/check-all\.cjs'\)/, "release.ps1 第 4 步要跑这个脚本");
   assert.doesNotMatch(release, /Invoke-Native \$Node @\('test\//, "release.ps1 里不许再单独列测试项 —— 那样又会漂");
+});
+
+test("发布清单与体积阈值只有 pack.ps1 一处权威（1.10.1）", () => {
+  const pack = readProjectFile("pack.ps1");
+  const size = readProjectFile(path.join("scripts", "check-package-size.cjs"));
+
+  // 权威侧：pack.ps1 声明阈值与白名单
+  for (const name of ["maxFileBytes", "maxTotalBytes", "maxFileCount"]) {
+    assert.ok(new RegExp("\\$" + name + "\\s*=").test(pack), "pack.ps1 要声明 $" + name);
+  }
+  for (const name of ["excludeNames", "allowedTopFiles", "allowedTopDirs"]) {
+    assert.ok(new RegExp("\\$" + name + "\\s*=\\s*@\\(").test(pack), "pack.ps1 要声明 $" + name);
+  }
+
+  // 检查脚本不另抄一份：只从 pack.ps1 解析
+  assert.match(size, /pack\.ps1/, "体积检查要读 pack.ps1");
+  for (const name of ["maxFileBytes", "maxTotalBytes", "maxFileCount", "allowedTopFiles", "allowedTopDirs"]) {
+    assert.ok(size.includes(name), "体积检查要从 pack.ps1 取 $" + name + " —— 不许另抄一份");
+  }
+  assert.doesNotMatch(size, /2097152|6291456/, "体积检查里不许写死字节阈值，那会和 pack.ps1 漂");
+
+  // 1.9.0 加的四个运行期文件真的漏在过白名单外面
+  for (const rel of ["archive-tools.js", "recycle.css", "recycle.html", "recycle.js"]) {
+    assert.ok(pack.includes('"' + rel + '"'), "pack.ps1 的白名单要有 " + rel);
+  }
 });
 
 // ---- 静默吞错分档与性能基准的守卫（V1.7.34）----
