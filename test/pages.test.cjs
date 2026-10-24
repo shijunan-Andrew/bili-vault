@@ -744,7 +744,21 @@ async function suiteLibrary() {
     assert.ok(petButton, "宠物按钮应该存在");
     assert.equal(petButton.getAttribute("tabindex"), "-1", "宠物按钮不该落在 Tab 序列里");
   });
+
+  await test("开源横幅是静态单行：一段文字、不滚动、可关闭（1.10.10）", async () => {
+    const page = await openLibrary();
+    await settle();
+    const doc = page.document;
+    const banner = doc.getElementById("githubBanner");
+    assert.ok(banner, "library.html 里要有 #githubBanner");
+    assert.equal(banner.hidden, false, "没关过就该显示");
+    assert.equal(banner.querySelectorAll(".banner-run").length, 1, "只留一段文字");
+    assert.equal(banner.querySelector(".banner-scroll"), null, "不该再有滚动容器");
+    assert.equal(doc.documentElement.classList.contains("banner-visible"), true,
+      "横幅出现时页面要靠 banner-visible 让出高度");
+  });
 }
+
 
 /* ---------------- popup.html ---------------- */
 

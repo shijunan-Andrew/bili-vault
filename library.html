@@ -19,10 +19,9 @@
   <!-- 4.5.2：开源横幅。仓库地址在业务脚本的 PROJECT_REPO_URL 常量里改，一处即可 -->
   <div id="githubBanner" class="github-banner" hidden>
     <a id="githubBannerLink" class="banner-track" href="https://github.com/shijunan-Andrew/bili-vault" target="_blank" rel="noopener noreferrer">
-      <span class="banner-scroll">
-        <span class="banner-run"><span class="banner-icon" data-icon="github"></span><span data-i18n="本项目已在 GitHub 上开源，点击查看">本项目已在 GitHub 上开源，点击查看</span></span>
-        <span class="banner-run" aria-hidden="true"><span class="banner-icon" data-icon="github"></span><span data-i18n="本项目已在 GitHub 上开源，点击查看">本项目已在 GitHub 上开源，点击查看</span></span>
-      </span>
+      <!-- 1.10.10 起是静态单行：以前按容器宽度复制 4–5 份同一句话做成跑马灯，
+           宽屏上满屏都是重复文字；现在只留一句，装不下就省略号。 -->
+      <span class="banner-run"><span class="banner-icon" data-icon="github"></span><span data-i18n="本项目已在 GitHub 上开源，点击查看">本项目已在 GitHub 上开源，点击查看</span></span>
     </a>
     <button id="dismissGithubBanner" class="banner-close" type="button" aria-label="关闭" data-i18n-aria="关闭"><span data-icon="close"></span></button>
   </div>

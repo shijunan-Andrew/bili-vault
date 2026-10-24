@@ -137,13 +137,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.9：「清空回收站」挪到页面底部，不再挨着日常操作
+## V1.10.10：开源横幅改成静态单行，不再满屏重复同一句话
 
-- **症状**：回收站页右上角四个按钮里，「彻底删除所选」和「清空回收站」都是红色不可逆，紧挨着放，想删几条时很容易点到「全清」。
-- **改法**：把「清空回收站」从顶部操作行里拿出来，单独放在卡片列表**下方**的一行危险区（`.recycle-danger-zone`，右对齐、上方一条细分割线）；顶部只留「全选 / 恢复所选 / 彻底删除所选」这三条跟「选中的这几条」有关的操作。新增四条 CSS 规则，全部用令牌。
-- **行为不变**：按钮 id 仍是 `recyclePurge`，绑定与「这次操作不可逆…」的确认框原样保留，只是位置变了。
-- **补的用例**：`pages` 新增一条，钉住「清空回收站待在底部危险区、不许回到顶部操作行」，同时断言「恢复所选」「彻底删除所选」仍留在顶部。
-- **范围**：只动 `recycle.html` / `recycle.css` / 一条用例；不新增文案，词典仍 **1083 条**，五套测试 **380 / 91 / 69 / 30 / 55**。
+- **症状**：收藏库顶部那条绿色横幅是跑马灯，`buildBannerMarquee()` 按容器宽度复制同一句话，宽屏上一眼能看到 4–5 份「本项目已在 GitHub 上开源，点击查看」并排滚过去。
+- **改法**：拆掉整套跑马灯 —— 标记里只留一段文字，删掉 `.banner-scroll` 容器、`@keyframes banner-scroll`、悬停暂停与 `prefers-reduced-motion` 的豁免规则，也删掉 `buildBannerMarquee()` 和窗口 resize 时的重建；`.banner-run` 改成静态单行，装不下时 `text-overflow: ellipsis`。
+- **行为不变**：仍是整条可点的链接（新窗口 + `rel` 保护）、仍可关闭（`githubBannerDismissed`）、出现时页面仍靠 `banner-visible` 让出 42px 高度。
+- **测试**：三条 stability 用例按静态口径改写（含「不许再有 `banner-scroll` / `@keyframes` / `buildBannerMarquee`」的反向断言），`pages` 新增一条真渲染用例（一段文字、无滚动容器、`banner-visible` 在）。
+- **范围**：只动 `library.html` / `library.css` / `library.js` 与两条测试；不新增文案，词典仍 **1083 条**，五套测试 **380 / 91 / 69 / 30 / 56**。
 
 **遗留** - 无。
 

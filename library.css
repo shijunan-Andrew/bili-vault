@@ -30,21 +30,20 @@ html.banner-visible { --banner-h: 42px; }
   color: #fff;                       /* 绿色底上的白字，不随主题变 */
   box-shadow: var(--shadow-sm);
 }
-.banner-track { display: flex; flex: 1; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; }
-.banner-scroll { display: flex; width: max-content; animation: banner-scroll 20s linear infinite; }
-/* 两段一模一样的文字，位移 50% 正好接上，循环看不出接缝 */
-@keyframes banner-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.banner-track:hover .banner-scroll { animation-play-state: paused; }
-/* theme.css 里有一条全局的 prefers-reduced-motion 规则，会把动画压成
-   「跑一次然后弹回原位」——对跑马灯来说等于完全不动，而且因为
-   animation-fill-mode 默认是 none，元素会退回无位移状态，看着像坏了。
-   这条横幅的存在意义就是滚动，所以这里显式豁免；它本身是可关闭的，
-   对不希望有动效的用户不构成困扰。 */
-@media (prefers-reduced-motion: reduce) {
-  .banner-scroll { animation-duration: 40s !important; animation-iteration-count: infinite !important; }
+.banner-track { display: flex; align-items: center; flex: 1; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; }
+/* 1.10.10 起不再滚动：一句静态文字，容器窄了就省略号。
+   以前是跑马灯 + 按宽度克隆 4–5 份，宽屏上等于满屏重复同一句话。 */
+.banner-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-base);
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.banner-run { flex: 0 0 auto; padding-right: 120px; font-size: var(--fs-base); font-weight: 650; white-space: nowrap; }
-.banner-run { display: inline-flex; align-items: center; gap: 7px; }
 .banner-icon { display: inline-flex; font-size: var(--fs-lg); }
 .banner-close {
   display: grid;

@@ -2630,34 +2630,6 @@ function displayVersion(raw) {
   return `V${version}`;
 }
 
-// 轨道只有两份文字时，宽屏上右边会空一大块；而系统开了「减少动画」后
-// 动画会被压成跑一次就弹回原位，看着像坏了。这里按容器宽度补足份数，
-// 并保证前后两半严格等宽，位移 50% 才能无缝衔接。
-function buildBannerMarquee() {
-  const track = githubBannerLink?.querySelector(".banner-scroll");
-  const seed = track?.querySelector(".banner-run");
-  if (!track || !seed || !githubBanner) return;
-  const measure = seed.cloneNode(true);
-  track.replaceChildren(measure);
-  const unitWidth = measure.getBoundingClientRect().width || 260;
-  const need = Math.max(1, Math.ceil(githubBanner.clientWidth / Math.max(unitWidth, 1)));
-  const half = Array.from({ length: need }, (_, index) => {
-    const node = seed.cloneNode(true);
-    if (index > 0) node.setAttribute("aria-hidden", "true");
-    return node;
-  });
-  const second = half.map((node) => {
-    const copy = node.cloneNode(true);
-    copy.setAttribute("aria-hidden", "true");
-    return copy;
-  });
-  track.replaceChildren(...half, ...second);
-  // 速度恒定：大约每秒 60px，短则不少于 14 秒
-  track.style.animationDuration = `${Math.max(14, Math.round((unitWidth * need) / 60))}s`;
-  // 克隆出来的图标节点还没被填充过，这里补一次
-  if (globalThis.BcaIcons?.hydrate) BcaIcons.hydrate(githubBanner);
-}
-
 // 正式开源后只改这一处
 const PROJECT_REPO_URL = "https://github.com/shijunan-Andrew/bili-vault";
 
@@ -2673,7 +2645,6 @@ async function restoreGithubBanner() {
   githubBanner.hidden = false;
   // 侧栏/顶栏/主区靠这个 class 一起下移，见 library.css 的 --banner-h
   document.documentElement.classList.add("banner-visible");
-  buildBannerMarquee();
 }
 
 function dismissGithubBanner() {
@@ -5545,13 +5516,6 @@ openRecentResultButton?.addEventListener("click", showRecentResultDetail);
 cleanupUnfinishedButton?.addEventListener("click", askToCleanupUnfinished);
 markDownloadedGo?.addEventListener("click", runMarkDownloaded);
 markDownloadedCancel?.addEventListener("click", () => markDownloadedDialog?.close());
-let bannerResizeTimer = 0;
-window.addEventListener("resize", () => {
-  if (githubBanner?.hidden) return;
-  clearTimeout(bannerResizeTimer);
-  bannerResizeTimer = setTimeout(buildBannerMarquee, 150);
-});
-
 /* ---------------- V1.3.2：右下角的设置齿轮 ---------------- */
 
 // 4.5.1～V1.3.1 这里是主题与语言两个悬浮球（含各自的菜单、键盘操作与选中态同步），

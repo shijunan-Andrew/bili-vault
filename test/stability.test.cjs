@@ -1518,12 +1518,15 @@ test("both banners carry the Github mark", () => {
   // 两个图标都要真存在，否则水合后是空白
   assert.match(icons, /github: '/);
   assert.match(icons, /tv: '/);
-  // 收藏库横幅的两段都要带图标（跑马灯整段克隆，少一段就会出现没图标的重复）
-  assert.equal([...library.matchAll(/banner-icon" data-icon="github"/g)].length, 2);
+  // 1.10.10 起横幅是静态单行，只有一段文字、一个图标（以前跑马灯要两段）
+  assert.equal([...library.matchAll(/banner-icon" data-icon="github"/g)].length, 1);
   assert.match(library, /class="banner-icon" data-icon="github"><\/span><span data-i18n="本项目已在 GitHub 上开源/);
+  assert.equal([...library.matchAll(/class="banner-run"/g)].length, 1, "静态横幅只该有一段文字");
   assert.match(popup, /data-icon="github"><\/span>\s*<span data-i18n="此项目已在 Github 上开源/);
-  // 克隆出来的图标节点没被水合过，必须补一次
-  assert.match(readProjectFile("library.js"), /BcaIcons\.hydrate\(githubBanner\)/);
+  // 1.10.10 起不再克隆节点，标记里的图标由 icons.js 自己在加载时水合（以前克隆出来的要补一次）
+  assert.match(icons, /document\.addEventListener\("DOMContentLoaded", \(\) => hydrate\(\)\)/);
+  assert.equal(/BcaIcons\.hydrate\(githubBanner\)/.test(readProjectFile("library.js")), false,
+    "不再克隆横幅节点，也就没有第二处水合");
 });
 
 test("the Github mark is filled, unlike the line icon set", () => {
@@ -1668,19 +1671,19 @@ test("the popup banner is static, full-bleed, closable, and gives its height bac
 
 /* ------------------------- 4.7 细节修复 ------------------------- */
 
-test("the banner marquee fills the width and survives reduced-motion", () => {
+test("the open-source banner is a static single line, not a marquee", () => {
   const library = readProjectFile("library.js");
   const css = readProjectFile("library.css");
-  // 轨道只有两份文字时宽屏右边会空一大块：要按容器宽度补足份数
-  assert.match(library, /function buildBannerMarquee/);
-  assert.match(library, /Math\.ceil\(githubBanner\.clientWidth/, "份数要按容器宽度算");
-  // 前后两半必须等宽，位移 50% 才能无缝
-  assert.match(library, /track\.replaceChildren\(\.\.\.half, \.\.\.second\)/);
-  // 窗口变宽要重建
-  assert.match(library, /addEventListener\("resize"/);
-  // theme.css 的全局 reduced-motion 会把动画压成「跑一次就弹回原位」，
-  // 对跑马灯等于完全不动，所以必须有一条豁免
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.banner-scroll \{ animation-duration: 40s !important; animation-iteration-count: infinite !important; \}/);
+  const html = readProjectFile("library.html");
+  // 1.10.10：跑马灯整套（按宽度克隆、无缝位移、resize 重建）都拆了 ——
+  // 宽屏上满屏重复同一句话，是审阅稿 L-1 记的问题。
+  assert.equal(/buildBannerMarquee/.test(library), false, "不该再有跑马灯构建函数");
+  assert.equal(/banner-scroll/.test(html), false, "标记里不该再有滚动容器");
+  assert.equal(/@keyframes banner-scroll/.test(css), false, "不该再有滚动动画");
+  assert.equal(/\.banner-scroll/.test(css), false, "不该再有滚动容器的样式");
+  // 改成静态单行：装不下就省略号
+  assert.match(css, /\.banner-run \{[^}]*text-overflow: ellipsis;/);
+  assert.match(css, /\.banner-run \{[^}]*overflow: hidden;/);
 });
 
 test("filter dropdowns keep a stable width", () => {
@@ -1836,19 +1839,16 @@ test("the theme reaches the content script through chrome.storage", () => {
   assert.match(content, /data-bca-theme/);
   assert.equal(/:host\(\[data-theme=/.test(content), false, "不该再用裸 data-theme 选择器");
 });
-test("the open-source banner is green, scrolling and closable", () => {
+test("the open-source banner is green, static and closable", () => {
   const html = readProjectFile("library.html");
   const css = readProjectFile("library.css");
   const library = readProjectFile("library.js");
   for (const id of ["githubBanner", "githubBannerLink", "dismissGithubBanner"]) {
     assert.match(html, new RegExp(`id="${id}"`), `library.html 缺少 #${id}`);
   }
-  // 两段一模一样的文字才能无缝循环
-  assert.equal([...html.matchAll(/class="banner-run"/g)].length, 2, "跑马灯要有两段相同文字");
-  assert.match(css, /@keyframes banner-scroll \{[^\n]*translateX\(-50%\)/);
-  assert.match(css, /\.banner-scroll \{[^}]*animation: banner-scroll/);
-  // 悬停暂停，方便点
-  assert.match(css, /\.banner-track:hover \.banner-scroll \{ animation-play-state: paused; \}/);
+  // 1.10.10：只有一段文字，不滚动（以前两段 + 位移 50% 循环）
+  assert.equal([...html.matchAll(/class="banner-run"/g)].length, 1, "静态横幅只要一段文字");
+  assert.equal(/animation/.test(css.match(/\.banner-run \{[\s\S]*?\n\}/)[0]), false, "横幅文字不该再有动画");
   // 绿色底
   assert.match(css, /\.github-banner \{[^}]*var\(--success-solid\)/);
   // 链接新窗口打开且带 rel 保护
