@@ -133,7 +133,7 @@
               <button id="exitBatch" class="text-button" type="button" data-i18n="退出批量管理">退出批量管理</button>
             </div>
             <div class="batch-actions">
-              <button id="updateSelected" class="button button-warning" type="button" disabled><span data-icon="refresh"></span><span data-i18n="更新视频状态">更新视频状态</span></button>
+              <button id="updateSelected" class="button button-warning" type="button" disabled><span data-icon="refresh"></span><span data-i18n="更新视频数据">更新视频数据</span></button>
               <button id="moveSelected" class="button button-primary" type="button" disabled><span data-icon="move"></span><span data-i18n="移动或复制">移动或复制</span></button>
               <button id="deleteSelected" class="button button-danger" type="button" disabled><span data-icon="trash"></span><span data-i18n="删除">删除</span></button>
             </div>
@@ -312,7 +312,7 @@
   </dialog>
 
   <dialog id="statusConfirm" class="editor-dialog" aria-labelledby="statusConfirmTitle">
-    <div class="editor-heading"><span class="editor-heading-icon" data-icon="refresh"></span><h2 id="statusConfirmTitle" data-i18n="更新视频状态">更新视频状态</h2></div>
+    <div class="editor-heading"><span class="editor-heading-icon" data-icon="refresh"></span><h2 id="statusConfirmTitle" data-i18n="更新视频数据">更新视频数据</h2></div>
     <p id="statusConfirmCount" class="editor-hint"></p>
     <p class="editor-hint" data-i18n="重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签。">重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签。</p>
     <p class="editor-hint" data-i18n="如果更新时发现视频已经失效：不会用新数据覆盖原有资料，只把这条记录标记为「已失效」——标题变红、封面变灰，与导入时解析到的失效视频表现一致。">如果更新时发现视频已经失效：不会用新数据覆盖原有资料，只把这条记录标记为「已失效」——标题变红、封面变灰，与导入时解析到的失效视频表现一致。</p>
@@ -321,7 +321,7 @@
     <p id="statusConfirmProgress" class="dialog-progress" role="status" hidden></p>
     <div class="editor-actions">
       <button id="statusConfirmCancel" class="button button-quiet" type="button" data-i18n="取消">取消</button>
-      <button id="statusConfirmGo" class="button button-primary" type="button" data-i18n="同步最近收藏">同步最近收藏</button>
+      <button id="statusConfirmGo" class="button button-primary" type="button" data-i18n="开始更新视频数据">开始更新视频数据</button>
     </div>
   </dialog>
 

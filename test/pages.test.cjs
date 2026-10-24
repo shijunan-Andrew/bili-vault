@@ -283,7 +283,7 @@ async function suiteLibrary() {
     assert.equal(await openByTitle("标题当简介视频"), "", "简介就是标题时也不显示");
   });
 
-  await test("没有互动数据的记录显示 N/A，并提示去「更新视频状态」（1.9.5）", async () => {
+  await test("没有互动数据的记录显示 N/A，并提示去「更新视频数据」（1.9.5）", async () => {
     const tree = {
       "小鲸鱼测试": {
         "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("没抓到数据的视频", { stats: false, upName: "某人" }), "封面.png": "PNG-1" }
@@ -302,7 +302,7 @@ async function suiteLibrary() {
     assert.match(textOf(doc.querySelector("#detailContent .detail-up-fans")), /N\/A/, "粉丝数缺失也要显示 N/A");
     const warning = doc.querySelector("#detailContent .detail-refresh-warning");
     assert.ok(warning, "数据不完整时要有提示");
-    assert.equal(textOf(warning), BcaT(page, "该视频数据不完整，更新视频状态或能解决"));
+    assert.equal(textOf(warning), BcaT(page, "该视频数据不完整（粉丝数N/A或互动数据N/A），更新视频数据将重新获取这些信息，或能解决"));
   });
 
   await test("删除确认对话框：文案与按钮按「删一个视频」渲染，取消后关闭且不动磁盘（1.7.23）", async () => {

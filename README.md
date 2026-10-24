@@ -134,37 +134,37 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 ## 正式版更新
 
-> 这里**只放最新一版**的改动说明。更早的版本（V1.9.5 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
+> 这里**只放最新一版**的改动说明。更早的版本（V1.9.6 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.9.6：统计页不再因为快照丢了就一直显示「还没有数据」
+## V1.9.7：功能改叫「更新视频数据」，回收站自成一栏
 
 **你会感觉到的几处**
 
-- 统计页在「还没有数据」时会多一个 **「重新读取统计库」** 按钮：数据库文件明明有记录、页面却是空的，点一下就按 `003database/database.json` 重新读一遍并重画。
-- 扩展安装/启动时如果发现统计快照整份不见了，会在后台自己按现成的数据库补发一次，不需要你手动点。
-- 修掉一个会让页面「再也不更新」的毛病：后台拒绝了一次写库（库正被占用、写失败）之后，收藏库页原先会把这次内容记成「已经发布过」，此后只要扫描结果不变就再也不发快照——统计页就永远停在旧数字（或者空的）。
-- 「更新视频状态」和导入链路的行为没变；单条收藏仍然只写 `视频信息.txt` 和封面，不碰统计库。
+- 视频详情里的按钮从「更新视频状态」改叫 **「更新视频数据」**，更新弹窗右下角从「同步最近收藏」改叫 **「开始更新视频数据」**。
+- 数据不全时的红字更具体：「该视频数据不完整（粉丝数N/A或互动数据N/A），更新视频数据将重新获取这些信息，或能解决」。
+- 设置页把 **回收站** 从「归档维护」里分出来，单独一栏；点进去照样能挑着恢复、彻底删除或一键清空。
+- 行为没变：更新只覆盖接口真正返回的数值，标题、简介、标签、封面都不动；失效视频只标状态。
 
 **开发侧**
 
-- `background.js` 新增 `republishStatsSnapshot()`（读库 → 清掉内容指纹 → 强制重发 `bcaStats`）与 `healStatsSnapshotOnStart()`（只有快照里 `videos` 为空才补发），分别挂在 `onInstalled` / `onStartup` 上；新增消息 `bca-stats-republish`（只读，不改库）。
-- `library.js` 的 `declined` 分支不再记录 `publishedStatsFingerprint`（拒绝不是「发布过了」），下一次扫描/刷新会重新提交。
-- `stats.html` / `stats.js` / `stats.css`：空态加 `#statsEmptyText` 与 `#statsRepublish`，四类失败各有文案（没有根目录 / 没权限 / 库读不出来 / 其他）。
-- 词典同步加 5 个键（其中「正在读取…」沿用已有键）。
+- 改名覆盖 `library.html` 的两处按钮、`library.js` 的进度与失败文案及确认按钮、`guide.html` 教程正文、`background.js` 的队列超时标签与失败消息；词典同步删旧键建新键。
+- `settings.html` 新增 `#group-recycle`（`data-group="recycle"`）与侧栏入口，「归档维护」卡只剩归档体检；`settingsOpenRecycle` 只留一处。
+- 守卫：新增两条 1.9.7 测试（旧名字不许回潮、回收站入口不在归档维护卡里），并放宽 V1.8.8 那条「开始更新」禁令（允许「开始更新视频数据」）。
 
 **遗留**
 
-- 统计快照是全机一份（`chrome.storage.local.bcaStats`），而数据库按备份文件夹分别存（`<根>/003database`）。切换备份文件夹之后，统计页要等下一次收藏库扫描、或点「重新读取统计库」，才会切到新根的数字。
+- 无。
+
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1024 条**<!-- i18n-count:1024 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1027 条**<!-- i18n-count:1027 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:369 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:371 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

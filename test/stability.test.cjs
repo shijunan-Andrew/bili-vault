@@ -1804,7 +1804,7 @@ test("batch refresh reports progress and can list its failures", () => {
   const html = readProjectFile("library.html");
   const library = readProjectFile("library.js");
   assert.match(html, /id="failurePanel"/);
-  assert.match(library, /正在更新视频状态 \{counter\}/);
+  assert.match(library, /正在更新视频数据 \{counter\}/);
   assert.match(html, /data-i18n="复制全部"/);
   // background.js 不许为了这个功能被改
   assert.equal(/failurePanel/.test(readProjectFile("background.js")), false);
@@ -6563,7 +6563,8 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
 test("「开始更新」改叫「同步最近收藏」：界面上不再出现旧名字（V1.8.8）", () => {
   for (const file of ["popup.html", "popup.js", "library.html", "library.js", "guide.html", "favorites-import.js"]) {
     const text = readProjectFile(file);
-    assert.equal(text.includes("开始更新"), false, `${file} 里还有旧名字「开始更新」`);
+    // 1.9.7：收藏库详情里的「开始更新视频数据」是另一个功能，不算这里的旧名字
+    assert.equal(/开始更新(?!视频数据)/.test(text), false, `${file} 里还有旧名字「开始更新」`);
   }
   assert.match(readProjectFile("popup.html"), /data-i18n="同步最近收藏"/, "按钮要叫「同步最近收藏」");
   const zhTW = JSON.parse(readProjectFile("locales/zh-TW.json"));
@@ -7602,7 +7603,7 @@ test("收藏前用 /x/web-interface/view 补真实 UP 主与互动数据，UP �
   assert.ok(source.includes('await biliImportApiGet("/x/web-interface/view", bvid ? { bvid } : { aid }, SAVE_ENRICH_TIMEOUT_MS)'), "收藏时要请求视频详情接口");
   assert.match(source, /upName: importIsPlaceholder\(owner\.name\) \? metadata\.upName : owner\.name,/);
   assert.match(source, /metadata = await enrichFavoriteMetadata\(pageMetadata\);/);
-  assert.match(source, /console\.warn\("收藏时没能补上互动数据（这次先按页面抓到的存，之后可以用「更新视频状态」补）", error\);/);
+  assert.match(source, /console\.warn\("收藏时没能补上互动数据（这次先按页面抓到的存，之后可以用「更新视频数据」补）", error\);/);
 });
 
 test("BV 索引与已有目录判定都还在（1.9.3；1.9.4 起命中就整条跳过，不再改写原目录）", () => {
@@ -7717,7 +7718,7 @@ test("缺失的数值一律写 N/A 并在收藏库显示；有 N/A 时提示去�
   const library = stripComments(readProjectFile("library.js"));
   assert.match(library, /function statDisplay\(value\) \{/);
   assert.match(library, /const detailIncomplete = statDisplay\(video\.upFans\) === "N\/A"/);
-  assert.match(library, /该视频数据不完整，更新视频状态或能解决/);
+  assert.match(library, /该视频数据不完整（粉丝数N\/A或互动数据N\/A），更新视频数据将重新获取这些信息，或能解决/);
   assert.match(library, /detail-refresh-warning/);
   const css = stripComments(readProjectFile("library.css"));
   assert.match(css, /\.detail-refresh-warning \{[^}]*color: var\(--danger\)/, "提示要用危险色");
@@ -7765,4 +7766,39 @@ test("统计页在没有数据时能按 003database 重新读取一次（1.9.6�
     const dictionary = i18nTools.readDictionary(locale) || {};
     assert.ok(dictionary["重新读取统计库"], `${locale} 缺「重新读取统计库」`);
   }
+});
+
+
+// ---- 1.9.7：更新视频数据的叫法统一、回收站自成一栏 ----
+
+test("「更新视频状态」统一改叫「更新视频数据」，弹窗按钮叫「开始更新视频数据」（1.9.7）", () => {
+  const html = readProjectFile("library.html");
+  const library = readProjectFile("library.js");
+  const guide = readProjectFile("guide.html");
+  const dictionary = i18nTools.readDictionary("zh-TW");
+
+  assert.match(html, /data-i18n="更新视频数据"/);
+  assert.match(html, /data-i18n="开始更新视频数据"/);
+  assert.equal(/data-i18n="更新视频状态"/.test(html), false, "收藏库页不许再出现旧名字");
+  assert.equal(/data-i18n="同步最近收藏"/.test(html), false, "弹窗确认按钮不许再叫「同步最近收藏」");
+  assert.match(library, /正在更新视频数据 \{counter\}/);
+  assert.match(library, /statusConfirmGo\.textContent = BcaI18n\.t\("开始更新视频数据"\)/);
+  assert.match(library, /BcaI18n\.t\("该视频数据不完整（粉丝数N\/A或互动数据N\/A），更新视频数据将重新获取这些信息，或能解决"\)/);
+  assert.equal(/更新视频状态/.test(guide), false, "教程页也要跟着改叫法");
+  assert.ok(dictionary["更新视频数据"], "词典里要有新名字");
+  assert.ok(dictionary["开始更新视频数据"], "词典里要有弹窗按钮的新名字");
+  assert.ok(dictionary["最近删除的视频"], "回收站卡的行标题也要进词典");
+});
+
+test("回收站从「归档维护」里分出来，自成一栏（1.9.7）", () => {
+  const html = readProjectFile("settings.html");
+  assert.match(html, /<button type="button" class="nav-item" data-group="recycle">/);
+  assert.match(html, /<section class="settings-card" id="group-recycle" data-group="recycle">/);
+  const maintenance = html.match(/<section class="settings-card" id="group-maintenance" data-group="maintenance">[\s\S]*?<\/section>/);
+  assert.ok(maintenance, "归档维护卡还在");
+  assert.equal(/settingsOpenRecycle/.test(maintenance[0]), false, "回收站入口不该留在归档维护卡里");
+  const recycle = html.match(/<section class="settings-card" id="group-recycle" data-group="recycle">[\s\S]*?<\/section>/);
+  assert.ok(recycle, "回收站卡要独立存在");
+  assert.match(recycle[0], /id="settingsOpenRecycle"/);
+  assert.equal((html.match(/id="settingsOpenRecycle"/g) || []).length, 1, "回收站入口只留一处");
 });

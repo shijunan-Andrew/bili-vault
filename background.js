@@ -1183,7 +1183,7 @@ async function enrichFavoriteMetadata(pageMetadata) {
       stats: hasAnyStat ? stats : (metadata.stats || {})
     };
   } catch (error) {
-    console.warn("收藏时没能补上互动数据（这次先按页面抓到的存，之后可以用「更新视频状态」补）", error);
+    console.warn("收藏时没能补上互动数据（这次先按页面抓到的存，之后可以用「更新视频数据」补）", error);
     return metadata;
   }
 }
@@ -2326,7 +2326,7 @@ async function refreshVideoStatusInner(data, tabId = null) {
       const index = cursor;
       const target = queue[cursor];
       cursor += 1;
-      sendStatusProgress(`正在更新视频状态 ${index + 1}/${queue.length}：${target.directory}`);
+      sendStatusProgress(`正在更新视频数据 ${index + 1}/${queue.length}：${target.directory}`);
       try {
         const result = await refreshOneArchiveStatus(root, target, tabId);
         if (result === "updated") updated += 1;
@@ -5469,7 +5469,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 超时就把"队列正忙"如实回报给界面，不再让它永远显示"更新中"。
     const task = saveQueue.then(() => refreshVideoStatus(message.data, sender?.tab?.id ?? null));
     saveQueue = task.catch(() => undefined);
-    withQueueDeadline(task, IMPORT_QUEUE_WAIT_TIMEOUT_MS, "更新视频状态")
+    withQueueDeadline(task, IMPORT_QUEUE_WAIT_TIMEOUT_MS, "更新视频数据")
       .then((result) => {
         if (result === WITH_QUEUE_DEADLINE_EXPIRED) {
           sendResponse({
@@ -5481,7 +5481,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         sendResponse(result);
       })
-      .catch((error) => sendResponse({ ok: false, message: error?.message || "更新视频状态失败。" }));
+      .catch((error) => sendResponse({ ok: false, message: error?.message || "更新视频数据失败。" }));
     return true;
   }
   if (message?.type === "bca-import-control") {
