@@ -190,7 +190,9 @@
          不能摆一堆 0 让人以为界面坏了。 -->
     <section class="stats-card stats-empty" id="statsEmpty" hidden>
       <span class="stats-empty-icon" data-icon="info"></span>
-      <p class="stats-empty-text" data-i18n="还没有数据：先在收藏库里扫描一次，或导入一次收藏夹。">还没有数据：先在收藏库里扫描一次，或导入一次收藏夹。</p>
+      <p class="stats-empty-text" id="statsEmptyText" data-i18n="还没有数据：先在收藏库里扫描一次，或导入一次收藏夹。">还没有数据：先在收藏库里扫描一次，或导入一次收藏夹。</p>
+      <!-- 1.9.6：快照丢了（只在收藏库扫描时才写）时，允许按现成的 003database 让后台补发一次 -->
+      <button class="button button-primary stats-empty-action" id="statsRepublish" type="button" data-i18n="重新读取统计库">重新读取统计库</button>
     </section>
 
     <!-- 小字：更新时间（脚本填）+ 数据只在本地这一句。

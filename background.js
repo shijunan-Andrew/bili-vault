@@ -186,12 +186,15 @@ chrome.runtime.onInstalled.addListener(() => {
   // 4.9：安装 / 更新 / 重新加载扩展之后不可能还有导入在跑，
   // 本地残留的 importState.running=true 要立刻复位，别让界面锁死
   importReconcileState().catch((error) => console.warn("复位导入状态失败", error));
+  // 1.9.6：统计快照丢了（只在收藏库扫描时才写）会让统计页一直显示「还没有数据」
+  healStatsSnapshotOnStart().catch((error) => console.warn("补发统计快照失败", error));
 });
 chrome.runtime.onStartup.addListener(() => {
   initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error));
   // 4.9：浏览器重新启动时 chrome.storage.session 已被清空，只剩 local 里的 running 残影，
   // 这里立刻复位并写明"上次导入已中断"
   importReconcileState().catch((error) => console.warn("复位导入状态失败", error));
+  healStatsSnapshotOnStart().catch((error) => console.warn("补发统计快照失败", error));
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.enabled) {
@@ -3836,6 +3839,39 @@ async function publishStatsSnapshot(database) {
   return stats;
 }
 
+/* 1.9.6（用户反馈「保存了三条视频，统计页还是 0」）：统计页只读 storage 里的 bcaStats 快照，
+   而这份快照以前只在「收藏库扫描 → 提交」这一条路上写。只要那一步被拒（写库失败、库正被
+   占用）、或者写库之后扩展紧接着重启，库文件明明是对的，统计页却一直停在「还没有数据」。
+   这里补一条只读的自愈路：把现成的 003database/database.json 读出来，重新发一份快照。
+   它不写库、不改任何记录，跑多少次都安全。 */
+async function republishStatsSnapshot() {
+  const root = await getRootHandle().catch(() => null);
+  if (!root) return { ok: false, reason: "no-root" };
+  const permission = await root.queryPermission({ mode: "read" }).catch(() => "denied");
+  if (permission !== "granted") return { ok: false, reason: "no-permission" };
+  const read = await readStatsDatabase(root, { archiveBroken: false });
+  const blocked = statsDatabaseWriteBlocked(read);
+  if (blocked) {
+    console.warn(`统计库读不出来，这次不重发快照：${blocked}`);
+    return { ok: false, reason: "unreadable" };
+  }
+  // 指纹是「这次和上次发的一样就不写」的去重；手动 / 自愈重发就是要强制覆盖一次
+  statsSnapshotPublished = "";
+  const stats = await publishStatsSnapshot(read.database);
+  return { ok: true, rows: Object.keys(read.database.videos || {}).length, savedToday: stats.savedToday };
+}
+
+/* 启动时只在「快照整个不见了」的情况下自愈：快照还在就不碰，省得每次开浏览器都读一遍库。 */
+async function healStatsSnapshotOnStart() {
+  const stored = await chrome.storage.local.get("bcaStats").catch(() => ({}));
+  const existing = stored && stored.bcaStats;
+  if (existing && Object.keys(existing.videos || {}).length) return;
+  const result = await republishStatsSnapshot().catch((error) => ({ ok: false, reason: error?.message }));
+  if (result && result.ok) {
+    console.warn(`统计快照缺失，已按 ${BcaStatsCore.DATABASE_FOLDER_NAME} 里的库补发（${result.rows} 条）。`);
+  }
+}
+
 /* 1.7.18（destructive P1-3）：insertedKeys 传进来时，顺手记下「这一批里哪些行是新建的」。
    取消导入的回滚只该撤掉这些行 —— 本轮之前就在库里的行是本轮之前的数据，
    撤掉它等于替用户删了旧记录。判定必须在 addRecord **之前**做，加完就分不出新旧了。 */
@@ -5530,6 +5566,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     commitStatsDatabaseFromPage(message)
       .then((result) => sendResponse(result))
       .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message?.type === "bca-stats-republish") {
+    // 1.9.6：统计页在「还没有数据」时可以让后台按现成的数据库重发一次快照（只读）。
+    republishStatsSnapshot()
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, reason: error?.message || "failed" }));
     return true;
   }
   if (message?.type === "bca-pet-touch") {

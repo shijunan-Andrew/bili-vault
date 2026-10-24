@@ -246,6 +246,68 @@ async function suite() {
     assert.equal(text, infoText, "跳过的记录不该被改写");
   });
 
+  await test("统计快照丢了可以按现成的 database.json 补发一次（1.9.6）", async () => {
+
+    const day = statsCore.localDayKey(Date.now());
+
+    const dbText = JSON.stringify({
+
+      version: 1,
+
+      schemaVersion: 1,
+
+      createdAt: 1700000000000,
+
+      firstSeenAt: new Date(1700000000000).toISOString(),
+
+      updatedAt: 1700000000000,
+
+      videos: {
+
+        "bvid:BV1aa411c7m1": { at: Date.now(), day, collection: "测试收藏夹", title: "补发用的记录", bvid: "BV1aa411c7m1", aid: 0 }
+
+      },
+
+      totals: { savedTotal: 1 },
+
+      futureDayCount: 0,
+
+      pet: { affinity: 1, day, todayTouch: 1, totalTouch: 1 }
+
+    });
+
+    const root = rootWithDatabase(dbText);
+
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }), indexedDB: makeRootDb(root) });
+
+    const listener = bg.chrome.__events["runtime.onMessage"].listeners[0];
+
+    const response = await new Promise((resolve) => {
+
+      const ret = listener({ type: "bca-stats-republish" }, { id: "test" }, resolve);
+
+      if (ret !== true) resolve({ ok: false, reason: "sync" });
+
+      setTimeout(() => resolve({ ok: false, reason: "timeout" }), 2000).unref?.();
+
+    });
+
+    assert.equal(response.ok, true, JSON.stringify(response));
+
+    assert.equal(response.rows, 1);
+
+    const stored = await bg.chrome.storage.local.get("bcaStats");
+
+    assert.ok(stored.bcaStats, "应该补发一份 bcaStats 快照");
+
+    assert.equal(stored.bcaStats.videos, 1, "快照里应该记着 1 条视频");
+
+    assert.equal(stored.bcaStats.savedToday, 1);
+
+  });
+
+
+
   await test("新目录第一次读库：给空库、允许写、reason 是 empty", async () => {
     const bg = loadBackground({ chrome: chromeWithMirror(null) });
     const root = rootWithDatabase(null);

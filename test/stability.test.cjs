@@ -7722,3 +7722,47 @@ test("缺失的数值一律写 N/A 并在收藏库显示；有 N/A 时提示去�
   const css = stripComments(readProjectFile("library.css"));
   assert.match(css, /\.detail-refresh-warning \{[^}]*color: var\(--danger\)/, "提示要用危险色");
 });
+test("统计快照丢了能按现成的库补发；被拒的那次不算「已发布」（1.9.6）", () => {
+  const background = stripComments(readProjectFile("background.js"));
+  assert.match(background, /async function republishStatsSnapshot\(\) \{/);
+  assert.match(background, /if \(!root\) return \{ ok: false, reason: "no-root" \};/);
+  assert.match(background, /statsSnapshotPublished = "";/);
+  assert.match(background, /const stats = await publishStatsSnapshot\(read\.database\);/);
+  assert.match(background, /async function healStatsSnapshotOnStart\(\) \{/);
+  assert.match(background, /if \(existing && Object\.keys\(existing\.videos \|\| \{\}\)\.length\) return;/);
+  assert.equal(
+    (background.match(/healStatsSnapshotOnStart\(\)\.catch\(\(error\) => console\.warn\("补发统计快照失败", error\)\);/g) || []).length,
+    2,
+    "启动与安装各挂一次"
+  );
+  assert.match(background, /if \(message\?\.type === "bca-stats-republish"\) \{/);
+
+  const rawLibrary = readProjectFile("library.js");
+  const library = stripComments(rawLibrary);
+  const declinedStart = library.indexOf('if (committed === "declined") {');
+  const failedStart = library.indexOf('if (committed === "failed") {', declinedStart);
+  assert.ok(declinedStart > 0 && failedStart > declinedStart, "被拒与失败两个分支都要在");
+  const declinedBranch = library.slice(declinedStart, failedStart);
+  assert.equal(/publishedStatsFingerprint\s*=/.test(declinedBranch), false, "被拒不算发布，不许记指纹");
+  assert.match(rawLibrary, /1\.9\.6（用户反馈「保存了三条，统计页还是 0」）/);
+  assert.match(library, /publishedStatsFingerprint = fingerprint;/);
+});
+
+test("统计页在没有数据时能按 003database 重新读取一次（1.9.6）", () => {
+  const html = stripComments(readProjectFile("stats.html"));
+  assert.match(html, /id="statsEmptyText"/);
+  assert.match(html, /<button[^>]*id="statsRepublish"[^>]*data-i18n="重新读取统计库"/);
+
+  const stats = stripComments(readProjectFile("stats.js"));
+  assert.match(stats, /function bindRepublish\(\) \{/);
+  assert.match(stats, /chrome\.runtime\.sendMessage\(\{ type: "bca-stats-republish" \}/);
+  assert.match(stats, /stats = await readStats\(\);/);
+
+  const css = stripComments(readProjectFile("stats.css"));
+  assert.match(css, /\.stats-empty-action \{[^}]*margin-top: 12px;/);
+
+  for (const locale of ["zh-TW", "en"]) {
+    const dictionary = i18nTools.readDictionary(locale) || {};
+    assert.ok(dictionary["重新读取统计库"], `${locale} 缺「重新读取统计库」`);
+  }
+});

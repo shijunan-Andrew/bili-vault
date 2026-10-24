@@ -4756,7 +4756,10 @@ async function syncStatsDatabaseLocked(handle, options = {}) {
     }
     const committed = await commitStatsDatabaseViaBackground(database, { pageArchivedBroken: previousArchived });
     if (committed === "declined") {
-      publishedStatsFingerprint = fingerprint;
+      /* 1.9.6（用户反馈「保存了三条，统计页还是 0」）：这里以前会把这次指纹记成「已经发布」，
+         于是后台拒绝一次（库正被占用、写库失败）之后，只要扫描结果不变，这一页以后每次都
+         直接 return，统计页就永远停在「还没有数据」。拒绝不是「发布过了」——不记指纹，
+         下一次扫描/刷新会再交一次。 */
       return;
     }
     if (committed === "failed") {

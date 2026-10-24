@@ -78,6 +78,8 @@
     yearCard: document.getElementById("statsYearCard"),
     topCard: document.getElementById("statsTopCard"),
     empty: document.getElementById("statsEmpty"),
+    emptyText: document.getElementById("statsEmptyText"),
+    republish: document.getElementById("statsRepublish"),
     rangeButton: document.getElementById("statsRangeButton"),
     rangeLabel: document.getElementById("statsRangeLabel"),
     rangeSummary: document.getElementById("statsRangeSummary"),
@@ -2161,6 +2163,48 @@
      关掉之后用户落到「底下原来那个标签」，看着就像「这个按钮只是把页面关了」
      （设置页的「返回收藏库」也是同一个坑，V1.4.1 已经踩过一次）。
      拿不到当前标签时就地导航，绝不把人卡住。 */
+  /* 1.9.6：统计页只读 storage 里的 bcaStats 快照；快照丢了（提交被拒、写库后扩展刚好重启、
+     storage 写入失败）时，这里让后台按现成的 003database 重发一份，再重新读一遍。 */
+  function bindRepublish() {
+    if (!ui.republish) return;
+    ui.republish.addEventListener("click", async () => {
+      const label = ui.republish.textContent;
+      ui.republish.disabled = true;
+      setText(ui.republish, t("正在读取…"));
+      try {
+        const result = await new Promise((resolve) => {
+          /* 后台在扩展重载的瞬间可能收不到回调：5 秒后必须把按钮还回去，不能让它一直转 */
+          const timer = window.setTimeout(() => resolve({ ok: false, reason: "timeout" }), 5000);
+          try {
+            chrome.runtime.sendMessage({ type: "bca-stats-republish" }, (response) => {
+              window.clearTimeout(timer);
+              void chrome.runtime.lastError;
+              resolve(response || { ok: false, reason: "no-response" });
+            });
+          } catch (_) {
+            window.clearTimeout(timer);
+            resolve({ ok: false, reason: "no-runtime" });
+          }
+        });
+        if (result && result.ok) {
+          stats = await readStats();
+          render();
+          return;
+        }
+        const reason = (result && result.reason) || "unknown";
+        const message = reason === "no-root" || reason === "no-permission"
+          ? t("还没有选择本地备份文件夹，先在收藏库里选一次。")
+          : reason === "unreadable"
+            ? t("统计库这次读不出来，稍后再试。")
+            : t("重新读取统计库失败：{reason}", { reason });
+        if (ui.emptyText) setText(ui.emptyText, message);
+      } finally {
+        ui.republish.disabled = false;
+        setText(ui.republish, label);
+      }
+    });
+  }
+
   function bindBack() {
     const button = document.getElementById("statsBack");
     if (!button) return;
@@ -2289,6 +2333,7 @@
 
   async function init() {
     bindBack();
+    bindRepublish();
     bindResize();
     bindPicker();
     bindChart();

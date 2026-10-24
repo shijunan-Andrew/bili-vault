@@ -134,40 +134,37 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 ## 正式版更新
 
-> 这里**只放最新一版**的改动说明。更早的版本（V1.9.4 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
+> 这里**只放最新一版**的改动说明。更早的版本（V1.9.5 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.9.5：收藏更快、缺失数据写 N/A、分区与发布时间补上
+## V1.9.6：统计页不再因为快照丢了就一直显示「还没有数据」
 
 **你会感觉到的几处**
 
-- 收藏比上一版快一截：收藏时不再顺手请求 UP 主粉丝数（少一次排队），详情接口的超时也从 8 秒收到 3 秒。粉丝数只在「更新视频状态」和「导入收藏夹」时取。
-- 拿不到的数字统一写 **N/A**：`视频信息.txt` 里的「UP主粉丝数」和六项互动数据缺失时记 N/A，收藏库的卡片与详情也显示 N/A，不再写「未知」、也不再整段消失。
-- 详情里出现 N/A 时，「更新视频状态」下面会多一句红字「该视频数据不完整，更新视频状态或能解决」——点一下就能补齐。
-- **分区**写进 `视频信息.txt`，并在详情里显示（取接口的 `tname` / `tname2`）。
-- **发布时间**优先读页面上的「2024-08-26 18:21:24」，页面没有才用接口值。
+- 统计页在「还没有数据」时会多一个 **「重新读取统计库」** 按钮：数据库文件明明有记录、页面却是空的，点一下就按 `003database/database.json` 重新读一遍并重画。
+- 扩展安装/启动时如果发现统计快照整份不见了，会在后台自己按现成的数据库补发一次，不需要你手动点。
+- 修掉一个会让页面「再也不更新」的毛病：后台拒绝了一次写库（库正被占用、写失败）之后，收藏库页原先会把这次内容记成「已经发布过」，此后只要扫描结果不变就再也不发快照——统计页就永远停在旧数字（或者空的）。
+- 「更新视频状态」和导入链路的行为没变；单条收藏仍然只写 `视频信息.txt` 和封面，不碰统计库。
 
 **开发侧**
 
-- `background.js`：`SAVE_ENRICH_TIMEOUT_MS = 3000`；新增 `COVER_SAVE_TIMEOUT_MS = 3000`，`loadCoverPng(url, { timeoutMs })` 只对收藏路径收紧，导入 / 更新状态仍是 20 秒；`enrichFavoriteMetadata()` 不再调用 `fetchUpFans()`，`upFans` 沿用页面值；返回补 `category: tname / tname2`，`pubdate` 改为页面优先。
-- `buildInfo()`：`MISSING_VALUE = "N/A"`；【互动数据】段总是写出，缺项写 N/A；粉丝数缺失同样写 N/A。
-- `content.js`：`getVideoMetadata()` 从 `#viewbox_report .pubdate / .video-info-meta .pubdate / .pubdate` 解析 `YYYY-MM-DD HH:mm:ss`，按本地时区换算成秒。
-- `archive-tools.js`：`statsFromInfo()` 把缺项归一成 `"N/A"`；`library.js` 新增 `statDisplay()`，卡片、详情、粉丝数统一走它，数据不完整时渲染 `.detail-refresh-warning`（`library.css` 用 `--danger`）。
+- `background.js` 新增 `republishStatsSnapshot()`（读库 → 清掉内容指纹 → 强制重发 `bcaStats`）与 `healStatsSnapshotOnStart()`（只有快照里 `videos` 为空才补发），分别挂在 `onInstalled` / `onStartup` 上；新增消息 `bca-stats-republish`（只读，不改库）。
+- `library.js` 的 `declined` 分支不再记录 `publishedStatsFingerprint`（拒绝不是「发布过了」），下一次扫描/刷新会重新提交。
+- `stats.html` / `stats.js` / `stats.css`：空态加 `#statsEmptyText` 与 `#statsRepublish`，四类失败各有文案（没有根目录 / 没权限 / 库读不出来 / 其他）。
+- 词典同步加 5 个键（其中「正在读取…」沿用已有键）。
 
 **遗留**
 
-- 老档案里的「未知」不会批量改写：打开详情时按 N/A 显示，想换成真数字点一次「更新视频状态」即可。
-- 分区依赖接口的 `tname`：接口没取到的老记录仍显示「未知」，同样可以用「更新视频状态」补。
-
+- 统计快照是全机一份（`chrome.storage.local.bcaStats`），而数据库按备份文件夹分别存（`<根>/003database`）。切换备份文件夹之后，统计页要等下一次收藏库扫描、或点「重新读取统计库」，才会切到新根的数字。
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1020 条**<!-- i18n-count:1020 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1024 条**<!-- i18n-count:1024 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:367 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:369 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

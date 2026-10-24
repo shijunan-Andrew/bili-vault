@@ -924,3 +924,8 @@ html.bca-glass .stats-topbar {
 .stats-table thead th { color: var(--muted); font-weight: 600; }
 .stats-table tbody th { color: var(--text); font-weight: 400; }
 .stats-table td { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* 1.9.6：空态里的「重新读取统计库」按钮 */
+.stats-empty-action {
+  margin-top: 12px;
+}
