@@ -191,7 +191,9 @@
 .setting-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; color: var(--ink); font-size: var(--fs-md); font-weight: 600; }
 .setting-row-desc { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
 /* 右侧控件：右对齐、不换行；分段控件与滑块在这里各有固定宽度 */
-.setting-row-control { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; gap: var(--sp-2); white-space: nowrap; }
+/* 1.10.5：说明太长时控件会换到下一行。自动外边距把它顶到右边，和没换行时的位置一样 ——
+   否则 flex-wrap 下它独占一行，justify-content: space-between 只剩一个子项，会贴到左边去。 */
+.setting-row-control { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; gap: var(--sp-2); margin-left: auto; white-space: nowrap; }
 /* 1.7.14（facet-compat C5）：词典没读出来时的说明可能很长，让它独占一行 ——
    塞在 .setting-row-control（nowrap + flex:0 0 auto）里会把左边的说明挤成一条竖线。 */
 .setting-row { flex-wrap: wrap; }
@@ -315,7 +317,7 @@ html:not([data-wallpaper-scope="popup"]) .settings-card.group-flash {
   .topbar-tools { flex: 1 1 100%; justify-content: space-between; }
   /* 一行放不下就上下排：标题一行，控件一行靠左 */
   .setting-row { flex-direction: column; align-items: stretch; gap: var(--sp-2); }
-  .setting-row-control { justify-content: flex-start; flex-wrap: wrap; white-space: normal; }
+  .setting-row-control { justify-content: flex-start; flex-wrap: wrap; margin-left: 0; white-space: normal; }
   .setting-row-control .segmented { width: 100%; }
   .setting-slider { width: 100%; }
 }
