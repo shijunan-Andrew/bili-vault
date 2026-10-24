@@ -1061,6 +1061,36 @@ test("snapshot 的 categories 只数有分区的行，按条数降序、同数�
   assert.equal(shot.videos, 4, "没有分区的行照样算记录数");
 });
 
+test("迁移演练：注入 v1→v2→v3，按序跑、盖章、不重复跑、不动入参", () => {
+  const calls = [];
+  const migrations = [
+    {
+      to: 2,
+      run: (database) => {
+        calls.push("v2");
+        const videos = Object.assign({}, database.videos);
+        for (const key of Object.keys(videos)) videos[key] = Object.assign({}, videos[key], { category: videos[key].category || "" });
+        return Object.assign({}, database, { videos });
+      }
+    },
+    { to: 3, run: (database) => { calls.push("v3"); return Object.assign({}, database, { note: "v3" }); } }
+  ];
+  const v1 = { schemaVersion: 1, videos: { "bvid:BV1aaaaaaaaa": { key: "bvid:BV1aaaaaaaaa", at: NOW } } };
+  const migrated = core.migrateDatabase(v1, NOW, { migrations });
+  assert.deepEqual(calls, ["v2", "v3"], "要按 to 升序逐级跑");
+  assert.equal(migrated.schemaVersion, 3, "跑完要盖章成最后一个版本");
+  assert.equal(migrated.videos["bvid:BV1aaaaaaaaa"].category, "", "v2 的改动要落下来");
+  assert.equal(migrated.note, "v3");
+  assert.equal(v1.schemaVersion, 1, "不能原地改调用方传进来的对象");
+  assert.equal(v1.videos["bvid:BV1aaaaaaaaa"].category, undefined, "也不能原地改库里的记录");
+  calls.length = 0;
+  const fromTwo = core.migrateDatabase(Object.assign({}, v1, { schemaVersion: 2 }), NOW, { migrations });
+  assert.deepEqual(calls, ["v3"], "已经在 v2 的库只跑后面那几步");
+  assert.equal(fromTwo.schemaVersion, 3);
+  assert.equal(core.migrateDatabase({ schemaVersion: 4 }, NOW, { migrations }), null, "未来版本仍然拒绝");
+  assert.equal(core.DATABASE_MIGRATIONS.length, 0, "当前就是 v1，表必须还是空的");
+  assert.equal(core.migrateDatabase(v1, NOW).schemaVersion, 1, "默认表为空时原样返回");
+});
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

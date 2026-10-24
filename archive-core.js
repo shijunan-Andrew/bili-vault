@@ -1000,6 +1000,39 @@
     return Math.max(1, Math.ceil(limit * 0.25));
   }
 
+  /* 1.10.2（TODO P2-11）：缩略图的口径只有这一处 —— 多大才值得缩、缩到多大、叫什么。
+     library.js 只负责「拿原图 → canvas → blob: URL」这一段，判断全在这里，
+     免得以后改尺寸时又是两三个文件各写一份 320。 */
+  const THUMBNAIL_MAX_SIDE = 320;
+  const THUMBNAIL_TRIGGER_BYTES = 160 * 1024;
+  const THUMBNAIL_TYPE = "image/webp";
+  const THUMBNAIL_QUALITY = 0.72;
+
+  // 太小的封面缩了反而更模糊，直接不缩（调用方就用原图）。
+  function thumbnailEligible(bytes) {
+    const size = Number(bytes);
+    return Number.isFinite(size) && size >= THUMBNAIL_TRIGGER_BYTES;
+  }
+
+  // 等比缩到长边 maxSide 以内；本来就小就不放大，正方形/超长图都保住比例。
+  function thumbnailFit(width, height, maxSide = THUMBNAIL_MAX_SIDE) {
+    const sourceWidth = Math.max(1, Math.round(Number(width) || 0));
+    const sourceHeight = Math.max(1, Math.round(Number(height) || 0));
+    const limit = Math.max(1, Math.round(Number(maxSide) || 0) || THUMBNAIL_MAX_SIDE);
+    const longest = Math.max(sourceWidth, sourceHeight);
+    if (longest <= limit) return { width: sourceWidth, height: sourceHeight };
+    const scale = limit / longest;
+    return {
+      width: Math.max(1, Math.round(sourceWidth * scale)),
+      height: Math.max(1, Math.round(sourceHeight * scale))
+    };
+  }
+
+  // 缩略图的键就是「收藏夹/目录名」，与扫描缓存、封面缓存用的同一套名字。
+  function thumbnailKey(collection, directory) {
+    return `${String(collection || "").trim()}/${String(directory || "").trim()}`;
+  }
+
   /* 1.8.8（P3-12）：004导出 只留最近几份。
      文件名是 归档元数据-YYYYMMDD-HHMMSS.json（同秒撞名再加 -2、-3），
      所以按名字升序就是按时间升序；不认识的条目一律不碰，返回的是「该删的那几个」。 */
@@ -1230,6 +1263,13 @@
     ARCHIVE_CACHE_HEADROOM,
     ARCHIVE_CACHE_MAX_CAPACITY,
     archiveCacheCapacity,
+    THUMBNAIL_MAX_SIDE,
+    THUMBNAIL_TRIGGER_BYTES,
+    THUMBNAIL_TYPE,
+    THUMBNAIL_QUALITY,
+    thumbnailEligible,
+    thumbnailFit,
+    thumbnailKey,
     archiveCacheDropCount
   });
   global.BcaArchiveCore = api;

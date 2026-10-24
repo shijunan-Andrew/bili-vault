@@ -535,9 +535,10 @@ async function suite() {
   }
 
   await test("原生消息：协议号对不上就拒绝，并把「它报几、要几」说清楚（1.7.13）", async () => {
-    const chrome = makeChrome({ nativeReplies: [{ ok: true, protocol: 2 }] });
+    const chrome = makeChrome({ nativeReplies: [{ ok: true, protocol: 3 }] });
     const { call } = nativeRequest(chrome);
-    await assert.rejects(() => call({ action: "get-config" }), /协议版本对不上（它报 2，本插件需要 3）/);
+    // 1.10.2（TODO P2-13）：扩展侧协议号升到 4，报 3 的必须是「旧宿主」这条路。
+    await assert.rejects(() => call({ action: "get-config" }), /协议版本对不上（它报 3，本插件需要 4）/);
   });
 
   await test("原生消息：老宿主没有 protocol 字段 → 直说「装的多半是旧版本」（1.7.13）", async () => {
@@ -559,12 +560,15 @@ async function suite() {
   });
 
   await test("原生消息：协议号对上就正常返回，并且真的调了那个宿主名", async () => {
-    const chrome = makeChrome({ nativeReplies: [{ ok: true, protocol: 3, downloadBasePath: "D:\\归档" }] });
+    const chrome = makeChrome({ nativeReplies: [{ ok: true, protocol: 4, downloadBasePath: "D:\\归档" }] });
     const { call } = nativeRequest(chrome);
     const response = await call({ action: "get-config" });
     assert.equal(response.downloadBasePath, "D:\\归档");
     assert.equal(chrome.__nativeCalls.length, 1);
     assert.equal(chrome.__nativeCalls[0].host, "com.bcatch.folder_opener");
+    // 1.10.2（TODO P2-13）：宿主先认调用方，所以请求里必须自报扩展 id 与协议号。
+    assert.equal(chrome.__nativeCalls[0].message.protocol, 4);
+    assert.ok(chrome.__nativeCalls[0].message.extensionId, "请求要带扩展 id");
   });
 
 /* ---------------- 本机路径打码 ---------------- */

@@ -121,6 +121,9 @@ if (Test-Path -LiteralPath $destScript -PathType Leaf) {
 $settingsJson = @{
   downloadBasePath = $DownloadBasePath
   extensionId = $ExtensionId
+  # 1.10.2（TODO P2-13）：协议 4 起宿主按这份白名单核对调用方。
+  # 显式写成数组（而不是只留 extensionId），以后要放行开发用的第二个 id 时直接往下加。
+  allowedExtensionIds = @($ExtensionId)
 } | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText((Join-Path $HostRoot "settings.json"), $settingsJson, (New-Object System.Text.UTF8Encoding($true)))
 

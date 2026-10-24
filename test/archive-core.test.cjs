@@ -999,6 +999,29 @@ test("导出裁剪的函数都在 archive-core 的导出清单里（1.8.8；1.9.
   }
 });
 
+test("thumbnailEligible / thumbnailFit / thumbnailKey：缩略图的判断只有一处（1.10.2，P2-11）", () => {
+  const core = BcaArchiveCore;
+  // 太小的封面不缩（缩了更糊），阈值 160 KB。
+  assert.equal(core.thumbnailEligible(159 * 1024), false);
+  assert.equal(core.thumbnailEligible(160 * 1024), true);
+  assert.equal(core.thumbnailEligible(0), false);
+  assert.equal(core.thumbnailEligible(undefined), false);
+  // 长边压到 320，比例不变；1920×1080 → 320×180。
+  assert.deepEqual(core.thumbnailFit(1920, 1080), { width: 320, height: 180 });
+  assert.deepEqual(core.thumbnailFit(1080, 1920), { width: 180, height: 320 });
+  // 本来就小就不放大 —— 放大只会更糊，还更占内存。
+  assert.deepEqual(core.thumbnailFit(300, 200), { width: 300, height: 200 });
+  // 极端比例也不会算出 0 像素；坏输入按 1 处理。
+  assert.deepEqual(core.thumbnailFit(4000, 1), { width: 320, height: 1 });
+  assert.deepEqual(core.thumbnailFit(0, 0), { width: 1, height: 1 }, "坏输入也要给出至少 1 像素");
+  // 键与扫描缓存 / 封面缓存同一套名字。
+  assert.equal(core.thumbnailKey(" 小鲸鱼测试 ", " 2025年01月01日00时00分00秒 "), "小鲸鱼测试/2025年01月01日00时00分00秒");
+  assert.equal(core.thumbnailKey(undefined, null), "/");
+  // 常量也在导出清单里，library.js 不用再写死 320。
+  assert.equal(core.THUMBNAIL_MAX_SIDE, 320);
+  assert.equal(core.THUMBNAIL_TYPE, "image/webp");
+  assert.ok(core.THUMBNAIL_QUALITY > 0 && core.THUMBNAIL_QUALITY < 1);
+});
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

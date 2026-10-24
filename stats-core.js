@@ -189,19 +189,40 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
   // 目前只有 v1：历史文件里没有 schemaVersion，用 version 补上。
   // 返回 null 表示这份库来自更新版本的扩展 —— 调用方按空库处理（宁可显示 0，
   // 也不要把不认识的字段硬塞进当前结构、再整份写回去）。
-  function migrateDatabase(raw, now = Date.now()) {
+  // 1.10.2（TODO P2-12）：版本升级表。加 v2 时的正确姿势是 —— 在下面 push 一条
+  // { to: 2, run(database) { ...返回新对象... } }，再把 DATABASE_SCHEMA_VERSION 改成 2。
+  // 迁移步骤只许往新版本走、只处理「上一版长什么样」，兼容读法继续留在 normalizeDatabase()。
+  // 这张表现在是空的（当前就是 v1），但机制不是摆设：test/stats-core.test.cjs 的
+  // 「迁移演练」用一个假的 v1→v2→v3 注入进来，证明真的会按序跑、会盖章、不会重复跑。
+  const DATABASE_MIGRATIONS = Object.freeze([]);
+
+  function migrateDatabase(raw, now = Date.now(), options = {}) {
     void now;
     if (!raw || typeof raw !== "object") return null;
     const declared = numberOr(raw.schemaVersion, NaN);
     const legacy = numberOr(raw.version, NaN);
     const source = Number.isFinite(declared) ? declared : Number.isFinite(legacy) ? legacy : 0;
-    if (source > DATABASE_SCHEMA_VERSION) return null;
+    // 能升到的最高版本：有注入的升级表时以表为准（演练会一路升到 v3），没表时就是当前版本。
+    const steps = Array.isArray(options.migrations) ? options.migrations : DATABASE_MIGRATIONS;
+    const ceiling = steps.reduce((top, step) => Math.max(top, numberOr(step && step.to, 0)), DATABASE_SCHEMA_VERSION);
+    if (source > ceiling) return null;
     let migrated = raw;
     if (!Number.isFinite(declared)) {
       // 老文件只有 version（甚至两个都没有）：补一个明确的 schemaVersion，
       // 但不动 version —— 那个字段老版本还会读到。
-      const target = source >= 1 ? Math.min(source, DATABASE_SCHEMA_VERSION) : DATABASE_SCHEMA_VERSION;
+      // 注意：这里补的是「已知最低的一版」而不是当前版本 —— 否则以后加了 v2，
+      // 一个没有版本号的旧文件会被直接盖成 v2，v2 的升级步骤永远不会跑。
+      const target = source >= 1 ? Math.min(source, DATABASE_SCHEMA_VERSION) : 1;
       migrated = Object.assign({}, raw, { schemaVersion: target });
+    }
+    const pending = steps
+      .filter((step) => step && typeof step.run === "function" && numberOr(step.to, 0) > numberOr(migrated.schemaVersion, 0))
+      .slice()
+      .sort((left, right) => numberOr(left.to, 0) - numberOr(right.to, 0));
+    for (const step of pending) {
+      const next = step.run(migrated);
+      if (next && typeof next === "object") migrated = next;
+      migrated = Object.assign({}, migrated, { schemaVersion: step.to });
     }
     return migrated;
   }
@@ -1004,6 +1025,7 @@ function fallbackRowKey(videos, key) {
     parseFavoriteTime,
     videoKey,
     emptyDatabase,
+    DATABASE_MIGRATIONS,
     migrateDatabase,
     normalizeDatabase,
     addRecord,

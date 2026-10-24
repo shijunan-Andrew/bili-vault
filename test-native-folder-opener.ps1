@@ -31,7 +31,7 @@ $browserRoots = @(
 $problems = 0
 # 扩展侧（library.js 的 NATIVE_PROTOCOL_VERSION）认得的协议号。改协议要同时改三处：
 # 这里、native/folder-opener-host.ps1 的 $protocolVersion、native/folder-opener-launcher.cs 的 LauncherProtocolVersion。
-$expectedProtocol = 3
+$expectedProtocol = 4
 
 # 失败必须由这里自己计数：以前它只打印不累加 $problems，调用方又忘了自己加，
 # 于是「清单 path 不对」「allowed_origins 为空」都会照常打印，最后仍然说「自检通过」——
@@ -87,6 +87,9 @@ if (-not $registeredWhere.Count) {
 }
 
 function Send-NativeRequest([hashtable]$Payload) {
+  # 1.10.2（TODO P2-13）：协议 4 的宿主先认调用方，请求里必须自报扩展 id 与协议号。
+  if (-not $Payload.ContainsKey("extensionId")) { $Payload["extensionId"] = $expectedId }
+  if (-not $Payload.ContainsKey("protocol")) { $Payload["protocol"] = $expectedProtocol }
   $json = ConvertTo-Json -InputObject $Payload -Compress
   $body = [System.Text.Encoding]::UTF8.GetBytes($json)
 
@@ -157,6 +160,13 @@ try {
     $problems += 1
   } else {
     Write-Check ([int]$config.protocol -eq $expectedProtocol) "协议版本" ("宿主报 {0}，扩展期望 {1}" -f $config.protocol, $expectedProtocol)
+  }
+  if ($config.auth) {
+    $authNote = if ([string]$config.auth -eq "whitelisted") { "按白名单放行" } else { "未配置白名单，按单用户机器处理" }
+    Write-Host ("  [OK]   调用方认证：{0}" -f $authNote) -ForegroundColor Green
+  } else {
+    Write-Host "  [缺失] 调用方认证：宿主没报 auth，装的多半是 1.10.2 之前的宿主。请重新运行 install-native-folder-opener.ps1。" -ForegroundColor Red
+    $problems += 1
   }
   if (-not $config.downloadBaseExists) {
     Write-Host "  [提示] 下载目录当前不存在；完成一次下载后它会被自动创建。" -ForegroundColor Yellow

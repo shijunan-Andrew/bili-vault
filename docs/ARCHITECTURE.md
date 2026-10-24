@@ -604,3 +604,12 @@ UP主主页：https://space.bilibili.com/……
 - 还可能包含导入任务进度及其他 UI 状态；改动前搜索全项目读写点。
 
 **`chrome.storage.session`**：4.9 起用于跨进程存活的导入回滚日志（见上文）。1.3.0 前还有一份「临时批量下载队列」（`bcaDownloadQueue:<UUID>`），随下载页删除。
+
+### 缩略图与扫描缓存的权威位置（1.10.2）
+
+- **缩略图口径**只有 `archive-core.js` 的 `thumbnailEligible() / thumbnailFit() / thumbnailKey()` 与四个 `THUMBNAIL_*` 常量。`library.js` 的 `cardThumbnailUrl()` 只负责取图、画 canvas、造 `blob: URL` 与 240 张的 LRU 上限；尺寸判断一律不许在页面里另写一份。
+- **卡片用缩略图、详情用原图**。这是有意的分叉：卡片的图只有几十像素高，详情是看大图的地方。
+- **扫描缓存不是新生事物**：`paintSnapshot()`（`library.js`）从 IndexedDB 快照把解析结果灌回内存 `archiveCache`，`archive-tools.js` 的 `cacheEntryFor()` 按 `size + lastModified` 判命中，命中不读正文。`test/stability.test.cjs` 有守卫钉着这两点，别在重构里拆掉。
+- **统计库迁移表**是 `stats-core.js` 的 `DATABASE_MIGRATIONS`（现在是空的，对应 v1）。`migrateDatabase(raw, now, options)` 按表逐级升级并盖 `schemaVersion`；`options.migrations` 只给测试注入假步骤用。
+- **原生宿主协议 4 的调用方认证**：扩展侧 `nativeHostRequest()` 每条请求自报 `extensionId` + `protocol`；宿主侧 `Assert-RequestCaller()` 在 `switch ($action)` 之前执行，id 必须是 32 位、协议号必须相等、白名单非空时只放名单里的。响应统一带 `auth: whitelisted | open`。协议号一改，五处要一起改（宿主、启动器、`library.js`、自检脚本、background 套件的断言）。
+

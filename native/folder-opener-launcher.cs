@@ -22,7 +22,7 @@ internal static class FolderOpenerLauncher
     // 「是版本对不上」还是「压根没装好」。这一份必须与 native/folder-opener-host.ps1
     // 里的 $hostVersion / $protocolVersion 保持一致。
     private const string LauncherHostVersion = "3.9.0";
-    private const int LauncherProtocolVersion = 3;
+    private const int LauncherProtocolVersion = 4;
 
     private static byte[] ReadExactly(Stream stream, int count)
     {

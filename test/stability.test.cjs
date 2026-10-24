@@ -2736,9 +2736,9 @@ test("原生宿主的协议号三处一致，扩展侧真的会校验（V1.7.13�
   const worker = readProjectFile("native/folder-opener-host.ps1");
   const launcher = readProjectFile("native/folder-opener-launcher.cs");
   const library = readProjectFile("library.js");
-  assert.match(worker, /\$protocolVersion = 3\b/, "工作脚本要报协议号 3");
-  assert.match(launcher, /LauncherProtocolVersion = 3;/, "启动器要报同一个协议号");
-  assert.match(library, /const NATIVE_PROTOCOL_VERSION = 3;/, "扩展侧要认得同一个协议号");
+  assert.match(worker, /\$protocolVersion = 4\b/, "工作脚本要报协议号 4（1.10.2 起带调用方认证）");
+  assert.match(launcher, /LauncherProtocolVersion = 4;/, "启动器要报同一个协议号");
+  assert.match(library, /const NATIVE_PROTOCOL_VERSION = 4;/, "扩展侧要认得同一个协议号");
   // 以前是单向握手：宿主每次都报 version，扩展从不看 —— 装了一版对不上的宿主
   // 只会表现成「点了没反应」。
   assert.match(library, /protocol !== NATIVE_PROTOCOL_VERSION/, "扩展侧必须真的比对协议号");
@@ -7570,7 +7570,11 @@ test("发布包有白名单和体积上限，包里不再可能混进开发文�
 test("统计库有显式 schemaVersion 与迁移位，未来改结构不用再改 normalizeDatabase（P3-13）", () => {
   const core = readProjectFile("stats-core.js");
   assert.match(core, /const DATABASE_SCHEMA_VERSION = 1;/);
-  assert.match(core, /function migrateDatabase\(raw, now = Date\.now\(\)\) \{/);
+  // 1.10.2（TODO P2-12）：迁移位从「只补一个字段」升级成「按版本表逐级跑」，
+  // 签名多了第三个可注入的参数（演练用），升级表默认是空的（当前就是 v1）。
+  assert.match(core, /function migrateDatabase\(raw, now = Date\.now\(\), options = \{\}\) \{/);
+  assert.match(core, /const DATABASE_MIGRATIONS = Object\.freeze\(\[\]\);/);
+  assert.match(core, /const pending = steps/, "必须真的按表跑，不能只声明一张空表");
   // emptyDatabase 必须同时写 version 与 schemaVersion。
   const empty = core.slice(core.indexOf("function emptyDatabase("), core.indexOf("function normalizeEntry("));
   assert.match(empty, /version: DATABASE_VERSION,/);
@@ -7850,4 +7854,49 @@ test("回收站从「归档维护」里分出来，自成一栏（1.9.7）", () 
   assert.ok(recycle, "回收站卡要独立存在");
   assert.match(recycle[0], /id="settingsOpenRecycle"/);
   assert.equal((html.match(/id="settingsOpenRecycle"/g) || []).length, 1, "回收站入口只留一处");
+});
+
+test("原生宿主协议 4 认调用方：扩展自报 id、宿主按白名单核对（1.10.2，P2-13）", () => {
+  const worker = readProjectFile("native/folder-opener-host.ps1");
+  const library = readProjectFile("library.js");
+  const installer = readProjectFile("install-native-folder-opener.ps1");
+  const selfCheck = readProjectFile("test-native-folder-opener.ps1");
+  // 扩展侧：每条请求都自报身份，且发出去的必须是这份带身份的 payload。
+  assert.match(library, /extensionId: chrome\.runtime\.id, protocol: NATIVE_PROTOCOL_VERSION/);
+  assert.match(library, /sendNativeMessage\(NATIVE_HOST_NAME, payload,/, "请求体要用自报身份的那份");
+  // 宿主侧：先认调用方再干活。
+  assert.match(worker, /\$script:authMode = Assert-RequestCaller \$request/);
+  assert.match(worker, /if \(\$requestProtocol -ne \$protocolVersion\) \{/);
+  assert.match(worker, /if \(\$allowed -notcontains \$extensionId\.ToLowerInvariant\(\)\) \{/);
+  assert.match(worker, /if \(-not \$Response\.ContainsKey\("auth"\)\) \{ \$Response\["auth"\] = \$script:authMode \}/);
+  assert.ok(
+    worker.indexOf("Assert-RequestCaller $request") < worker.indexOf('$action -eq "get-config"'),
+    "先认证再干活"
+  );
+  // 白名单来源与安装脚本一致。
+  assert.match(worker, /allowedExtensionIds/);
+  assert.match(installer, /allowedExtensionIds = @\(\$ExtensionId\)/);
+  // 自检脚本也要自报身份，否则它自己会被宿主拒绝。
+  assert.match(selfCheck, /\$Payload\["extensionId"\] = \$expectedId/);
+  assert.match(selfCheck, /\$Payload\["protocol"\] = \$expectedProtocol/);
+});
+
+test("扫描缓存持久化与缩略图：判断只有一处，卡片不再整图解码（1.10.2，P2-10 / P2-11）", () => {
+  const core = readProjectFile("archive-core.js");
+  const tools = readProjectFile("archive-tools.js");
+  const library = readProjectFile("library.js");
+  // P2-10：冷启动靠快照把解析结果灌回内存缓存；先查缓存，命中就不读正文。
+  assert.match(library, /if \(!cache\.has\(cacheName\)\) cache\.set\(cacheName, \{ size: entry\.size, lastModified: entry\.lastModified, record \}\);/);
+  const cacheCheck = tools.indexOf("cacheEntryFor(");
+  const textRead = tools.indexOf("meta.text()");
+  assert.ok(cacheCheck > 0 && textRead > cacheCheck, "必须先查缓存再读正文");
+  // P2-11：尺寸口径住在 archive-core。
+  assert.match(core, /const THUMBNAIL_MAX_SIDE = 320;/);
+  assert.match(library, /const fit = BcaArchiveCore\.thumbnailFit\(bitmap\.width, bitmap\.height\);/);
+  // 卡片走缩略图，详情仍走原图。
+  assert.match(library, /cardThumbnailUrl\(video\)\.then\(\(url\) => \{/);
+  assert.match(library, /const THUMBNAIL_MAX_CACHED = 240;/);
+  assert.match(library, /function clearThumbnailUrls\(\) \{/);
+  const dropFn = library.slice(library.indexOf("function dropRootCaches("), library.indexOf("function touchArchiveCacheRoot("));
+  assert.match(dropFn, /clearThumbnailUrls\(\);/, "丢根目录缓存时要连缩略图一起丢");
 });

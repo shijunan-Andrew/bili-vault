@@ -6,7 +6,9 @@ $hostVersion = "3.9.0"
 # 以前版本握手是单向的 —— 宿主每次都报 3.8.0，扩展从不看，装了一版对不上的宿主
 # 只会表现出「点了没反应」。改帧格式或字段语义时必须同时改这里和 library.js 的
 # NATIVE_PROTOCOL_VERSION。
-$protocolVersion = 3
+$protocolVersion = 4
+# 1.10.2（TODO P2-13）：这次调用的认证结论，Write-Response 统一带出去。
+$script:authMode = "unknown"
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [Console]::OpenStandardOutput()
 
@@ -25,6 +27,9 @@ function Write-Response([System.IO.Stream]$Stream, [hashtable]$Response) {
   # 1.7.13（facet-native P2-6）：每条帧都带 protocol + version，调用方不用各写一遍。
   if (-not $Response.ContainsKey("protocol")) { $Response["protocol"] = $protocolVersion }
   if (-not $Response.ContainsKey("version")) { $Response["version"] = $hostVersion }
+  # 1.10.2（TODO P2-13）：响应里带上这次调用方的认证结论，扩展侧排查时不用猜。
+  # whitelisted = id 匹配 settings.json 的白名单；open = 白名单还没配（老安装脚本写的设置）。
+  if (-not $Response.ContainsKey("auth")) { $Response["auth"] = $script:authMode }
   $json = ConvertTo-Json -InputObject $Response -Compress
   $body = [System.Text.Encoding]::UTF8.GetBytes($json)
   $header = [System.BitConverter]::GetBytes([uint32]$body.Length)
@@ -36,12 +41,10 @@ function Write-Response([System.IO.Stream]$Stream, [hashtable]$Response) {
 # settings.json 由安装脚本写成 UTF-8。PowerShell 5.1 的 Get-Content 默认按系统 ANSI
 # 代码页读取，中文路径会被解坏，甚至让 ConvertFrom-Json 直接抛“无法识别的转义序列”。
 # 这里必须显式指定 -Encoding UTF8。
-function Get-DownloadBasePath {
+# 1.10.2（TODO P2-13）：settings.json 的读法抽成一处 —— 下载根目录与调用方白名单
+# 用同一份解析结果，不再各读一遍文件。
+function Read-HostSettings {
   if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) { throw "找不到本地下载目录设置，请重新运行安装脚本。" }
-  # 1.8.22（old-p3 native L198、L208）：以前是 Get-Content -Raw -Encoding UTF8 一把梭。
-  # 文件被记事本另存成 ANSI（GB2312）时，中文下载路径会被静默解成乱码；JSON 坏了则
-  # 把 .NET 解析器原文（「传入的对象无效，应为“:”或“}”」）直接甩给用户。现在按字节读、
-  # 严格按 UTF-8 解码（解不开就明确说是编码问题），JSON 解析也换成人话错误。
   $settingsBytes = [System.IO.File]::ReadAllBytes($settingsPath)
   $strictUtf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList $false, $true
   try {
@@ -51,10 +54,57 @@ function Get-DownloadBasePath {
   }
   $settingsText = $settingsText.TrimStart([char]0xFEFF)
   try {
-    $settings = $settingsText | ConvertFrom-Json
+    return $settingsText | ConvertFrom-Json
   } catch {
     throw "本地下载目录设置文件已损坏（不是合法的 JSON），请重新运行安装脚本。"
   }
+}
+
+# 白名单来自 settings.json：安装脚本写的 extensionId（一个）加上可选的
+# allowedExtensionIds（数组）。两个都认，老的设置文件不用重写也能用。
+function Get-AllowedExtensionIds {
+  $settings = Read-HostSettings
+  $ids = New-Object System.Collections.Generic.List[string]
+  $single = [string]$settings.extensionId
+  if (-not [string]::IsNullOrWhiteSpace($single)) { $ids.Add($single.Trim().ToLowerInvariant()) }
+  if ($settings.PSObject.Properties.Name -contains "allowedExtensionIds") {
+    foreach ($candidate in @($settings.allowedExtensionIds)) {
+      $text = [string]$candidate
+      if (-not [string]::IsNullOrWhiteSpace($text)) { $ids.Add($text.Trim().ToLowerInvariant()) }
+    }
+  }
+  return ,$ids.ToArray()
+}
+
+# 协议 4：每条请求都要自报扩展 id（chrome.runtime.id）与协议号。
+# 这是「调用方认证」而不是密码学意义的安全边界 —— Chrome 只会启动清单里
+# allowed_origins 允许的那个扩展，这里再加一道，挡住「别的扩展/别的脚本把宿主当通用
+# 目录打开器用」。白名单为空（老安装脚本写的设置）时按 open 放行并如实标注。
+function Assert-RequestCaller($Request) {
+  $extensionId = [string]$Request.extensionId
+  if ([string]::IsNullOrWhiteSpace($extensionId) -or $extensionId -notmatch '^[a-p]{32}$') {
+    throw "这条请求没有带有效的扩展 ID。请重新运行一次安装脚本（协议 4 需要扩展自报身份）。"
+  }
+  $requestProtocol = 0
+  if ($Request.PSObject.Properties.Name -contains "protocol") { $requestProtocol = [int]$Request.protocol }
+  if ($requestProtocol -ne $protocolVersion) {
+    throw "扩展自报的协议号（$requestProtocol）对不上（宿主是 $protocolVersion），请重新运行安装脚本。"
+  }
+  $allowed = @(Get-AllowedExtensionIds)
+  if ($allowed.Count -eq 0) { return "open" }
+  if ($allowed -notcontains $extensionId.ToLowerInvariant()) {
+    throw "调用方扩展（$extensionId）不在白名单里，拒绝执行。"
+  }
+  return "whitelisted"
+}
+
+function Get-DownloadBasePath {
+  if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) { throw "找不到本地下载目录设置，请重新运行安装脚本。" }
+  # 1.8.22（old-p3 native L198、L208）：以前是 Get-Content -Raw -Encoding UTF8 一把梭。
+  # 文件被记事本另存成 ANSI（GB2312）时，中文下载路径会被静默解成乱码；JSON 坏了则
+  # 把 .NET 解析器原文（「传入的对象无效，应为“:”或“}”」）直接甩给用户。现在按字节读、
+  # 严格按 UTF-8 解码（解不开就明确说是编码问题），JSON 解析也换成人话错误。
+  $settings = Read-HostSettings
   $basePath = [string]$settings.downloadBasePath
   if ([string]::IsNullOrWhiteSpace($basePath)) { throw "本地下载目录设置不完整，请重新运行安装脚本。" }
   return [System.IO.Path]::GetFullPath($basePath)
@@ -125,6 +175,9 @@ while ($true) {
     }
     $body = Read-ExactBytes $inputStream ([int]$length)
     $request = [System.Text.Encoding]::UTF8.GetString($body) | ConvertFrom-Json
+    # 1.10.2（TODO P2-13）：协议 4 先认调用方，再干活。没带 id、id 不合法、或不在
+    # 白名单里，一律回一条 ok=false 的帧（带 protocol / version / auth），扩展能直接显示原因。
+    $script:authMode = Assert-RequestCaller $request
     $action = [string]$request.action
 
     if ($action -eq "get-config") {

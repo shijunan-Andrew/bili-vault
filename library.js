@@ -816,6 +816,8 @@ function dropRootCaches(rootKey) {
   lastScanRecordCount.delete(rootKey);
   archiveCacheLimit.delete(rootKey); // 1.8.4：容量与下载索引也按根目录记，别留孤儿
   downloadIndexCache.delete(rootKey);
+  // 缩略图缓存按「收藏夹/目录名」记，换根目录或点了「刷新」时一起丢掉，别留旧图。
+  clearThumbnailUrls();
   const at = archiveCacheOrder.indexOf(rootKey);
   if (at >= 0) archiveCacheOrder.splice(at, 1);
 }
@@ -899,6 +901,83 @@ async function hydrateCover(video) {
     releaseCoverRef(oldest.url);
   }
   return result.cover;
+}
+/* 1.10.2（TODO P2-11）：网格卡片改用缩略图，详情面板仍是原图。
+
+   为什么值得做：老档案的封面是真 PNG（平均 1.7 MB、最大 7.3 MB），卡片位只有几
+   十像素高，一页 25 张就是整图解码 —— 翻页时内存峰值全在这里。缩成 320×180 的
+   WebP 之后，同样一页只吃原来的百分之几。
+
+   为什么先只放内存、不写 IndexedDB：缩一张大约 10–30 ms，而它可以从原图随时重建；
+   跨会话持久化要多一套「文件变了就作废」的校验与清理（原图本身就带 size/lastModified），
+   收益小于风险。哪天冷启动的封面重建真成了瓶颈，再往 IndexedDB 挪。
+
+   详情面板故意不用缩略图：那里是看大图的地方，糊了就是退步。 */
+const thumbnailUrls = new Map(); // "收藏夹/目录" -> blob: URL
+const thumbnailOrder = [];
+const THUMBNAIL_MAX_CACHED = 240;
+
+function clearThumbnailUrls() {
+  for (const url of thumbnailUrls.values()) URL.revokeObjectURL(url);
+  thumbnailUrls.clear();
+  thumbnailOrder.length = 0;
+}
+
+function rememberThumbnailUrl(key, url) {
+  thumbnailUrls.set(key, url);
+  thumbnailOrder.push(key);
+  while (thumbnailOrder.length > THUMBNAIL_MAX_CACHED) {
+    const oldest = thumbnailOrder.shift();
+    if (!thumbnailUrls.has(oldest)) continue;
+    URL.revokeObjectURL(thumbnailUrls.get(oldest));
+    thumbnailUrls.delete(oldest);
+  }
+}
+
+// 环境不支持（没有 createImageBitmap / OffscreenCanvas）就返回空串，调用方退回原图。
+async function makeThumbnailUrl(file) {
+  if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") return "";
+  let bitmap = null;
+  try {
+    bitmap = await createImageBitmap(file);
+    const fit = BcaArchiveCore.thumbnailFit(bitmap.width, bitmap.height);
+    const canvas = new OffscreenCanvas(fit.width, fit.height);
+    const context = canvas.getContext("2d");
+    if (!context) return "";
+    context.drawImage(bitmap, 0, 0, fit.width, fit.height);
+    const blob = await canvas.convertToBlob({
+      type: BcaArchiveCore.THUMBNAIL_TYPE,
+      quality: BcaArchiveCore.THUMBNAIL_QUALITY
+    });
+    return blob ? URL.createObjectURL(blob) : "";
+  } catch (error) {
+    console.warn("这张封面缩不出来（卡片继续用原图）", error);
+    return "";
+  } finally {
+    if (bitmap && typeof bitmap.close === "function") bitmap.close();
+  }
+}
+
+// 卡片的封面：能缩就用缩略图，缩不了就照旧走原图（hydrateCover）。
+async function cardThumbnailUrl(video) {
+  if (!video) return "";
+  const key = BcaArchiveCore.thumbnailKey(video.collection, video.directory);
+  const cached = thumbnailUrls.get(key);
+  if (cached) return cached;
+  const entry = await resolveCoverEntry(video);
+  if (!entry) return hydrateCover(video);
+  let file = null;
+  try {
+    file = await entry.getFile();
+  } catch (error) {
+    if (!BcaArchiveCore.isMissingError(error)) console.warn("取不到封面文件（卡片先走原图）", error);
+    return hydrateCover(video);
+  }
+  if (!BcaArchiveCore.thumbnailEligible(file.size)) return hydrateCover(video);
+  const url = await makeThumbnailUrl(file);
+  if (!url) return hydrateCover(video);
+  rememberThumbnailUrl(key, url);
+  return url;
 }
 
 // 读一条归档记录。命中缓存时只取 File 的元数据（不读正文），未命中才 getFile().text()。
@@ -1676,7 +1755,8 @@ function paintPageCovers(pageCards) {
       applyCardCover(card, video.cover);
       continue;
     }
-    hydrateCover(video).then((url) => {
+    // 1.10.2（P2-11）：卡片位只要几十像素高，先试缩略图；缩不出来再退回原图。
+    cardThumbnailUrl(video).then((url) => {
       if (!url || !card.isConnected) return;
       applyCardCover(card, url);
     }).catch(() => {});
@@ -3145,7 +3225,7 @@ const NATIVE_HOST_NAME = "com.bcatch.folder_opener";
 // （1.7.13 / facet-native P2-6；test/stability.test.cjs 有断言钉住）。
 // 以前版本握手是单向的 —— 宿主每次都报 version，扩展从不看，装了一版对不上的
 // 宿主只会表现成「点了没反应」。改帧格式或字段语义时必须同时改这三处。
-const NATIVE_PROTOCOL_VERSION = 3;
+const NATIVE_PROTOCOL_VERSION = 4;
 
 // 本地目录打开助手（宿主启动器）以 Native Messaging 帧协议应答。失败时它会回一条
 // { ok: false, message } 的响应，这里把 message 原样带出去，避免只看到
@@ -3153,9 +3233,13 @@ const NATIVE_PROTOCOL_VERSION = 3;
 function nativeHostRequest(message) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    // 1.10.2（TODO P2-13）：协议 4 起每条请求都自报「我是谁」——宿主按 settings.json 的
+    // 白名单核对，对不上就回一条 ok=false，原因原样显示给用户。chrome.runtime.id 在
+    // 解压加载（unpacked）与商店安装下都稳定，不需要额外权限。
+    const payload = Object.assign({ extensionId: chrome.runtime.id, protocol: NATIVE_PROTOCOL_VERSION }, message);
     const finish = (callback) => { if (!settled) { settled = true; callback(); } };
     try {
-      chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, (response) => {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, payload, (response) => {
         const runtimeError = chrome.runtime.lastError;
         if (runtimeError) {
           finish(() => reject(new Error(runtimeError.message ? BcaI18n.t(runtimeError.message) : BcaI18n.t("Chrome 无法启动 Windows 原生目录助手。"))));
