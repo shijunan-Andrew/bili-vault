@@ -7940,6 +7940,26 @@ test("设置页的动作按钮先确认、后回执，确认只有 askConfirm �
   assert.match(page, /flashTransfer\(BcaI18n\.t\("配置已导入。"\)\)/);
 });
 
+test("1.10.8：横轴标签排在基线下方，不会被挤回柱子里面", () => {
+  const stats = readProjectFile("stats.js");
+  const band = stats.match(/const CHART_LABEL_BAND = (\d+);/);
+  assert.ok(band, "stats.js 里应该有 CHART_LABEL_BAND");
+  assert.ok(Number(band[1]) >= 30, `标签竖条至少 30px，实际 ${band[1]}px`);
+  // 按周 / 按月 / 按年：底部留白按这个值兜底，否则标签行会被挤回柱子里面
+  assert.ok(stats.includes('labelMode === "dates"'), "drawChart 应该按 labelMode 分叉算边距");
+  assert.ok(
+    stats.includes("{ bottom: Math.max(basePad.bottom, CHART_LABEL_BAND) }"),
+    "非日期粒度的图要把底部留白补到 CHART_LABEL_BAND"
+  );
+  // 标签行的 y 必须落在基线下方：之前是 Math.min(baseline + 14, height - 30)，
+  // 高度只有 200 时 height - 30 = 170 比基线（176）还高，整排年份标签就压在柱子里。
+  assert.ok(stats.includes("const anchorY = Math.min(baseline + 14, height - 8);"), "标签锚点要跟着基线走");
+  assert.ok(stats.includes("const labelY = round2(Math.min(baseline + 14, height - 8));"), "标签行同样要跟着基线走");
+  // 注释里会提到旧的写法，所以剥掉注释再查
+  const statsCode = stats.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  assert.ok(!statsCode.includes("height - 30)"), "标签行不许再用 height - 30 顶回基线上方");
+});
+
 test("1.10.6：收藏库的快照预热要真的能跑（不许再裸调搬走的老函数）", () => {
   const library = readProjectFile("library.js");
   // 1.9.0 把 videoFromArchiveRecord 搬进了 archive-tools.js 并改名 BcaArchiveTools.recordToVideo，

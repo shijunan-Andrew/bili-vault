@@ -38,6 +38,9 @@
      这时候沿用上一帧的宽度，免得把图按 260 画完再被 CSS 拉大。 */
   let lastChartWidth = 0;
   const CHART_PAD = { top: 20, right: 8, bottom: 24, left: 34 };
+  /* 按周 / 按月 / 按年的横轴标签要占的竖条高度（基线下方 14px 起、字高再算一截）。
+     底部留白不够时标签会被挤回柱子里面，所以 drawChart 会按这个值兜底。 */
+  const CHART_LABEL_BAND = 34;
   const CHART_MAX_BAR = 34;
   /* 柱子超过这个数量就不再标数值，免得数字糊成一片 */
   const CHART_VALUE_LABEL_LIMIT = 20;
@@ -692,8 +695,14 @@
     const height = config.height || CHART_HEIGHT;
     const labelMode = config.labelMode || "dates";
 
-    /* 按周 / 按月聚合时坐标轴标签又长又少，边距得单独放宽一点 */
-    const pad = config.pad || CHART_PAD;
+    /* 按周 / 按月聚合时坐标轴标签又长又少，边距得单独放宽一点。
+       1.10.8：这三类图把标签摆在基线下方 14px，底部至少要留 CHART_LABEL_BAND 的空。
+       原来一律沿用 CHART_PAD.bottom（24），标签行又被 Math.min(baseline + 14, height - 30)
+       顶回基线上方 —— 整排年份标签压在柱子底部、深灰字压在蓝柱上，看着就像「标签没了」。 */
+    const basePad = config.pad || CHART_PAD;
+    const pad = labelMode === "dates"
+      ? basePad
+      : Object.assign({}, basePad, { bottom: Math.max(basePad.bottom, CHART_LABEL_BAND) });
     const dateKey = typeof config.dateKey === "function" ? config.dateKey : (row) => String(row.day);
     const semantic = Boolean(config.semantic);
 
@@ -742,8 +751,9 @@
        完整的「1月6日星期一 - 1月12日星期日」只进提示框和读屏。 */
     let labelTilt = 0;
     if (labelMode !== "dates") {
-      const anchorY = Math.min(baseline + 14, height - 30);
-      const room = Math.max(6, height - 8 - anchorY);
+      /* 1.10.8：标签行不再被 height - 30 顶回基线上方（那正是年份标签压在柱子里的原因） */
+      const anchorY = Math.min(baseline + 14, height - 8);
+      const room = Math.max(6, height - 6 - anchorY);
       const widest = rows.reduce((top, row) => {
         const text = String(row.short || row.label || dateKey(row) || "");
         return Math.max(top, measureLabelWidth(svg, text));
@@ -840,7 +850,7 @@
            这正是以前「右边留白、最后几根没标签」的原因（旋转支点算错了）。
            角度是整排统一的 labelTilt，不这么斜就还是老老实实居中。 */
         const anchorX = round2(center);
-        const labelY = round2(Math.min(baseline + 14, height - 30));
+        const labelY = round2(Math.min(baseline + 14, height - 8));
         const label = setText(appendSvg(listed, "text", {
           class: isToday ? "stats-axis-label stats-axis-label-today" : "stats-axis-label",
           x: anchorX, y: labelY, "text-anchor": labelTilt > 0 ? "end" : "middle"

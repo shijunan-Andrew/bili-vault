@@ -137,11 +137,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.7：弹窗标题行不再把「使用说明」挤成两行
+## V1.10.8：统计页「按年份累计」的年份标签回来了
 
-- **症状**：弹窗顶部标题行里挤了四样东西（图标、标题 + 副标题、「使用说明」、「打开本地收藏库」）。宽度不够时副标题被压成两行，「使用说明」自己的四个字也被折成「使用说 / 明」。
-- **改法**：标题行只留「图标 + 标题块 + 主出口」；「使用说明」是次要入口，挪到标题行下面单独一行、靠右（`.brand-links`），并加 `white-space: nowrap` 保证它永远不折行。
-- **范围**：只动 `popup.html` 的标题行结构与 `popup.css` 三处；不新增文案，词典仍 **1083 条**，五套测试仍 **379 / 91 / 69 / 30 / 54**。
+- **症状**：年份柱状图（按年份累计）三根柱子底下看不到年份标签，而同页「每日新增收藏数」有 10-19 这种标签，看着像标签被挤出容器。
+- **根因不是标签没画**：标签一直在（`2024 / 2025 / 2026` 都有），只是被摆到了 **基线上方** —— 年份图底部留白 `CHART_PAD.bottom = 24`，标签行却按 `Math.min(baseline + 14, height - 30)` 定位，高度 200 时 `height - 30 = 170` 比基线（176）还高，于是整排深灰字压在蓝柱子里，等于看不见。
+- **改法**：新增 `CHART_LABEL_BAND = 34`，按周 / 按月 / 按年的图把底部留白兜到它；标签行改成 `Math.min(baseline + 14, height - 8)`，永远落在基线下方。日粒度图的位置一点没变。
+- **补的守卫**：`stability` 新增一条，钉住「标签行必须跟着基线走」和「非日期粒度的图底部留白兜到 `CHART_LABEL_BAND`」。
+- **范围**：只动 `stats.js` 五处；不新增文案，词典仍 **1083 条**，五套测试 **380 / 91 / 69 / 30 / 54**。
 
 **遗留** - 无。
 
@@ -153,7 +155,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:379 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:380 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
