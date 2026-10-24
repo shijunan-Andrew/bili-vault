@@ -1485,8 +1485,12 @@ test("page sizes are multiples of the five-per-row grid", () => {
 test("the sidebar offers a support link and a repository link", () => {
   const html = readProjectFile("library.html");
   const css = readProjectFile("library.css");
-  // 放在版本号下方
-  assert.ok(html.indexOf("side-support") > html.indexOf("side-version"), "两个入口应在版本号下方");
+  // 1.10.14（L-3）：版本号并进 side-support 当第一行，所以这里改成
+  // 「版本号在 side-support 的开标签之后、仓库链接之前」。
+  const supportAt = html.indexOf('class="side-support"');
+  const versionAt = html.indexOf('class="side-version"');
+  assert.ok(supportAt > 0 && versionAt > supportAt, "版本号要在 side-support 里面（第一行）");
+  assert.ok(versionAt < html.indexOf('class="repo-link"'), "版本号排在两个入口之前");
   assert.ok(html.indexOf("side-support") < html.indexOf("</aside>"), "两个入口应在侧栏里");
   // 一键三连指向 B 站主页，用「小电视」图标
   assert.match(html, /<a class="support-link" href="https:\/\/space\.bilibili\.com\/\d+" target="_blank" rel="noopener noreferrer"><span data-icon="tv"><\/span>/);
@@ -7998,6 +8002,35 @@ test("1.10.6：收藏库的快照预热要真的能跑（不许再裸调搬走�
   }
   assert.deepEqual(missing, [], `paintSnapshot 里调了本文件没定义的名字：${missing.join("、")}`);
 });
+test("1.10.14：禁用态的次要按钮不抢主按钮，侧栏元信息并成一块", () => {
+  const libraryCss = readProjectFile("library.css");
+
+  assert.match(
+    libraryCss,
+    /\.button-quiet:disabled \{[\s\S]*?color: var\(--faint\);[\s\S]*?background: transparent;/,
+    "禁用态的 quiet 按钮要把品牌色撤掉，只留淡框"
+  );
+  assert.doesNotMatch(
+    libraryCss,
+    /\.button-quiet:disabled \{[^}]*background: var\(--brand-soft\)/,
+    "禁用了还挂着品牌底色，就会和主按钮抢注意力"
+  );
+
+  const libraryHtml = readProjectFile("library.html");
+  const support = libraryHtml.slice(libraryHtml.indexOf('class="side-support"'));
+  const supportExit = support.indexOf("</div>", support.indexOf('class="repo-link"'));
+  const supportBlock = support.slice(0, supportExit);
+  assert.ok(
+    supportBlock.includes('class="side-version"'),
+    "版本号要并进 side-support 那一块，别再单独占一行"
+  );
+  assert.match(
+    libraryCss,
+    /\.side-support \{[\s\S]*?border-top: 1px solid var\(--line-soft\);/,
+    "这一块上面要有一条细线，把它和 tip 卡分开"
+  );
+});
+
 test("1.10.4：分区整条链路都不许回来", () => {
   const files = ["background.js", "content.js", "library.js", "archive-core.js", "archive-tools.js", "stats-core.js", "stats.js", "stats.html", "stats.css"];
   for (const file of files) {

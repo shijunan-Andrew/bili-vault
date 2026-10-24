@@ -267,7 +267,7 @@ html.banner-visible { --banner-h: 42px; }
   line-height: 1.6;
 }
 .lock-icon { display: grid; place-items: center; color: var(--success); font-size: var(--fs-lg); }
-.side-version { padding: var(--sp-3) 2px 0; color: var(--faint); font-size: var(--fs-micro); }
+.side-version { padding: 0; color: var(--faint); font-size: var(--fs-micro); }
 
 /* ---------- 主区域 ---------- */
 .main-area { min-height: 100vh; margin-left: 256px; }
@@ -321,6 +321,15 @@ html.banner-visible { --banner-h: 42px; }
 }
 .button:hover:not(:disabled) { transform: translateY(-1px); }
 .button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+/* 1.10.14（L-2）：还没选备份文件夹时，「与 B 站对比」「刷新」是禁用的，但 quiet 样式
+   仍然带品牌描边和淡蓝底，一眼看过去像能点的主按钮，把真正的主动作
+   「选择本地备份文件夹」抢掉了。禁用时把品牌色整条撤掉，只留一层很淡的框。 */
+.button-quiet:disabled {
+  color: var(--faint);
+  background: transparent;
+  border-color: var(--line-soft);
+  box-shadow: none;
+}
 .button-primary { color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
 .button-primary:hover:not(:disabled) { background: var(--brand-strong); }
 /* 4.8.3：次要按钮原来是白底 + 深色字，压在白卡片上几乎看不出是个按钮。
@@ -557,7 +566,15 @@ kbd { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-ra
 
 /* 配置导出 / 导入：只含界面偏好，不含任何目录句柄或 B 站数据 */
 /* 4.8.1：版本号下方的一键三连与仓库入口 */
-.side-support { display: flex; flex-direction: column; gap: 5px; margin-top: var(--sp-2); }
+/* 1.10.14（L-3）：版本号与两个链接收进同一块，上面一条细线把它和 tip 卡分开。 */
+.side-support {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--line-soft);
+}
 .support-link, .repo-link { display: inline-flex; align-items: center; gap: 6px; color: var(--brand-deep); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
 .repo-link { color: var(--muted); font-weight: 500; }
 .support-link:hover, .repo-link:hover { text-decoration: underline; }

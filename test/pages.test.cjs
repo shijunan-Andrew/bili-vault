@@ -1495,6 +1495,25 @@ async function suiteSettings() {
    这一页的渲染、多选、确认文案全靠人眼看过。这里换成桩驱动真代码。 */
 
 async function suiteRecycle() {
+  await test("侧栏底部把版本号和两个链接收进同一块（1.10.14）", async () => {
+    const page = await openLibrary();
+    const doc = page.document;
+
+    const support = doc.querySelector(".sidebar-bottom .side-support");
+    assert.ok(support, "找到侧栏底部那一块");
+    assert.ok(support.querySelector(".side-version"), "版本号在这一块里");
+    assert.equal(
+      support.querySelectorAll("a.support-link, a.repo-link").length,
+      2,
+      "三连与仓库两个链接也在同一块里"
+    );
+    assert.equal(
+      doc.querySelectorAll(".sidebar-bottom > .side-version").length,
+      0,
+      "版本号不该再作为同级的一块单独存在"
+    );
+  });
+
   await test("回收站没选过备份文件夹时给一条能照着做的错误，不是一片空白（1.10.0 真执行）", async () => {
     const page = await openRecycle();
     const { tools } = makeRecycleTools({ noRoot: true });

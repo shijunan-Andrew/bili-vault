@@ -137,11 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.13：回收站一进页面不再把「正在读取」说两遍
+## V1.10.14：次要按钮禁用了就真的退下去，侧栏底部收成一块
 
-- **症状**：打开回收站，标题下面那行写「正在读取回收站…」，紧接着下面又有一行同样的「正在读取回收站…」。前者其实是「共 N 项」摘要（读完之后会被覆盖），后者才是真正的状态行。
-- **改法**：摘要初始为空并隐藏，读到回收站内容才露面；读失败时也保持隐藏——那时我们并不知道回收站空不空，不该顺手写一句「回收站里现在是空的。」。「正在读取回收站…」现在整页只有状态行一处。
-- **范围**：`recycle.html` 一处（去掉初始文案与 `data-i18n`）、`recycle.js` 三处（`summaryReady` 标记、成功路径置位、失败路径复位）；`test/pages.test.cjs` 加一条用例（页面套件 57 → **58**），并改掉 1.10.0 那条断言「读失败时摘要写『空的』」。
+- **禁用态**：还没选备份文件夹时，「与 B 站对比」「刷新」是禁用的，但 quiet 样式仍带品牌描边和淡蓝底，看起来像能点；现在禁用时整条品牌色撤掉（透明底 + 淡框 + `--faint` 文字），顶栏只剩「选择本地备份文件夹」一个着重点。
+- **侧栏底部**：版本号原来单独一行，和 tip 卡、两个链接各占一块，四块层级一样平；现在版本号并进链接那一块当第一行，上面补一条细线，读起来是「一块元信息」。
+- **范围**：`library.css` 三处、`library.html` 一处；`test/stability.test.cjs` 加一条口径守卫（并改掉旧的「版本号在 side-support 上方」断言），`test/pages.test.cjs` 加一条真渲染用例（页面套件 58 → **59**，稳定性套件 380 → **381**）。
 
 **遗留** - 无。
 ## 测试与文档
@@ -152,7 +152,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:380 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:381 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
