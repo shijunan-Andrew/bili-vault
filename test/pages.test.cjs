@@ -1503,6 +1503,26 @@ async function suiteRecycle() {
     assert.equal(doc.getElementById("recyclePurge").disabled, false, "有东西时清空按钮要可用");
   });
 
+  await test("「清空回收站」和日常操作隔着一段放：不许再挨着「彻底删除所选」（1.10.9）", async () => {
+    const page = await openRecycle();
+    const { tools } = makeRecycleTools({ entries: [recycleEntry("2026年05月10日01时19分50秒")] });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const purge = doc.getElementById("recyclePurge");
+    const actions = doc.querySelector(".recycle-actions");
+    const zone = doc.querySelector(".recycle-danger-zone");
+    assert.ok(actions && zone, "顶部操作行与底部危险区都要在");
+    assert.equal(actions.contains(purge), false, "清空回收站不许留在顶部操作行里");
+    assert.equal(zone.contains(purge), true, "清空回收站要待在底部危险区");
+    assert.equal(purge.disabled, false, "有内容时清空按钮可用");
+    // 恢复与彻底删除是「选中的这几条」，留在顶部；只有「全清」下沉
+    assert.equal(zone.contains(doc.getElementById("recycleDeleteSelected")), false, "彻底删除所选仍留在顶部");
+    assert.equal(zone.contains(doc.getElementById("recycleRestore")), false, "恢复所选仍留在顶部");
+  });
+
   await test("回收站全选按钮在「全选 / 取消全选」之间切，恢复与删除的可用状态跟着选中数走（1.10.0 真执行）", async () => {
     const page = await openRecycle();
     const { tools } = makeRecycleTools({

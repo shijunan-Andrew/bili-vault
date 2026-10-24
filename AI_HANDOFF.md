@@ -74,7 +74,7 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1083 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 380 · archive-core 91 · stats-core 69 · background 30 · pages 54（后四套是真执行） |
+| 测试基线 | stability 380 · archive-core 91 · stats-core 69 · background 30 · pages 55（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
 | 生成 | 2026-10-25 00:06，当时 HEAD `e9c5474`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
