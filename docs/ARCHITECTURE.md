@@ -26,9 +26,9 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 │   ├── zh-TW.json                # 繁体词典（简体中文不需要词典，查不到就原样返回）
 │   └── en.json                   # 英文词典
 ├── popup.html/js/css             # 插件弹窗：自动归档开关、本地备份文件夹、导入界面、语言（1.4.0 起弹窗不再有主题滑块）
-├── settings.html/js/css          # 1.3.2：设置页（外观 / 语言 / 使用说明）；1.4.0 起外观含自定义背景与毛玻璃；1.5.0 起多一组「数据统计」；1.9.0 起再加「导入与导出」「归档维护」（体检与回收站入口）
+├── settings.html/js/css          # 1.3.2：设置页（外观 / 语言 / 使用说明）；1.4.0 起外观含自定义背景与毛玻璃；1.5.0 起多一组「数据统计」；1.9.0 起「导入与导出」「归档维护」；1.9.7 起回收站独立成「回收站」一栏
 ├── library.html/js/css           # 本地收藏库页面
-├── recycle.html/js/css           # 1.9.0：回收站页（卡片列表、恢复/彻底删除/一键清空），从设置页「查看回收站」打开
+├── recycle.html/js/css           # 1.9.0：回收站页（卡片列表、恢复/彻底删除/一键清空），1.9.7 起从设置页侧栏「回收站」进入
 ├── guide.html / tutorial.html     # 使用说明页 / 安装教程页（两页共用 tutorial.js、page.css、mockup.css）
 ├── tutorial.js                    # 上面两页共用的关窗按钮脚本
 ├── mockup.css                     # 教程页与说明页共用的界面示意图样式（CSS 画的假截图）
@@ -105,9 +105,9 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 **接口抓不到数据的处理**：`/x/web-interface/view` 的 `desc` 对不少视频就是空的或 `-`（实测 `BV1LKGm6ZErR` 返回 `-`），这时简介会退回收藏夹接口 `intro` 清理后的文本；`stat` 通常都有。
 
-### 更新视频状态（4.4 引入，4.5 调整见下）
+### 更新视频数据（4.4 引入，4.5 调整见下；1.9.7 起界面文案叫「更新视频数据」）
 
-收藏库的「更新视频状态」按钮经 `bca-refresh-video-stats` 触发 `refreshVideoStatus()`，逐条调用 `refreshOneArchiveStatus()`：
+收藏库的「更新视频数据」按钮经 `bca-refresh-video-stats` 触发 `refreshVideoStatus()`，逐条调用 `refreshOneArchiveStatus()`：
 
 - **有效视频**：调用 `/x/web-interface/view` 拿 `stat`，按 UP 缓存调用 `/x/relation/stat` 拿粉丝数，然后用 `patchVolatileFields()` **只替换** UP主粉丝数、`【互动数据】` 整块，以及原值为「未知」时的发布时间。标题、简介、标签、收藏时间、所属收藏夹、目录结构全部逐字不动（测试会核对行数与逐行差异）。
 - **失效视频**：`biliImportApiGet()` 把接口错误码挂在 `error.apiCode` 上；只有 `typeof error.apiCode === "number"` 才判定为失效（网络/超时错误保持原样、记为失败），此时**只写一行** `视频状态：已失效视频（更新状态时检测到）`，其余内容一个字都不改。网页端 `isInvalid` 的依据是 `/失效/.test(视频状态)`，因此标记后立即表现为「已失效」徽标 + 红色标题 + 灰色封面，与导入时识别的失效视频一致。若该记录又能正常访问，更新时会把标记改回「正常」。
@@ -142,20 +142,20 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 **后台（`background.js`）不翻译**。它是模块化 service worker，加载不了经典脚本；它产出的文案有两种处理方式：界面显示处包一层 `t()`（可以翻静态串），或者维持中文（导入进度、错误报告文件）。4.5 采用后者，见「已知限制」。
 - 词条工具：`node test/i18n-extract.cjs` 列词条、`--todo` 生成待译清单、`--check` 校验词典覆盖率（回归测试会调用 `--check`，漏译会失败）。
 
-### 更新视频状态（4.5 调整）
+### 更新视频数据（4.5 调整）
 
 **4.4 删掉的是「无确认的单条刷新」，不是批量入口。** 详情面板那个点一下就提交、不先弹确认框的 `refreshOneVideoStatus(video)` 确实没了（`test/stability.test.cjs` 有一条断言它的名字不许回到 `library.js`）；现在**所有**刷新都先过确认框：
 
-- **统一入口**：`openStatusConfirm(videos, source)`（`source` 是 `"detail"` 或 `"batch"`）→ 用户点「同步最近收藏」→ `runStatusRefresh()` 提交：
+- **统一入口**：`openStatusConfirm(videos, source)`（`source` 是 `"detail"` 或 `"batch"`）→ 用户点「开始更新视频数据」→ `runStatusRefresh()` 提交：
 
 ```
 chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets, limit: STATUS_BATCH_LIMIT } })
 ```
 
-- **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频状态」（`library.html:144` 的 `#updateSelected`），`library.js:5572` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:957` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
-- **上限**：`library.js:2477` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
+- **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频数据」（`library.html:136` 的 `#updateSelected`），`library.js:5339` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:957` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
+- **上限**：`library.js:2086` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
 - **后台实现**（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。风控的顾虑不是靠「不做批量」解决的，而是靠**确认框 + 80 条上限 + 串行间隔**（`IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`）。**不要再把无确认的单条刷新加回来。**
-- 上面几处行号是 V1.8.20 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
+- 上面几处行号是 V1.9.7 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
 ### CSS 覆盖顺序（4.8.3 的教训）
 
 **同一组件的规则必须写在它的基础规则之后。** 4.7 给 `.import-card` 加橘黄时把新规则写在了 `.import-card > summary { … }` 前面，结果：
@@ -554,7 +554,7 @@ UP主主页：https://space.bilibili.com/……
 | `bca-locale` | 内容脚本 `i18n.js` → `background.js` | 4.5：内容脚本请后台代取词典。**不能自己 fetch**——从网页上下文读扩展资源必须声明 `web_accessible_resources`，而 4.3 起刻意不开放任何扩展资源给网页；直接 fetch 会被拦、被 `try/catch` 吞成空词典，表现为提示卡永远中文且不报错 |
 | `bca-open-library` | `content.js` → `background.js` | 4.3：由后台 `chrome.tabs.create` 打开本地收藏库，扩展页因此不必暴露给网页 |
 | `bca-refresh-video-stats` | `library.js` → `background.js` | 4.4：重新解析并更新互动数据与粉丝数；失效只打标记 |
-| `bca-status-progress` | `background.js` → `library.js` | 4.4：更新视频状态的进度回报 |
+| `bca-status-progress` | `background.js` → `library.js` | 4.4：更新视频数据的进度回报 |
 | `add-manual-video` | `library.js` → `background.js` | 解析手动添加视频并写入一个或多个收藏夹 |
 | `import-bili-favorites` | `favorites-import.js` → `background.js` | 导入所选线上收藏夹 |
 | `bca-list-import-folders` | `popup.js` → `favorites-import.js` | 在收藏夹页请求线上收藏夹列表 |

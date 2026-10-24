@@ -1,6 +1,6 @@
 "use strict";
 /*
-  library.html / popup.html / content.js 这三份「要真 DOM 才能加载」的页面脚本，**真执行**测试。
+  library.html / settings.html / popup.html / stats.html 这几个「要真 DOM 才能加载」的页面脚本与 content.js，**真执行**测试。
 
   分工（四套测试各管一段）：
     test/stability.test.cjs  —— 读文件 + 正则：证明源码里写着某行字（防漂移）

@@ -95,7 +95,7 @@ node test/status.cjs --write   # 跑完五套测试再刷新本表
 ```powershell
 node test/stability.test.cjs      # 静态回归断言（最快；改文档、常量后必跑）
 node test/background.test.cjs     # 真执行：chrome.* / FileSystem / 导入回写
-node test/pages.test.cjs          # 真执行：library / popup / stats / content 四个页面
+node test/pages.test.cjs          # 真执行：library / settings / popup / stats / content 五个页面
 node test/i18n-extract.cjs --check
 ```
 
