@@ -184,6 +184,40 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 2. `bsk_session action=stop` 关掉浏览器会话。
 3. 预览服务这类后台任务用 `job_kill` 杀掉，别留着。
 
+### 用 browser-skill 调试这个插件（怎么快速上手）
+
+`bsk_*` 工具连的是**普通网页的页面上下文**，不是整包扩展。这条边界先记住，能省掉大量试错：
+
+- **能做**：打开普通的 https 页面（比如 B 站视频页）读真实 DOM、截图、点按；把扩展页面搬到本机 http 预览站之后，用真浏览器看布局、文案、交互。
+- **不能做**：直接打开 `chrome-extension://<id>/…` 扩展页；进 popup；attach MV3 的 service worker；替用户点系统文件选择器、给 File System Access 授权。
+- 所以「插件内容不能通过 browser-skill 操作」这句**严格说是对的**，它指的是上面那一列。但页面代码（HTML/CSS/JS）只要脱离扩展环境、换成桩环境，就能在浏览器里真跑真看。
+
+#### 标准流程（十分钟能上手）
+
+1. 起预览站（脚手架在参考区，**不在仓库里**）：
+   `cd C:/Users/Maxwell/Desktop/bili_vault_ref && PREVIEW_PORT=8798 node _appearance-preview.cjs`
+   用后台 job 跑，它会打印自己的 URL。
+2. 开会话并打开页面（`bsk_page` 之前必须先 `bsk_session start`，否则报 needs a session）：
+   `bsk_session action=start url=http://127.0.0.1:8798/__settings.html?locale=zh-CN&theme=light`
+3. 交互与取证：`bsk_page navigate` / `bsk_interact click|wheel` / `bsk_inspect screenshot|console|snapshot|observe`。
+4. 收尾（见上一节）：`bsk_session action=stop` + `job_kill <job_id>`。
+
+页面入口：`__library.html` / `__settings.html` / `__stats.html` / `__recycle.html`。
+查询参数：`locale=zh-CN|zh-TW|en`、`theme=light|dark`、`glass=1`、`wallpaper=1`、`veiled=1`、`bad=1`（失败横幅）、`nostats=1`（统计页空态）、`fixture=cards`（canvas 现画 4 张彩色封面 + 假目录树，用来看卡片封面）。
+
+#### 预览站到底是什么
+
+服务端原样吐出仓库里的 HTML/CSS/JS，并注入一段桩脚本：把 `chrome.storage` / `chrome.runtime.sendMessage` / `chrome.tabs` 换成本地实现，再伪造一套 File System Access 句柄（目录、`视频信息.txt`、封面）。**页面代码是真的，浏览器是真的，DOM/CSS 是真的**；`chrome.*` 与目录授权是假的。所以可以信布局、文案、事件；不要用它验证存储语义、权限、跨上下文消息。
+
+#### 踩过的坑
+
+- **改完预览脚本要重启服务**（旧进程不会重读文件）；端口报 `EADDRINUSE` 就换个端口，常见是旧进程或 TIME_WAIT。
+- `filter` 出来的丑问题优先看 `bsk_inspect console`：favicon 404 和我们无关的浏览器扩展日志可以忽略，本扩展的异常一定看得到。
+- `bsk_inspect screenshot` 偶尔 RPC 超时，直接重试一次即可。
+- `?fixture=cards` 依赖 `window.displayRoot`，而产品代码从 1.9.0 起不再往 `window` 挂它，所以 fixture 常常只看到空态 —— **不要为了让预览好看往产品代码加钩子**，空态截图 + `pages.test.cjs` 已经够。
+- 想核对 B 站真实 DOM（选择器改版时）：直接用预览站之外的普通标签页打开 `https://www.bilibili.com/video/BV…`，用 `bsk_inspect snapshot` 拿 ref 再读属性；只读，不登录、不发请求。
+- 真机端到端（真扩展、真 SW、真 FSA 授权、popup）browser-skill 覆盖不到，仍以**用户截图/描述**为准；预览站 + `pages.test.cjs` + `stability.test.cjs` 只是把能自动化的那部分压缩掉。
+
 ### 问询型请求：先回答，别先动文件
 
 用户问「能不能…」「为什么会…」「现在是什么状态」「有没有…」时，那是**提问**，不是指令。先把答案和证据给出来，**在用户明确点头之前不要改文件**。
