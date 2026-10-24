@@ -123,6 +123,16 @@ function idsIn(root, selector) {
 /* ---------------- library.html ---------------- */
 
 async function suiteLibrary() {
+  await test("空态的两张步骤卡各讲一件事，不再三张挤着重复说明（1.10.17 真执行）", async () => {
+    const page = await openLibrary();
+    const doc = page.document;
+    const steps = doc.querySelectorAll(".welcome-step");
+    assert.equal(steps.length, 2, "步骤卡从三张压成两张");
+    assert.equal(steps[0].querySelector("strong").textContent.trim(), BcaT(page, "选择一个本地备份文件夹"));
+    assert.equal(steps[1].querySelector("strong").textContent.trim(),
+      BcaT(page, "收藏时自动归档，也能批量导入"));
+  });
+
   await test("library.html 整页真加载：七个脚本都跑了，侧栏版本号来自 manifest", async () => {
     const page = await openLibrary();
     assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "archive-core.js", "archive-tools.js", "stats-core.js", "library.js", "pet.js"]);
@@ -763,6 +773,16 @@ async function suiteLibrary() {
 /* ---------------- popup.html ---------------- */
 
 async function suitePopup() {
+  await test("文件夹卡只剩一句提示，首屏不再被文案占满（1.10.17 真执行）", async () => {
+    const chrome = makeChrome({ version: "1.10.17", localData: {} });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle();
+    const hints = [...page.document.querySelectorAll(".folder-card .hint")].filter((el) => el.hidden === false);
+    assert.equal(hints.length, 1, "两块提示已经并成一句");
+    assert.equal(hints[0].textContent.trim(),
+      BcaT(page, "和收藏库右上角是同一个位置；选一次就会记住路径，并按收藏夹名称和时间建子目录。"));
+  });
+
   await test("popup.html 整页真加载：四个脚本都跑了，角标与错误卡的 DOM 都在（1.7.23）", async () => {
     const chrome = makeChrome({ version: "1.7.23", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });

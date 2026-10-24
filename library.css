@@ -415,7 +415,7 @@ html.banner-visible { --banner-h: 42px; }
 .welcome-copy { max-width: 420px; margin: var(--sp-3) 0 var(--sp-5); color: var(--muted); font-size: var(--fs-base); line-height: 1.85; }
 .welcome-footnote { margin: var(--sp-4) 0 0; color: var(--faint); font-size: var(--fs-sm); }
 
-.welcome-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); max-width: 720px; margin: var(--sp-5) 0 0; padding: 0; list-style: none; text-align: left; }
+.welcome-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); max-width: 560px; margin: var(--sp-5) 0 0; padding: 0; list-style: none; text-align: left; }
 .welcome-step { display: grid; gap: 6px; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-sm); }
 .welcome-step-index { display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-xs); color: var(--brand-deep); background: var(--brand-soft); font-size: var(--fs-sm); font-weight: 700; }
 .welcome-step strong { color: var(--ink); font-size: var(--fs-base); }
