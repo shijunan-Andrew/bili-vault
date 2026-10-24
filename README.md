@@ -137,14 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.6：打开收藏库不再报错，上次的快照真的先用上了
+## V1.10.7：弹窗标题行不再把「使用说明」挤成两行
 
-- **症状**：每次打开收藏库，页面都会报一条「按上次的快照先渲染失败（这次直接整库读） ReferenceError: videoFromArchiveRecord is not defined」。
-- **根因**：1.9.0 把「归档记录 → 界面视频对象」的换算搬进 `archive-tools.js` 并改名 `BcaArchiveTools.recordToVideo`，搬走时改了扫描那条调用点，**「先画上次快照」这条路的调用点漏改**，仍在调旧名字。这一行从 1.9.0 起一直抛错，被 `displayRoot()` 的 try/catch 吞成一条警告，所以界面照常能用、问题藏了八个版本。
-- **代价不只是那句报错**：1.8.5 加的「毫秒级先出上次结果、再整库校准」从来没跑通过；快照本该顺手把记录灌进内存缓存，也就一直没灌进去 —— 每次打开收藏库都是整库读一遍 `视频信息.txt`。
-- **改法**：这一处换成 `BcaArchiveTools.recordToVideo(entry.collection, { name: entry.directory }, record, { previous: previousVideos })`，与扫描那条调用点同一写法。
-- **补的守卫**：`stability` 新增一条 —— `library.js` 里不许再出现旧函数名，且 `paintSnapshot()` 里调用的每个裸函数名都必须在 `library.js` 内定义（拼错 / 搬走的名字当场失败，不必等真机点开收藏库）。
-- **范围**：只动 `library.js` 一行 + 新增 1 条测试；词典仍 **1083 条**，五套测试 **379 / 91 / 69 / 30 / 54**。
+- **症状**：弹窗顶部标题行里挤了四样东西（图标、标题 + 副标题、「使用说明」、「打开本地收藏库」）。宽度不够时副标题被压成两行，「使用说明」自己的四个字也被折成「使用说 / 明」。
+- **改法**：标题行只留「图标 + 标题块 + 主出口」；「使用说明」是次要入口，挪到标题行下面单独一行、靠右（`.brand-links`），并加 `white-space: nowrap` 保证它永远不折行。
+- **范围**：只动 `popup.html` 的标题行结构与 `popup.css` 三处；不新增文案，词典仍 **1083 条**，五套测试仍 **379 / 91 / 69 / 30 / 54**。
 
 **遗留** - 无。
 

@@ -15,7 +15,8 @@ body {
 
 main { padding: var(--sp-3) var(--sp-4) var(--sp-2); }
 
-.brand-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+/* 1.10.7：标题行只放「图标 + 标题块 + 主出口」 */
+.brand-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-1); }
 /* 纯白字母压在品牌蓝渐变上，属于“彩色底上的文字”，不随主题变 */
 .brand-icon {
   display: grid;
@@ -51,12 +52,15 @@ h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .toggle-switch.off { background: var(--ghost); }
 .toggle-switch.off span { left: 3px; }
 
-/* 「使用说明」是次要入口，放在标题行下方一行，不与主出口抢位置 */
+/* 「使用说明」是次要入口，1.10.7 起单独占标题行下面的一行、靠右：
+   它挤在标题行里时会把副标题压成三行，自己的文字也会折行。 */
+.brand-links { display: flex; justify-content: flex-end; margin: 0 0 var(--sp-2); }
 .guide-link {
   display: inline-block;
-  margin: 0 0 var(--sp-2);
+  margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
+  white-space: nowrap;
   text-decoration: none;
 }
 .guide-link:hover { color: var(--accent); text-decoration: underline; }
