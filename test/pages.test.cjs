@@ -1762,6 +1762,33 @@ async function suiteStats() {
     assert.equal(button.textContent.trim(), BcaT(page, "重新读取统计库"));
   });
 
+  await test("低频卡的长说明默认收在折叠块里，不再一屏塞满（1.10.15 真执行）", async () => {
+    const page = await openSettings();
+    const doc = page.document;
+    const maintenance = doc.querySelectorAll("#group-maintenance details.row-more");
+    const recycle = doc.querySelectorAll("#group-recycle details.row-more");
+    const localdata = doc.querySelectorAll("#group-localdata details.row-more");
+    assert.equal(maintenance.length, 1, "归档维护卡里要有一个折叠块");
+    assert.equal(recycle.length, 1, "回收站卡里要有一个折叠块");
+    assert.equal(localdata.length, 1, "本机数据卡里要有一个折叠块");
+
+    for (const details of [...maintenance, ...recycle, ...localdata]) {
+      assert.equal(details.open, false, "折叠块默认必须是收起的");
+      assert.equal(details.querySelector("summary").textContent.trim(), BcaT(page, "它具体做什么？"));
+    }
+
+    // 长解释搬进了折叠块，行内只剩一句。
+    const integrityRow = doc.getElementById("runIntegrityCheck").closest(".setting-row");
+    assert.equal(integrityRow.querySelector(".setting-row-desc").textContent.trim(),
+      BcaT(page, "只读扫一遍，说清缺互动数据、缺封面、缺简介各有多少条。"));
+    assert.match(maintenance[0].textContent, /按限速跑/, "补全的做法要留在折叠块里");
+
+    const cleanupRow = doc.getElementById("copyNativeCleanup").closest(".setting-row");
+    assert.equal(cleanupRow.querySelector(".setting-row-desc").textContent.trim(),
+      BcaT(page, "点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。"));
+    assert.match(localdata[0].textContent, /注册表项/, "清理范围要留在折叠块里");
+  });
+
 }
 
 /* ---------------- 可访问性（1.10.1） ----------------

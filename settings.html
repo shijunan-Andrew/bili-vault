@@ -414,7 +414,11 @@
         <div class="setting-row">
           <div class="setting-row-text">
             <p class="setting-row-title" data-i18n="完整度巡检">完整度巡检</p>
-            <p class="setting-row-desc" data-i18n="只读扫一遍，说清有多少条缺互动数据、缺封面、缺简介。缺互动数据能就地补，走的就是「更新视频数据」那条队列：每条一次请求，按限速跑，补完会写回视频信息.txt。">只读扫一遍，说清有多少条缺互动数据、缺封面、缺简介。缺互动数据能就地补，走的就是「更新视频数据」那条队列：每条一次请求，按限速跑，补完会写回视频信息.txt。</p>
+            <p class="setting-row-desc" data-i18n="只读扫一遍，说清缺互动数据、缺封面、缺简介各有多少条。">只读扫一遍，说清缺互动数据、缺封面、缺简介各有多少条。</p>
+            <details class="row-more">
+              <summary data-i18n="它具体做什么？">它具体做什么？</summary>
+              <p data-i18n="缺互动数据能就地补，走的就是「更新视频数据」那条队列：每条一次请求，按限速跑，补完会写回视频信息.txt。">缺互动数据能就地补，走的就是「更新视频数据」那条队列：每条一次请求，按限速跑，补完会写回视频信息.txt。</p>
+            </details>
           </div>
           <div class="setting-row-control">
             <button id="runIntegrityCheck" class="button button-quiet" type="button"><span data-icon="shield"></span><span data-i18n="开始巡检">开始巡检</span></button>
@@ -435,7 +439,11 @@
         <div class="setting-row">
           <div class="setting-row-text">
             <p class="setting-row-title" data-i18n="最近删除的视频">最近删除的视频</p>
-            <p class="setting-row-desc" data-i18n="删掉的归档先进 005回收站，30 天后自动清理，这期间还能自己捞回来。">删掉的归档先进 005回收站，30 天后自动清理，这期间还能自己捞回来。</p>
+            <p class="setting-row-desc" data-i18n="删掉的归档会先进 005回收站，30 天后自动清理。">删掉的归档会先进 005回收站，30 天后自动清理。</p>
+            <details class="row-more">
+              <summary data-i18n="它具体做什么？">它具体做什么？</summary>
+              <p data-i18n="这 30 天里还能自己捞回来：恢复会放回原来的收藏夹，同名目录已存在时自动加 -2，不会覆盖现有记录。">这 30 天里还能自己捞回来：恢复会放回原来的收藏夹，同名目录已存在时自动加 -2，不会覆盖现有记录。</p>
+            </details>
           </div>
           <div class="setting-row-control">
             <button id="settingsOpenRecycle" class="button button-quiet" type="button"><span data-icon="trash"></span><span data-i18n="查看回收站">查看回收站</span></button>
@@ -471,7 +479,11 @@
         <div class="setting-row">
           <div class="setting-row-text">
             <p class="setting-row-title" data-i18n="清理本机的原生目录助手">清理本机的原生目录助手</p>
-            <p class="setting-row-desc" data-i18n="点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。它会删掉原生消息宿主、注册表项和残留的文件夹（里面有你选择过的下载目录路径）。">点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。它会删掉原生消息宿主、注册表项和残留的文件夹（里面有你选择过的下载目录路径）。</p>
+            <p class="setting-row-desc" data-i18n="点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。">点右边按钮会复制一条命令，粘到 PowerShell 里回车即可。</p>
+            <details class="row-more">
+              <summary data-i18n="它具体做什么？">它具体做什么？</summary>
+              <p data-i18n="它会删掉原生消息宿主、注册表项和残留的文件夹（里面有你选择过的下载目录路径），不碰本地备份文件夹里的任何归档。">它会删掉原生消息宿主、注册表项和残留的文件夹（里面有你选择过的下载目录路径），不碰本地备份文件夹里的任何归档。</p>
+            </details>
           </div>
           <div class="setting-row-control">
             <button type="button" class="button button-quiet" id="copyNativeCleanup" data-i18n="复制清理命令">复制清理命令</button>

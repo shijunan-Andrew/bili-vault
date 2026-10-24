@@ -222,6 +222,48 @@
   font-weight: 600;
   line-height: 1.6;
 }
+/* 1.10.15（S-3）：低频卡的长说明默认收起，只留一句。折叠块本身不带框，
+   展开后是一段小一号的说明文字，视觉上仍属于这一行。 */
+.row-more {
+  margin-top: var(--sp-1);
+}
+
+.row-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  cursor: pointer;
+  list-style: none;
+}
+
+.row-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.row-more > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  transition: transform 120ms ease;
+}
+
+.row-more[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.row-more > p {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
 .row-error { margin: 0; color: var(--warning); font-size: var(--fs-base); }
 /* 1.7.9（ux P2-4）：操作成功的落地提示（背景图已移除）。和 .row-error 同一个位置，
    但走 --muted 而不是 --warning —— 成功不是警告，不该用警示色。 */

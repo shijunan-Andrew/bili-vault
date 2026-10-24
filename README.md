@@ -137,18 +137,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.14：次要按钮禁用了就真的退下去，侧栏底部收成一块
+## V1.10.15：设置页把长说明收起来，低频卡不再一屏塞满
 
-- **禁用态**：还没选备份文件夹时，「与 B 站对比」「刷新」是禁用的，但 quiet 样式仍带品牌描边和淡蓝底，看起来像能点；现在禁用时整条品牌色撤掉（透明底 + 淡框 + `--faint` 文字），顶栏只剩「选择本地备份文件夹」一个着重点。
-- **侧栏底部**：版本号原来单独一行，和 tip 卡、两个链接各占一块，四块层级一样平；现在版本号并进链接那一块当第一行，上面补一条细线，读起来是「一块元信息」。
-- **范围**：`library.css` 三处、`library.html` 一处；`test/stability.test.cjs` 加一条口径守卫（并改掉旧的「版本号在 side-support 上方」断言），`test/pages.test.cjs` 加一条真渲染用例（页面套件 58 → **59**，稳定性套件 380 → **381**）。
+- **折叠块**：归档维护、回收站、本机数据三张卡里最长的三条说明（完整度巡检、最近删除的视频、清理本机的原生目录助手），行内只剩一句话，做法与范围收进「它具体做什么？」折叠块，点开才展开；用的是原生 `<details>`，键盘与读屏都跟着浏览器走，不需要新脚本。
+- **样式**：折叠块共用一条 `.row-more` 口径（小一号、`--muted`、行前三角随开合旋转），颜色与字号全部走令牌，没有新写死值。
+- **范围**：`settings.html` 三行、`settings.css` 六条规则、两本词典各 +4 条（删 3 加 7，1083 → **1087**）；`test/pages.test.cjs` 加一条真渲染用例（页面套件 59 → **60**）。
 
 **遗留** - 无。
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1083 条**<!-- i18n-count:1083 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1087 条**<!-- i18n-count:1087 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
