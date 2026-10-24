@@ -30,6 +30,9 @@ const purgeButton = document.getElementById("recyclePurge");
 const selectedPaths = new Set();
 let entries = [];
 let busy = false;
+/* 1.10.13（R-2）：是否已经读到过回收站内容。false 时摘要保持隐藏，
+   避免和状态行的「正在读取回收站…」重复同一句。 */
+let summaryReady = false;
 let coverUrls = [];
 
 function escapeHtml(value) {
@@ -90,6 +93,13 @@ function renderSelectionState() {
 
 function updateSummary() {
   if (!summary) return;
+  /* 1.10.13（R-2）：读到数据之后摘要才有意义。读之前、读失败都保持隐藏，
+     免得和状态行的「正在读取回收站…」重复（错误由 #recycleError 说）。 */
+  if (!summaryReady) {
+    summary.hidden = true;
+    return;
+  }
+  summary.hidden = false;
   if (!entries.length) {
     summary.textContent = BcaI18n.t("回收站里现在是空的。");
     return;
@@ -215,9 +225,11 @@ async function loadRoot() {
 
 async function reload() {
   try {
+    summaryReady = false;
     showStatus(BcaI18n.t("正在读取回收站…"));
     const handle = await loadRoot();
     entries = await BcaArchiveTools.listRecycled(handle);
+    summaryReady = true;
     for (const entry of [...selectedPaths]) {
       if (!entries.some((item) => entryKey(item) === entry)) selectedPaths.delete(entry);
     }
@@ -226,6 +238,8 @@ async function reload() {
   } catch (error) {
     entries = [];
     selectedPaths.clear();
+    summaryReady = false;
+    if (summary) summary.hidden = true;
     renderEntries();
     showError(BcaI18n.t("读回收站失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
   }

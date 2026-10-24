@@ -29,7 +29,10 @@
         <button id="recycleBack" class="button button-quiet" type="button"><span data-icon="move"></span><span data-i18n="返回设置">返回设置</span></button>
         <div class="recycle-heading">
           <h1 data-i18n="回收站">回收站</h1>
-          <p id="recycleSummary" class="recycle-summary" role="status" data-i18n="正在读取回收站…">正在读取回收站…</p>
+          <!-- 1.10.13（R-2）：这里是「共 N 项」的摘要，不是状态行。以前初始文字也是
+               「正在读取回收站…」，和下面的 #recycleStatus 同时出现，一进页面就读到两遍同一句。
+               现在初始为空、读到数据才显示；「正在读取」这句话只由状态行说一次。 -->
+          <p id="recycleSummary" class="recycle-summary" role="status" hidden></p>
         </div>
       </div>
       <div class="recycle-actions">

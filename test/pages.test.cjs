@@ -1510,7 +1510,38 @@ async function suiteRecycle() {
       "错误文案要指名下一步做什么");
     assert.equal(doc.getElementById("recycleGrid").children.length, 0, "一条卡片都不该画");
     assert.equal(doc.getElementById("recycleEmpty").hidden, false, "空态要显示");
-    assert.equal(doc.getElementById("recycleSummary").textContent.trim(), BcaT(page, "回收站里现在是空的。"));
+    /* 1.10.13（R-2）：读失败时我们并不知道回收站空不空，摘要保持隐藏，
+       别再拿「回收站里现在是空的。」当占位。 */
+    const summary = doc.getElementById("recycleSummary");
+    assert.equal(summary.hidden, true, "读失败时摘要不该露面");
+    assert.equal(summary.textContent.trim(), "", "读失败时摘要不该有文字");
+  });
+
+  await test("「正在读取回收站…」整页只说一次，摘要读到数据才露面（1.10.13）", async () => {
+    const page = await openRecycle();
+    const { tools } = makeRecycleTools({ noRoot: true });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const status = doc.getElementById("recycleStatus");
+    const summary = doc.getElementById("recycleSummary");
+    assert.equal(summary.hidden, true, "失败时摘要不该抢话说");
+    assert.equal(summary.textContent.trim(), "", "摘要读完之前不该有文字");
+    const loading = BcaT(page, "正在读取回收站…");
+    const shown = [status.textContent, summary.textContent].filter((line) => line.includes(loading));
+    assert.equal(shown.length, 0, "失败之后状态行已经清掉，页面里不该还留着「正在读取」");
+
+    const ok = makeRecycleTools({ entries: [recycleEntry("2026年05月10日01时19分50秒")] });
+    page.window.BcaArchiveTools = ok.tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    assert.equal(summary.hidden, false, "读到数据后摘要要露面");
+    assert.ok(summary.textContent.includes("共 1 项"), "摘要写条数");
+    assert.equal(status.hidden, true, "读完就没状态行了");
+    assert.equal(summary.textContent.includes(loading), false, "摘要不是状态行，不该复读「正在读取」");
   });
 
   await test("回收站把一条记录画成卡片：收藏夹徽标、标题、UP 主、删于路径都在（1.10.0 真执行）", async () => {
