@@ -560,9 +560,12 @@
 
   function statsFromInfo(info, fallbackStats = {}) {
     const stats = {};
+    // 1.9.5（用户要求 3）：缺失的互动数据统一记 N/A ——
+    // 老版本「没抓到就整段不写」的做法，界面上完全看不出这条能不能补。
     for (const [key, label] of Object.entries(BcaArchiveCore.STAT_LABELS)) {
-      const value = realField(info, label) || String(fallbackStats[key] || "");
-      if (value) stats[key] = value;
+      const raw = field(info, label) || String(fallbackStats[key] || "");
+      const text = String(raw || "").trim();
+      stats[key] = !text || BcaArchiveCore.isPlaceholderValue(text) ? "N/A" : text;
     }
     return stats;
   }

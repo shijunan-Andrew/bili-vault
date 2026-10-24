@@ -138,11 +138,10 @@ async function suite() {
   });
 
   await test("收藏时用接口补真实 UP 主与互动数据，接口失败就退回页面元数据（1.9.3）", async () => {
-    const pageMetadata = { bvid: bv("A1"), upName: "推荐位里的名字", upMid: "999", title: "页面标题" };
+    const pageMetadata = { bvid: bv("A1"), upName: "推荐位里的名字", upMid: "999", title: "页面标题", pubdate: 1600000000 };
+    const fetched = [];
     const fetchOk = async (url) => {
-      if (String(url).includes("/x/relation/stat")) {
-        return { ok: true, json: async () => ({ code: 0, data: { mid: 4925207, follower: 30205 } }) };
-      }
+      fetched.push(String(url));
       return {
         ok: true,
         json: async () => ({
@@ -155,6 +154,8 @@ async function suite() {
             pubdate: 1700000000,
             duration: 120,
             pic: "https://i0.hdslb.com/bfs/archive/cover.jpg",
+            tname: "游戏",
+            tname2: "单机游戏",
             owner: { mid: 4925207, name: "真 UP" },
             stat: { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 }
           }
@@ -166,8 +167,12 @@ async function suite() {
     assert.equal(merged.upName, "真 UP");
     assert.equal(merged.upMid, "4925207");
     assert.deepEqual(merged.stats, { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 });
-    // 1.9.4：第一次收藏就要有粉丝数（以前要等「更新视频状态」），简介只认接口给的真简介
-    assert.equal(merged.upFans, "30205");
+    // 1.9.5：收藏时不再请求粉丝数（少一次限速排队），粉丝数交给「更新视频状态」/导入；
+    // 分区用接口的 tname，发布时间优先用页面 DOM 抓到的那个。
+    assert.equal(merged.upFans, undefined);
+    assert.equal(fetched.filter((url) => url.includes("/x/relation/stat")).length, 0, "收藏时不该再请求粉丝数");
+    assert.equal(merged.category, "游戏 / 单机游戏");
+    assert.equal(merged.pubdate, 1600000000, "发布时间优先用页面 DOM 的值");
     assert.equal(merged.description, "真简介");
 
     const failing = loadBackground({ chrome: makeChrome({ localData: {} }) });

@@ -62,10 +62,12 @@ const INFO = (title, extra = {}) => {
     `UP主昵称：${extra.upName || "某人"}`,
     `UP主UID：${extra.upMid || "12345"}`,
     "",
-    "【互动数据】",
-    `播放量：${extra.view || "1000"}`,
-    "弹幕量：20",
-    "",
+    ...(extra.stats === false ? [] : [
+      "【互动数据】",
+      `播放量：${extra.view || "1000"}`,
+      "弹幕量：20",
+      ""
+    ]),
     "【标签】",
     "标签一、标签二",
     "",
@@ -279,6 +281,28 @@ async function suiteLibrary() {
     assert.equal(await openByTitle("真简介视频"), "真正的简介第一行\n真正的第二行");
     assert.equal(await openByTitle("分享文案视频"), "", "分享文案不算简介");
     assert.equal(await openByTitle("标题当简介视频"), "", "简介就是标题时也不显示");
+  });
+
+  await test("没有互动数据的记录显示 N/A，并提示去「更新视频状态」（1.9.5）", async () => {
+    const tree = {
+      "小鲸鱼测试": {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("没抓到数据的视频", { stats: false, upName: "某人" }), "封面.png": "PNG-1" }
+      }
+    };
+    const page = await openLibrary({ tree });
+    const doc = page.document;
+    const card = doc.querySelector("#videoGrid .video-card");
+    assert.ok(card, "应该有卡片");
+    assert.equal(textOf(card.querySelector(".cover-views")), "N/A 播放", "卡片播放量缺失要显示 N/A");
+    card.click();
+    await settle(6);
+    const values = [...doc.querySelectorAll("#detailContent .detail-stat-value")].map((node) => textOf(node));
+    assert.equal(values.length, 6, "六项互动数据都要占位");
+    assert.deepEqual(values, ["N/A", "N/A", "N/A", "N/A", "N/A", "N/A"]);
+    assert.match(textOf(doc.querySelector("#detailContent .detail-up-fans")), /N\/A/, "粉丝数缺失也要显示 N/A");
+    const warning = doc.querySelector("#detailContent .detail-refresh-warning");
+    assert.ok(warning, "数据不完整时要有提示");
+    assert.equal(textOf(warning), BcaT(page, "该视频数据不完整，更新视频状态或能解决"));
   });
 
   await test("删除确认对话框：文案与按钮按「删一个视频」渲染，取消后关闭且不动磁盘（1.7.23）", async () => {

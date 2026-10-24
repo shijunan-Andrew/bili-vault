@@ -214,6 +214,16 @@
     const upNameText = upContainerLink ? (upContainerLink.textContent || "").replace(/\s+/g, " ").trim() : "";
     const title = video.title || document.querySelector("h1")?.textContent?.trim() || document.title.replace(/_哔哩哔哩.*$/i, "").trim();
     const player = document.querySelector("video");
+    /* 1.9.5（用户要求 6）：发布时间优先从页面上那行「2024-08-26 18:21:24」读，
+       读不到才交给接口的 pubdate 兜底。页面这行在播放量/弹幕旁边，位置多年来没变过；
+       用 Date 构造按本地时区解释，和 import 路径里 parseChineseDateTime 的口径一致。 */
+    const domPublishText = textOf(document.querySelector(
+      "#viewbox_report .pubdate, .video-info-meta .pubdate, .video-info-container .pubdate, .pubdate"
+    ));
+    const domPublishMatch = domPublishText.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    const domPublish = domPublishMatch
+      ? Math.floor(new Date(+domPublishMatch[1], +domPublishMatch[2] - 1, +domPublishMatch[3], +domPublishMatch[4], +domPublishMatch[5], +domPublishMatch[6]).getTime() / 1000)
+      : 0;
 
     return {
       title: title || "",
@@ -223,7 +233,7 @@
       cover: video.pic || meta('meta[property="og:image"]') || player?.poster || "",
       category: [video.tname || video.tid_name || "", video.tname2 || ""].filter(Boolean).join(" / "),
       duration: Number(video.duration) || (Number.isFinite(player?.duration) ? Math.floor(player.duration) : 0),
-      pubdate: Number(video.pubdate) || 0,
+      pubdate: domPublish || Number(video.pubdate) || 0,
       upName: owner.name || owner.uname || upNameText || "",
       upMid,
       // 1.9.4（用户报「没有简介的视频被存成标题+播放量+UP主简介+相关视频标题」）：

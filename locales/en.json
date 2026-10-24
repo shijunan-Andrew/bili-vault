@@ -273,6 +273,7 @@
   "复制失败：{message}": "Copy failed: {message}",
   "复制视频链接": "Copy video link",
   "复制视频目录路径": "Copy video folder path",
+  "该视频数据不完整，更新视频状态或能解决": "Some data for this video is missing. Updating the video status may fix it.",
   "改用「较低」": "Use 「Lower」",
   "高": "High",
   "各年份的收藏构成": "Breakdown by year",

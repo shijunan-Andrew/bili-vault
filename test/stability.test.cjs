@@ -665,8 +665,10 @@ test("the new info layout carries the followers count and a separate stats block
   assert.match(source, /UP主粉丝数：\$\{fansText\}/);
   assert.match(source, /lines\.push\("【互动数据】"\)/);
   assert.match(source, /const STAT_LABELS = \{ view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" \}/);
-  // 只有真的抓到互动数据时才写这一区块，自动归档的老格式不受影响
-  assert.match(source, /const hasStats = STAT_KEYS\.some\(\(key\) => !importIsPlaceholder\(stats\[key\]\)\)/);
+  // 1.9.5：互动数据段总是写，缺的记 N/A（用户要求在 txt 里也能看出数据不完整）
+  assert.match(source, /const MISSING_VALUE = "N\/A";/);
+  assert.match(source, /lines\.push\("【互动数据】"\);/);
+  assert.match(source, /importIsPlaceholder\(value\) \? MISSING_VALUE : String\(value\)/);
 });
 
 test("the 4.2 layout round-trips through the archive parser", () => {
@@ -991,7 +993,7 @@ test("the video card shows the view count at the bottom-right of the cover", () 
   const css = readProjectFile("library.css");
   assert.match(library, /<span class="cover-views tnum" hidden><\/span>/);
   assert.match(library, /const viewsBadge = card\.querySelector\("\.cover-views"\)/);
-  assert.match(library, /const viewsText = formatCount\(video\.stats\?\.view\)/);
+  assert.match(library, /const viewsText = formatCount\(statDisplay\(video\.stats\?\.view\)\)/);
   // 右下角定位
   const rule = (css.match(/\.cover-views \{[^}]*\}/) || [""])[0];
   assert.match(rule, /right:/, "播放量徽标应贴右边");
@@ -7595,7 +7597,7 @@ test("UP 主只在视频自己的信息区里取，绝不捡全页第一个 spac
 
 test("收藏前用 /x/web-interface/view 补真实 UP 主与互动数据，UP 主不再来自推荐位（1.9.3）", () => {
   const source = readProjectFile("background.js");
-  assert.match(source, /const SAVE_ENRICH_TIMEOUT_MS = 8000;/);
+  assert.match(source, /const SAVE_ENRICH_TIMEOUT_MS = 3000;/);
   assert.match(source, /async function enrichFavoriteMetadata\(pageMetadata\) \{/);
   assert.ok(source.includes('await biliImportApiGet("/x/web-interface/view", bvid ? { bvid } : { aid }, SAVE_ENRICH_TIMEOUT_MS)'), "收藏时要请求视频详情接口");
   assert.match(source, /upName: importIsPlaceholder\(owner\.name\) \? metadata\.upName : owner\.name,/);
@@ -7678,14 +7680,45 @@ test("收藏前先按「收藏夹 + BV」判重，已存在就整条跳过（1.9
   assert.doesNotMatch(body, /existing\?\.favoriteLine/, "已存在的记录不再改写成新时间");
 });
 
-test("第一次收藏就补 UP 主粉丝数，简介只认接口返回值（1.9.4）", () => {
+test("收藏时不再为粉丝数多发一次请求，分区与发布时间按新口径取（1.9.5）", () => {
   const background = stripComments(readProjectFile("background.js"));
   assert.match(background, /function bvidOfMetadata\(metadata\) \{/);
   const enrich = functionBodyOf(background, "async function enrichFavoriteMetadata(pageMetadata) {");
   assert.match(enrich, /bvidOfMetadata\(metadata\)/, "补资料前先算 BV 号");
-  assert.match(enrich, /await fetchUpFans\(/, "第一次收藏就取粉丝数");
-  assert.match(enrich, /upFans: fans \|\| metadata\.upFans,/, "取不到粉丝数就退回页面值");
+  assert.doesNotMatch(enrich, /fetchUpFans\(/, "收藏路径不许再请求粉丝数");
+  assert.match(enrich, /upFans: metadata\.upFans,/, "粉丝数沿用页面值（通常是空，写入时记 N/A）");
+  assert.match(enrich, /category: String\(\[video\.tname, video\.tname2\]/, "分区写接口的 tname");
+  assert.match(enrich, /pubdate: Number\(metadata\.pubdate\) \|\| Number\(video\.pubdate\) \|\| 0,/, "发布时间优先用页面 DOM 抓到的值");
   assert.match(enrich, /description: String\(video\.desc \|\| ""\)\.trim\(\) \|\| metadata\.description,/, "简介只认接口值");
-  assert.match(enrich, /biliImportApiGet\("\/x\/web-interface\/view"/);
   assert.match(enrich, /收藏时没能补上互动数据/, "取不到就退回页面元数据，不挡收藏");
+
+  // 页面 DOM 的发布时间：新版页面那行「2024-08-26 18:21:24」
+  const content = stripComments(readProjectFile("content.js"));
+  assert.match(content, /\.pubdate/, "要读页面上的发布时间节点");
+  assert.match(content, /const domPublishMatch = domPublishText\.match/, "解析 YYYY-MM-DD HH:mm:ss");
+  assert.match(content, /pubdate: domPublish \|\| Number\(video\.pubdate\) \|\| 0,/, "DOM 优先、接口兜底");
+
+  // 收藏路径的超时：详情 3 秒、封面 3 秒；导入/更新状态不变
+  assert.match(background, /const SAVE_ENRICH_TIMEOUT_MS = 3000;/);
+  assert.match(background, /const COVER_SAVE_TIMEOUT_MS = 3000;/);
+  assert.match(background, /loadCoverPng\(metadata\.cover, \{ timeoutMs: COVER_SAVE_TIMEOUT_MS \}\)/);
+});
+
+test("缺失的数值一律写 N/A 并在收藏库显示；有 N/A 时提示去更新状态（1.9.5）", () => {
+  const background = stripComments(readProjectFile("background.js"));
+  assert.match(background, /const MISSING_VALUE = "N\/A";/, "写入侧用 N/A");
+  assert.match(background, /UP主粉丝数：\$\{fansText\}/, "粉丝数缺了也写出来");
+  assert.match(background, /lines\.push\("【互动数据】"\);/, "互动数据段总是写");
+  assert.match(background, /importIsPlaceholder\(value\) \? MISSING_VALUE : String\(value\)/, "缺的互动数写 N/A");
+
+  const tools = stripComments(readProjectFile("archive-tools.js"));
+  assert.match(tools, /stats\[key\] = !text \|\| BcaArchiveCore\.isPlaceholderValue\(text\) \? "N\/A" : text;/, "读回时缺失也归一成 N/A");
+
+  const library = stripComments(readProjectFile("library.js"));
+  assert.match(library, /function statDisplay\(value\) \{/);
+  assert.match(library, /const detailIncomplete = statDisplay\(video\.upFans\) === "N\/A"/);
+  assert.match(library, /该视频数据不完整，更新视频状态或能解决/);
+  assert.match(library, /detail-refresh-warning/);
+  const css = stripComments(readProjectFile("library.css"));
+  assert.match(css, /\.detail-refresh-warning \{[^}]*color: var\(--danger\)/, "提示要用危险色");
 });

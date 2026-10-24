@@ -134,37 +134,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 ## 正式版更新
 
-> 这里**只放最新一版**的改动说明。更早的版本（V1.9.3 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
+> 这里**只放最新一版**的改动说明。更早的版本（V1.9.4 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.9.4：简介只认真简介、已有记录直接跳过、第一次收藏就补粉丝数
+## V1.9.5：收藏更快、缺失数据写 N/A、分区与发布时间补上
 
 **你会感觉到的几处**
 
-- **详情里的「视频简介」回来了**：1.9.0 起详情面板一律显示「这个归档没有记录简介」——简介在《视频信息.txt》里有，但读取时找错了段落。修好后详情按【视频简介】显示。
-- **收藏时不会再存「假简介」**：以前从 B 站页面抓到的分享文案（「标题, 视频播放量…、UP简介…相关视频…」）会被当简介写进去。现在分享文案、以及「简介恰好等于标题」都按「没有简介」记录，真简介照常保存；分享文案里带的互动数据仍会回收进统计。
-- **已经存过的视频，再收藏一次就直接跳过**：不请求接口、不改写文件，消息里会说「已在本地，跳过」。
-- **第一次收藏就有 UP 主粉丝数**：收藏时顺手补上（以前要等「更新视频状态」）。
-- **`所属收藏夹` 写的是收藏夹名**：以前误写成了记录目录名（形如 `2026年10月24日01时12分36秒`）。新写入的按收藏夹名记录，旧文件保持原样。
+- 收藏比上一版快一截：收藏时不再顺手请求 UP 主粉丝数（少一次排队），详情接口的超时也从 8 秒收到 3 秒。粉丝数只在「更新视频状态」和「导入收藏夹」时取。
+- 拿不到的数字统一写 **N/A**：`视频信息.txt` 里的「UP主粉丝数」和六项互动数据缺失时记 N/A，收藏库的卡片与详情也显示 N/A，不再写「未知」、也不再整段消失。
+- 详情里出现 N/A 时，「更新视频状态」下面会多一句红字「该视频数据不完整，更新视频状态或能解决」——点一下就能补齐。
+- **分区**写进 `视频信息.txt`，并在详情里显示（取接口的 `tname` / `tname2`）。
+- **发布时间**优先读页面上的「2024-08-26 18:21:24」，页面没有才用接口值。
 
 **开发侧**
 
-- `archive-tools.js` 的 `splitDescription()` 改走 `BcaArchiveCore.descriptionFromInfo(info)`（简介在 `info.sections["视频简介"]`；1.9.0–1.9.3 读的是 `info.fields`，所以详情一直空）。`splitShareText()` 判为分享文案、或简介与标题相同时返回空简介，`stats` 仍从分享文案里解析。
-- `content.js` 的 `description` 去掉 `meta[name="description"]` 兜底（B 站那个 meta 是自动生成的分享文案）。
-- `background.js`：新增 `bvidOfMetadata()`；`enrichFavoriteMetadata()` 用接口补 `description` 与 `upFans`（`fetchUpFans`，失败只 warn）；`buildInfo()` 简介写「真简介 / 无 / 未知」，四处 `buildInfo()` 的收藏夹参数改成收藏夹名；`saveFavorite()` 重排成「先判重、再补资料」——`plans` → `pendingFolders` / `skippedFolders`，没有待写的收藏夹时走「已在本地，跳过」出口，不请求接口也不写盘。
-- 测试：`test/harness.cjs` 的 `BACKGROUND_EXPORTS` 增加 `buildInfo`、`loadBackground()` 支持注入 `indexedDB`；background +2（简介规则、整条跳过）、pages +1（详情简介渲染）、stability +4（简介读写、收藏夹名、判重跳过、首次补粉丝数），并调整 3 条旧守卫的形状。
+- `background.js`：`SAVE_ENRICH_TIMEOUT_MS = 3000`；新增 `COVER_SAVE_TIMEOUT_MS = 3000`，`loadCoverPng(url, { timeoutMs })` 只对收藏路径收紧，导入 / 更新状态仍是 20 秒；`enrichFavoriteMetadata()` 不再调用 `fetchUpFans()`，`upFans` 沿用页面值；返回补 `category: tname / tname2`，`pubdate` 改为页面优先。
+- `buildInfo()`：`MISSING_VALUE = "N/A"`；【互动数据】段总是写出，缺项写 N/A；粉丝数缺失同样写 N/A。
+- `content.js`：`getVideoMetadata()` 从 `#viewbox_report .pubdate / .video-info-meta .pubdate / .pubdate` 解析 `YYYY-MM-DD HH:mm:ss`，按本地时区换算成秒。
+- `archive-tools.js`：`statsFromInfo()` 把缺项归一成 `"N/A"`；`library.js` 新增 `statDisplay()`，卡片、详情、粉丝数统一走它，数据不完整时渲染 `.detail-refresh-warning`（`library.css` 用 `--danger`）。
 
-**遗留**：已有记录里的「假简介」和错误「所属收藏夹」不会自动回写——只影响新写入；「更新视频状态」也不会重写简介（需要重新收藏一次才会按新规则写）。
+**遗留**
+
+- 老档案里的「未知」不会批量改写：打开详情时按 N/A 显示，想换成真数字点一次「更新视频状态」即可。
+- 分区依赖接口的 `tname`：接口没取到的老记录仍显示「未知」，同样可以用「更新视频状态」补。
 
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1019 条**<!-- i18n-count:1019 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1020 条**<!-- i18n-count:1020 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:366 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:367 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

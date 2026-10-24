@@ -1835,9 +1835,9 @@ function updateVideoCard(card, video, query) {
   checkbox.checked = selectedVideoIds.has(video.id);
   card.querySelector(".cover-badge").textContent = video.collection;
   card.querySelector(".downloaded-badge").hidden = !video.downloaded;
-  // 4.5：播放量放在封面右下角，没有数据的记录不显示
+  // 4.5：播放量放在封面右下角；1.9.5 起缺数据显示 N/A，让「数据不完整」一眼可见
   const viewsBadge = card.querySelector(".cover-views");
-  const viewsText = formatCount(video.stats?.view);
+  const viewsText = formatCount(statDisplay(video.stats?.view));
   viewsBadge.textContent = viewsText ? `${viewsText} ${BcaI18n.t("播放")}` : "";
   viewsBadge.hidden = !viewsText;
   card.querySelector(".card-title").innerHTML = highlightMatches(video.title, query);
@@ -2672,6 +2672,12 @@ function formatCount(value) {
 }
 
 // 互动数据卡片行：一个值都没有（老档案还没写【互动数据】）时整块不渲染，避免一排“未知”
+// 1.9.5（用户要求 3）：数值类字段缺失时统一显示 N/A，不再显示「未知」或整块不渲染。
+function statDisplay(value) {
+  const text = String(value ?? "").trim();
+  return !text || BcaArchiveCore.isPlaceholderValue(text) ? "N/A" : text;
+}
+
 function detailStatsHtml(stats) {
   // 每次渲染现翻一次，切语言后重画详情就会跟着变
   const labels = {
@@ -2683,10 +2689,9 @@ function detailStatsHtml(stats) {
     share: BcaI18n.t("转发")
   };
   const cards = STAT_KEYS
-    .map((key) => ({ label: labels[key], value: formatCount(stats?.[key]) }))
-    .filter((item) => item.value)
+    .map((key) => ({ label: labels[key], value: formatCount(statDisplay(stats?.[key])) }))
     .map((item) => `<div class="detail-stat"><span class="detail-stat-value tnum">${escapeHtml(item.value)}</span><span class="detail-stat-label">${escapeHtml(item.label)}</span></div>`);
-  return cards.length ? `<div class="detail-stats">${cards.join("")}</div>` : "";
+  return `<div class="detail-stats">${cards.join("")}</div>`;
 }
 
 // 搜索命中时高亮卡片标题里的关键词（先转义再插入 <mark>，避免标题里的尖括号被当成标签）
@@ -2931,12 +2936,16 @@ function openDetail(video, restoreTo, options = {}) {
   retainDetailCover(video.cover);
   detailPanel.classList.toggle("invalid-video", video.isInvalid);
   const rows = [];
+  // 1.9.5（用户要求 4）：粉丝数或六项互动数据里有 N/A 时，在「更新视频状态」下面补一句红字
+  const detailIncomplete = statDisplay(video.upFans) === "N/A"
+    || STAT_KEYS.some((key) => statDisplay(video.stats?.[key]) === "N/A");
   addField(rows, BcaI18n.t("收藏时间"), video.favoriteAt);
   addField(rows, BcaI18n.t("信息保存于"), video.savedAt);
   // 失效视频多一行原因；老归档没写这一行时显示「已失效」，不能显示「未知」
   if (video.isInvalid) addField(rows, BcaI18n.t("失效原因"), video.invalidReason || BcaI18n.t("已失效"));
   // 粉丝数按原值显示（例如“粉丝 12345”），不套用统计卡片的万/亿缩写
-  addField(rows, BcaI18n.t("UP 主"), video.upName, video.upFans ? `<span class="detail-up-fans">${escapeHtml(BcaI18n.t("粉丝"))} <span class="tnum">${escapeHtml(video.upFans)}</span></span>` : "");
+  // 1.9.5：粉丝数缺失也显示 N/A（收藏时不再请求粉丝数，所以新记录常是 N/A）
+  addField(rows, BcaI18n.t("UP 主"), video.upName, `<span class="detail-up-fans">${escapeHtml(BcaI18n.t("粉丝"))} <span class="tnum">${escapeHtml(statDisplay(video.upFans))}</span></span>`);
   addField(rows, BcaI18n.t("UP 主 UID"), video.upMid);
   if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>${escapeHtml(BcaI18n.t("UP 主主页"))}</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">${escapeHtml(BcaI18n.t("打开 UP 主主页"))} ${BcaIcons.svg("external")}</a></dd>`);
   addField(rows, BcaI18n.t("分区"), video.category);
@@ -2972,7 +2981,7 @@ function openDetail(video, restoreTo, options = {}) {
     ? `<a class="detail-title-link" href="${escapeHtml(detailHref)}" target="_blank" rel="noopener noreferrer" title="${detailHrefLabel}"></a>`
     : "";
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `${coverHtml}<span class="detail-collection"></span><h2 class="detail-title">${titleHtml}</h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}${video.isInvalid ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("将下载到本地的视频放入收藏夹中"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频状态"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span><p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
+  detailContent.innerHTML = `${coverHtml}<span class="detail-collection"></span><h2 class="detail-title">${titleHtml}</h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}${video.isInvalid ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("将下载到本地的视频放入收藏夹中"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频状态"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span>${detailIncomplete ? `<span class="detail-refresh-warning">${escapeHtml(BcaI18n.t("该视频数据不完整，更新视频状态或能解决"))}</span>` : ""}<p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · ${BcaI18n.t("已失效")}` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   // 1.8.6：详情封面同样「用到才读」；读完只替换占位图，不重画整个面板

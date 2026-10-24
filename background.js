@@ -68,6 +68,8 @@ const COVER_QUALITY = 0.8;
 const COVER_HOST_SUFFIXES = [".hdslb.com"];
 const COVER_EXACT_HOSTS = ["hdslb.com", "api.bilibili.com"];
 const COVER_FETCH_TIMEOUT_MS = 20000;
+// 1.9.5：收藏这条链路要用户等，封面最多等 3 秒；失败就记「封面待补全」，不影响收藏本身。
+const COVER_SAVE_TIMEOUT_MS = 3000;
 
 // 4.5.1：工具栏图标的观感对齐网页/弹窗里的 logo——更大的圆角比例、
 // 竖直渐变、大尺寸下加一圈白色高光。关闭自动归档时整体转灰（保持原有行为）。
@@ -654,7 +656,10 @@ function coverFetchUrl(rawUrl) {
   }
 }
 
-async function loadCoverPng(url) {
+// 1.9.5（用户要求「收藏时把超时收到 3 秒」）：收藏路径单独用一个更短的封面超时，
+// 导入/更新状态仍然沿用 20 秒（那两条链路本来就慢、且不在点击收藏的等待里）。
+async function loadCoverPng(url, options = {}) {
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : COVER_FETCH_TIMEOUT_MS;
   const normalized = normalizeUrl(url);
   if (!normalized) throw new Error("网页没有提供封面地址。");
   // V1.4.3（P2-17）：不在白名单里的封面地址直接跳过，绝不向任意域名发请求
@@ -666,7 +671,7 @@ async function loadCoverPng(url) {
   // 但不该把等待时间算进网络超时里）。
   await biliThrottleWait();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), COVER_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(coverUrl, { credentials: "omit", cache: "no-store", signal: controller.signal });
     if (!response.ok) throw new Error(`封面下载失败：HTTP ${response.status}`);
@@ -724,8 +729,9 @@ function buildInfo(data, folderName, savedAt) {
     ? "未知"
     : (descriptionSplit.isShareText || rawDescription === title ? "无" : rawDescription);
   const stats = metadata.stats || {};
-  const hasStats = STAT_KEYS.some((key) => !importIsPlaceholder(stats[key]));
-  const fansText = importIsPlaceholder(metadata.upFans) ? "未知" : String(metadata.upFans);
+  // 1.9.5（用户要求 3）：数值类字段拿不到就写 N/A，不再写「未知」；读取侧两种都按缺失处理。
+  const MISSING_VALUE = "N/A";
+  const fansText = importIsPlaceholder(metadata.upFans) ? MISSING_VALUE : String(metadata.upFans);
   const lines = [
     "【基本信息】",
     `视频收藏时间：${favoriteAtText}`,
@@ -748,15 +754,14 @@ function buildInfo(data, folderName, savedAt) {
     `UP主主页：${upHome}`,
     ""
   ];
-  // 互动数据单独成段，不再和简介挤在一起（只有确实抓到时才写）
-  if (hasStats) {
-    lines.push("【互动数据】");
-    for (const key of STAT_KEYS) {
-      const value = stats[key];
-      lines.push(`${STAT_LABELS[key]}：${importIsPlaceholder(value) ? "未知" : String(value)}`);
-    }
-    lines.push("");
+  // 1.9.5（用户要求 3）：这一段总是写出来，缺的字段记 N/A ——
+  // 「数据不完整」在 txt 里能一眼看出来，收藏库也能据此提示去「更新视频状态」。
+  lines.push("【互动数据】");
+  for (const key of STAT_KEYS) {
+    const value = stats[key];
+    lines.push(`${STAT_LABELS[key]}：${importIsPlaceholder(value) ? MISSING_VALUE : String(value)}`);
   }
+  lines.push("");
   lines.push(
     "【标签】",
     tags,
@@ -876,7 +881,7 @@ async function addManualVideo(data) {
     const savedCollections = [];
     const savedPaths = [];
     if (pending.length) {
-      const cover = await loadCoverPng(metadata.cover);
+      const cover = await loadCoverPng(metadata.cover, { timeoutMs: COVER_SAVE_TIMEOUT_MS });
       const favoriteAt = new Date();
       for (const target of pending) {
         const record = await uniqueTimeFolder(target.collection, timestampFolder(favoriteAt));
@@ -1125,7 +1130,7 @@ async function logClientError(payload) {
    所以收藏这一下顺手问一次 `/x/web-interface/view`（与「更新视频状态」「导入」同一个接口），
    以接口的 owner / stat / desc 为准。请求失败一律退回页面元数据 ——
    补资料失败绝不能让这次收藏变成失败。 */
-const SAVE_ENRICH_TIMEOUT_MS = 8000;
+const SAVE_ENRICH_TIMEOUT_MS = 3000;
 
 // 1.9.4：页面元数据里 BV 有时只在链接里 —— 判重与补资料都要用它，收敛成一处。
 function bvidOfMetadata(metadata) {
@@ -1152,15 +1157,10 @@ async function enrichFavoriteMetadata(pageMetadata) {
       share: pick("share")
     };
     const hasAnyStat = STAT_KEYS.some((key) => !importIsPlaceholder(stats[key]));
-    // 1.9.4（用户报「第一次收藏没有粉丝数，点『更新视频状态』才有」）：顺手补一次 UP 主粉丝数。
-    // fetchUpFans 自己带 7 天缓存，同一个 UP 主只问一次；它失败不能拖垮这次收藏，所以单独兜住。
+    /* 1.9.5（用户要求）：收藏时不再额外请求粉丝数 —— 少一次限速排队。
+       粉丝数只在「更新视频状态」和「从收藏夹导入」里获取；这次没取到就写 N/A，
+       收藏库会提示「该视频数据不完整」。 */
     const upMid = owner.mid ? String(owner.mid) : metadata.upMid;
-    let fans = "";
-    try {
-      if (upMid && !importIsPlaceholder(upMid)) fans = await fetchUpFans(String(upMid).replace(/[^0-9]/g, ""));
-    } catch (fansError) {
-      console.warn("收藏时没能补上 UP 主粉丝数（不影响这次保存）", fansError);
-    }
     return {
       ...metadata,
       bvid: String(video.bvid || bvid || "").trim(),
@@ -1168,12 +1168,15 @@ async function enrichFavoriteMetadata(pageMetadata) {
       title: metadata.title || String(video.title || "").trim(),
       upName: importIsPlaceholder(owner.name) ? metadata.upName : owner.name,
       upMid,
-      upFans: fans || metadata.upFans,
+      upFans: metadata.upFans,
       // 1.9.4：简介只认接口给的真简介，页面那份可能是分享文案（见 content.js 的同一处修正）。
       description: String(video.desc || "").trim() || metadata.description,
-      pubdate: Number(video.pubdate) || metadata.pubdate,
+      // 1.9.5（用户要求 6）：发布时间优先用页面 DOM 抓到的那份，接口值只做兜底。
+      pubdate: Number(metadata.pubdate) || Number(video.pubdate) || 0,
       duration: Number(video.duration) || metadata.duration,
       cover: metadata.cover || video.pic || "",
+      // 1.9.5（用户要求 5）：接口的 tname/tname2 就是「分区」，写进 txt 并显示在收藏库。
+      category: String([video.tname, video.tname2].filter(Boolean).join(" / ")).trim() || metadata.category,
       stats: hasAnyStat ? stats : (metadata.stats || {})
     };
   } catch (error) {
