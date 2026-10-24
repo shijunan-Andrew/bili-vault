@@ -36,7 +36,6 @@
         <button id="recycleSelectAll" class="button button-quiet" type="button" data-i18n="全选">全选</button>
         <button id="recycleRestore" class="button button-primary" type="button" disabled><span data-icon="move"></span><span data-i18n="恢复所选">恢复所选</span></button>
         <button id="recycleDeleteSelected" class="button button-danger" type="button" disabled><span data-icon="trash"></span><span data-i18n="彻底删除所选">彻底删除所选</span></button>
-        <button id="recyclePurge" class="button button-danger" type="button"><span data-icon="trash"></span><span data-i18n="清空回收站">清空回收站</span></button>
       </div>
     </header>
 
@@ -51,6 +50,12 @@
     </div>
 
     <div id="recycleGrid" class="video-grid recycle-grid" role="list"></div>
+
+    <!-- 「清空回收站」不跟日常操作挤在右上角：它一次删光全部、不可逆，
+         放在页面底部单独一行，和上面的选择操作隔开，误点的可能性小得多。 -->
+    <div class="recycle-danger-zone">
+      <button id="recyclePurge" class="button button-danger" type="button"><span data-icon="trash"></span><span data-i18n="清空回收站">清空回收站</span></button>
+    </div>
   </div>
 
   <script src="recycle.js"></script>
