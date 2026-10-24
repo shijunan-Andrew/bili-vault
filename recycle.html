@@ -47,6 +47,14 @@
     <p id="recycleStatus" class="row-status" role="status" hidden></p>
     <p id="recycleError" class="row-error" role="alert" hidden></p>
 
+    <!-- 1.10.16（R-3）：没选文件夹和「回收站是空的」是两种处境。
+         混成一句「现在是空的」，用户会以为东西被删光了，其实只是还没选目录。 -->
+    <div id="recycleNoRoot" class="recycle-empty" hidden>
+      <p data-i18n="还没有选择本地备份文件夹，所以这里读不到回收站。">还没有选择本地备份文件夹，所以这里读不到回收站。</p>
+      <p class="recycle-empty-note" data-i18n="回收站就在本地备份文件夹的 005回收站 里，选好文件夹再回来这里就能看到。">回收站就在本地备份文件夹的 005回收站 里，选好文件夹再回来这里就能看到。</p>
+      <button id="recycleChooseRoot" class="button button-quiet" type="button"><span data-icon="folder"></span><span data-i18n="去收藏库选文件夹">去收藏库选文件夹</span></button>
+    </div>
+
     <div id="recycleEmpty" class="recycle-empty" hidden>
       <p data-i18n="回收站里现在是空的。">回收站里现在是空的。</p>
       <p class="recycle-empty-note" data-i18n="在收藏库里删掉视频或收藏夹后，它们会先出现在这里，30 天后自动清理。">在收藏库里删掉视频或收藏夹后，它们会先出现在这里，30 天后自动清理。</p>

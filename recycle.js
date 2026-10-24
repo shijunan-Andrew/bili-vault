@@ -18,6 +18,8 @@ const COVER_HYDRATE_CONCURRENCY = 4;
 
 const grid = document.getElementById("recycleGrid");
 const emptyBox = document.getElementById("recycleEmpty");
+const noRootBox = document.getElementById("recycleNoRoot");
+const chooseRootButton = document.getElementById("recycleChooseRoot");
 const summary = document.getElementById("recycleSummary");
 const statusLine = document.getElementById("recycleStatus");
 const errorLine = document.getElementById("recycleError");
@@ -33,6 +35,8 @@ let busy = false;
 /* 1.10.13（R-2）：是否已经读到过回收站内容。false 时摘要保持隐藏，
    避免和状态行的「正在读取回收站…」重复同一句。 */
 let summaryReady = false;
+// 1.10.16（R-3）：没选文件夹时给不同的空态，别拿「回收站是空的」糊弄。
+let rootMissing = false;
 let coverUrls = [];
 
 function escapeHtml(value) {
@@ -209,7 +213,8 @@ function renderEntries() {
   if (!grid) return;
   grid.replaceChildren();
   for (const entry of entries) grid.appendChild(buildCard(entry));
-  if (emptyBox) emptyBox.hidden = entries.length > 0;
+  if (emptyBox) emptyBox.hidden = entries.length > 0 || rootMissing;
+  if (noRootBox) noRootBox.hidden = !rootMissing;
   updateSummary();
   renderSelectionState();
   hydrateCovers();
@@ -217,7 +222,12 @@ function renderEntries() {
 
 async function loadRoot() {
   const handle = await BcaArchiveTools.loadRootHandle();
-  if (!handle) throw new Error(BcaI18n.t("先选一个本地备份文件夹，再打开回收站。"));
+  if (!handle) {
+    // 1.10.16（R-3）：标记一下，好让空态知道「是没选文件夹」而不是「回收站真的是空的」。
+    const error = new Error(BcaI18n.t("先选一个本地备份文件夹，再打开回收站。"));
+    error.noRoot = true;
+    throw error;
+  }
   const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
   if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
   return handle;
@@ -229,6 +239,7 @@ async function reload() {
     showStatus(BcaI18n.t("正在读取回收站…"));
     const handle = await loadRoot();
     entries = await BcaArchiveTools.listRecycled(handle);
+    rootMissing = false;
     summaryReady = true;
     for (const entry of [...selectedPaths]) {
       if (!entries.some((item) => entryKey(item) === entry)) selectedPaths.delete(entry);
@@ -238,9 +249,16 @@ async function reload() {
   } catch (error) {
     entries = [];
     selectedPaths.clear();
+    rootMissing = error?.noRoot === true;
     summaryReady = false;
     if (summary) summary.hidden = true;
     renderEntries();
+    if (rootMissing) {
+      // 还没选文件夹不是「出错」，是一步还没做的事；空态里已经写清楚下一步，
+      // 再顶一条红字只会让人以为回收站坏了。
+      showStatus("");
+      return;
+    }
     showError(BcaI18n.t("读回收站失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
   }
 }
@@ -334,6 +352,20 @@ async function purgeAll() {
   }
 }
 
+function goLibrary() {
+  try {
+    chrome.tabs.getCurrent((tab) => {
+      if (tab && tab.id !== undefined) {
+        chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("library.html") });
+        return;
+      }
+      window.location.href = chrome.runtime.getURL("library.html");
+    });
+  } catch (_) {
+    window.location.href = "library.html";
+  }
+}
+
 function goBack() {
   try {
     chrome.tabs.getCurrent((tab) => {
@@ -349,6 +381,7 @@ function goBack() {
 }
 
 backButton?.addEventListener("click", goBack);
+chooseRootButton?.addEventListener("click", goLibrary);
 selectAllButton?.addEventListener("click", () => {
   if (selectedPaths.size === entries.length) {
     selectedPaths.clear();

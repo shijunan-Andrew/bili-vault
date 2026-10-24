@@ -43,6 +43,10 @@
   line-height: 1.7;
 }
 
+.recycle-empty .button {
+  margin-top: var(--sp-3);
+}
+
 .recycle-empty {
   display: flex;
   flex-direction: column;

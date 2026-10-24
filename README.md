@@ -137,18 +137,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.15：设置页把长说明收起来，低频卡不再一屏塞满
+## V1.10.16：回收站把「还没选文件夹」和「回收站是空的」分开
 
-- **折叠块**：归档维护、回收站、本机数据三张卡里最长的三条说明（完整度巡检、最近删除的视频、清理本机的原生目录助手），行内只剩一句话，做法与范围收进「它具体做什么？」折叠块，点开才展开；用的是原生 `<details>`，键盘与读屏都跟着浏览器走，不需要新脚本。
-- **样式**：折叠块共用一条 `.row-more` 口径（小一号、`--muted`、行前三角随开合旋转），颜色与字号全部走令牌，没有新写死值。
-- **范围**：`settings.html` 三行、`settings.css` 六条规则、两本词典各 +4 条（删 3 加 7，1083 → **1087**）；`test/pages.test.cjs` 加一条真渲染用例（页面套件 59 → **60**）。
+- **两种空态**：没选本地备份文件夹时，回收站页不再显示「回收站里现在是空的。」，而是单独一块说明「还没有选择本地备份文件夹」，并给一个「去收藏库选文件夹」按钮直接带过去。
+- **不再是报错**：没选文件夹属于「还没做」，不是失败；这条路径不再顶一条红字错误，只留空态与下一步。
+- **范围**：`recycle.html` 一块、`recycle.css` 一条、`recycle.js` 六处、两本词典各 +3 条（1087 → **1090**）；`test/pages.test.cjs` 的两条回收站用例改成盯空态分流（页面套件 60 → **61**）。
 
 **遗留** - 无。
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1087 条**<!-- i18n-count:1087 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1090 条**<!-- i18n-count:1090 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。

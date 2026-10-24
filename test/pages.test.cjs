@@ -1523,12 +1523,16 @@ async function suiteRecycle() {
 
     const doc = page.document;
     const error = doc.getElementById("recycleError");
-    assert.equal(error.hidden, false, "错误行要露出来");
-    assert.equal(error.textContent.trim(),
-      BcaT(page, "读回收站失败：{message}", { message: BcaT(page, "先选一个本地备份文件夹，再打开回收站。") }),
-      "错误文案要指名下一步做什么");
+    assert.equal(error.hidden, true, "没选文件夹不是出错，不该顶红字");
+    assert.equal(doc.getElementById("recycleStatus").hidden, true, "状态行也别留着「正在读取」");
     assert.equal(doc.getElementById("recycleGrid").children.length, 0, "一条卡片都不该画");
-    assert.equal(doc.getElementById("recycleEmpty").hidden, false, "空态要显示");
+    /* 1.10.16（R-3）：没选文件夹 ≠ 回收站是空的。这时候要引导去选文件夹，
+       不能拿「回收站里现在是空的。」把人劝回去。 */
+    assert.equal(doc.getElementById("recycleNoRoot").hidden, false, "没选文件夹的空态要显示");
+    assert.equal(doc.getElementById("recycleChooseRoot").textContent.trim(),
+      BcaT(page, "去收藏库选文件夹"), "空态里要有一个明确的下一步");
+    assert.equal(doc.getElementById("recycleEmpty").hidden, true,
+      "「回收站是空的」这句不许在没选文件夹时冒出来");
     /* 1.10.13（R-2）：读失败时我们并不知道回收站空不空，摘要保持隐藏，
        别再拿「回收站里现在是空的。」当占位。 */
     const summary = doc.getElementById("recycleSummary");
@@ -1698,6 +1702,19 @@ async function suiteRecycle() {
     assert.equal(doc.getElementById("recycleGrid").children.length, 0, "恢复完列表要空");
     assert.equal(doc.getElementById("recycleStatus").textContent.trim(),
       BcaT(page, "已恢复 {count} 项，放回原来的收藏夹。", { count: "1" }));
+  });
+
+  await test("真的读到了、但一条都没有时，才说「回收站里现在是空的」（1.10.16 真执行）", async () => {
+    const page = await openRecycle();
+    const { tools } = makeRecycleTools({ entries: [] });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    assert.equal(doc.getElementById("recycleEmpty").hidden, false, "空回收站要有说明");
+    assert.equal(doc.getElementById("recycleNoRoot").hidden, true,
+      "已经读到数据了，就不该再提示没选文件夹");
   });
 }
 
