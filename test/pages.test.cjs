@@ -1462,6 +1462,32 @@ async function suiteSettings() {
     assert.ok(said.some((message) => message.includes("006报告/")), "体检文案要点明报告写到哪");
     assert.ok(said.some((message) => message.includes("006报告/") && message.includes("只读归档")), "体检要说明不动归档");
   });
+
+  await test("收藏夹那行同时写出总量与近 7 天新增，不再只报一个数（1.10.12）", async () => {
+    const page = await openStats({
+      localData: {
+        bcaStats: {
+          videos: 2193,
+          days: 7,
+          collections: 5,
+          topCollection: { name: "蜻蜓小新", count: 447, recent: 11 },
+          dailyRows: [{ day: "2026-10-20", count: 4 }],
+          weekly: [], monthly: [], yearly: []
+        }
+      }
+    });
+    await settle(12);
+
+    const doc = page.document;
+    assert.equal(doc.getElementById("statsTopName").textContent.trim(), "蜻蜓小新");
+    const count = doc.getElementById("statsTopCount").textContent.trim();
+    assert.equal(
+      count,
+      BcaT(page, "共 {total} 条 · 近 {days} 天新增 {recent} 条", { total: "447", days: "7", recent: "11" }),
+      "要同时写出总量与近 7 天新增，别让人把 447 当成区间新增"
+    );
+    assert.ok(count.includes("447") && count.includes("11"), "两个数都要在");
+  });
 }
 
 /* ---------------- 回收站页（1.10.0） ----------------

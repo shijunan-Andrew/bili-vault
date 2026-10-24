@@ -1571,7 +1571,17 @@
     const total = Math.max(0, numberOr(top.count, 0));
     setText(ui.topName, name || "—");
     if (recent > 0) {
-      setText(ui.topCount, t("近 {days} 天保存 {count} 个视频", { days: windowDays, count: formatCount(recent) }));
+      /* 1.10.12：以前只报「近 7 天保存 N 个」，和上面「区间内新增 N」并排时容易被读成
+         同一个数（一个是某个收藏夹的 7 天新增、一个是整个库在所选区间里的新增）。
+         这里把总量一起写出来，两个数各自是什么就一目了然。 */
+      setText(
+        ui.topCount,
+        t("共 {total} 条 · 近 {days} 天新增 {recent} 条", {
+          total: formatCount(total),
+          days: windowDays,
+          recent: formatCount(recent)
+        })
+      );
     } else if (total > 0) {
       /* 近 7 天一条没存：那就报它一共多少，别让人以为这夹子是空的 */
       setText(ui.topCount, t("近 {days} 天没有新增，一共 {count} 个视频", { days: windowDays, count: formatCount(total) }));
