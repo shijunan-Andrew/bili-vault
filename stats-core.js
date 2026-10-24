@@ -171,7 +171,6 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
       title: String(raw.title || ""),
       bvid: String(raw.bvid || ""),
       aid: String(raw.aid || ""),
-      category: String(raw.category || "")
     };
   }
 
@@ -286,8 +285,6 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
       existing.title = String(record.title || existing.title || "");
       existing.bvid = String(record.bvid || existing.bvid || "");
       existing.aid = String(record.aid || existing.aid || "");
-      // 分区以最近一次扫描到的为准：视频改分区了，库里跟着改（其余字段仍按「有值才覆盖」）。
-      existing.category = String(record.category || existing.category || "");
     } else {
       database.videos[key] = {
         at,
@@ -296,7 +293,6 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
         title: String(record.title || ""),
         bvid: String(record.bvid || ""),
         aid: String(record.aid || ""),
-        category: String(record.category || "")
       };
       // 累计保存数：只有「新的一条入库」才 +1，同一条重扫 / 改收藏夹都不加，所以它单调递增、
       // 删视频也不会回退（用户要的正是「自首次启用以来的累计」）。
@@ -319,9 +315,6 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
       title: source.title || "",
       bvid: source.bvid || "",
       aid: source.aid || "",
-      // 1.10.1（P1-7）：分区（视频信息.txt 的「分区」）。老库没有这一项，靠下一次
-      // 整库重建（databaseFromVideos）补上；补上之前统计页的「分区构成」自己隐藏。
-      category: String(source.category || "").trim(),
       at: Number.isFinite(favoriteAt) ? favoriteAt : numberOr(now, Date.now())
     };
   }
@@ -737,7 +730,6 @@ function fallbackRowKey(videos, key) {
     const collections = new Set();
     const recentByCollection = new Map();
     const totalByCollection = new Map();
-    const totalByCategory = new Map();
     let savedToday = 0;
     let savedLast7 = 0;
     let firstAt = Infinity;
@@ -746,8 +738,6 @@ function fallbackRowKey(videos, key) {
       const name = entry.collection || "未分类收藏";
       collections.add(name);
       totalByCollection.set(name, numberOr(totalByCollection.get(name), 0) + 1);
-      const category = String(entry.category || "").trim();
-      if (category) totalByCategory.set(category, numberOr(totalByCategory.get(category), 0) + 1);
       if (at < firstAt) firstAt = at;
       if (entry.day === today) savedToday += 1;
       if (at >= last7From) savedLast7 += 1;
@@ -760,12 +750,6 @@ function fallbackRowKey(videos, key) {
         topCollection = { name, count, recent: numberOr(recentByCollection.get(name), 0) };
       }
     }
-    /* 1.10.1（P1-7）：分区构成。只数「有分区」的行 —— 老库在下次整库重建之前
-       这一项是空的，统计页那张卡自己隐藏，不拿「未标注」把图凑满。
-       条数相同的按名字排，保证两次渲染顺序稳定。 */
-    const categoryRows = [...totalByCategory.entries()]
-      .map(([categoryName, count]) => ({ name: categoryName, count }))
-      .sort((left, right) => (right.count - left.count) || left.name.localeCompare(right.name, "zh-CN"));
     const sinceTime = Number.isFinite(firstAt) ? firstAt : numberOr(Date.parse(String((database && database.createdAt) || "")), time);
     const since = localDayKey(sinceTime);
     // 用「本地日之间隔几天」来算，而不是 (todayTime - sinceTime) / DAY_MS：
@@ -791,8 +775,6 @@ function fallbackRowKey(videos, key) {
       savedToday,
       savedLast7,
       topCollection,
-      // 1.10.1（P1-7）：分区构成（按条数降序）。空数组＝这份快照还没有分区数据。
-      categories: categoryRows,
       savedTotal: Math.max(entries.length, numberOr(database && database.totals && database.totals.savedTotal, 0)),
       firstSeen: { since: firstSeen, days: firstSeenDays },
       days: { since, days },

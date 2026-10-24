@@ -684,7 +684,6 @@ test("the 4.2 layout round-trips through the archive parser", () => {
     "恢复情况：收藏夹资料 + 视频资料接口",
     "BV号：BV1pMgp6aEbu",
     "av号：av116645959959066",
-    "分区：美食 / 美食制作",
     "视频时长：17:37",
     "视频发布时间：2026-08-14 06:00:00 星期五",
     "",
@@ -793,7 +792,6 @@ const FULL_INFO = [
   "恢复情况：收藏夹资料",
   "BV号：BV1pMgp6aEbu",
   "av号：av116645959959066",
-  "分区：美食 / 美食制作",
   "视频时长：17:37",
   "视频发布时间：未知",
   "",
@@ -827,7 +825,6 @@ const LEGACY_INFO = [
   "视频链接：https://www.bilibili.com/video/BV14b4y1i7gN/",
   "BV号：BV14b4y1i7gN",
   "av号：未知",
-  "分区：未知",
   "视频时长：未知",
   "视频发布时间：未知",
   "",
@@ -877,7 +874,7 @@ test("updating the volatile numbers leaves everything else untouched", () => {
   assert.equal(after.fields["转发人数"], "12");
   assert.equal(after.fields["视频发布时间"], "2026-08-14 06:00:00 星期五");
   // 其它一律不动
-  for (const key of ["视频标题", "视频链接", "视频收藏时间", "保存文件夹", "BV号", "av号", "分区", "视频时长", "UP主昵称", "UP主UID", "UP主主页", "视频状态", "恢复情况"]) {
+  for (const key of ["视频标题", "视频链接", "视频收藏时间", "保存文件夹", "BV号", "av号", "视频时长", "UP主昵称", "UP主UID", "UP主主页", "视频状态", "恢复情况"]) {
     assert.equal(after.fields[key], before.fields[key], `${key} 不该被改动`);
   }
   assert.deepEqual(core.tagsFromInfo(after), core.tagsFromInfo(before));
@@ -3820,7 +3817,7 @@ test("失效原因写进 视频信息.txt：失效才写，有效一个字都不
   const savedAt = new Date("2026-10-10T12:00:00");
   const metadata = {
     imported: true, title: "已失效视频", url: "未知", bvid: "未知", aid: "", description: "未知",
-    upName: "账号已注销", upMid: "未知", upFans: "未知", category: "未知", duration: 0, pubdate: 0,
+    upName: "账号已注销", upMid: "未知", upFans: "未知", duration: 0, pubdate: 0,
     tags: [], stats: {}, recoverySummary: "未能找回资料", invalid: true, attr: 9
   };
   const build = (extra) => buildInfo({ metadata: { ...metadata, ...extra }, favoriteAt: savedAt.getTime() }, "沙雕动画", savedAt);
@@ -3856,7 +3853,7 @@ test("失效原因的全链路：接口 attr → importMetadata → 视频信息
   );
   const item = {
     title: "已失效视频", bvid: "", aid: "", cover: "", description: "未知", author: "账号已注销",
-    authorMid: "", upFans: "", stats: {}, category: "", duration: 0, pubdate: 0, tags: [],
+    authorMid: "", upFans: "", stats: {}, duration: 0, pubdate: 0, tags: [],
     recoverySources: [], isInvalid: true, attr: 9
   };
   const savedAt = new Date("2026-10-10T12:00:00");
@@ -7734,14 +7731,13 @@ test("收藏前先按「收藏夹 + BV」判重，已存在就整条跳过（1.9
   assert.doesNotMatch(body, /existing\?\.favoriteLine/, "已存在的记录不再改写成新时间");
 });
 
-test("收藏时不再为粉丝数多发一次请求，分区与发布时间按新口径取（1.9.5）", () => {
+test("收藏时不再为粉丝数多发一次请求，发布时间按新口径取（1.9.5）", () => {
   const background = stripComments(readProjectFile("background.js"));
   assert.match(background, /function bvidOfMetadata\(metadata\) \{/);
   const enrich = functionBodyOf(background, "async function enrichFavoriteMetadata(pageMetadata) {");
   assert.match(enrich, /bvidOfMetadata\(metadata\)/, "补资料前先算 BV 号");
   assert.doesNotMatch(enrich, /fetchUpFans\(/, "收藏路径不许再请求粉丝数");
   assert.match(enrich, /upFans: metadata\.upFans,/, "粉丝数沿用页面值（通常是空，写入时记 N/A）");
-  assert.match(enrich, /category: String\(\[video\.tname, video\.tname2\]/, "分区写接口的 tname");
   assert.match(enrich, /pubdate: Number\(metadata\.pubdate\) \|\| Number\(video\.pubdate\) \|\| 0,/, "发布时间优先用页面 DOM 抓到的值");
   assert.match(enrich, /description: String\(video\.desc \|\| ""\)\.trim\(\) \|\| metadata\.description,/, "简介只认接口值");
   assert.match(enrich, /收藏时没能补上互动数据/, "取不到就退回页面元数据，不挡收藏");
@@ -7942,4 +7938,20 @@ test("设置页的动作按钮先确认、后回执，确认只有 askConfirm �
   }
   // 导入的回执在 change 处理器里（文件选完才有结果）
   assert.match(page, /flashTransfer\(BcaI18n\.t\("配置已导入。"\)\)/);
+});
+
+test("1.10.4：分区整条链路都不许回来", () => {
+  const files = ["background.js", "content.js", "library.js", "archive-core.js", "archive-tools.js", "stats-core.js", "stats.js", "stats.html", "stats.css"];
+  for (const file of files) {
+    const text = readProjectFile(file).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    assert.doesNotMatch(text, /分区/, `${file} 里不该再提到分区`);
+    assert.doesNotMatch(text, /\btname\b/, `${file} 不该再向接口要 tname（B 站只回数字 tid）`);
+    assert.doesNotMatch(text, /\bcategor(y|ies)\b/, `${file} 不该再有 category 字段`);
+  }
+  // 写侧：视频信息.txt 不再有这一行（写的唯一入口是 buildInfo）
+  const background = readProjectFile("background.js");
+  assert.doesNotMatch(background, /`分区：${/, "buildInfo 不许再写分区行");
+  // 读侧：扫描不再去 txt 里取这一行
+  const tools = readProjectFile("archive-tools.js");
+  assert.doesNotMatch(tools, /field\(info, "分区"\)/, "recordToVideo 不许再读分区行");
 });

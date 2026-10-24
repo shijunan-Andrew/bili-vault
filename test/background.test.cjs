@@ -168,10 +168,10 @@ async function suite() {
     assert.equal(merged.upMid, "4925207");
     assert.deepEqual(merged.stats, { view: 100, danmaku: 3, like: 5, coin: 6, favorite: 7, share: 8 });
     // 1.9.5：收藏时不再请求粉丝数（少一次限速排队），粉丝数交给「更新视频状态」/导入；
-    // 分区用接口的 tname，发布时间优先用页面 DOM 抓到的那个。
+    // 1.10.4：不再记分区（接口只回数字 tid，没有名字）。发布时间优先用页面 DOM 抓到的那个。
     assert.equal(merged.upFans, undefined);
     assert.equal(fetched.filter((url) => url.includes("/x/relation/stat")).length, 0, "收藏时不该再请求粉丝数");
-    assert.equal(merged.category, "游戏 / 单机游戏");
+    assert.equal(merged.category, undefined, "1.10.4 起不再记分区");
     assert.equal(merged.pubdate, 1600000000, "发布时间优先用页面 DOM 的值");
     assert.equal(merged.description, "真简介");
 

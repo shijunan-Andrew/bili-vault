@@ -1366,7 +1366,7 @@ async function suiteSettings() {
         diagnostics: { missingText: [], missingCover: [], brokenText: [], tempFiles: [] },
         issues: [], unfinished: [], longNames: [], bytes: 0, recordCount: 1
       }),
-      recordToVideo: (collection, entry) => ({ collection, directory: entry.name, title: "t", bvid: "BV1aaaaaaaaa", url: "", upName: "", upMid: "", upHome: "", upFans: "", favoriteAt: "", savedAt: "", timestamp: "", category: "", duration: "", publishDate: "", description: "", stats: {}, tags: [], isInvalid: false, invalidReason: "", cover: "", info: {}, searchIndex: "" }),
+      recordToVideo: (collection, entry) => ({ collection, directory: entry.name, title: "t", bvid: "BV1aaaaaaaaa", url: "", upName: "", upMid: "", upHome: "", upFans: "", favoriteAt: "", savedAt: "", timestamp: "", duration: "", publishDate: "", description: "", stats: {}, tags: [], isInvalid: false, invalidReason: "", cover: "", info: {}, searchIndex: "" }),
       subdirectoryHandle: async () => exportDirectory(),
       formatMegabytes: () => "0 B"
     };
@@ -1652,31 +1652,6 @@ async function suiteStats() {
     assert.equal(button.textContent.trim(), BcaT(page, "重新读取统计库"));
   });
 
-  await test("统计页「分区构成」按快照里的 categories 画条，没标分区的那一格单列（1.10.1 真执行）", async () => {
-    const page = await openStats({
-      localData: {
-        bcaStats: {
-          ...snapshot,
-          categories: [{ name: "动画", count: 6 }, { name: "音乐", count: 3 }, { name: "", count: 1 }]
-        }
-      }
-    });
-    const doc = page.document;
-    const card = doc.getElementById("statsCategoryCard");
-    assert.equal(card.hidden, false, "有分区数据就要显示这张卡");
-    const rows = [...doc.querySelectorAll("#statsCategoryList .stats-category-row")];
-    assert.equal(rows.length, 3, "三个分区（含未标注）要各占一行");
-    assert.deepEqual(rows.map((row) => textOf(row.querySelector(".stats-category-name"))),
-      ["动画", "音乐", BcaT(page, "未标注分区")], "空名字要换成「未标注分区」");
-    assert.equal(rows[0].querySelector(".stats-category-fill").style.width, "100%", "最多的分区条要占满");
-    assert.equal(rows[1].querySelector(".stats-category-fill").style.width, "50%", "3/6 应该是半条");
-    assert.match(textOf(rows[2].querySelector(".stats-category-count")), /10%/, "最少的那个也要给出百分比");
-  });
-
-  await test("统计页没有分区数据时整张「分区构成」卡都收起来（1.10.1 真执行）", async () => {
-    const page = await openStats({ localData: { bcaStats: snapshot } });
-    assert.equal(page.document.getElementById("statsCategoryCard").hidden, true, "categories 为空就不该占版面");
-  });
 }
 
 /* ---------------- 可访问性（1.10.1） ----------------

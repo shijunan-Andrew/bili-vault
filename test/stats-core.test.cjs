@@ -1026,41 +1026,6 @@ test("台词下标不会卡住：封顶后延后写盘的那一分钟里也要�
   assert.deepEqual(indexes, [0, 1, 2, 3, 0, 1], "touchPet 自己也要轮着走");
 });
 
-/* ───────────────── 1.10.1（P1-7）：分区构成 ───────────────── */
-
-test("recordFromVideo 把分区带上（没有分区就是空串，不是 N/A）", () => {
-  assert.equal(core.recordFromVideo(video({ category: "动画" }), NOW).category, "动画");
-  assert.equal(core.recordFromVideo(video(), NOW).category, "");
-  assert.equal(core.recordFromVideo(video({ category: "  " }), NOW).category, "");
-});
-
-test("addRecord 后补的分区能填进来，空分区不覆盖已有的", () => {
-  const database = core.emptyDatabase(NOW);
-  core.addRecord(database, core.recordFromVideo(video(), NOW), NOW);
-  assert.equal(database.videos["bvid:BV1Z9c7zAEbj"].category, "");
-  core.addRecord(database, core.recordFromVideo(video({ category: "动画" }), NOW), NOW);
-  assert.equal(database.videos["bvid:BV1Z9c7zAEbj"].category, "动画", "后补的分区要填进来");
-  core.addRecord(database, core.recordFromVideo(video({ category: "" }), NOW), NOW);
-  assert.equal(database.videos["bvid:BV1Z9c7zAEbj"].category, "动画", "空分区不许把已有的抹掉");
-});
-
-test("snapshot 的 categories 只数有分区的行，按条数降序、同数按名字排", () => {
-  const database = core.emptyDatabase(NOW);
-  const rows = [
-    video({ bvid: "BV1aaaaaaaaa", title: "甲" }),
-    video({ bvid: "BV1bbbbbbbbb", title: "乙", category: "动画" }),
-    video({ bvid: "BV1ccccccccc", title: "丙", category: "音乐" }),
-    video({ bvid: "BV1ddddddddd", title: "丁", category: "动画" })
-  ];
-  for (const row of rows) core.addRecord(database, core.recordFromVideo(row, NOW), NOW);
-  const shot = core.snapshot(database, NOW);
-  assert.deepEqual(shot.categories, [
-    { name: "动画", count: 2 },
-    { name: "音乐", count: 1 }
-  ], "空分区的行不进 categories，排序要稳定");
-  assert.equal(shot.videos, 4, "没有分区的行照样算记录数");
-});
-
 test("迁移演练：注入 v1→v2→v3，按序跑、盖章、不重复跑、不动入参", () => {
   const calls = [];
   const migrations = [
@@ -1069,7 +1034,7 @@ test("迁移演练：注入 v1→v2→v3，按序跑、盖章、不重复跑、�
       run: (database) => {
         calls.push("v2");
         const videos = Object.assign({}, database.videos);
-        for (const key of Object.keys(videos)) videos[key] = Object.assign({}, videos[key], { category: videos[key].category || "" });
+        for (const key of Object.keys(videos)) videos[key] = Object.assign({}, videos[key], { note: "v2" });
         return Object.assign({}, database, { videos });
       }
     },
@@ -1079,10 +1044,10 @@ test("迁移演练：注入 v1→v2→v3，按序跑、盖章、不重复跑、�
   const migrated = core.migrateDatabase(v1, NOW, { migrations });
   assert.deepEqual(calls, ["v2", "v3"], "要按 to 升序逐级跑");
   assert.equal(migrated.schemaVersion, 3, "跑完要盖章成最后一个版本");
-  assert.equal(migrated.videos["bvid:BV1aaaaaaaaa"].category, "", "v2 的改动要落下来");
+  assert.equal(migrated.videos["bvid:BV1aaaaaaaaa"].note, "v2", "v2 的改动要落下来");
   assert.equal(migrated.note, "v3");
   assert.equal(v1.schemaVersion, 1, "不能原地改调用方传进来的对象");
-  assert.equal(v1.videos["bvid:BV1aaaaaaaaa"].category, undefined, "也不能原地改库里的记录");
+  assert.equal(v1.videos["bvid:BV1aaaaaaaaa"].note, undefined, "也不能原地改库里的记录");
   calls.length = 0;
   const fromTwo = core.migrateDatabase(Object.assign({}, v1, { schemaVersion: 2 }), NOW, { migrations });
   assert.deepEqual(calls, ["v3"], "已经在 v2 的库只跑后面那几步");

@@ -456,7 +456,6 @@ const ARCHIVE = [
   "视频标题：不该被动到的标题",
   "视频链接：https://www.bilibili.com/video/BV1xx411c7mD/",
   "视频状态：正常",
-  "分区：未知",
   "视频发布时间：未知",
   "",
   "【UP主】",
@@ -546,7 +545,7 @@ test("patchVolatileFields：视频状态能写进去", () => {
 });
 
 test("patchVolatileFields：老档案没有「视频状态」行时补在视频链接之后", () => {
-  const old = ["【基本信息】", "视频标题：t", "视频链接：https://x/", "分区：y"].join("\n");
+  const old = ["【基本信息】", "视频标题：t", "视频链接：https://x/", "视频时长：01:00"].join("\n");
   const out = core.patchVolatileFields(old, { videoStatus: "正常" });
   const lines = out.split("\n");
   assert.equal(lines[lines.findIndex((l) => l.startsWith("视频链接：")) + 1], "视频状态：正常");
@@ -819,7 +818,6 @@ const LIVE_ARCHIVE = [
   "视频状态：正常",
   "BV号：BV1rsJX6vEMo",
   "av号：av11312345678",
-  "分区：单机游戏",
   "视频时长：05:12",
   "视频发布时间：2026-10-15 20:00:00 星期四",
   "",
@@ -850,7 +848,6 @@ const LIVE_ARCHIVE = [
 const DEGRADED_REBUILD = LIVE_ARCHIVE
   .replace("视频收藏时间：2026年10月16日00时36分14秒 星期五", "视频收藏时间：2026年10月16日 00时36分14秒.15")
   .replace("视频发布时间：2026-10-15 20:00:00 星期四", "视频发布时间：未知")
-  .replace("分区：单机游戏", "分区：未知")
   .replace("视频时长：05:12", "视频时长：未知")
   .replace("UP主粉丝数：3456", "UP主粉丝数：未知")
   .replace(/【互动数据】[\s\S]*?\n\n/, "")
@@ -866,8 +863,7 @@ test("mergeInfoText：接口失败导致的重建不许把已知内容换成「�
   const merged = core.mergeInfoText(LIVE_ARCHIVE, DEGRADED_REBUILD);
   for (const keep of [
     "视频发布时间：2026-10-15 20:00:00 星期四",
-    "分区：单机游戏",
-    "视频时长：05:12",
+      "视频时长：05:12",
     "UP主粉丝数：3456",
     "漫漫长夜、单机游戏、修改器",
     "这是 UP 主自己写的一段简介。",

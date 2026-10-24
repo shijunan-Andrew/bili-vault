@@ -518,11 +518,11 @@
   /* 1.8.3（存档完好性）：刷新已有记录时的「不许降级」闸门。
      导入的「更新」链路为了把老档案补齐成新格式，一直是拿这次抓到的资料整篇重建
      （buildInfo）。但资料接口 / 标签接口任一失败，重建出来的就是一堆「未知」：
-     简介、标签、发布时间、分区、时长、互动数据会在一次「更新」里被换掉，而导入跑完
+     简介、标签、发布时间、时长、互动数据会在一次「更新」里被换掉，而导入跑完
      之后没有退路（回滚日志只在中途取消时才用）。
      这里逐字段比对：新值是占位、原值不是占位 → 保留原值；区块（标签 / 简介 / 互动
      数据）整体成了占位而原文有真内容 → 整块保留原文。其余以新值为准（真变了就该更新）。 */
-  const MERGE_LINE_FIELDS = ["视频标题", "视频链接", "BV号", "av号", "分区", "视频时长", "视频发布时间", "UP主昵称", "UP主UID", "UP主粉丝数", "UP主主页"];
+  const MERGE_LINE_FIELDS = ["视频标题", "视频链接", "BV号", "av号", "视频时长", "视频发布时间", "UP主昵称", "UP主UID", "UP主粉丝数", "UP主主页"];
   const MERGE_SECTIONS = ["【标签】", "【视频简介】"];
 
   function mergeInfoText(original, candidate) {
@@ -888,7 +888,6 @@
       favoriteAt: asText(source.favoriteAt),
       savedAt: asText(source.savedAt),
       timestamp: asNumber(source.timestamp),
-      category: asText(source.category),
       duration: asText(source.duration),
       publishDate: asText(source.publishDate),
       isInvalid: source.isInvalid === true,

@@ -744,7 +744,6 @@ function buildInfo(data, folderName, savedAt) {
     `视频链接：${videoUrl}`,
     `BV号：${bvid}`,
     `av号：${aid}`,
-    `分区：${infoLineValue(metadata.category)}`,
     `视频时长：${metadata.imported && !(Number(metadata.duration) > 0) ? "未知" : formatDuration(metadata.duration)}`,
     `视频发布时间：${formatPublishDate(metadata.pubdate)}`,
     // 封面候选全失败时这里会留下「待补全」标记，让后续导入还能重新尝试补真封面（见 COVER_PENDING_LINE）
@@ -847,7 +846,6 @@ async function fetchManualVideoMetadata(identifier) {
     description: video.desc || "未知",
     upMid: video.owner?.mid,
     upName: video.owner?.name,
-    category: video.tname,
     duration: video.duration,
     pubdate: video.pubdate,
     tags
@@ -1181,8 +1179,6 @@ async function enrichFavoriteMetadata(pageMetadata) {
       pubdate: Number(metadata.pubdate) || Number(video.pubdate) || 0,
       duration: Number(video.duration) || metadata.duration,
       cover: metadata.cover || video.pic || "",
-      // 1.9.5（用户要求 5）：接口的 tname/tname2 就是「分区」，写进 txt 并显示在收藏库。
-      category: String([video.tname, video.tname2].filter(Boolean).join(" / ")).trim() || metadata.category,
       stats: hasAnyStat ? stats : (metadata.stats || {})
     };
   } catch (error) {
@@ -1768,7 +1764,6 @@ function normalizeImportMedia(media, folder) {
     shareStats: shareSplit.stats,
     author: importClean(upper.name || media.upper_name || ""),
     authorMid: String(upper.mid || ""),
-    category: importClean(media.tname || media.type_name || ""),
     duration: Number(media.duration || 0) || 0,
     pubdate: Number(media.pubtime || media.pubdate || 0) || 0,
     tags: [],
@@ -1855,11 +1850,10 @@ function mergeRecoveredValue(item, candidate, source) {
   if (candidate.author && !item.author) item.author = candidate.author;
   if (candidate.authorMid && !item.authorMid) item.authorMid = String(candidate.authorMid);
   if (candidate.duration && !item.duration) item.duration = Number(candidate.duration) || 0;
-  if (candidate.category && !item.category) item.category = candidate.category;
   if (candidate.pubdate && !item.pubdate) item.pubdate = Number(candidate.pubdate) || 0;
   if (candidate.description && !item.description) item.description = candidate.description;
   if (Array.isArray(candidate.tags) && candidate.tags.length && !item.tags.length) { item.tags = candidate.tags; tagsAdded = true; }
-  if (changed || candidate.cover || candidate.author || candidate.authorMid || candidate.duration || candidate.category || candidate.pubdate || candidate.description || tagsAdded) {
+  if (changed || candidate.cover || candidate.author || candidate.authorMid || candidate.duration || candidate.pubdate || candidate.description || tagsAdded) {
     item.recoverySources.add(source);
   }
 }
@@ -2069,7 +2063,7 @@ async function enrichImportedInvalidVideos(items, folder, tabId = null) {
       const data = await biliImportApiGet("/x/web-interface/view", { bvid: item.bvid }, 10000, tabId);
       if (data?.title) mergeRecoveredValue(item, {
         title: data.title, cover: data.pic, author: data.owner?.name, authorMid: data.owner?.mid,
-        category: data.tname, duration: data.duration, pubdate: data.pubdate, description: data.desc
+        duration: data.duration, pubdate: data.pubdate, description: data.desc
       }, "视频资料接口");
     } catch (error) {
       if (importIsRateLimitedError(error)) item.rateLimited = true;
@@ -2111,7 +2105,7 @@ async function importRunLimited(items, limit, worker) {
 /* ==========================================================================
    4.2：导入/更新的完整重构
    与 4.1beta 的区别：
-   - 每条视频都抓一次完整资料（标签、简介、发布时间、分区、互动数据、UP 主粉丝数），
+   - 每条视频都抓一次完整资料（标签、简介、发布时间、互动数据、UP 主粉丝数），
      不再只补“缺失”的字段；
    - 支持暂停 / 继续 / 取消，取消时回滚本次新建的目录与被改写的文件，
      导入前就在本地归档里的内容保持不动；
@@ -3117,7 +3111,7 @@ async function refreshImportedRecord(collection, record, item, journal) {
   metadata.coverMissing = cover ? cover.placeholder === true : record.coverMissing === true;
   // 1.8.3（存档完好性）：整篇重建的结果先过一道「不许降级」合并。
   // 资料接口 / 标签接口任一失败时，重建出来的是一堆「未知」——直接写下去就是把真实的
-  // 简介、标签、发布时间、分区、时长、互动数据换成占位符，而且导入跑完之后没有退路。
+  // 简介、标签、发布时间、时长、互动数据换成占位符，而且导入跑完之后没有退路。
   const rebuiltText = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, collection.name, new Date());
   const refreshedText = BcaArchiveCore.mergeInfoText(original, rebuiltText);
   let touched = false;
@@ -3164,7 +3158,7 @@ async function fetchUpFans(mid, tabId = null, options = {}) {
   return fans;
 }
 
-// 一条视频的完整资料：简介、发布时间、分区、时长、UP 主、互动数据、标签、粉丝数
+// 一条视频的完整资料：简介、发布时间、时长、UP 主、互动数据、标签、粉丝数
 async function fetchVideoDetail(item, tabId = null) {
   const detail = { stats: {}, errors: [] };
   /* 1.8.6（P0-2）：这条记录只缺「UP主粉丝数」时，只补 /x/relation/stat 这一下 ——
@@ -3189,7 +3183,6 @@ async function fetchVideoDetail(item, tabId = null) {
         if (data.desc) detail.description = String(data.desc).trim();
         if (Number(data.pubdate) > 0) detail.pubdate = Number(data.pubdate);
         if (Number(data.duration) > 0) detail.duration = Number(data.duration);
-        if (data.tname) detail.category = importClean(data.tname);
         if (data.pic) detail.cover = normalizeUrl(data.pic);
         if (data.owner?.name) detail.upName = importClean(data.owner.name);
         if (data.owner?.mid) detail.upMid = String(data.owner.mid);
@@ -3232,7 +3225,6 @@ function applyVideoDetail(item, detail) {
   if (detail.upName) item.author = detail.upName;
   if (detail.upMid) item.authorMid = detail.upMid;
   if (detail.upFans) item.upFans = detail.upFans;
-  if (detail.category) item.category = detail.category;
   if (Number(detail.pubdate) > 0) item.pubdate = Number(detail.pubdate);
   if (Number(detail.duration) > 0) item.duration = Number(detail.duration);
   if (detail.description) item.description = detail.description;
@@ -3402,7 +3394,7 @@ function importMetadata(item, cover) {
   const aid = item.aid || (bvid ? importBvToAid(bvid) : "");
   const title = importUsefulTitle(item.title) ? item.title : "未知";
   const sources = [...item.recoverySources];
-  const recoveredFields = [item.title, item.cover, item.author, item.duration, item.category, item.pubdate, item.description]
+  const recoveredFields = [item.title, item.cover, item.author, item.duration, item.pubdate, item.description]
     .filter((value) => value && value !== "已失效视频").length;
   return {
     title,
@@ -3415,7 +3407,6 @@ function importMetadata(item, cover) {
     upMid: item.authorMid || "",
     upFans: item.upFans || "",
     stats: item.stats || {},
-    category: item.category || "未知",
     duration: Number(item.duration) || 0,
     pubdate: Number(item.pubdate) || 0,
     tags: item.tags.length ? item.tags : ["未知"],
@@ -4710,7 +4701,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
         folderNotes.push(`「${folder.title}」有失效视频，但「尝试恢复失效视频」未开启，已按“未知”保存。可在插件弹窗的导入面板中开启后重新导入。`);
       }
 
-      // 4.2：每条视频都抓一次完整资料（标签 / 简介 / 发布时间 / 分区 / 互动数据 / UP 主粉丝数）
+      // 4.2：每条视频都抓一次完整资料（标签 / 简介 / 发布时间 / 互动数据 / UP 主粉丝数）
       const detailTargets = [...pendingItems, ...refreshTargets.map((entry) => entry.item)];
       if (detailTargets.length) await fetchImportDetails(detailTargets, folder, tabId);
 

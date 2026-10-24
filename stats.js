@@ -77,9 +77,6 @@
     pieCard: document.getElementById("statsPieCard"),
     yearCard: document.getElementById("statsYearCard"),
     topCard: document.getElementById("statsTopCard"),
-    categoryCard: document.getElementById("statsCategoryCard"),
-    categoryLead: document.getElementById("statsCategoryLead"),
-    categoryList: document.getElementById("statsCategoryList"),
     empty: document.getElementById("statsEmpty"),
     emptyText: document.getElementById("statsEmptyText"),
     republish: document.getElementById("statsRepublish"),
@@ -1573,53 +1570,6 @@
     }
   }
 
-  /* 1.10.1（P1-7）：分区构成。数据来自快照的 categories（stats-core 从视频信息.txt
-     的「分区」攒出来），统计页读不到数据库本体，所以只能吃快照里这一项。
-     老库在下次整库重建之前没有这一项 —— 那就整块藏起来：不拿「未标注」把图凑满，
-     也不为了这张卡去碰文件系统。 */
-  function renderCategories(snapshot) {
-    const list = ui.categoryList;
-    if (!list) return;
-    list.textContent = "";
-    const rows = Array.isArray(snapshot && snapshot.categories) ? snapshot.categories : [];
-    if (!rows.length) {
-      show(ui.categoryCard, false);
-      setText(ui.categoryLead, "");
-      return;
-    }
-    const counts = rows.map((row) => Math.max(0, numberOr(row && row.count, 0)));
-    const total = counts.reduce((sum, count) => sum + count, 0);
-    const peak = counts.reduce((top, count) => Math.max(top, count), 0) || 1;
-    setText(ui.categoryLead, t("按视频信息里的「分区」统计，{count} 条记录标了分区。", { count: formatCount(total) }));
-    rows.forEach((row, index) => {
-      const count = counts[index];
-      const item = document.createElement("li");
-      item.className = "stats-category-row";
-      const head = document.createElement("p");
-      head.className = "stats-category-head";
-      const name = document.createElement("span");
-      name.className = "stats-category-name";
-      name.textContent = String((row && row.name) || "") || t("未标注分区");
-      const value = document.createElement("span");
-      value.className = "stats-category-count tnum";
-      value.textContent = t("{count} 条 · {percent}%", {
-        count: formatCount(count),
-        percent: String(total > 0 ? Math.round((count * 100) / total) : 0)
-      });
-      head.append(name, value);
-      const bar = document.createElement("span");
-      bar.className = "stats-category-bar";
-      const fill = document.createElement("span");
-      fill.className = "stats-category-fill";
-      /* 最少留 2%：只有一条的分区也看得见颜色，不然像没画出来 */
-      fill.style.width = `${Math.max(2, Math.round((count * 100) / peak))}%`;
-      bar.append(fill);
-      item.append(head, bar);
-      list.append(item);
-    });
-    show(ui.categoryCard, true);
-  }
-
   function renderUpdated(snapshot) {
     const text = formatTime(snapshot && snapshot.updatedAt);
     setText(ui.updatedValue, text);
@@ -1644,9 +1594,6 @@
       show(ui.pieCard, false);
       show(ui.yearCard, false);
       show(ui.topCard, false);
-      show(ui.categoryCard, false);
-      if (ui.categoryList) ui.categoryList.textContent = "";
-      setText(ui.categoryLead, "");
       if (ui.chart) ui.chart.textContent = "";
       if (ui.pie) ui.pie.textContent = "";
       if (ui.yearChart) ui.yearChart.textContent = "";
@@ -1692,7 +1639,6 @@
     if (selectable) renderPie();
     renderYears();
     renderTop(snapshot);
-    renderCategories(snapshot);
     renderUpdated(snapshot);
     /* 语言切换后柱子上那些 title / aria-label 得跟着换（图标是脚本塞的，也补一次） */
     if (typeof BcaIcons === "object" && BcaIcons && typeof BcaIcons.hydrate === "function") {

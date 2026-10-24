@@ -83,7 +83,6 @@ const DESCRIPTION_LINES = [
 ];
 const TAG_POOL = ["前端", "B站", "教程", "搬运", "二次元", "鬼畜", "手书", "数据库", "性能优化", "MV3", "开源", "备份"];
 const UP_NAMES = ["老张", "阿黎", "糯米团子", "半糖去冰", "折腾君", "K酱", "深夜搬砖", "三号机"];
-const CATEGORIES = ["科技区", "生活区", "鬼畜区", "动画区", "音乐区"];
 
 // 更新视频状态时真正会传的那几个字段，形状与 background.js 一致。
 const PATCH_OPTIONS = {
@@ -251,7 +250,6 @@ function generateVideos(size) {
       favoriteAt: timeText(at),
       savedAt: new Date(at).toISOString(),
       timestamp: at,
-      category: pick(rand, CATEGORIES),
       duration: pad2(1 + Math.floor(rand() * 59)) + ":" + pad2(Math.floor(rand() * 60)),
       publishDate: timeText(at - (1 + Math.floor(rand() * 200)) * DAY_MS).slice(0, 10),
       isInvalid: false,

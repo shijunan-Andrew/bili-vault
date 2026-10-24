@@ -624,13 +624,12 @@
     const bvid = field(info, "BV号");
     const aid = field(info, "av号");
     const upName = field(info, "UP主昵称");
-    const category = field(info, "分区");
     const tags = BcaArchiveCore.tagsFromInfo(info);
     const id = `${collectionName}/${recordEntry.name}`;
     const previousRecord = previous.get(id);
     const downloadState = BcaArchiveCore.downloadStateFromIndex(collectionName, videoIdentifierKeys({ bvid, aid }), downloadIndex, previousRecord);
     // 搜索比对串在扫描时拼一次就够；字段顺序与取值必须与 matchesBaseFilters 里那份一致。
-    const searchIndex = [title, upName, bvid, category, collectionName, share.description, ...tags].join(" ").toLocaleLowerCase();
+    const searchIndex = [title, upName, bvid, collectionName, share.description, ...tags].join(" ").toLocaleLowerCase();
     return {
       id,
       collection: collectionName,
@@ -654,7 +653,6 @@
       favoriteAt: date,
       savedAt: record.savedAt,
       timestamp: parseDate(date, recordEntry.name),
-      category,
       duration: field(info, "视频时长"),
       publishDate: field(info, "视频发布时间"),
       description: share.description,

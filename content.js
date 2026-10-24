@@ -231,7 +231,6 @@
       bvid,
       aid,
       cover: video.pic || meta('meta[property="og:image"]') || player?.poster || "",
-      category: [video.tname || video.tid_name || "", video.tname2 || ""].filter(Boolean).join(" / "),
       duration: Number(video.duration) || (Number.isFinite(player?.duration) ? Math.floor(player.duration) : 0),
       pubdate: domPublish || Number(video.pubdate) || 0,
       upName: owner.name || owner.uname || upNameText || "",

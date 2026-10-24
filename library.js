@@ -1720,7 +1720,7 @@ function refreshVideoFilterOptionsForSearch() {
 }
 
 function legacySearchIndex(video) {
-  return [video.title, video.upName, video.bvid, video.category, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase();
+  return [video.title, video.upName, video.bvid, video.collection, video.description, ...video.tags].join(" ").toLocaleLowerCase();
 }
 
 // 筛选值以外的条件（搜索 + #videoFilter），用来算下拉选项池
@@ -3102,7 +3102,6 @@ function openDetail(video, restoreTo, options = {}) {
   addField(rows, BcaI18n.t("UP 主"), video.upName, `<span class="detail-up-fans">${escapeHtml(BcaI18n.t("粉丝"))} <span class="tnum">${escapeHtml(statDisplay(video.upFans))}</span></span>`);
   addField(rows, BcaI18n.t("UP 主 UID"), video.upMid);
   if (video.upHome && /^https?:\/\//i.test(video.upHome)) rows.push(`<dt>${escapeHtml(BcaI18n.t("UP 主主页"))}</dt><dd><a class="detail-profile-link" href="${escapeHtml(video.upHome)}" target="_blank" rel="noopener noreferrer">${escapeHtml(BcaI18n.t("打开 UP 主主页"))} ${BcaIcons.svg("external")}</a></dd>`);
-  addField(rows, BcaI18n.t("分区"), video.category);
   addField(rows, BcaI18n.t("视频时长"), video.duration);
   addField(rows, BcaI18n.t("发布时间"), video.publishDate);
   addField(rows, BcaI18n.t("BV 号"), video.bvid);

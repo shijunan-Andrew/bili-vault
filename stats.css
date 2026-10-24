@@ -685,62 +685,6 @@ html[data-theme="dark"] .stats-pie {
   font-size: var(--fs-lg);
 }
 /* 收藏夹名字可能很长：占满剩余宽度、超长省略号，别把右边的数字挤走 */
-/* 1.10.1（P1-7）：分区构成 —— 名字一行、条数一行、下面一条占比横条。
-   横条用收窄的百分比（最多的那个分区占满），不是在总条数里占比，
-   这样小分区也看得见长度；旁边的「x 条 · n%」才是占总数的比例。 */
-.stats-category {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.stats-category-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-
-.stats-category-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  margin: 0;
-  font-size: var(--fs-base);
-}
-
-.stats-category-name {
-  color: var(--text);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stats-category-count {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  white-space: nowrap;
-}
-
-.stats-category-bar {
-  display: block;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--surface-sunken);
-  overflow: hidden;
-}
-
-.stats-category-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-}
-
 .stats-top-name {
   flex: 1 1 auto;
   min-width: 0;
