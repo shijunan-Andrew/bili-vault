@@ -7940,6 +7940,44 @@ test("设置页的动作按钮先确认、后回执，确认只有 askConfirm �
   assert.match(page, /flashTransfer\(BcaI18n\.t\("配置已导入。"\)\)/);
 });
 
+test("1.10.6：收藏库的快照预热要真的能跑（不许再裸调搬走的老函数）", () => {
+  const library = readProjectFile("library.js");
+  // 1.9.0 把 videoFromArchiveRecord 搬进了 archive-tools.js 并改名 BcaArchiveTools.recordToVideo，
+  // 但 paintSnapshot 里那一处一直没改 —— 每次打开收藏库都抛 ReferenceError，被 try/catch 吞掉。
+  assert.doesNotMatch(library, /(?<![.\w$])videoFromArchiveRecord\s*\(/, "videoFromArchiveRecord 1.9.0 就搬走了，留着就是运行时炸");
+  // 快照预热按新签名传 previous，否则「已下载」状态会在预热时丢掉
+  assert.match(
+    library,
+    /BcaArchiveTools\.recordToVideo\(entry\.collection, \{ name: entry\.directory \}, record, \{ previous: previousVideos \}\)/,
+    "paintSnapshot 必须走 BcaArchiveTools.recordToVideo 并带上 previous"
+  );
+
+  // 只盯这一条路径还不够：把 paintSnapshot 的函数体抠出来，逐个核它调用的裸函数名都在本文件里定义。
+  // 一个拼错 / 搬走的名字在这里就会露出来，不必等到真机点开收藏库。
+  const start = library.indexOf("async function paintSnapshot(");
+  assert.ok(start > 0, "library.js 里找不到 paintSnapshot");
+  const end = library.indexOf("\nasync function scanDownloadedDirectories(", start);
+  assert.ok(end > start, "找不到 paintSnapshot 的结尾");
+  const body = library.slice(start, end);
+  assert.ok(body.length > 400, "抠出来的函数体太短，切分规则可能失效了");
+
+  const defined = new Set();
+  for (const match of library.matchAll(/(?:function|const|let|var)\s+([A-Za-z_$][\w$]*)/g)) defined.add(match[1]);
+  const globals = new Set([
+    "Object", "Array", "Map", "Set", "WeakMap", "Date", "JSON", "Math", "Number", "String", "Boolean",
+    "Promise", "Error", "RegExp", "BigInt", "Intl", "Symbol", "URL", "Blob", "File", "AbortController",
+    "parseInt", "parseFloat", "isNaN", "encodeURIComponent", "decodeURIComponent", "structuredClone",
+    "setTimeout", "clearTimeout", "requestAnimationFrame", "queueMicrotask", "if", "for", "while",
+    "switch", "catch", "return", "typeof", "await", "new", "function", "of", "in", "void", "delete"
+  ]);
+  const missing = [];
+  for (const match of body.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const name = match[1];
+    if (globals.has(name) || defined.has(name)) continue;
+    if (!missing.includes(name)) missing.push(name);
+  }
+  assert.deepEqual(missing, [], `paintSnapshot 里调了本文件没定义的名字：${missing.join("、")}`);
+});
 test("1.10.4：分区整条链路都不许回来", () => {
   const files = ["background.js", "content.js", "library.js", "archive-core.js", "archive-tools.js", "stats-core.js", "stats.js", "stats.html", "stats.css"];
   for (const file of files) {

@@ -137,11 +137,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.5：设置页每一行的控件统一靠右
+## V1.10.6：打开收藏库不再报错，上次的快照真的先用上了
 
-- **同一页里原来有两种对齐**：说明超过两行时控件会换到下一行，换行后它独占一行、`justify-content: space-between` 只剩一个子项，于是贴到左边；和没换行、靠右的那些行放在一起就显得乱。
-- **改法只有一处**：`.setting-row-control` 加 `margin-left: auto`，换行与不换行都由它把控件顶到右边；窄屏（≤620px）上下排时再把它清零，保持「标题一行、控件一行」的既有行为。
-- **范围**：只改 `settings.css` 两处，不动 HTML 结构、不新增文案 —— 词典仍 **1083 条**，五套测试仍 **378 / 91 / 69 / 30 / 54**。
+- **症状**：每次打开收藏库，页面都会报一条「按上次的快照先渲染失败（这次直接整库读） ReferenceError: videoFromArchiveRecord is not defined」。
+- **根因**：1.9.0 把「归档记录 → 界面视频对象」的换算搬进 `archive-tools.js` 并改名 `BcaArchiveTools.recordToVideo`，搬走时改了扫描那条调用点，**「先画上次快照」这条路的调用点漏改**，仍在调旧名字。这一行从 1.9.0 起一直抛错，被 `displayRoot()` 的 try/catch 吞成一条警告，所以界面照常能用、问题藏了八个版本。
+- **代价不只是那句报错**：1.8.5 加的「毫秒级先出上次结果、再整库校准」从来没跑通过；快照本该顺手把记录灌进内存缓存，也就一直没灌进去 —— 每次打开收藏库都是整库读一遍 `视频信息.txt`。
+- **改法**：这一处换成 `BcaArchiveTools.recordToVideo(entry.collection, { name: entry.directory }, record, { previous: previousVideos })`，与扫描那条调用点同一写法。
+- **补的守卫**：`stability` 新增一条 —— `library.js` 里不许再出现旧函数名，且 `paintSnapshot()` 里调用的每个裸函数名都必须在 `library.js` 内定义（拼错 / 搬走的名字当场失败，不必等真机点开收藏库）。
+- **范围**：只动 `library.js` 一行 + 新增 1 条测试；词典仍 **1083 条**，五套测试 **379 / 91 / 69 / 30 / 54**。
 
 **遗留** - 无。
 
@@ -153,7 +156,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:378 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:379 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

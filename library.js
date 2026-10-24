@@ -399,7 +399,7 @@ function revokeAllCoverRefs() {
 async function readCover(fileHandle) {
   const file = await fileHandle.getFile();
   const url = URL.createObjectURL(file);
-  // 缓存条目先持有一份；派生出的 video 对象在 videoFromArchiveRecord 里再加一份
+  // 缓存条目先持有一份；派生出的 video 对象（BcaArchiveTools.recordToVideo）里再加一份
   addCoverRef(url);
   // 1.8.5：顺手把封面字节数带出去 —— 体积统计就不用再为它单独 getFile 一遍
   return { cover: url, coverBytes: file.size };
@@ -642,7 +642,10 @@ async function paintSnapshot(handle) {
       downloadCollectionName: entry.downloadCollectionName || "",
       downloadDirectoryHandle: null
     });
-    const video = videoFromArchiveRecord(entry.collection, { name: entry.directory }, record, null, previousVideos);
+    // V1.10.6：这个换算 1.9.0 就搬到 archive-tools.js 并改名 recordToVideo 了，这里一直没改 ——
+    // 于是每次打开收藏库都在这一行抛 ReferenceError，被 displayRoot 的 try/catch 吞成一条警告，
+    // 「先画上次快照、再整库校准」这条加速从来没真正跑过。签名对齐 scanRoot 里那个调用点。
+    const video = BcaArchiveTools.recordToVideo(entry.collection, { name: entry.directory }, record, { previous: previousVideos });
     if (!byCollection.has(entry.collection)) byCollection.set(entry.collection, []);
     byCollection.get(entry.collection).push(video);
   }

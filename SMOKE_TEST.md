@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **378** 项里<!-- test-count:378 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **379** 项里<!-- test-count:379 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -716,6 +716,12 @@
 **出问题看**：先确认它是不是在抓详情（那会让耗时从分钟级变成小时级）；再看有没有拿到 uid（报错会说"请先打开一次自己的 B 站收藏夹页面"）。
 
 ---
+
+## V1.10.6 新增的几条
+
+1. **打开收藏库不再报错**：先在收藏库里正常浏览一次（让快照写下去），关掉页面再打开，F12 控制台里**不应再有** `ReferenceError: videoFromArchiveRecord is not defined`。
+2. **首屏先出上次结果**：第二次打开时，应当先看到「已显示上次的 N 条记录，正在核对文件…」这行提示与上次的列表，随后才被这次扫描覆盖（记录很多时这个差别更明显）。
+3. **回归**：打开后列表、封面、筛选、详情都照常；「刷新」仍然强制整库读一遍（不走快照）。
 
 ## V1.10.5 新增的几条
 
