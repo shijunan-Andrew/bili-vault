@@ -211,6 +211,32 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 
 服务端原样吐出仓库里的 HTML/CSS/JS，并注入一段桩脚本：把 `chrome.storage` / `chrome.runtime.sendMessage` / `chrome.tabs` 换成本地实现，再伪造一套 File System Access 句柄（目录、`视频信息.txt`、封面）。**页面代码是真的，浏览器是真的，DOM/CSS 是真的**；`chrome.*` 与目录授权是假的。所以可以信布局、文案、事件；不要用它验证存储语义、权限、跨上下文消息。
 
+#### 连不上时怎么办（按顺序试，2026-10-24 补）
+
+1. `bsk_session list` 报 `no active browser sessions` 只是「还没开会话」，不是错误 —— 直接 `bsk_session start`。
+2. **只开一个浏览器时不要传 `browser`**。传一个凭猜的标签（例如 `browser: "chrome"`）会得到 `requested browser is not connected`：工具只认验证过的实例 ID / 唯一标签，认不出时不会退回唯一在线的那台。2026-10-24 连着两次误判「扩展没连上」，都是这个词造成的 —— 用户那边显示已连接，去掉 `browser` 立刻就通。
+3. 真有多台浏览器 / 多个 Chrome 配置时，标签必须先验证过；拿不准就问用户当前用的是哪一个，别猜。
+4. 连接失败和「预览站没起」是两回事：`curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8798/__settings.html` 返回 `000` 是服务没起（重新 `job_kill` + 起一个新的），跟扩展能不能连无关。
+5. 实在连不上就走下面的 headless Chrome 兜底，别在这里卡住：静态布局核对用不上会话。
+
+#### headless Chrome 兜底（bsk 不可用，或只想看静态布局）
+
+```
+"C:/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --hide-scrollbars \
+  --window-size=1400,3400 --screenshot="C:\Users\Maxwell\Desktop\bili_vault_ref\_shot.png" \
+  --virtual-time-budget=3000 "http://127.0.0.1:8798/__settings.html?locale=zh-CN&theme=light"
+```
+
+- `--window-size` 的高度就是截图的长度：整页很长时给 3000–3600，一次拍到底，比 bsk 里滚一屏截一张快。
+- 只适合静态核对（布局、对齐、文案、空态）；要点按、滚动后才出现的状态、需要交互的流程，仍然得 bsk。
+- 截图放参考区（`C:\Users\Maxwell\Desktop\bili_vault_ref\_shot-*.png`），别进仓库。1.10.5 那次的对齐核对就是这么做的：前面几张是用户截的，后面一张是改完的。
+
+#### 真扩展页面能不能看（2026-10-24 补）
+
+- 用 CDP 把已有标签页 `navigate` 到 `chrome-extension://<id>/…` 会被 Chrome 拒（`{"code":-32000,"message":"Not allowed"}`）；但 **`bsk_tabs create` 时直接带上这个 URL 可以正常打开**（只读看一眼用，别在里面点操作）。
+- 未打包扩展的 id 由路径算出，这台机器上是 `fmjfnoklnindjjemlbbagjjiaackjjhb`；`chrome://extensions` 卡片上的版本号、收藏库左下角「哔哩藏库 · V1.10.x」都能确认到底加载的是哪一版（改完没点「重新加载」时，这里还是旧版本号）。
+- 用户自己的标签页要 `bsk_tabs borrow` 搬进 Agent 窗口才截得到；无人值守时 borrow 会报 `No user tab can display the borrow confirmation`，那就直接请用户贴截图，别绕。
+
 #### 踩过的坑
 
 - **改完预览脚本要重启服务**（旧进程不会重读文件）；端口报 `EADDRINUSE` 就换个端口，常见是旧进程或 TIME_WAIT。
@@ -219,6 +245,10 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 - `?fixture=cards` 依赖 `window.displayRoot`，而产品代码从 1.9.0 起不再往 `window` 挂它，所以 fixture 常常只看到空态 —— **不要为了让预览好看往产品代码加钩子**，空态截图 + `pages.test.cjs` 已经够。
 - 想核对 B 站真实 DOM（选择器改版时）：直接用预览站之外的普通标签页打开 `https://www.bilibili.com/video/BV…`，用 `bsk_inspect snapshot` 拿 ref 再读属性；只读，不登录、不发请求。
 - 真机端到端（真扩展、真 SW、真 FSA 授权、popup）browser-skill 覆盖不到，仍以**用户截图/描述**为准；预览站 + `pages.test.cjs` + `stability.test.cjs` 只是把能自动化的那部分压缩掉。
+- `bsk_inspect action=screenshot` 截的是 **Agent 窗口当前活跃的那个标签页**，传 `tabId` 指定别的标签页不起作用（要换先 `bsk_tabs select`；跨窗口仍要 borrow）。
+- `bsk_interact` 用 `text=…` 当选择器，在部分页面上会报 `{"code":-32000,"message":"DOM Error while querying"}`；改用 `bsk_inspect action=snapshot` 拿 `@eN` 引用再点。页面 `navigate` 之后旧引用同样会失效，要重新 snapshot。
+- `bsk_inspect action=html` 传 `selector` **不会**把结果裁到那个元素，返回的是整份文档 —— 要做局部核对就用 `observe`，或按 ref 截元素。
+- 预览站起不来时先看端口占用：`EADDRINUSE` 说明上一个进程还活着，`job_kill` 之后重启；`bsk` 与预览站是两个独立进程，别把「页面白屏」和「会话连不上」混成一件事。
 
 ### 问询型请求：先回答，别先动文件
 
