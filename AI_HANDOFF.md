@@ -29,7 +29,9 @@
 
 ## 项目文档的维护规范
 
-**这套文档是什么**：`AI_HANDOFF.md`（入口：现状、规矩、红线）、`README.md`（用户看到的：装什么、怎么用、每个版本改了什么）、`SMOKE_TEST.md`（发版前的真机清单）、`docs/ARCHITECTURE.md`（机制、数据流、接口）、`docs/HISTORY.md`（逐版本的根因与教训）、`docs/PRIVACY.md`（隐私说明：数据存哪、请求哪些域名、每个权限干什么；商店审核对照用），以及仓库外的 `Desktop\bili_vault_ref\TODO.md`（唯一「活的」待办）。
+**这套文档是什么**：`AI_HANDOFF.md`（入口：现状、规矩、红线）、`README.md`（用户看到的：装什么、怎么用、每个版本改了什么）、`SMOKE_TEST.md`（发版前的真机清单）、`docs/ARCHITECTURE.md`（机制、数据流、接口）、`docs/HISTORY.md`（逐版本的根因与教训）、`docs/PRIVACY.md`（隐私说明：数据存哪、请求哪些域名、每个权限干什么；商店审核对照用），以及仓库外的 `Desktop\bili_vault_ref\TODO.md`（唯一「活的」待办：进行中、下一步方向、暂缓与不做）与 `Desktop\bili_vault_ref\TODO_finished.md`（已完成记录，2026-10-24 从 TODO.md 拆出）。
+
+**命名以界面为准**：1.9.7 起界面把「更新视频状态」改叫「更新视频数据」、确认框按钮叫「开始更新视频数据」，`docs/ARCHITECTURE.md` 与 `SMOKE_TEST.md` 已同步；`docs/HISTORY.md` 与旧审查材料里的旧名是当时记录，不用追改。
 
 **谁读**：接手这个项目的 AI，以及用户本人。所以写的是「现在该怎么做」，不是日记；每条结论都要能被验证 —— 给文件名、grep 锚点或测试项名，不要写「已经处理好了」这种核对不了的话。
 
