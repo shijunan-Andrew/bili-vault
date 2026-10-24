@@ -73,10 +73,10 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 <!-- status:begin -->
 | 项 | 值 |
 |---|---|
-| 词典 | 1027 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 371 · archive-core 88 · stats-core 68 · background 30 · pages 37（后四套是真执行） |
+| 词典 | 1056 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
+| 测试基线 | stability 371 · archive-core 88 · stats-core 68 · background 30 · pages 44（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-24 17:04，当时 HEAD `0f8aa8b`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-24 21:35，当时 HEAD `5bffd21`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -97,7 +97,7 @@ node test/status.cjs --write   # 跑完五套测试再刷新本表
 ```powershell
 node test/stability.test.cjs      # 静态回归断言（最快；改文档、常量后必跑）
 node test/background.test.cjs     # 真执行：chrome.* / FileSystem / 导入回写
-node test/pages.test.cjs          # 真执行：library / settings / popup / stats / content 五个页面
+node test/pages.test.cjs          # 真执行：library / settings / recycle / popup / stats / content 六个页面
 node test/i18n-extract.cjs --check
 ```
 

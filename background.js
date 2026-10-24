@@ -908,7 +908,7 @@ async function addManualVideo(data) {
     if (failures.length) {
       const message = failures.map((item) => `${item.name}：${item.message}`).join("；");
       const saved = await logError(new Error(`部分目标收藏夹保存失败：${message}`), {
-        metadata, folders: failures.map((item) => ({ name: item.name }))
+        operation: "手动添加视频", metadata, folders: failures.map((item) => ({ name: item.name }))
       });
       reportPath = saved.reportPath || "";
     }
@@ -934,7 +934,7 @@ async function addManualVideo(data) {
     const ok = !failures.length || savedCollections.length > 0 || duplicates.length > 0;
     return { ok, message, paths: savedPaths, added: savedCollections, skipped: duplicates, failed: failures, reportPath: reportPath ? storageReportLabel(reportPath) : "" };
   } catch (error) {
-    const saved = await logError(error, { metadata, folders: collectionNames.map((name) => ({ name })) });
+    const saved = await logError(error, { operation: "手动添加视频", metadata, folders: collectionNames.map((name) => ({ name })) });
     await chrome.storage.local.set({ lastResult: { message: `添加失败：${error?.message || "未知错误"}`, createdAt: Date.now() } });
     // 1.8.21（PRV-P2-4）：回给页面的只能是「末两段」相对标签 —— 绝对路径里带着用户名，
     // 而这条 details 会原样显示在 B 站页面的通知里。报告正文留在插件里，点图标能看能下载。
@@ -1088,6 +1088,9 @@ async function logError(error, context = {}) {
   } catch (storageError) {
     console.warn("写入错误报告失败（报告正文仍会返回给调用方）", storageError);
   }
+  // 1.10.0（TODO P0-3）：顺手留一条给设置页「最近出错」面板看（只留最近 3 条，自己兜错）。
+  // 操作名优先用调用点显式给的 operation，其次页面来的 source，最后给个兜底说法。
+  await rememberFailureEntry(context.operation || context.source || "收藏或导入", error?.message || error);
   return { report, reportPath };
 }
 
@@ -1289,6 +1292,11 @@ async function saveFavorite(data) {
     const skippedPaths = skippedFolders.map((plan) => `${root.name}/${plan.name}/${plan.existing.directory}`);
 
     // 1.9.4：所有收藏夹都已有这条记录 —— 一个接口请求、一次封面下载、一次写盘都不做。
+    /* 1.10.0（TODO P0-4）：下面五处 lastResult 都带上结构化的 kind / skipped / failed。
+       收藏库顶栏那条「刚才有跳过 / 有失败」的提示靠这几个字段判断，**不许去正则解析
+       message** —— 文案一改判据就静默失效，而且那种失败没有任何测试能发现。
+       kind 取值：skipped（全部已在本地，一条没存）／partial（存了一部分，有跳过或失败）／
+       saved（全成，可能带跳过）／failed（整条失败）。 */
     if (!pendingFolders.length) {
       const failed = plans.filter((plan) => plan.error);
       if (failed.length && !skippedFolders.length) throw failed[0].error;
@@ -1296,7 +1304,7 @@ async function saveFavorite(data) {
         ? `已在本地，跳过（${skippedFolders.length} 个收藏夹）；另有 ${failed.length} 个没法检查（${failed.map((plan) => plan.name).join("、")}）。`
         : `已在本地，跳过（${skippedFolders.length} 个收藏夹都没有改动）。`;
       try {
-        await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(skippedPaths.join(String.fromCharCode(10))), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+        await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(skippedPaths.join(String.fromCharCode(10))), createdAt: Date.now(), kind: "skipped", skipped: skippedFolders.length, failed: failed.length }, lastError: null, pendingFavorite: null });
       } catch (storageError) {
         console.warn("写入最近结果失败（这次只是跳过）", storageError);
       }
@@ -1350,7 +1358,7 @@ async function saveFavorite(data) {
       if (!skippedFolders.length) throw failures[0]?.error || new Error("这次没有保存到任何收藏夹。");
       const message = `已在本地，跳过（${skippedFolders.length} 个收藏夹）；另有 ${failures.length} 个没保存（${failures.map((item) => item.name).join("、")}）：${failures[0]?.error?.message || "未知错误"}`;
       try {
-        await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(skippedPaths.join(String.fromCharCode(10))), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+        await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(skippedPaths.join(String.fromCharCode(10))), createdAt: Date.now(), kind: "skipped", skipped: skippedFolders.length, failed: failures.length }, lastError: null, pendingFavorite: null });
       } catch (storageError) {
         console.warn("写入最近结果失败（这次只是跳过）", storageError);
       }
@@ -1364,7 +1372,7 @@ async function saveFavorite(data) {
       await logError(failure.error, { metadata, folders });
       const partialMessage = `已保存到 ${savedFolders.length} 个收藏夹${skippedSuffix}；另有 ${failures.length} 个没保存（${failures.map((item) => item.name).join("、")}）：${failure.error?.message || "未知错误"}`;
       try {
-        await chrome.storage.local.set({ lastResult: { message: partialMessage, path: maskLocalUserPaths(savedFolders.join("\n")), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+        await chrome.storage.local.set({ lastResult: { message: partialMessage, path: maskLocalUserPaths(savedFolders.join("\n")), createdAt: Date.now(), kind: "partial", skipped: skippedFolders.length, failed: failures.length }, lastError: null, pendingFavorite: null });
       } catch (storageError) {
         console.warn("写入最近结果失败（收藏已经保存成功）", storageError);
       }
@@ -1376,7 +1384,7 @@ async function saveFavorite(data) {
     // 原来它裸 await 在同一个 try 里：storage 一抛错就被 catch 改写成「保存失败」，
     // 而磁盘上其实已经有一份完整记录。收尾必须自己兜住异常，不许改写已成功的结果。
     try {
-      await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(savedFolders.join("\n")), createdAt: Date.now() }, lastError: null, pendingFavorite: null });
+      await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(savedFolders.join("\n")), createdAt: Date.now(), kind: "saved", skipped: skippedFolders.length, failed: 0 }, lastError: null, pendingFavorite: null });
     } catch (storageError) {
       console.warn("写入最近结果失败（收藏已经保存成功）", storageError);
     }
@@ -1396,7 +1404,7 @@ async function saveFavorite(data) {
     const retryHint = pendingRegistered ? "" : "；补存登记也没写成，请回 B 站重新收藏这条视频。";
     const saved = await logError(error, { metadata, folders });
     try {
-      await chrome.storage.local.set({ lastResult: { message: `保存失败：${error?.message || "未知错误"}${retryHint}`, createdAt: Date.now() } });
+      await chrome.storage.local.set({ lastResult: { message: `保存失败：${error?.message || "未知错误"}${retryHint}`, createdAt: Date.now(), kind: "failed", failed: 1 } });
     } catch (storageError) {
       console.warn("写入最近结果失败（这次保存本来就失败了）", storageError);
     }
@@ -3529,6 +3537,12 @@ function statsFlushDue() {
 const STATS_DATABASE_BACKUP_PREFIX = "database.bad.";
 const STATS_DATABASE_KEEP_BACKUPS = 5;
 
+// 1.10.0（TODO P0-1 重建统计库）：重建之前先把「现在这份正常库」原文另存一份。
+// 上面那组是「已经坏掉的现场」，这组是「重建前的正常版本」——同一种命名与轮转口径，
+// 但前缀必须分开：混进 database.bad.* 里，以后就分不清哪份是坏的、哪份是能回去的。
+const STATS_REBUILD_BACKUP_PREFIX = "database.backup.";
+const STATS_REBUILD_KEEP_BACKUPS = 5;
+
 // 本地时间戳，定长：YYYYMMDD-HHMMSS。定长才能直接按文件名排序定新旧。
 function statsBackupTimestamp(date = new Date()) {
   const p = localDateParts(date);
@@ -3536,12 +3550,14 @@ function statsBackupTimestamp(date = new Date()) {
 }
 
 // 只留最近 keep 份留档，其余删掉。失败的删除不致命：下次留档时还会再试一遍。
-async function trimStatsBackups(directory, keep) {
+// 1.10.0：多一个 prefix —— 「坏掉的现场」与「重建前的正常版本」各按各的前缀轮转，
+// 否则 5 份配额会被两类文件互相挤掉。
+async function trimStatsBackups(directory, keep, prefix = STATS_DATABASE_BACKUP_PREFIX) {
   let names = [];
   try {
     for await (const entry of directory.values()) {
       if (entry.kind !== "file") continue;
-      if (!entry.name.startsWith(STATS_DATABASE_BACKUP_PREFIX) || !entry.name.endsWith(".json")) continue;
+      if (!entry.name.startsWith(prefix) || !entry.name.endsWith(".json")) continue;
       names.push(entry.name);
     }
   } catch (_) {
@@ -3593,6 +3609,40 @@ async function archiveBrokenStatsDatabase(directory, text) {
   return "";
 }
 
+/* 1.10.0（TODO P0-1）：设置页「重建统计库」动手之前，把现在这份库的原文另存一份。
+   同 archiveBrokenStatsDatabase 一样写**原文**：重建是派生动作，用户想退回去时
+   要能拿回一模一样的那份，重新序列化一遍就不是原件了。
+   写失败了不拦重建 —— commitStatsDatabase 那边还有 database.bak.json 兜底，
+   这里只是多留一份带时间戳、能一眼看出「重建之前长什么样」的。 */
+async function stampStatsDatabaseBackup(directory, text) {
+  if (!directory || !text || !text.trim()) return "";
+  const stamp = statsBackupTimestamp();
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+    const name = `${STATS_REBUILD_BACKUP_PREFIX}${stamp}${suffix}.json`;
+    let exists = true;
+    try {
+      await directory.getFileHandle(name);
+    } catch (_) {
+      exists = false;
+    }
+    if (exists) continue;
+    try {
+      const backup = await directory.getFileHandle(name, { create: true });
+      const writable = await backup.createWritable();
+      await writable.write(text);
+      await writable.close();
+      await trimStatsBackups(directory, STATS_REBUILD_KEEP_BACKUPS, STATS_REBUILD_BACKUP_PREFIX);
+      return name;
+    } catch (error) {
+      console.warn("重建统计库前的副本没写成：这次照旧重建，只是少一份可以退回去的版本。", error);
+      return "";
+    }
+  }
+  console.warn("重建统计库前的副本没写成：同一时间戳的备份名已占满 100 个。");
+  return "";
+}
+
 /* ---------- 1.7.0（批次 A / P0）：读不到库时绝不允许整份重写 ----------
    1.5.1 只处理了「文件能读、JSON 坏」这一种：留档 → 删坏文件 → 重建空库。
    另一种一直没管：getFile().text() 直接失败（权限刚被撤、文件被安全软件占着、
@@ -3637,6 +3687,37 @@ async function readStatsMirror() {
    全换反而把每处调用点都读得更吵。 */
 const STORAGE_WRITE_RETRY_MS = 200;
 
+/* 1.10.0（TODO P0-3）：设置页要能看见「最近几次失败」。
+   lastError / lastStorageError 各只有一个槽位，后一次失败会把前一次顶掉 —— 用户能看到的
+   永远只有最新那一条，重复收藏失败三次跟失败一次长得一模一样。所以另留一条最多
+   RECENT_FAILURE_LIMIT 条的环形记录（新的在前）。
+   权威仍然是 lastError（弹窗、错误报告都读它），这条记录**只**给设置页的「最近出错」面板
+   和「复制诊断信息」用，不参与任何业务判断。
+   摘要入库前就过 maskLocalUserPaths：面板是给人看的，诊断文本会被贴进 issue，
+   路径在源头打码，不指望下游每一处都记得再打一次。 */
+const RECENT_FAILURE_LIMIT = 3;
+const RECENT_FAILURE_OPERATION_LIMIT = 40;
+const RECENT_FAILURE_SUMMARY_LIMIT = 160;
+
+async function rememberFailureEntry(operation, message) {
+  const at = Date.now();
+  const entry = {
+    operation: String(operation || "未知操作").slice(0, RECENT_FAILURE_OPERATION_LIMIT),
+    summary: maskLocalUserPaths(String(message || "未知错误")).slice(0, RECENT_FAILURE_SUMMARY_LIMIT),
+    at
+  };
+  try {
+    const stored = await chrome.storage.local.get("recentFailures");
+    const previous = Array.isArray(stored?.recentFailures) ? stored.recentFailures : [];
+    const list = [entry, ...previous.filter((item) => item && typeof item === "object" && typeof item.summary === "string")]
+      .slice(0, RECENT_FAILURE_LIMIT);
+    await chrome.storage.local.set({ recentFailures: list });
+  } catch (error) {
+    // 三档：这条记录只是给设置页看的，写不进去不能盖住这次真正的失败
+    console.warn("最近失败记录写不进去（设置页的「最近出错」会少这一条）", error);
+  }
+}
+
 async function rememberStorageError(label, error) {
   try {
     await chrome.storage.local.set({
@@ -3646,6 +3727,7 @@ async function rememberStorageError(label, error) {
         at: Date.now()
       }
     });
+    await rememberFailureEntry(`本地存储（${String(label || "未知操作")}）`, error?.message || error);
   } catch (_) {
     // 兜底本身也写不进去：这时候只剩控制台，不要再套一层递归
   }
@@ -3999,9 +4081,13 @@ async function commitStatsDatabaseFromPage(payload) {
     /* 1.8.19：顺手清掉同目录里超过 10 分钟的点号临时文件。1.8.17 之后页面不再自己写库，
        「写前清理」那条路就再也没人走，崩一次留下的 .database.json.xxxx.tmp 会一直躺着。 */
     await cleanStatsTempFiles(root);
+    /* 1.10.0（TODO P0-1）：设置页的「重建统计库」要求先留一份带时间戳的副本再整份重建。
+       副本由后台写 —— 页面只做「读归档 + 构建」，ARCHITECTURE 里那条「统计库只有一个写者」
+       照旧成立（页面还是只发 bca-stats-commit，绝不自己写 003database）。 */
+    const backupName = payload?.stampBackup === true ? await stampStatsDatabaseBackup(read.directory, read.text) : "";
     const database = BcaStatsCore.applyStatsMirror(incoming, BcaStatsCore.statsMirrorOf(read.database));
     if (!(await commitStatsDatabase(root, read, database))) return { ok: false, declined: true, reason: "write-failed" };
-    return { ok: true };
+    return backupName ? { ok: true, backup: backupName } : { ok: true };
   }).catch((error) => ({ ok: false, reason: error?.message || "commit-failed" }));
 }
 
@@ -4952,7 +5038,7 @@ function importBiliFavoritesInOrder(data, tabId = null) {
 
 async function recordFavoriteError(data) {
   const error = new Error(data?.message || "B站收藏操作失败。");
-  const saved = await logError(error, { metadata: data?.metadata || {} });
+  const saved = await logError(error, { operation: "收藏", metadata: data?.metadata || {} });
   return {
     ok: false,
     message: error.message,
@@ -5590,7 +5676,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "import-bili-favorites") {
     const reportImportFailure = async (error) => {
       const folders = Array.isArray(message.folderIds) ? message.folderIds.map((id) => ({ id, name: id })) : [];
-      const saved = await logError(error, { folders });
+      const saved = await logError(error, { operation: "导入收藏", folders });
       const failureText = `导入失败：${error?.message || "未知错误"}。打开插件可以看「最近状态」与错误报告。`;
       await chrome.storage.local.set({
         // 1.7.0（批次 B / P1）：失败的终态要能被弹窗认出来并展开（见 popup.js 的 refreshStatus），

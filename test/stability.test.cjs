@@ -2491,10 +2491,10 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 4,
     "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径（导出与封面转换 1.9.0 搬去设置页）都要先查闸门");
   assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
-  // 设置页的「导出归档元数据 / 归档体检」在导入期间拒绝扫半成品
+  // 设置页的「导出归档元数据 / 归档体检 / 重建统计库」在导入期间拒绝扫半成品
   assert.match(settings, /async function importIsRunning\(\) \{/);
-  assert.equal([...settings.matchAll(/if \(await importIsRunning\(\)\) throw new Error/g)].length, 2,
-    "导出元数据与归档体检都要先问一句");
+  assert.equal([...settings.matchAll(/if \(await importIsRunning\(\)\) throw new Error/g)].length, 3,
+    "导出元数据、归档体检与 1.10.0 的重建统计库都要先问一句");
   // 只清自己那一把：不能把别人后写进来的锁顺手抹掉
   assert.match(background, /if \(!lock \|\| !kind \|\| lock\.kind === kind\) await chrome\.storage\.session\.remove/);
 });

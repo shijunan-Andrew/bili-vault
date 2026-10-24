@@ -302,6 +302,8 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **`视频信息.txt` 的「视频收藏时间」保留精确到秒**（1.8.21 明确取舍）：设置页已写明会把收藏时间一起存下来。改成日期粒度会同时动目录名与统计库 `date`，而且 `parseChineseDateTime` 不认日期-only —— 刷新路径会静默把老记录的时间改成今天。**要么整条链路一起降级，要么不做。**
 - **收藏链路 1.9.3：UP 主只从视频自己的信息区取，互动数据在收藏时补一次，同收藏夹同 BV 只留一份**：`content.js` 的 `findOwnerAnchor()` 只认 `#v_upinfo` / `.up-info` 里的 `space.bilibili.com` 链接（推荐位卡片也带 `a.up-name`，必须排除；旧的 `.upname a` 兜底是 1.9.3 之前抓错 UP 主的根因）；`background.js` 的 `enrichFavoriteMetadata()` 在写盘前请求 `/x/web-interface/view`（8 秒超时），失败退回页面元数据；去重依赖 `biliVaultBvIndex`（`library.js` 扫描后 `publishBvIndex()` 发布「收藏夹 → BV → 目录名」，后台 `readExistingRecordFolder()` 校验 BV 后判定「已存在」，1.9.4 起整条跳过、不再复用改写（见下一条），统计口径见上一条）。索引是缓存，不是唯一真相：查不到就按新记录保存，不会覆盖别的视频。
 - **界面改叫「更新视频数据」，回收站自成一栏（1.9.7）**：改名只动界面文案与会话里的标签，内部标识不变（消息名 `bca-refresh-video-stats`、函数名 `refreshVideoStatus`、按钮 id `#updateSelected` / `#statusConfirmGo`）；`background.js` 的队列超时标签与失败消息也跟着叫「更新视频数据」。数据不完整的提示句统一成「该视频数据不完整（粉丝数N/A或互动数据N/A），更新视频数据将重新获取这些信息，或能解决」，由 `library.js` 的 `detailIncomplete` 判定后渲染 `.detail-refresh-warning`。回收站从 `#group-maintenance` 拆成独立的 `#group-recycle`（侧栏 `data-group="recycle"`），`#settingsOpenRecycle` 全文件只出现一处；`settings.js` 的导航与搜索按 DOM 里的 `data-group` 自动收编，不需要改代码。
+- **重建统计库是「页面构建、后台写」的第三条腿（1.10.0）**：设置页的「重建统计库」用 `BcaArchiveTools.scanArchive()` 把归档拼成 `videos`，再用 `BcaStatsCore.databaseFromVideos(videos, {})` 建一份新库 —— **故意不传 `previous`**，因为 `commitStatsDatabaseFromPage` 会再套一次 `applyStatsMirror()`，`firstSeenAt`、`totals.savedTotal`、宠物亲密度都被 `Math.max` 保住。写库仍走唯一的 `bca-stats-commit`；载荷多一个 `stampBackup: true`，后台在 `cleanStatsTempFiles()` 之后、`commitStatsDatabase()` 之前调 `stampStatsDatabaseBackup()`，把当前库**原文**另存成 `database.backup.<时间戳>.json`（撞名加 `-2`、`-3`），再由 `trimStatsBackups(directory, keep, prefix)` 的第三个参数按前缀只留 5 份。副本写失败只 `console.warn`、不拦重建 —— 那时确实没有退路，所以成功文案会分成「带副本名」和「不带」两种，别在界面上谎称已备份。
+- **「最近出错」只读三件套（1.10.0）**：`logError()`（错误报告那条路）与 `rememberStorageError()`（storage 写不进去那条路）都会调一次 `rememberFailureEntry(operation, message)`，写 `chrome.storage.local.recentFailures`（`{ operation, summary, at }`，只留 3 条，摘要先过 `maskLocalUserPaths()` 再截 160 字）。设置页的「最近出错」面板与「复制诊断信息」都只读这个键，不发任何网络请求；诊断文本是**报告产物**，与错误报告同一口径，**不进词典**（否则路径与错误原文会被翻译）。
 - **统计快照丢了能自愈，被拒不算发布（1.9.6）**：`stats.js` / `pet.js` 只读 `chrome.storage.local.bcaStats`，而 `003database/database.json` 按备份根分别存——快照缺失或没跟上时，页面会停在「还没有数据」。三条修复：① `background.js` 的 `republishStatsSnapshot()` 按现成的库重发（先清 `statsSnapshotPublished` 指纹再 `publishStatsSnapshot`，只读不写库），`healStatsSnapshotOnStart()` 只在快照里 `videos` 为空时挂在 `onInstalled` / `onStartup` 上补一次；② `library.js` 在 `bca-stats-commit` 回 `declined` 时**不记** `publishedStatsFingerprint`（否则一次拒绝会让之后所有扫描都跳过）；③ 统计页空态给 `#statsRepublish`，走只读消息 `bca-stats-republish`。注意快照里的 `videos` 是条数，不是记录表。
 - **收藏链路 1.9.5：粉丝数不在收藏路径，缺失数值一律 N/A**：`enrichFavoriteMetadata()` 只请求 `/x/web-interface/view`（3 秒超时），再用 `tname / tname2` 填 `category`；粉丝数只由「更新视频状态」与导入链路取（`fetchUpFans` 的 7 天缓存不变）。`buildInfo()` 的 `MISSING_VALUE = "N/A"` 是「缺失」的唯一写法：`UP主粉丝数` 与六项互动数据缺失都写 N/A，且【互动数据】段总是输出；读取侧 `archive-tools.statsFromInfo()` 同样把缺项归一成 N/A。展示侧只认 `library.js` 的 `statDisplay()`（占位值 → N/A），卡片徽标、详情六张卡、粉丝数都走它；详情里只要出现 N/A 就渲染 `.detail-refresh-warning` 提示去「更新视频状态」。**收藏路径的超时不等于导入路径**：`COVER_SAVE_TIMEOUT_MS = 3000` 只由 `loadCoverPng(url, { timeoutMs })` 在收藏时传入，导入 / 更新状态仍是 `COVER_FETCH_TIMEOUT_MS = 20000`。发布时间优先用页面那行 `YYYY-MM-DD HH:mm:ss`（`content.js` 本地时区解析），接口 `pubdate` 只兜底。
 - **收藏链路 1.9.4：简介只认 `sections`，已有记录整条跳过**：`archive-tools.js` 的 `splitDescription()` 必须走 `BcaArchiveCore.descriptionFromInfo(info)` —— 简介在 `info.sections["视频简介"]`，`info.fields` 里没有，1.9.0–1.9.3 详情因此一直显示「这个归档没有记录简介」。`BcaArchiveCore.splitShareText()` 判为分享文案、或简介与标题相同时按空简介处理（分享文案里的互动数仍回收成 `stats`）；`background.js` 的 `buildInfo()` 写「真简介 / 无 / 未知」，第二个参数（`所属收藏夹`）一律传收藏夹名，不许传记录目录名。`saveFavorite()` 先判重再补资料：`plans` → `pendingFolders` / `skippedFolders`，没有待写收藏夹时直接返回「已在本地，跳过」（不请求接口、不写盘），所以 1.9.3 的「复用目录并保留原『视频收藏时间』」分支已删除（1.9.4 起整条跳过）。
@@ -561,6 +563,8 @@ UP主主页：https://space.bilibili.com/……
 | `list-bili-favorite-folders` | `favorites-import.js` → `background.js` | 获取线上收藏夹列表 |
 | `bca-import-selected-folders` | `popup.js` → `favorites-import.js` | 启动所选收藏夹导入 |
 | `bca-page-api-get` | `background.js` → `favorites-import.js` | 通过已登录页面上下文发起收藏夹 API 请求 |
+| `bca-stats-commit` | `library.js` / `settings.js` → `background.js` | 提交一份新统计库 —— 整个项目**只有后台写库**（见下文「写库只有一个写者」）。1.10.0 起设置页的「重建统计库」也走这条消息，并带 `stampBackup: true` 要求后台先把当前库另存成带时间戳的副本 |
+| `bca-stats-republish` | `stats.js` → `background.js` | 只读：统计快照丢了时，让后台按现成的 `003database/database.json` 重发一份（不写库、不改指纹以外的状态） |
 
 `bca-download-parse` / `bca-download-playurl` / `bca-download-subtitles` 三条消息 1.3.0 已随下载功能删除。
 
@@ -578,8 +582,9 @@ UP主主页：https://space.bilibili.com/……
 **`chrome.storage.local`**：
 
 - `enabled`：自动归档开关，`false` 为关闭。
-- `lastResult`：最近成功/失败状态。
+- `lastResult`：最近一次收藏的结果 —— `message` + 可选的 `path`；1.10.0 起还带结构化字段 `kind`（`saved` / `skipped` / `partial` / `failed`）与 `skipped` / `failed` 计数，收藏库顶栏的「上次收藏结果」提示**只按字段判断**，不去正则解析那句中文 message。
 - `lastError`：错误报告文本及路径。
+- `recentFailures`：1.10.0 起最近 3 条失败（`{ operation, summary, at }`；摘要已打码、截 160 字）。设置页「最近出错」面板与「复制诊断信息」的唯一数据源，只存本机。
 - `pendingFavorite`、`authorizedErrorAt`：授权失效后待补存相关状态。
 - `downloadRevision`：通知本地库刷新下载状态的版本标记。
 - `collectionOrder`：网页收藏夹排序。

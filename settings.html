@@ -265,6 +265,23 @@
             <button type="button" class="button button-quiet" id="openStats" data-i18n="点击查看最近收藏统计">点击查看最近收藏统计</button>
           </div>
         </div>
+
+        <!-- 1.10.0（TODO P0-1）：以前只有统计页的「什么都没有」空态里能重新读一次库，
+             快照停在旧数字（提交被拒、扩展重启、storage 写入失败）时没有任何入口。
+             这里给一个随时能按的：按本地归档重算，动手前先把现在这份库原文另存成
+             database.backup.<时间戳>.json；归档一个字节都不动。 -->
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="重建统计库">重建统计库</p>
+            <p class="setting-row-desc" data-i18n="按本地归档重新数一遍：总数、今日新增、最近 14 天、收藏夹排行和宠物记录都会按文件夹里的实际情况重算。只重建 003database 里的统计库，不动任何视频文件夹；动手前会先把现在这份库另存一份带时间戳的副本。">按本地归档重新数一遍：总数、今日新增、最近 14 天、收藏夹排行和宠物记录都会按文件夹里的实际情况重算。只重建 003database 里的统计库，不动任何视频文件夹；动手前会先把现在这份库另存一份带时间戳的副本。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="rebuildStats" data-i18n="重建统计库">重建统计库</button>
+          </div>
+        </div>
+
+        <p class="row-status" id="rebuildStatsStatus" role="status" hidden></p>
+        <p class="row-error" id="rebuildStatsError" role="alert" hidden></p>
       </section>
 
       <!-- V1.5.4：宠物挂件从「数据统计」卡里独立成一组。挂件右键菜单的「宠物设置」
@@ -424,8 +441,24 @@
           </div>
         </div>
 
+        <!-- 1.10.0（TODO P0-3）：失败原来只在弹窗里闪一下就没了（lastError 只有一个槽位，
+             后一次会顶掉前一次）。这里留最近 3 条，再给一个「复制诊断信息」。
+             摘要写进 storage 之前就已经过 maskLocalUserPaths()，复制出去不会带用户名。 -->
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="最近出错">最近出错</p>
+            <p class="setting-row-desc" data-i18n="最近三次失败的操作和原因，只记在本机。「复制诊断信息」会带上插件版本、归档记录数和这三条摘要，路径已经打过码，可以直接贴出来求助。">最近三次失败的操作和原因，只记在本机。「复制诊断信息」会带上插件版本、归档记录数和这三条摘要，路径已经打过码，可以直接贴出来求助。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="refreshRecentErrors" data-i18n="刷新">刷新</button>
+            <button type="button" class="button button-quiet" id="copyDiagnostics" data-i18n="复制诊断信息">复制诊断信息</button>
+          </div>
+        </div>
+        <ul class="recent-error-list" id="recentErrorList" hidden></ul>
+
         <p class="row-status" id="forgetUidStatus" role="status" hidden></p>
         <p class="row-status" id="nativeCleanupStatus" role="status" hidden></p>
+        <p class="row-status" id="recentErrorStatus" role="status" hidden></p>
       </section>
 
       <p class="settings-foot" data-i18n="外观、语言、数据统计和使用说明都在这里改，改完立即生效。">外观、语言、数据统计和使用说明都在这里改，改完立即生效。</p>

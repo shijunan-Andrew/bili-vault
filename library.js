@@ -58,6 +58,11 @@ const resultSummary = document.getElementById("resultSummary");
 const scanNotice = document.getElementById("scanNotice");
 const scanNoticeText = document.getElementById("scanNoticeText");
 const dismissScanNoticeButton = document.getElementById("dismissScanNotice");
+// 1.10.0（TODO P0-4）：最近一次收藏结果里有「跳过 / 失败」时留在顶栏的提示，与扫描提示同款
+const recentResultNotice = document.getElementById("recentResultNotice");
+const recentResultText = document.getElementById("recentResultText");
+const openRecentResultButton = document.getElementById("openRecentResult");
+const dismissRecentResultButton = document.getElementById("dismissRecentResult");
 // 1.8.21（P2-6）：扫描提示条上的「清理这些没写完的目录」。只在真有半截目录时出现。
 const cleanupUnfinishedButton = document.getElementById("cleanupUnfinished");
 const importHint = document.getElementById("importHint");
@@ -974,6 +979,75 @@ function setScanNotice(text) {
   const value = text || "";
   scanNoticeText.textContent = value;
   scanNotice.hidden = !value || value === dismissedScanNotice;
+}
+
+/* ---------------- 1.10.0（TODO P0-4）：最近一次收藏里的「跳过 / 失败」----------------
+
+   重复收藏走「已在本地，跳过」、或者一次收藏里有收藏夹没存上时，原来只有弹窗里那句
+   一闪而过的 lastResult.message：关掉弹窗就再也没地方看，用户只能靠回忆「它到底存没存上」。
+   这里把最近一次**有跳过或有失败**的收藏结果留在顶栏，组件与样式和上面那条扫描提示
+   完全一致（.scan-notice），点「查看详情」开现成的结果对话框。
+   判据只认 background.js 写进 lastResult 的结构化字段（kind / skipped / failed），
+   **不解析 message**：文案随版本改，正则判据会静默失效，而且没有任何测试抓得住。
+   24 小时是个很松的上界：今天看到的提示不该在几天后还挂着，那会变成假信息。 */
+const RECENT_RESULT_NOTICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const RECENT_RESULT_TROUBLE_KINDS = ["skipped", "partial", "failed"];
+let recentResultRecord = null;
+// 记住被关掉那一条的时间戳：同一条不再出现，新的一条照常出来（和扫描提示同一个思路）
+let dismissedRecentResultAt = 0;
+
+function recentResultHasTrouble(result) {
+  if (!result || typeof result !== "object") return false;
+  if (RECENT_RESULT_TROUBLE_KINDS.includes(String(result.kind || ""))) return true;
+  return (Number(result.skipped) || 0) > 0 || (Number(result.failed) || 0) > 0;
+}
+
+function recentResultFailed(result) {
+  return String(result?.kind || "") === "failed" || (Number(result?.failed) || 0) > 0;
+}
+
+function recentResultNoticeMessage(result) {
+  const skipped = Number(result?.skipped) || 0;
+  const failed = Number(result?.failed) || 0;
+  if (skipped > 0 && failed > 0) return BcaI18n.t("上次收藏：{skipped} 个收藏夹里已有这条记录，{failed} 个没存上。", { skipped, failed });
+  if (failed > 0) return BcaI18n.t("上次收藏有 {failed} 个收藏夹没存上。", { failed });
+  if (skipped > 0) return BcaI18n.t("上次收藏：{skipped} 个收藏夹里已经有这条记录了，直接跳过。", { skipped });
+  return BcaI18n.t("上次收藏有需要看一眼的地方。");
+}
+
+// 唯一入口：传 null、过期、没有麻烦、或者刚被关掉过，都只做「藏起来」
+function applyRecentResultNotice(result) {
+  if (!recentResultNotice || !recentResultText) return;
+  const at = Number(result?.createdAt) || 0;
+  const fresh = Boolean(result && typeof result === "object"
+    && at > Date.now() - RECENT_RESULT_NOTICE_MAX_AGE_MS
+    && recentResultHasTrouble(result));
+  recentResultRecord = fresh ? result : null;
+  const shown = fresh && at !== dismissedRecentResultAt;
+  recentResultText.textContent = shown ? recentResultNoticeMessage(result) : "";
+  recentResultNotice.hidden = !shown;
+}
+
+async function restoreRecentResultNotice() {
+  if (!recentResultNotice) return;
+  try {
+    const saved = await chrome.storage.local.get("lastResult");
+    applyRecentResultNotice(saved?.lastResult || null);
+  } catch (_) {
+    // 二档降级：读不到就当没有。这条提示只是锦上添花，不能因为它把收藏库的启动拖住
+    console.warn("最近收藏结果没读出来（顶栏那条「跳过 / 失败」提示本次不显示）");
+  }
+}
+
+function showRecentResultDetail() {
+  const result = recentResultRecord;
+  if (!result) return;
+  const lines = [String(result.message || "")];
+  const path = String(result.path || "");
+  if (path) lines.push("", BcaI18n.t("相关路径："), path);
+  const at = Number(result.createdAt) || 0;
+  if (at) lines.push("", BcaI18n.t("时间：{time}", { time: stampText(new Date(at)) }));
+  showResultDialog(BcaI18n.t("上次收藏结果"), lines.join("\n"), recentResultFailed(result) ? "error" : "ok");
 }
 
 // displayRoot() 收尾时把「读取进度 + 缓存命中 + 读取失败」拼成一条提示
@@ -5374,6 +5448,13 @@ dismissScanNoticeButton?.addEventListener("click", () => {
   dismissedScanNotice = scanNoticeText?.textContent || "";
   if (scanNotice) scanNotice.hidden = true;
 });
+// 1.10.0（TODO P0-4）：跳过 / 失败提示条的两个按钮。关掉只记这一条的时间戳，
+// 下一条新的收藏结果照常会出来（和扫描提示同一个「关掉不烦人、新信息不丢」的口径）。
+dismissRecentResultButton?.addEventListener("click", () => {
+  dismissedRecentResultAt = Number(recentResultRecord?.createdAt) || 0;
+  applyRecentResultNotice(recentResultRecord);
+});
+openRecentResultButton?.addEventListener("click", showRecentResultDetail);
 // 1.8.21（P2-6）：提示条上的清理入口，点开先弹确认框，真正删除在 confirmPendingDelete 里。
 cleanupUnfinishedButton?.addEventListener("click", askToCleanupUnfinished);
 markDownloadedGo?.addEventListener("click", runMarkDownloaded);
@@ -5519,6 +5600,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   refreshVideoFilterOptionsForSearch();
   resetPaging();
   renderVideos();
+});
+// 1.10.0（TODO P0-4）：收藏库开着的时候又在 B 站点了一次收藏，后台写完 lastResult
+// 这里就能立刻挂出提示 —— 用户不用关掉再打开。
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes.lastResult) return;
+  applyRecentResultNotice(changes.lastResult.newValue || null);
 });
 closeDetailButton.addEventListener("click", closeDetail);
 detailBackdrop.addEventListener("click", closeDetail);
@@ -5690,7 +5777,9 @@ BcaI18n.init().catch(() => {}).then(() => Promise.all([
   restoreImportHint(),
   restoreImportState(),
   clearLegacySafetyDismissed(),
-  restoreGithubBanner()
+  restoreGithubBanner(),
+  // 1.10.0（TODO P0-4）：最近一次收藏里的跳过 / 失败，开机就挂出来（24 小时内的才算）
+  restoreRecentResultNotice()
 ])).finally(() => {
   applyViewMode();
   restoreLastRoot();

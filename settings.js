@@ -870,6 +870,161 @@ function openRecyclePage() {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * 1.10.0（TODO P0-1）：重建统计库
+ * ------------------------------------------------------------------ */
+
+const rebuildStatsRow = { status: "rebuildStatsStatus", error: "rebuildStatsError" };
+
+function showRebuildStatsMessage(text, isError = false) {
+  showRowMessage(rebuildStatsRow, text, isError);
+}
+
+// 后台把「为什么没写成」编成码回来，这里翻成人话（和统计页那条「重新读取统计库」同一套码）。
+function rebuildStatsFailureText(response) {
+  const reason = (response && response.reason) || "unknown";
+  if (reason === "no-root" || reason === "no-permission") return BcaI18n.t("还没有选择本地备份文件夹，先在收藏库里选一次。");
+  if (reason === "unreadable") return BcaI18n.t("统计库这次读不出来，稍后再试。");
+  if (reason === "write-failed" || reason === "bad-payload") return BcaI18n.t("写统计库失败，稍后再试。");
+  if (reason === "timeout" || reason === "no-response" || reason === "no-runtime") return BcaI18n.t("后台没有回应，稍后再试。");
+  return BcaI18n.t("重建统计库失败：{message}", { message: reason });
+}
+
+/* 按本地归档把统计库整个重算一遍。
+   取根与扫盘完全照 exportArchiveMetadata 那条路：只读归档，写盘只碰 003database。
+   真正的写库交给后台（bca-stats-commit + stampBackup）—— 页面只做「读 + 构建」，
+   ARCHITECTURE 里「统计库只有一个写者」那条不破。
+   previous 故意不传：后台 commit 会再套一次 applyStatsMirror，
+   firstSeenAt / 累计保存 / 亲密度不会因为这次重建被归零。 */
+async function rebuildStatsDatabase() {
+  try {
+    const statsCore = globalThis.BcaStatsCore;
+    if (!statsCore) throw new Error(BcaI18n.t("统计模块没加载出来，刷新这一页再试。"));
+    const handle = await BcaArchiveTools.loadRootHandle();
+    if (!handle) throw new Error(BcaI18n.t("先选择本地备份文件夹，再重建统计库。"));
+    const granted = await BcaArchiveTools.ensureRootPermission(handle, "readwrite");
+    if (!granted) throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
+    if (await importIsRunning()) throw new Error(BcaI18n.t("导入正在跑，等它结束再试。"));
+    // 重建会按归档里数出来的条数覆盖「总数」这类累计数字，属于不可逆的覆盖 —— 先问一句。
+    const confirmed = window.confirm(BcaI18n.t("会按本地归档重算统计库（总数、每日新增、收藏夹排行、宠物记录），并把现在这份库另存成一份带时间戳的副本。视频文件夹一个都不动。要开始吗？"));
+    if (!confirmed) return false;
+    showRebuildStatsMessage(BcaI18n.t("正在读归档…"));
+    const scan = await BcaArchiveTools.scanArchive(handle);
+    const videos = scan.collections.flatMap((collection) => collection.records.map(({ directory, record }) => (
+      BcaArchiveTools.recordToVideo(collection.name, { name: directory }, record)
+    )));
+    showRebuildStatsMessage(BcaI18n.t("正在重建统计库…"));
+    const database = statsCore.databaseFromVideos(videos, {});
+    const response = await new Promise((resolve) => {
+      // 后台在扩展重载的瞬间可能收不到回调：别让按钮和状态行一直停着
+      const timer = window.setTimeout(() => resolve({ ok: false, reason: "timeout" }), 15000);
+      try {
+        chrome.runtime.sendMessage({ type: "bca-stats-commit", database, stampBackup: true }, (reply) => {
+          window.clearTimeout(timer);
+          void chrome.runtime.lastError;
+          resolve(reply || { ok: false, reason: "no-response" });
+        });
+      } catch (_) {
+        window.clearTimeout(timer);
+        resolve({ ok: false, reason: "no-runtime" });
+      }
+    });
+    if (!response || !response.ok) throw new Error(rebuildStatsFailureText(response));
+    const count = BcaArchiveCore.formatCountText(videos.length);
+    showRebuildStatsMessage(response.backup
+      ? BcaI18n.t("已按归档重建统计库：{count} 条记录；现在这份库已另存为 {backup}。", { count, backup: response.backup })
+      : BcaI18n.t("已按归档重建统计库：{count} 条记录。", { count }));
+    return true;
+  } catch (error) {
+    showRebuildStatsMessage(error?.message || BcaI18n.t("重建统计库失败。"), true);
+    return false;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 1.10.0（TODO P0-3）：最近出错 + 复制诊断信息
+ * ------------------------------------------------------------------ */
+
+// 最近失败记录由后台 rememberFailureEntry() 写（最多 3 条，新的在前），这里只读不改。
+function recentFailureItems(data) {
+  const list = Array.isArray(data?.recentFailures) ? data.recentFailures : [];
+  return list.filter((item) => item && typeof item === "object" && typeof item.summary === "string");
+}
+
+function recentFailureLine(item, index) {
+  const at = Number(item.at) || Date.now();
+  return `${index + 1}. ${String(item.operation || BcaI18n.t("未知操作"))}（${humanTimestamp(new Date(at))}）：${String(item.summary || "")}`;
+}
+
+async function renderRecentErrors() {
+  const data = await readStoredSettings(["recentFailures"]);
+  const items = recentFailureItems(data);
+  const list = $("recentErrorList");
+  const status = $("recentErrorStatus");
+  if (!items.length) {
+    if (list) list.replaceChildren();
+    setVisible(list, false);
+    writeText(status, BcaI18n.t("最近没有记录到失败。"));
+    setVisible(status, true);
+    return items;
+  }
+  if (list) {
+    list.replaceChildren();
+    for (const item of items) {
+      const row = document.createElement("li");
+      row.className = "recent-error-item";
+      const head = document.createElement("div");
+      head.className = "recent-error-head";
+      const operation = document.createElement("span");
+      operation.className = "recent-error-operation";
+      writeText(operation, String(item.operation || BcaI18n.t("未知操作")));
+      const time = document.createElement("span");
+      time.className = "recent-error-time";
+      writeText(time, humanTimestamp(new Date(Number(item.at) || Date.now())));
+      head.append(operation, time);
+      const summary = document.createElement("p");
+      summary.className = "recent-error-summary";
+      writeText(summary, String(item.summary || ""));
+      row.append(head, summary);
+      list.append(row);
+    }
+  }
+  setVisible(list, true);
+  writeText(status, "");
+  setVisible(status, false);
+  return items;
+}
+
+/* 「复制诊断信息」：版本 + 库记录数 + 三条摘要。
+   摘要由后台入库前就打码（maskLocalUserPaths），这里不再加工；
+   路径这件事宁可漏打也不能重复打 —— 打两次会把相对标签也吃掉。 */
+async function copyDiagnostics() {
+  const data = await readStoredSettings(["recentFailures", "bcaStats"]);
+  const items = recentFailureItems(data);
+  const stats = data?.bcaStats && typeof data.bcaStats === "object" ? data.bcaStats : {};
+  const version = String(chrome?.runtime?.getManifest?.()?.version || "").trim();
+  const lines = [
+    `${BcaI18n.t("哔哩藏库 · 诊断信息")}`,
+    `${BcaI18n.t("插件版本")}：${version || "-"}`,
+    `${BcaI18n.t("界面语言")}：${BcaI18n.locale()}`,
+    `${BcaI18n.t("归档记录")}：${Number(stats.videos) || 0}`,
+    `${BcaI18n.t("收藏夹")}：${Number(stats.collections) || 0}`,
+    `${BcaI18n.t("最近出错")}（${items.length}）：`
+  ];
+  if (!items.length) lines.push(BcaI18n.t("最近没有记录到失败。"));
+  else items.forEach((item, index) => lines.push(recentFailureLine(item, index)));
+  const text = lines.join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    writeText($("recentErrorStatus"), BcaI18n.t("已复制，可以直接贴出来。"));
+    setVisible($("recentErrorStatus"), true);
+  } catch (_) {
+    // 剪贴板被拒（页面不在前台）时退回「让用户自己复制」，不能只报一句失败
+    window.prompt(BcaI18n.t("复制失败，请手动选中下面的文字："), text);
+  }
+  return text;
+}
+
 function wireTransferAndMaintenance() {
   $("settingsExportConfig")?.addEventListener("click", () => { downloadConfigFile(true); });
   $("settingsExportConfigSlim")?.addEventListener("click", () => { downloadConfigFile(false); });
@@ -881,6 +1036,10 @@ function wireTransferAndMaintenance() {
   $("settingsExportArchive")?.addEventListener("click", () => { exportArchiveMetadata(); });
   $("settingsHealthCheck")?.addEventListener("click", () => { writeHealthReport(); });
   $("settingsOpenRecycle")?.addEventListener("click", openRecyclePage);
+  // 1.10.0：统计库随时能重建；「最近出错」随时能刷新、能复制诊断信息。
+  $("rebuildStats")?.addEventListener("click", () => { rebuildStatsDatabase(); });
+  $("refreshRecentErrors")?.addEventListener("click", () => { renderRecentErrors(); });
+  $("copyDiagnostics")?.addEventListener("click", () => { copyDiagnostics(); });
 }
 
 // 供 pages.test 直接驱动（收藏库时代的测试调的是 importConfigFromText，搬家后名字保持一致）。
@@ -889,7 +1048,10 @@ globalThis.BcaSettingsTransfer = Object.freeze({
   downloadConfigFile,
   currentConfigPreferences,
   exportArchiveMetadata,
-  writeHealthReport
+  writeHealthReport,
+  rebuildStatsDatabase,
+  renderRecentErrors,
+  copyDiagnostics
 });
 
 wireTransferAndMaintenance();
@@ -1126,6 +1288,9 @@ async function boot() {
     if (!event.target.closest?.(".settings-search")) renderSearchResults("");
   });
 
+  // 1.10.0（TODO P0-3）：启动时把「最近出错」面板填上（i18n 已就绪，文案才是当前语言）
+  renderRecentErrors().catch(() => {});
+
   BcaI18n.onChange(() => {
     applyTitle();
     renderLocaleOptions();
@@ -1133,6 +1298,8 @@ async function boot() {
     buildSearchIndex();
     renderCrumb(navGroup);
     renderAppearance();
+    // 1.10.0：面板里的操作名与状态行也是算出来的，换语言要重画一次
+    renderRecentErrors();
     // 正在报的错也要换成当前语言（它没挂 data-i18n，apply() 管不到）
     if (!$("wallpaperErrorRow")?.hidden) showWallpaperError(wallpaperErrorKey);
   });

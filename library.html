@@ -176,6 +176,14 @@
           <button id="cleanupUnfinished" class="text-button scan-notice-cleanup" type="button" hidden data-i18n="清理这些没写完的目录">清理这些没写完的目录</button>
           <button id="dismissScanNotice" class="scan-notice-close" type="button" aria-label="关闭" data-i18n-aria="关闭"><span data-icon="close"></span></button>
         </div>
+        <!-- 1.10.0（TODO P0-4）：重复收藏走「已在本地，跳过」、或者一次收藏里有收藏夹没存上时，
+             原来只有弹窗里那句话，关掉就再也没处看。这里留最近一次（24 小时内）有跳过或
+             有失败的结果；组件与样式跟上面那条扫描提示完全一致，详情走现成的结果对话框。 -->
+        <div id="recentResultNotice" class="scan-notice" hidden>
+          <span id="recentResultText" class="scan-notice-text"></span>
+          <button id="openRecentResult" class="text-button scan-notice-cleanup" type="button" data-i18n="查看详情">查看详情</button>
+          <button id="dismissRecentResult" class="scan-notice-close" type="button" aria-label="关闭" data-i18n-aria="关闭"><span data-icon="close"></span></button>
+        </div>
         <div id="importRunningNotice" class="import-hint import-running-notice" role="status" hidden>
           <span class="import-hint-icon" data-icon="info"></span>
           <p id="importRunningText"></p>

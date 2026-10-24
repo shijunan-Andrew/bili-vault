@@ -1,6 +1,6 @@
 "use strict";
 /*
-  library.html / settings.html / popup.html / stats.html 这几个「要真 DOM 才能加载」的页面脚本与 content.js，**真执行**测试。
+  library.html / settings.html / popup.html / stats.html / recycle.html 这几个「要真 DOM 才能加载」的页面脚本与 content.js，**真执行**测试。
 
   分工（四套测试各管一段）：
     test/stability.test.cjs  —— 读文件 + 正则：证明源码里写着某行字（防漂移）
@@ -555,15 +555,7 @@ async function suiteLibrary() {
   await test("统计页能用回调式 storage 真跑起来：有数据画卡片、空库显示空态（1.8.11）", async () => {
     /* stats.js 读快照用的是 chrome.storage.local.get(key, cb) 回调式，而 harness
        只有 Promise 版 —— 不补这一层，统计页的 init 永远不完成（这也正是它此前零覆盖的原因）。 */
-    const wrap = (chrome) => {
-      const area = chrome.storage.local;
-      const rawGet = area.get.bind(area);
-      area.get = function (keys, callback) {
-        if (typeof callback !== "function") return rawGet(keys);
-        return rawGet(keys).then((result) => callback(result));
-      };
-      return chrome;
-    };
+    const wrap = withCallbackStorage;
     const snapshot = {
       videos: 12,
       days: 3,
@@ -1004,6 +996,94 @@ async function openSettings(options = {}) {
   return page;
 }
 
+/** stats.js 读快照用回调式 storage，harness 只有 Promise 版：补这一层，init 才走得完。 */
+function withCallbackStorage(chrome) {
+  const area = chrome.storage.local;
+  const rawGet = area.get.bind(area);
+  area.get = function (keys, callback) {
+    if (typeof callback !== "function") return rawGet(keys);
+    return rawGet(keys).then((result) => callback(result));
+  };
+  return chrome;
+}
+
+/** 起一页 stats.html（统计页只读 bcaStats 快照，另外靠一条消息让后台补发）。 */
+async function openStats(options = {}) {
+  const chrome = withCallbackStorage(makeChrome({
+    version: "1.10.0",
+    localData: options.localData || {},
+    onRuntimeMessage: options.onRuntimeMessage
+  }));
+  const page = dom.loadPage({ htmlFile: "stats.html", chrome });
+  page.__chrome = chrome;
+  page.document.dispatchEvent({ type: "DOMContentLoaded" });
+  await settle(12);
+  return page;
+}
+
+/** 起一页 recycle.html（1.10.0）。回收站的数据面全在 BcaArchiveTools 里，
+    测试把那一整块换成桩，页面自己的渲染 / 选择 / 确认 / 文案走真代码。 */
+async function openRecycle(options = {}) {
+  const chrome = makeChrome({ version: "1.10.0", localData: options.localData || {} });
+  const page = dom.loadPage({ htmlFile: "recycle.html", chrome, globals: options.globals });
+  page.__chrome = chrome;
+  await settle();
+  return page;
+}
+
+/** 回收站工具桩：只回测试要的那几样，并把「哪些条目被恢复 / 删掉」记下来供断言。 */
+function makeRecycleTools(options = {}) {
+  const state = {
+    entries: (options.entries || []).map((entry) => ({ ...entry })),
+    restored: [],
+    deleted: [],
+    purged: 0,
+    lists: 0
+  };
+  const tools = {
+    loadRootHandle: async () => (options.noRoot ? null : { name: "归档" }),
+    ensureRootPermission: async () => options.permission !== false,
+    listRecycled: async () => {
+      state.lists += 1;
+      return state.entries.map((entry) => ({ ...entry }));
+    },
+    field: (info, name) => String((info && info[name]) || ""),
+    formatMegabytes: (bytes) => `${Math.round((Number(bytes) || 0) / (1024 * 1024))} MB`,
+    reportListLine: (failures) => (failures || []).map((failure) => String((failure && failure.message) || failure)),
+    restoreRecycled: async (handle, chosen) => {
+      const paths = chosen.map((entry) => entry.path);
+      state.restored.push(paths);
+      state.entries = state.entries.filter((entry) => !paths.includes(entry.path));
+      return { restored: chosen, failures: [] };
+    },
+    deleteRecycled: async (handle, chosen) => {
+      const paths = chosen.map((entry) => entry.path);
+      state.deleted.push(paths);
+      state.entries = state.entries.filter((entry) => !paths.includes(entry.path));
+      return { removed: paths.length, failures: [] };
+    },
+    purgeRecycler: async () => {
+      const removed = state.entries.length;
+      state.purged += 1;
+      state.entries = [];
+      return { removed, failures: [] };
+    }
+  };
+  return { tools, state };
+}
+
+/** 一条回收站条目（path 带 005回收站/ 前缀，和 archive-tools 给的一致）。 */
+function recycleEntry(stamp, extra = {}) {
+  return {
+    path: `005回收站/${stamp}/小鲸鱼测试/2026年10月09日01时19分50秒`,
+    collection: "小鲸鱼测试",
+    directory: "2026年10月09日01时19分50秒",
+    deletedAt: "2026-05-19T10:00:00.000Z",
+    record: { bytes: 2 * 1024 * 1024, info: { "视频标题": extra.title || "被删掉的那一条", "UP主昵称": "小鲸鱼UP" } },
+    ...extra
+  };
+}
+
 async function suiteSettings() {
   await test("设置页滑杆 input 连发只写一次 storage，松手落最后一次（1.8.12 真执行）", async () => {
     const page = await openSettings();
@@ -1096,6 +1176,209 @@ async function suiteSettings() {
   });
 }
 
+/* ---------------- 回收站页（1.10.0） ----------------
+   1.9.0 起回收站是独立页，但 pages.test 一直只覆盖 library / settings / popup / content，
+   这一页的渲染、多选、确认文案全靠人眼看过。这里换成桩驱动真代码。 */
+
+async function suiteRecycle() {
+  await test("回收站没选过备份文件夹时给一条能照着做的错误，不是一片空白（1.10.0 真执行）", async () => {
+    const page = await openRecycle();
+    const { tools } = makeRecycleTools({ noRoot: true });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const error = doc.getElementById("recycleError");
+    assert.equal(error.hidden, false, "错误行要露出来");
+    assert.equal(error.textContent.trim(),
+      BcaT(page, "读回收站失败：{message}", { message: BcaT(page, "先选一个本地备份文件夹，再打开回收站。") }),
+      "错误文案要指名下一步做什么");
+    assert.equal(doc.getElementById("recycleGrid").children.length, 0, "一条卡片都不该画");
+    assert.equal(doc.getElementById("recycleEmpty").hidden, false, "空态要显示");
+    assert.equal(doc.getElementById("recycleSummary").textContent.trim(), BcaT(page, "回收站里现在是空的。"));
+  });
+
+  await test("回收站把一条记录画成卡片：收藏夹徽标、标题、UP 主、删于路径都在（1.10.0 真执行）", async () => {
+    const page = await openRecycle();
+    const { tools } = makeRecycleTools({
+      entries: [
+        recycleEntry("2026年05月10日01时19分50秒"),
+        recycleEntry("2026年05月11日01时19分50秒", { title: "第二条" })
+      ]
+    });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const grid = doc.getElementById("recycleGrid");
+    assert.equal(grid.children.length, 2, "两条要画成两张卡片");
+    const first = grid.children[0];
+    assert.equal(first.dataset.entryKey, "005回收站/2026年05月10日01时19分50秒/小鲸鱼测试/2026年10月09日01时19分50秒");
+    assert.equal(first.querySelector(".cover-badge").textContent.trim(), "小鲸鱼测试", "徽标是收藏夹名");
+    assert.equal(first.querySelector(".card-title").textContent.trim(), "被删掉的那一条");
+    assert.equal(first.querySelector(".card-up").textContent.trim(), "小鲸鱼UP");
+    assert.match(first.querySelector(".card-date").textContent.trim(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/,
+      "删于时间要格式化到分钟");
+    assert.equal(first.querySelector(".card-deleted").textContent.trim(),
+      BcaT(page, "删于 {path}", { path: "2026年05月10日01时19分50秒/小鲸鱼测试/2026年10月09日01时19分50秒" }),
+      "路径要把 005回收站/ 前缀去掉");
+    assert.equal(doc.getElementById("recycleEmpty").hidden, true, "有内容就不该显示空态");
+    assert.match(doc.getElementById("recycleSummary").textContent, /共 2 项/, "摘要要报条数");
+    assert.equal(doc.getElementById("recyclePurge").disabled, false, "有东西时清空按钮要可用");
+  });
+
+  await test("回收站全选按钮在「全选 / 取消全选」之间切，恢复与删除的可用状态跟着选中数走（1.10.0 真执行）", async () => {
+    const page = await openRecycle();
+    const { tools } = makeRecycleTools({
+      entries: [recycleEntry("2026年05月10日01时19分50秒"), recycleEntry("2026年05月11日01时19分50秒")]
+    });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const grid = doc.getElementById("recycleGrid");
+    const selectAll = doc.getElementById("recycleSelectAll");
+    const restore = doc.getElementById("recycleRestore");
+    const remove = doc.getElementById("recycleDeleteSelected");
+    assert.equal(selectAll.textContent.trim(), BcaT(page, "全选"));
+    assert.equal(restore.disabled, true, "没选中时恢复不可点");
+    assert.equal(remove.disabled, true, "没选中时彻底删除不可点");
+
+    dom.fireUserEvent(selectAll, "click");
+    await settle();
+    assert.equal(selectAll.textContent.trim(), BcaT(page, "取消全选"));
+    assert.equal(restore.disabled, false);
+    assert.equal(remove.disabled, false);
+    assert.equal([...grid.children].filter((card) => card.classList.contains("selected")).length, 2,
+      "选中的卡片要加 selected");
+    assert.ok([...grid.querySelectorAll(".card-select")].every((box) => box.checked), "复选框要跟着勾上");
+
+    dom.fireUserEvent(selectAll, "click");
+    await settle();
+    assert.equal(selectAll.textContent.trim(), BcaT(page, "全选"));
+    assert.equal(restore.disabled, true);
+  });
+
+  await test("回收站彻底删除先问一次不可逆确认：取消就什么都不发生，确认才真删（1.10.0 真执行）", async () => {
+    const page = await openRecycle();
+    const { tools, state } = makeRecycleTools({ entries: [recycleEntry("2026年05月10日01时19分50秒")] });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const confirmed = [];
+    page.window.confirm = (text) => {
+      confirmed.push(text);
+      return false;
+    };
+    dom.fireUserEvent(doc.getElementById("recycleSelectAll"), "click");
+    await page.window.BcaRecycle.deleteSelected();
+    await settle();
+
+    assert.equal(confirmed.length, 1, "删除前必须问一次");
+    assert.equal(confirmed[0],
+      BcaT(page, "这次操作不可逆：会把选中的 {count} 项彻底删掉，不会进系统回收站，也找不回来。确定吗？", { count: "1" }),
+      "确认文案要说清不可逆、不进系统回收站");
+    assert.equal(state.deleted.length, 0, "点了取消就一条都不许删");
+    assert.equal(doc.getElementById("recycleGrid").children.length, 1, "取消后列表要原样");
+
+    page.window.confirm = () => true;
+    await page.window.BcaRecycle.deleteSelected();
+    await settle();
+    assert.deepEqual(state.deleted, [["005回收站/2026年05月10日01时19分50秒/小鲸鱼测试/2026年10月09日01时19分50秒"]],
+      "确认后要真删选中的那条");
+    assert.equal(doc.getElementById("recycleGrid").children.length, 0, "删完列表要空");
+    assert.equal(doc.getElementById("recycleEmpty").hidden, false, "删完要回到空态");
+    assert.equal(doc.getElementById("recycleStatus").textContent.trim(),
+      BcaT(page, "已彻底删除 {count} 项。", { count: "1" }));
+  });
+
+  await test("回收站恢复把条目放回原收藏夹，成功文案报条数（1.10.0 真执行）", async () => {
+    const page = await openRecycle();
+    const { tools, state } = makeRecycleTools({ entries: [recycleEntry("2026年05月10日01时19分50秒")] });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    dom.fireUserEvent(doc.getElementById("recycleSelectAll"), "click");
+    await page.window.BcaRecycle.restoreSelected();
+    await settle();
+
+    assert.deepEqual(state.restored, [["005回收站/2026年05月10日01时19分50秒/小鲸鱼测试/2026年10月09日01时19分50秒"]],
+      "恢复的要正是选中的那条");
+    assert.equal(doc.getElementById("recycleGrid").children.length, 0, "恢复完列表要空");
+    assert.equal(doc.getElementById("recycleStatus").textContent.trim(),
+      BcaT(page, "已恢复 {count} 项，放回原来的收藏夹。", { count: "1" }));
+  });
+}
+
+/* ---------------- 统计页的「重新读取统计库」按钮（1.10.0） ----------------
+   1.9.6 加了这条路线：快照丢了就让后台按现成的 003database 补发一份。
+   只测过静态断言，没测过「点下去真的发消息、回来真的重绘」。 */
+
+async function suiteStats() {
+  const snapshot = {
+    videos: 12,
+    days: 3,
+    totals: { savedTotal: 12 },
+    firstSeen: "2026-05-01",
+    collections: 2,
+    topCollection: { name: "默认收藏夹", count: 9 },
+    dailyRows: [{ day: "2026-05-19", count: 4 }, { day: "2026-05-20", count: 8 }],
+    weekly: [{ week: "2026-05-18", count: 12 }],
+    monthly: [{ month: "2026-05", count: 12 }],
+    yearly: [{ year: "2026", count: 12 }]
+  };
+
+  await test("统计页空态点「重新读取统计库」会让后台补发快照，回来就重绘（1.10.0 真执行）", async () => {
+    let asked = 0;
+    const page = await openStats({
+      onRuntimeMessage: async (message) => {
+        if (message && message.type === "bca-stats-republish") {
+          asked += 1;
+          await page.chrome.storage.local.set({ bcaStats: snapshot });
+          return { ok: true };
+        }
+        return undefined;
+      }
+    });
+    const doc = page.document;
+    assert.equal(doc.getElementById("statsEmpty").hidden, false, "一开始没有快照，必须是空态");
+
+    dom.fireUserEvent(doc.getElementById("statsRepublish"), "click");
+    await settle(16);
+    assert.equal(asked, 1, "点一次要发一条 bca-stats-republish");
+    assert.equal(doc.getElementById("statVideos").textContent.trim(), "12", "补发回来要重绘");
+    assert.equal(doc.getElementById("statsEmpty").hidden, true, "有数据后空态要收起来");
+    const button = doc.getElementById("statsRepublish");
+    assert.equal(button.disabled, false, "按钮要还回去，不能一直转");
+    assert.equal(button.textContent.trim(), BcaT(page, "重新读取统计库"), "按钮文案要还原");
+  });
+
+  await test("统计页补发被拒（没选备份文件夹）时说清下一步，按钮照样还回来（1.10.0 真执行）", async () => {
+    const page = await openStats({
+      onRuntimeMessage: async (message) => (message && message.type === "bca-stats-republish"
+        ? { ok: false, reason: "no-root" }
+        : undefined)
+    });
+    const doc = page.document;
+    dom.fireUserEvent(doc.getElementById("statsRepublish"), "click");
+    await settle(16);
+
+    assert.equal(doc.getElementById("statsEmptyText").textContent.trim(),
+      BcaT(page, "还没有选择本地备份文件夹，先在收藏库里选一次。"));
+    assert.equal(doc.getElementById("statsEmpty").hidden, false, "没补上就还是空态");
+    const button = doc.getElementById("statsRepublish");
+    assert.equal(button.disabled, false);
+    assert.equal(button.textContent.trim(), BcaT(page, "重新读取统计库"));
+  });
+}
+
 /* ---------------- 跑 ---------------- */
 
 async function suite() {
@@ -1103,6 +1386,8 @@ async function suite() {
   await suitePopup();
   await suiteContent();
   await suiteSettings();
+  await suiteRecycle();
+  await suiteStats();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

@@ -221,6 +221,15 @@
    但走 --muted 而不是 --warning —— 成功不是警告，不该用警示色。 */
 .row-status { margin: 0; color: var(--muted); font-size: var(--fs-base); }
 
+/* 1.10.0（TODO P0-3）：设置页「最近出错」的三条记录。这里只管排版与层级，
+   颜色、圆角、间距全部走令牌 —— 深色主题与玻璃效果自动跟着换，不许写死色值。 */
+.recent-error-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.recent-error-item { padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--surface-sunken); }
+.recent-error-head { display: flex; align-items: baseline; gap: var(--sp-2); }
+.recent-error-operation { color: var(--text); font-size: var(--fs-base); font-weight: 600; }
+.recent-error-time { color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.recent-error-summary { margin: var(--sp-1) 0 0; color: var(--muted); font-size: var(--fs-sm); word-break: break-all; }
+
 /* 开关：结构照 popup.css 的 .toggle-switch（圆槽 + 一个圆点，.off 时点回到左边），
    但配色走 --surface-sunken / --brand 令牌 —— popup.css 那版里底色与圆点是写死的，
    设置页要在深色主题下也成立，所以这里自己定义一份，不去动 popup.css。 */
