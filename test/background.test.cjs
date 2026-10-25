@@ -645,6 +645,42 @@ async function suite() {
     assert.equal(masked.includes("没有权限"), true, "人话部分要留着");
   });
 
+  /* ---- 1.13.5（审查 P1-6）：对比残影的复位要真跑一遍 ---- */
+
+  await test("对比进行中被回收：storage 里的 running 残影要在模块启动时就落回 false（1.13.5 · 审查 P1-6）", async () => {
+    const residue = { running: true, text: "正在对比「我的收藏」：第 2/5 页，已读到 60 条", summary: null, at: 1760000000000 };
+    const chrome = makeChrome({ localData: { diffState: residue } });
+    loadBackground({ chrome });
+    // 模块末尾那句 diffReconcileState() 是 fire-and-forget，等它一轮微任务落盘
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const after = chrome.storage.local.dump().diffState;
+    assert.equal(after.running, false, "残影必须落回 false，否则弹窗的导入/对比/恢复会一直锁着");
+    assert.equal(after.text, "", "残影的进度文字也要清掉");
+    assert.equal(after.at, residue.at, "原有字段别丢");
+  });
+
+  await test("对比真的在内存里跑的时候，复位函数不许动它（1.13.5 · 审查 P1-6）", async () => {
+    const chrome = makeChrome({ localData: {} });
+    const bg = loadBackground({ chrome });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const running = { running: true, text: "正在对比「我的收藏」…", summary: null, at: 1760000000000 };
+    await chrome.storage.local.set({ diffState: running });
+    bg.__test.diffRun.active = true;
+    assert.deepEqual(await bg.__test.diffReconcileState(), { active: true, reset: false });
+    assert.deepEqual(chrome.storage.local.dump().diffState, running, "在跑就别碰");
+    bg.__test.diffRun.active = false;
+    assert.deepEqual(await bg.__test.diffReconcileState(), { active: false, reset: true }, "标记落回 false 之后才复位");
+    assert.equal(chrome.storage.local.dump().diffState.running, false);
+  });
+
+  await test("没有 diffState（首次安装 / 从未对比过）也能安全复位（1.13.5 · 审查 P1-6）", async () => {
+    const chrome = makeChrome({ localData: {} });
+    const bg = loadBackground({ chrome });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(await bg.__test.diffReconcileState(), { active: false, reset: false });
+    assert.equal(chrome.storage.local.dump().diffState, undefined, "没有残影就不许凭空造一份");
+  });
+
 }
 
 /* ---------------- 跑 ---------------- */

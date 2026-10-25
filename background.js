@@ -187,6 +187,8 @@ chrome.runtime.onInstalled.addListener(() => {
   // 4.9：安装 / 更新 / 重新加载扩展之后不可能还有导入在跑，
   // 本地残留的 importState.running=true 要立刻复位，别让界面锁死
   importReconcileState().catch((error) => console.warn("复位导入状态失败", error));
+  // 1.13.5（审查 P1-6）：对比的残影同理。
+  diffReconcileState().catch((error) => console.warn("复位对比状态失败", error));
   // 1.9.6：统计快照丢了（只在收藏库扫描时才写）会让统计页一直显示「还没有数据」
   healStatsSnapshotOnStart().catch((error) => console.warn("补发统计快照失败", error));
 });
@@ -207,6 +209,8 @@ chrome.runtime.onStartup.addListener(() => {
   // 4.9：浏览器重新启动时 chrome.storage.session 已被清空，只剩 local 里的 running 残影，
   // 这里立刻复位并写明"上次导入已中断"
   importReconcileState().catch((error) => console.warn("复位导入状态失败", error));
+  // 1.13.5（审查 P1-6）：对比没有断点快照，local 里的 running 同样是残影。
+  diffReconcileState().catch((error) => console.warn("复位对比状态失败", error));
   healStatsSnapshotOnStart().catch((error) => console.warn("补发统计快照失败", error));
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -3037,6 +3041,22 @@ async function importReconcileState() {
   return { active: false, reset: true };
 }
 
+// 1.13.5（审查 P1-6）：对比和导入一样会留残影。判据也只有一条 —— 内存里真的在跑才算在跑。
+// 上一次对比正在进行时浏览器被关、扩展被重载或 service worker 被回收，
+// chrome.storage.local 里的 diffState.running 会永远停在 true；弹窗每次打开都读这份状态
+// （popup.js 里 running 为真就 importBusy = true），而对比全程不渲染暂停/取消，
+// 于是「导入 / 对比 / 恢复」三个按钮全部锁死，用户没有任何复位入口。
+async function diffReconcileState() {
+  if (diffRun.active) return { active: true, reset: false };
+  const stored = await chrome.storage.local.get("diffState").catch(() => ({}));
+  const storedState = stored?.diffState || null;
+  if (storedState?.running !== true) return { active: false, reset: false };
+  // storage 说在跑、内存里没有：这一轮的进程已经没了，立刻把状态落回 false。
+  diffState = { ...storedState, running: false, text: "" };
+  await chrome.storage.local.set({ diffState }).catch(() => {});
+  return { active: false, reset: true };
+}
+
 // service worker 每次启动都会重新求值这个模块：此刻内存里的 importRun 一定是空的，
 // 所以 session 里 active 的记录只可能来自"上一次被回收打断的导入"。
 async function importRecoverInterruptedImport() {
@@ -5740,6 +5760,10 @@ function publishDiffProgress(text) {
   publishDiffState({ running: true, text });
 }
 
+// 1.13.5（审查 P1-6）：「这一次对比是不是真的在内存里跑」的唯一判据。
+// 不要用时间窗口，也不要信 storage 里的 running —— 那可能是被回收前留下的残影。
+let diffRun = { active: false };
+
 let diffState = { running: false, text: "", summary: null, at: 0 };
 
 function sendDiffProgress(text) {
@@ -5783,6 +5807,7 @@ async function diffBiliFavorites(data, tabId = null) {
   // 对比差异的收尾只有两条：inner 正常返回 = 成功（有几处差异不代表失败，那正是这次要的结果），
   // inner 抛错 = 失败（UID 没记过、没设本地文件夹、读列表失败都从这里出去）
   markActivityStarted();
+  diffRun.active = true;
   publishDiffState({ running: true, text: BcaI18n.t("正在读取 B 站收藏夹列表…"), summary: null, at: Date.now() });
   try {
     const result = await diffBiliFavoritesInner(data, tabId);
@@ -5792,6 +5817,9 @@ async function diffBiliFavorites(data, tabId = null) {
     publishDiffState({ running: false, text: "", at: Date.now(), summary: null });
     markActivityFinished(null);
     throw error;
+  } finally {
+    // 1.13.5（审查 P1-6）：内存里的「正在跑」标记要和 storage 里的 running 一起落回 false
+    diffRun.active = false;
   }
 }
 
@@ -6140,6 +6168,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     importReconcileState()
       .catch(() => {})
       .then(() => { importState = { ...importState, active: importRun.active }; })
+      // 1.13.5（审查 P1-6）：对比的残影也在这里复位，弹窗一打开就能重新用。
+      .then(() => diffReconcileState().catch(() => {}))
       .then(() => chrome.storage.local.get(["lastResult", "lastError", "pendingFavorite", "authorizedErrorAt", "lastStorageError"]))
       .then((status) => {
         sendResponse({ ...status, importState });
@@ -6156,3 +6186,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // 发现之后：复位 importState.running、留一份带提示行的中断报告、把回滚日志挪到独立键，
 // 并明确告知用户"发生了中断、断点在哪、已写入的内容仍然有效"。
 importRecoverInterruptedImport().catch((error) => console.warn("检查未完成的导入记录失败", error));
+// 1.13.5（审查 P1-6）：对比的残影也在模块启动时复位 —— 此刻内存里的 diffRun 必定是 false，
+// storage 里 running:true 只可能是被回收前留下的。放在这里，弹窗打开前状态就已经是干净的。
+diffReconcileState().catch((error) => console.warn("复位对比状态失败", error));

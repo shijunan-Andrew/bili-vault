@@ -137,12 +137,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.13.4：回收站和搬目录这一段，终于有真执行测试了
+## V1.13.5：对比跑到一半被关掉，弹窗不会再锁死了
 
-- **补上真执行测试**（审查 P1-1）：回收收藏夹、批量回收记录、恢复、彻底删除、清空回收站、搬目录 —— 七条用例全部在内存文件系统上真跑 `archive-tools.js`，每一步都断言磁盘上的真实结构：挪过去的字节、源目录还在不在、重名怎么断、空掉的时间戳目录有没有清掉。这是项目里唯一不可逆删数据的代码，之前只有内存桩。
-- **顺手补上 harness 的一处失真**：`createWritable().write()` 以前不认「从 `getFile()` 拿到的 File」，于是 `copyFileHandle` 在测试里永远产 0 字节 —— 「复制 → 逐文件比字节 → 才删源」这条最该测的路径，从来没有被执行过。
-- **冒烟清单里那条点不出来的步骤改掉了**（审查 P1-2）：「点『收藏到本地』」是 1.7 之前的行为，现在是关掉 B 站收藏弹窗后自动归档。
-- **README 的出网域名口径与隐私说明对齐**（审查 P1-7）：只有三类，第三类是点「检查更新」时才读一次的两个地址。
+- **修好了「永久锁死」**（审查 P1-6）：对比进行中关浏览器、重载扩展或后台被回收，弹窗再打开会一直以为对比还在跑，把「导入 / 对比 / 恢复」三个按钮全禁掉 —— 而对比全程没有暂停/取消可点，用户没有复位入口。现在只要后台起来，就会发现「内存里其实没在跑」，把状态复位掉。
+- **判据只有一条**：内存里真的在跑才算在跑。`chrome.storage.local` 里那份 `running: true` 只是残影。
+- **四处兜底**：后台模块启动、安装/更新、浏览器重启、弹窗查询状态，任何一个时机都会清掉残影；已经跑完的结果面板不受影响。
+- **补了四条测试**：三条真执行用例（残影会在后台启动时落盘复位、真在跑时不许动它、从没对比过时不许凭空造状态）+ 一条源码守卫（判据、四处复位、`finally`、弹窗仍读这份状态）。
 
 **遗留** - 无。
 
@@ -154,7 +154,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:418 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:419 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

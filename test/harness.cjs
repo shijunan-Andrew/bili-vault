@@ -366,7 +366,9 @@ const BACKGROUND_EXPORTS = [
   "loadBvIndex", "saveBvIndex", "enrichFavoriteMetadata", "buildInfo",
   // 1.12.4（审查 P2-2）：自定义路径打码要能被单独驱动
   "rememberLocalRoot", "maskKnownRoots",
-  "writeFile", "fileExists"
+  "writeFile", "fileExists",
+  // 1.13.5（审查 P1-6）：对比残影的复位要能被真执行
+  "diffReconcileState", "diffRun"
 ];
 
 function loadBackground(options = {}) {

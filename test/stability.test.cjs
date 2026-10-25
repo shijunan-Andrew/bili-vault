@@ -8940,3 +8940,27 @@ test("1.12.6：文档里的数字能一键对齐，.ps1 也不用等人工才验
   assert.ok(status.includes("process.exitCode = 1"), "红要带退出码");
 });
 
+// ---- V1.13.5（审查 P1-6）：对比残影要有复位入口 ----
+test("对比进行中被回收，弹窗不会永久锁死（1.13.5 · 审查 P1-6）", () => {
+  const background = readProjectFile("background.js");
+  // 1) 判据是内存标记，不是 storage 里的 running（那可能是残影）
+  assert.ok(background.includes("let diffRun = { active: false };"), "要有内存里的对比运行标记");
+  assert.match(background, /if \(diffRun\.active\) return \{ active: true, reset: false \};/,
+    "在跑就直接返回，别去改 storage");
+  assert.match(background, /if \(storedState\?\.running !== true\) return \{ active: false, reset: false \};/,
+    "storage 没在跑就不动它");
+  assert.match(background, /diffState = \{ \.\.\.storedState, running: false, text: "" \};/,
+    "复位要把 running 与进度文字一起清掉");
+  // 2) 四道调用点：安装/更新、浏览器重启、模块启动、get-status
+  const resets = background.split('diffReconcileState().catch((error) => console.warn("复位对比状态失败", error));').length - 1;
+  assert.equal(resets, 3, "模块启动 + onInstalled + onStartup 三处都要复位");
+  assert.match(background, /\.then\(\(\) => diffReconcileState\(\)\.catch\(\(\) => \{\}\)\)/,
+    "get-status 里也要复位（弹窗打开就是这里的时机）");
+  // 3) 对标对比本身：开始时置真、收尾时置假（finally，抛错也复位）
+  assert.match(background, /markActivityStarted\(\);\r?\n\s*diffRun\.active = true;/, "开始对比要置真");
+  assert.match(background, /finally \{\r?\n\s*\/\/[^\r\n]*\r?\n\s*diffRun\.active = false;/, "收尾要在 finally 里置假");
+  // 4) 弹窗读的就是这份状态：不能被悄悄改名
+  const popup = readProjectFile("popup.js");
+  assert.ok(popup.includes('chrome.storage.local.get("diffState")'), "弹窗仍然读 diffState");
+});
+
