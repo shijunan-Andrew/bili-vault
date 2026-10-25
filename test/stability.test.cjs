@@ -8074,3 +8074,36 @@ test("1.10.18：三种导出收成「导出配置 + 更多导出」，不再三�
   assert.match(js, /const exportMore = \$\("exportMore"\);/, "下拉要能被脚本收起");
   assert.match(js, /if \(exportMore\) exportMore\.open = false;/, "选完一项要收起");
 });
+
+
+test("1.10.19：使用说明与安装教程的字号只用令牌，示意图按钮跟随品牌色", () => {
+  const css = readProjectFile("page.css");
+  const px = css.match(/font-size:\s*\d+(?:\.\d+)?px/g) || [];
+  assert.deepEqual(px, ["font-size: 24px"], "除了文档标题那 24px，其它字号都要走 --fs-* 令牌");
+  assert.match(css, /文档标题专用 24px/, "那 24px 的例外要写清理由");
+  assert.ok(!/font-size:\s*13\.5px/.test(css), "13.5px 不在 7 档令牌里，不许再出现");
+
+  const html = readProjectFile("guide.html");
+  assert.ok(!/background:\s*var\(--accent\)/.test(html), "示意图的主按钮要跟真机一样用品牌色");
+  assert.match(html, /<table class="terms">/, "术语对照表要加 class，才能单独定列宽");
+  assert.match(css, /table\.terms\s*\{\s*table-layout:\s*fixed;\s*\}/, "术语表用固定布局");
+  assert.match(
+    css,
+    /table\.terms th:first-child,\s*table\.terms td:first-child\s*\{\s*width:\s*34%;\s*\}/,
+    "左列给固定比例，右列的长句才会正常折行"
+  );
+
+  /* 示意图里照着真机画的那几块（开关、主按钮、侧栏选中、批量条、浮球）必须用品牌色，
+     文档自己的标注徽标才用暖色 --accent；混用会让人以为真机是棕色的。 */
+  const mockup = readProjectFile("mockup.css");
+  for (const [label, selector] of [
+    ["开关", ".pop .switch"],
+    ["收藏库顶栏主按钮", ".lib-top .btn.primary"]
+  ]) {
+    const rule = mockup.slice(mockup.indexOf(selector), mockup.indexOf("}", mockup.indexOf(selector)));
+    assert.ok(rule.includes("var(--brand)"), `${label}要用品牌色`);
+    assert.ok(!rule.includes("var(--accent)"), `${label}不许再用文档暖色`);
+  }
+  const accentUses = (mockup.match(/var\(--accent\)/g) || []).length;
+  assert.equal(accentUses, 1, "mockup.css 里只剩标注徽标那一处暖色");
+});

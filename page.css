@@ -32,15 +32,17 @@ html[data-appearance="custom"][data-wallpaper="on"] .wrap {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
+/* 1.10.19：文档标题专用 24px —— 7 档令牌里 22 与 27 之间没有合适档位，
+   收进去会把标题观感明显改小/改大，所以这里保留像素值，其余字号一律走令牌。 */
 h1 { font-size: 24px; margin: 0 0 6px; }
 .lead { color: var(--muted); margin: 0 0 26px; }
-h2 { font-size: 18px; margin: 40px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }
+h2 { font-size: var(--fs-lg); margin: 40px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }
 h2:first-of-type { border-top: 0; padding-top: 0; }
-h3 { font-size: 15px; margin: 22px 0 8px; }
+h3 { font-size: var(--fs-md); margin: 22px 0 8px; }
 p { margin: 10px 0; }
 ul, ol { margin: 10px 0; padding-left: 22px; }
 li { margin: 5px 0; }
-code { padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); font-size: 13px; }
+code { padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); font-size: var(--fs-base); }
 
 .muted { color: var(--muted); }
 .callout { margin: 14px 0; padding: 13px 16px; border: 1px solid var(--accent-line); border-radius: var(--r-sm); background: var(--accent-soft); }
@@ -61,17 +63,21 @@ code { padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); fo
 .note > strong:first-child { color: var(--accent); }
 
 /* 表格：与 guide.html 里的原有写法一致（.num 是等宽数字列） */
-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: var(--fs-base); }
 th, td { padding: 9px 11px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { background: var(--surface-soft); font-weight: 600; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 1.10.19：术语对照表两列都是 auto，第一列被拉到近 700px、右列一句话反而挤成窄条；
+   固定布局 + 左列 34% 之后两列宽度稳定，长句会正常折行。 */
+table.terms { table-layout: fixed; }
+table.terms th:first-child, table.terms td:first-child { width: 34%; }
 
 /* 步骤列表：编号圆标靠 counter 生成，圆标、边框、底色缺一不可 */
 .steps { counter-reset: s; list-style: none; padding: 0; }
 .steps > li { counter-increment: s; position: relative; margin: 0 0 22px; padding: 16px 18px 16px 56px;
               border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
 .steps > li::before { content: counter(s); position: absolute; left: 16px; top: 15px; width: 26px; height: 26px;
-                      border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px;
+                      border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: var(--fs-base);
                       display: grid; place-items: center; }
 .steps > li > b { display: block; margin-bottom: 4px; }
 /* 教程页的步骤正文是 <p class="what">，卡片已经有 16px 内边距，首行不用再留 12px */
@@ -83,7 +89,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: now
 
 /* 目录卡：两列网格，窄屏退回一列（原来固定两列，英文界面上会挤成一团） */
 .toc { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; margin: 0 0 8px; padding: 14px 18px;
-       border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: 13.5px; }
+       border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: var(--fs-base); }
 .toc a { color: var(--accent); text-decoration: none; }
 .toc a:hover { text-decoration: underline; }
 @media (max-width: 620px) { .toc { grid-template-columns: 1fr; } }

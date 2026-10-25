@@ -107,7 +107,7 @@
 .pop .card { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); }
 .pop .card b { font-size: 13.5px; }
 .pop .card small { display: block; margin-top: 2px; color: var(--muted); }
-.pop .switch { margin-left: auto; width: 38px; height: 22px; border-radius: 999px; background: var(--accent); position: relative; flex: none; }
+.pop .switch { margin-left: auto; width: 38px; height: 22px; border-radius: 999px; background: var(--brand); position: relative; flex: none; }
 .pop .switch::after { content: ""; position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
 .pop .note { margin-top: 8px; color: var(--muted); font-size: 12.5px; }
 .pop .danger { color: var(--danger); font-weight: 600; }
@@ -121,11 +121,11 @@
 .lib-top .crumb b { color: var(--ink); }
 .lib-top .spacer { flex: 1; }
 .lib-top .btn { padding: 5px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 12.5px; }
-.lib-top .btn.primary { border-color: transparent; background: var(--accent); color: #fff; }
+.lib-top .btn.primary { border-color: transparent; background: var(--brand); color: #fff; }
 .lib-main { display: flex; min-height: 150px; }
 .lib-side { width: 178px; flex: none; padding: 10px; border-right: 1px solid var(--line); background: var(--surface-soft); font-size: 12.5px; }
 .lib-side div { padding: 6px 9px; border-radius: var(--r-xs); color: var(--muted); }
-.lib-side div.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.lib-side div.on { background: var(--brand-soft); color: var(--brand); font-weight: 700; }
 .lib-side div .n { float: right; }
 .lib-grid { flex: 1; padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .lib-card { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; background: var(--surface); }
@@ -135,12 +135,12 @@
 .lib-card p { margin: 7px 8px 4px; font-size: 12.5px; line-height: 1.45; }
 .lib-card small { display: block; margin: 0 8px 8px; color: var(--muted); font-size: 11.5px; }
 .lib-card.isbad p { color: var(--danger); font-weight: 700; }
-.lib-batch { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line); background: var(--accent-soft); font-size: 12.5px; }
+.lib-batch { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line); background: var(--brand-soft); font-size: 12.5px; }
 .lib-batch .spacer { flex: 1; }
 .lib-batch .btn { padding: 5px 11px; border-radius: var(--r-sm); font-size: 12.5px; border: 1px solid var(--line); background: var(--surface); }
 .lib-batch .btn.warn { background: var(--warning-soft); border-color: var(--warning-line); }
 .lib-batch .btn.green { background: var(--success-soft); border-color: var(--success-line); }
-.lib-batch .btn.blue { background: var(--accent-soft); border-color: var(--accent-line); }
+.lib-batch .btn.blue { background: var(--brand-soft); border-color: var(--brand-line); }
 .lib-batch .btn.red { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
 
 /* ── 收藏库详情面板示意 ── */
@@ -155,7 +155,7 @@
 .detail-body .act { display: block; width: 100%; margin-bottom: 7px; padding: 9px 0; border: 1px solid var(--line);
                     border-radius: var(--r-sm); text-align: center; font-size: 13px; font-weight: 600; }
 .detail-body .act.green { background: var(--success-soft); border-color: var(--success-line); color: var(--success-strong); }
-.detail-body .act.blue { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.detail-body .act.blue { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand); }
 .detail-body .act.red { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
 .detail-body .act.quiet { background: var(--surface-soft); color: var(--muted); }
 .detail-note { margin: 0; color: var(--muted); font-size: 12.5px; }
@@ -163,9 +163,9 @@
 /* ── 主题 / 语言浮标 ── */
 .floats { display: flex; gap: 26px; align-items: flex-start; margin-top: 12px; }
 .float-item { text-align: center; }
-.float-btn { width: 46px; height: 46px; margin: 0 auto; border-radius: 50%; border: 1px solid var(--accent-line);
-             background: var(--surface); color: var(--accent); display: grid; place-items: center; font-size: 19px; box-shadow: var(--shadow-md); }
+.float-btn { width: 46px; height: 46px; margin: 0 auto; border-radius: 50%; border: 1px solid var(--brand-line);
+             background: var(--surface); color: var(--brand); display: grid; place-items: center; font-size: 19px; box-shadow: var(--shadow-md); }
 .float-item p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .float-menu { margin-top: 8px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-md); text-align: left; }
 .float-menu div { padding: 6px 10px; border-radius: var(--r-xs); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-.float-menu div.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.float-menu div.on { background: var(--brand-soft); color: var(--brand); font-weight: 700; }
