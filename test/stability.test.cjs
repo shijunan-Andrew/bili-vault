@@ -8107,3 +8107,23 @@ test("1.10.19：使用说明与安装教程的字号只用令牌，示意图按�
   const accentUses = (mockup.match(/var\(--accent\)/g) || []).length;
   assert.equal(accentUses, 1, "mockup.css 里只剩标注徽标那一处暖色");
 });
+
+test("1.10.20：两个文档页都要有「回去的路」，出口指向真实页面", () => {
+  const css = readProjectFile("page.css");
+  assert.match(css, /\.doc-bar\s*\{[^}]*justify-content:\s*flex-end/, "顶栏的出口靠右放");
+  assert.match(css, /\.doc-bar-link\s*\{[^}]*text-decoration:\s*none/, "出口是文字链接，不是按钮");
+
+  for (const file of ["guide.html", "tutorial.html"]) {
+    const html = readProjectFile(file);
+    assert.ok(html.includes('<body id="top">'), `${file} 要有 #top 锚点`);
+    assert.ok(html.includes('href="settings.html" data-i18n="返回设置"'), `${file} 要能回设置页`);
+    assert.ok(html.includes('href="library.html" data-i18n="打开本地收藏库"'), `${file} 要能去收藏库`);
+    assert.ok(html.includes('href="#top" data-i18n="回到顶部"'), `${file} 末尾要有回到顶部`);
+  }
+
+  /* 三个文案都复用已有词条，不许为此新增词典条目 */
+  const zh = JSON.parse(readProjectFile("locales/zh-TW.json").replace(/^\uFEFF/, ""));
+  for (const key of ["返回设置", "打开本地收藏库", "回到顶部"]) {
+    assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `词典里要有「${key}」`);
+  }
+});

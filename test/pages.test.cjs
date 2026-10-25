@@ -1910,6 +1910,31 @@ async function suiteA11y() {
 }
 
 /* ---------------- 跑 ---------------- */
+
+/* ---- 两个文档页：使用说明、安装教程（1.10.20 起） ---- */
+async function suiteDocs() {
+  await test("使用说明与安装教程都有「回去的路」：两个出口 + 回到顶部（1.10.20 真执行）", async () => {
+    for (const htmlFile of ["guide.html", "tutorial.html"]) {
+      const page = dom.loadPage({ htmlFile });
+      await settle();
+      const document = page.document;
+
+      const bar = document.querySelector(".doc-bar");
+      assert.ok(bar, `${htmlFile} 要找得到顶栏`);
+      const links = Array.from(bar.querySelectorAll("a.doc-bar-link"));
+      assert.equal(links.length, 2, "顶栏要有两个出口，不许多也不许少");
+      assert.equal(links[0].getAttribute("href"), "settings.html", "第一个出口回设置页");
+      assert.equal(links[1].getAttribute("href"), "library.html", "第二个出口去收藏库");
+      assert.equal(links[0].textContent.trim(), "返回设置");
+      assert.equal(links[1].textContent.trim(), "打开本地收藏库");
+
+      const top = document.querySelector('a[href="#top"]');
+      assert.ok(top, "末尾要有「回到顶部」");
+      assert.equal(top.textContent.trim(), "回到顶部");
+      assert.ok(document.body.id === "top", "#top 要真的落在 <body> 上，否则点了没反应");
+    }
+  });
+}
 
 async function suite() {
   await suiteLibrary();
@@ -1919,6 +1944,7 @@ async function suite() {
   await suiteRecycle();
   await suiteStats();
   await suiteA11y();
+  await suiteDocs();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

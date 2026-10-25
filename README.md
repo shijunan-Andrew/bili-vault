@@ -137,12 +137,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.19：使用说明和安装教程不再「画歪」自家的界面
+## V1.10.20：使用说明和安装教程有了「回去的路」
 
-- **示意图的主按钮和开关是棕色的**：文档页有一套暖色阅读主题（`--accent` 是 `#a9762f`），示意图里的按钮、开关、侧栏选中、批量条、浮球菜单直接抄了这套颜色，于是「照着真机画」变成了另一种配色。改法是把这几处换成产品自己的 `--brand` 系列，**文档的标注徽标仍用暖色**（那是排版记号，不是产品色）。
-- **两处写死的 13.5px**：目录卡和表格的字号不在 7 档 `--fs-*` 令牌里，顺手收进 `--fs-base`（13px）。同一份 CSS 里 `h2`/`h3`/`code`/步骤圆标也一并换成令牌，值未变（18/15/13/13）；只有文档标题保留 24px 并写明理由（22 与 27 之间没有合适档位）。
-- **术语对照表的列宽**：两列都是 `auto`，第一列被拉到近 700px、右列一句话挤成窄条；改成 `table-layout: fixed` + 左列 34%，长句正常折行。
-- **范围**：`guide.html`（两处内联色 + 术语表加 `class="terms"`）、`page.css`（令牌化 + `table.terms` 规则）、`mockup.css`（九处产品色）；无新增文案，词典仍是 **1088** 条；`test/stability.test.cjs` 加 1 条守卫（382 → **383**）。
+- **问题**：这两页是从设置页点开、在新标签里看的；看完想回设置页或收藏库，除了关掉标签没有别的入口（页尾只有「知道了」）。
+- **改法**：两页正文最上方加一行轻量导航——「返回设置」`settings.html`、「打开本地收藏库」`library.html`；正文末尾在「知道了」旁边加「回到顶部」（`#top` 锚在 `<body>` 上，点了才真的会滚）。
+- **为什么用文字链接而不是按钮**：这两个动作是「离开这一页」，不该和正文里的主按钮抢注意力；字号用 `--fs-sm`、底色只在悬停时给一点品牌色。
+- **范围**：`guide.html`、`tutorial.html` 各两处、`page.css` 三条 `.doc-bar*` 规则与 `.actions` 的 `gap`；**没有新增文案**（三个词条都是现成的），词典仍是 **1088** 条；`test/stability.test.cjs` 加 1 条守卫（383 → **384**），`test/pages.test.cjs` 新增 `suiteDocs` 1 条真执行用例（64 → **65**）。
 
 **遗留** - 无。
 
@@ -154,7 +154,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:383 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:384 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

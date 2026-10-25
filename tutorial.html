@@ -12,8 +12,15 @@
 <link rel="stylesheet" href="page.css">
 <script src="theme.js"></script>
 </head>
-<body>
+<body id="top">
 <div class="wrap">
+
+  <!-- 1.10.20：文档页原来没有「回去的路」——从设置页新开一个标签看完只能关掉标签。
+       顶栏给两个出口，正文末尾再给一个「回到顶部」。 -->
+  <nav class="doc-bar">
+    <a class="doc-bar-link" href="settings.html" data-i18n="返回设置">返回设置</a>
+    <a class="doc-bar-link" href="library.html" data-i18n="打开本地收藏库">打开本地收藏库</a>
+  </nav>
   <h1 data-i18n="本地目录打开助手 · 安装教程">本地目录打开助手 · 安装教程</h1>
   <p class="lead" data-i18n-html="装好之后，收藏库里的「打开本地视频目录」就能直接在文件资源管理器里定位到视频文件夹。<strong>总共五步，装一次就行。</strong>">装好之后，收藏库里的「打开本地视频目录」就能直接在文件资源管理器里定位到视频文件夹。<strong>总共五步，装一次就行。</strong></p>
 
@@ -118,6 +125,7 @@
 
   <div class="actions">
     <button id="tutorialClose" class="button button-primary" type="button" data-i18n="知道了，去试试">知道了，去试试</button>
+    <a class="doc-bar-link" href="#top" data-i18n="回到顶部">回到顶部</a>
   </div>
 </div>
 <script src="i18n.js"></script>

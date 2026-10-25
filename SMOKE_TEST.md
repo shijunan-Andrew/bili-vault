@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **383** 项里<!-- test-count:383 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **384** 项里<!-- test-count:384 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -716,6 +716,12 @@
 **出问题看**：先确认它是不是在抓详情（那会让耗时从分钟级变成小时级）；再看有没有拿到 uid（报错会说"请先打开一次自己的 B 站收藏夹页面"）。
 
 ---
+
+## V1.10.20 新增的几条
+
+1. 设置页点「打开使用说明」：页面右上角有「返回设置」「打开本地收藏库」，点「返回设置」回到设置页、点另一个进收藏库。
+2. 同一个页面拉到最底：「知道了」旁边有「回到顶部」，点一下回到页首。
+3. 设置页点「打开安装教程」：同样有这两个出口与末尾的「回到顶部」。
 
 ## V1.10.19 新增的几条
 

@@ -104,7 +104,15 @@ table.terms th:first-child, table.terms td:first-child { width: 34%; }
             stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* 页脚操作区：教程页「知道了，去试试」。按钮单独一行居中，不和正文贴在一起。 */
-.actions { display: flex; justify-content: center; margin: var(--sp-6) 0 0; }
+.actions { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); margin: var(--sp-6) 0 0; }
+
+/* 1.10.20：文档页的「回去的路」。顶栏两个出口靠右，末尾一个「回到顶部」。
+   用文字链接而不是按钮：这两个动作是「离开这一页」，不该和正文里的主按钮抢注意力。 */
+.doc-bar { display: flex; justify-content: flex-end; gap: var(--sp-1); margin: 0 0 var(--sp-4); }
+.doc-bar-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: var(--r-xs);
+                color: var(--muted); font-size: var(--fs-sm); text-decoration: none; }
+.doc-bar-link:hover { color: var(--brand); background: var(--brand-soft); }
+.end .doc-bar-link { margin-top: var(--sp-3); }
 
 /* ── 按钮 ──
    与 library.css 的同名规则逐条对齐（同样 40px 高、--brand 底、白字 + 品牌阴影），
