@@ -1387,7 +1387,8 @@ test("the default download folder is created when it is missing", () => {
   //    V1.4.4 起固定目录一起建：000视频下载 / 001错误报告 / 002同步报告
   //    V1.5.0 起再加 003database（本地数据库根目录）
   assert.match(popup, /const DOWNLOAD_FOLDER_NAME = "000视频下载";/);
-  assert.match(popup, /const ROOT_STRUCTURE_DIRECTORIES = \[DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告", "003database"\];/);
+  // 1.11.10：名单收敛到 archive-core.js 的 AUXILIARY_DIR_NAMES，弹窗只引用
+  assert.match(popup, /const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore\.AUXILIARY_DIR_NAMES;/);
   assert.match(popup, /for \(const name of ROOT_STRUCTURE_DIRECTORIES\) \{/);
   assert.match(popup, /await handle\.getDirectoryHandle\(name, \{ create: true \}\)/);
   // ② 老用户（根目录已设好但没这个文件夹）也能立刻用上：标记时按需创建
@@ -5460,15 +5461,17 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
   // 是两种形状：1.5.0 起 003database 同时属于两者。
   // 1.7.30：多了 004导出（归档元数据导出目录）
   const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "003database", "004导出", "005回收站", "006报告", "视频下载", "错误报告"].join("|");
-  const shapeStructure = ["000视频下载", "001错误报告", "002同步报告", "003database"].join("|");
+  // 1.11.10：「选完目录就建出来」的那份名单不再手写在 library.js 里，
+  // 改成引用 archive-core.js 的 AUXILIARY_DIR_NAMES —— 所以这里只核对保留目录那一种形状。
+
   const shapes = reservedLists.map(([literal]) => namesOf(literal).join("|"));
   assert.ok(shapes.filter((shape) => shape === shapeReserved).length >= 2,
     `library.js 里应该有两份「扫描时跳过的保留目录名」，实际 ${JSON.stringify(shapes)}`);
-  assert.ok(shapes.includes(shapeStructure),
-    `library.js 里应该有 V1.4.4 的固定目录名单，实际 ${JSON.stringify(shapes)}`);
+  assert.ok(readProjectFile("library.js").includes("const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore.AUXILIARY_DIR_NAMES;"),
+    "收藏库要引用 archive-core.js 里那份唯一的辅助目录名单");
   for (const shape of shapes) {
-    assert.ok(shape === shapeReserved || shape === shapeStructure,
-      `library.js 里的目录名名单只允许两种形状（保留目录 / 固定目录），实际 ${shape}`);
+    assert.ok(shape === shapeReserved,
+      `library.js 里的目录名名单只允许「扫描时跳过的保留目录」这一种形状，实际 ${shape}`);
   }
 });
 
@@ -5542,8 +5545,8 @@ test("选完目录必须真的读一次，空文件夹也要建出三个固定�
 
   // 2) 收藏库：一份固定目录名单 + 一个建目录助手，选择目录与连接上次目录都要走它
   //    1.5.0 起多一个 003database（本地数据库根目录）
-  assert.ok(library.includes('const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告", "003database"];'),
-    "收藏库要有一份固定目录名单");
+  assert.ok(library.includes("const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore.AUXILIARY_DIR_NAMES;"),
+    "收藏库的固定目录名单要引用 archive-core.js 那一份");
   assert.ok(library.includes("async function ensureRootStructure("), "要有建目录的助手");
   assert.ok(library.includes("await ensureRootStructure(handle);"), "选择目录后要建出固定目录");
   assert.ok(library.includes("await ensureRootStructure(rootHandle);"), "连接上次目录时也要补齐");
@@ -5551,15 +5554,18 @@ test("选完目录必须真的读一次，空文件夹也要建出三个固定�
     "收藏库要按读写要权限，否则建不了目录");
 
   // 3) 弹窗：一次建齐，名字与收藏库同一份
-  assert.ok(popup.includes('const ROOT_STRUCTURE_DIRECTORIES = [DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告", "003database"];'),
-    "弹窗的固定目录名单要和收藏库一致");
+  assert.ok(popup.includes("const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore.AUXILIARY_DIR_NAMES;"),
+    "弹窗的固定目录名单要和收藏库用同一份");
+  assert.match(readProjectFile("popup.html"), /<script src="archive-core\.js"><\/script>\s*<script src="popup\.js">/,
+    "弹窗要先加载 archive-core.js 才能引用那份名单");
   assert.ok(popup.includes("for (const name of ROOT_STRUCTURE_DIRECTORIES)"),
     "弹窗要按名单逐个创建");
 
-  // 4) 这些名字必须在 background.js 的保留目录名单里（几处一起改，别让名单漂移）
+  // 4) 1.11.10：名字只写在 archive-core.js 的保留名单里（辅助目录名就是从那儿筛出来的），
+  //    background.js 那份是逐字相同的副本，两边都要有。
+  const coreSource = readProjectFile("archive-core.js");
   for (const name of ["000视频下载", "001错误报告", "002同步报告", "003database"]) {
-    assert.ok(library.includes(`"${name}"`), `收藏库的固定目录里有 ${name}`);
-    assert.ok(popup.includes(`"${name}"`), `弹窗的固定目录里有 ${name}`);
+    assert.ok(coreSource.includes(`"${name}"`), `archive-core.js 的保留名单里有 ${name}`);
     assert.ok(background.includes(`"${name}"`), `${name} 也要在 background.js 的保留名单里`);
   }
 });
@@ -8365,6 +8371,29 @@ test("1.11.5：使用说明里不再有「左下角两个浮标」（主题与�
   assert.equal(/\.float-(?:item|btn|menu)/.test(css), false, "只给它用的样式一起删，别留死代码");
   assert.match(guide, /主题和界面语言在哪改？/, "要在 FAQ 里说清改去哪了");
   assert.match(guide, /怎么知道有没有新版本？/, "要把检查更新写进 FAQ");
+});
+
+test("1.11.10：辅助目录只有一处名单，毛玻璃只在自定义外观下可用", () => {
+  const core = readProjectFile("archive-core.js");
+  const library = readProjectFile("library.js");
+  const settings = readProjectFile("settings.js");
+  const html = readProjectFile("settings.html");
+  const theme = readProjectFile("theme.js");
+
+  // A. 目录名单：筛选 + 按编号排序都写在 archive-core.js；library.js 只引用不重写
+  assert.match(core, /const AUXILIARY_DIR_NAMES = Object\.freeze\(/, "名单要冻结");
+  assert.match(core, /RESERVED_COLLECTION_NAMES\s*\n?\s*\.filter\(\(name\) => \/\^\\d\{3\}\/\.test\(name\)\)/, "从保留名里筛三位数字目录");
+  assert.match(core, /\.sort\(\(left, right\) => parseInt\(left, 10\) - parseInt\(right, 10\)\)/, "按编号排序");
+  assert.match(library, /const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore\.AUXILIARY_DIR_NAMES;/, "library.js 只引用这一份");
+  assert.doesNotMatch(library, /ROOT_STRUCTURE_DIRECTORIES = \[/, "不许再手写一份");
+  const structureBody = library.slice(library.indexOf("async function ensureRootStructure("), library.indexOf("globalThis.BcaLibraryRoot"));
+  assert.doesNotMatch(structureBody, /"00\d/, "ensureRootStructure 里不该再写死目录名");
+
+  // B. 毛玻璃归属：不是自定义就既不给开关、也不挂 class
+  assert.match(html, /<div class="setting-row" id="glassRow">/, "毛玻璃那行要有 id 才收得起来");
+  assert.match(settings, /setVisible\(\$\("glassRow"\), custom\);/, "不是自定义就藏起来");
+  assert.match(settings, /setVisible\(\$\("glassBlurRow"\), custom && Boolean\(appearance\.glass\)\);/, "强度滑块还要再叠一层开关");
+  assert.match(theme, /root\.classList\.toggle\("bca-glass", mode === "custom" && Boolean\(appearance\.glass\)\);/, "不是自定义就不挂 bca-glass");
 });
 
 test("1.11.9：时间范围菜单抬得起来，年份图例不再吞掉滚轮", () => {

@@ -126,7 +126,8 @@
   function paintAppearance() {
     const root = document.documentElement;
     root.dataset.appearance = mode === "custom" ? "custom" : "plain";
-    root.classList.toggle("bca-glass", Boolean(appearance.glass));
+    // 1.11.10：毛玻璃是「自定义」外观的子选项 —— 白天 / 夜晚 / 跟随系统都不生效。
+    root.classList.toggle("bca-glass", mode === "custom" && Boolean(appearance.glass));
     // 遮罩是「页面底色的雾」而不是黑幕：压一层底色既压得住花哨的照片，又不会把整页
     // 拖进另一个极端。颜色按主题给（浅色主题浅雾、夜晚主题深雾，见 theme.css 的
     // --bca-veil-rgb），这里只填 alpha —— 写死浅色的话夜晚主题会白蒙蒙一层。

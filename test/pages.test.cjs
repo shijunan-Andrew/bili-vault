@@ -861,7 +861,7 @@ async function suitePopup() {
     const chrome = makeChrome({ version: "1.7.23", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
     await settle();
-    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "popup.js"]);
+    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "archive-core.js", "popup.js"]);
     assert.equal(page.warnings.length, 0, `加载期不该有 warning：${page.warnings.join(" | ")}`);
     assert.ok(page.document.getElementById("lastError"));
     assert.equal(page.document.getElementById("lastError").getAttribute("role"), "alert");
@@ -1987,6 +1987,38 @@ async function suiteStats() {
     monthly: [{ month: "2026-05", count: 12 }],
     yearly: [{ year: "2026", count: 12 }]
   };
+
+  await test("选好本地备份文件夹时，把 000…006 七本辅助目录一次建全（1.11.10 真执行）", async () => {
+    const page = await openLibrary();
+    const root = page.window.BcaLibraryRoot;
+    assert.ok(root, "library.js 要暴露测试入口");
+    assert.deepEqual(
+      Array.from(root.ROOT_STRUCTURE_DIRECTORIES),
+      ["000视频下载", "001错误报告", "002同步报告", "003database", "004导出", "005回收站", "006报告"],
+      "名单要按编号、且七本齐全"
+    );
+
+    const made = [];
+    const handle = {
+      getDirectoryHandle: async (name) => { made.push(name); return { name }; }
+    };
+    const failed = await root.ensureRootStructure(handle);
+    assert.deepEqual(made, Array.from(root.ROOT_STRUCTURE_DIRECTORIES), "每本都要真的建一次");
+    assert.deepEqual(failed, [], "顺利时不该记录失败");
+
+    // 有一本建不出来：不影响其余，失败的记下来给日志
+    const partial = [];
+    const picky = {
+      getDirectoryHandle: async (name) => {
+        if (name === "003database") throw new Error("no");
+        partial.push(name);
+        return { name };
+      }
+    };
+    const failedAgain = await root.ensureRootStructure(picky);
+    assert.deepEqual(failedAgain, ["003database"], "建不出来的要单独回报");
+    assert.equal(partial.length, 6, "剩下六本照样建");
+  });
 
   await test("打开时间范围菜单时把那张卡抬起来，选完再放下去（1.11.9 真执行）", async () => {
     const page = await openStats({ localData: { bcaStats: snapshot } });

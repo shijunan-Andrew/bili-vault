@@ -137,11 +137,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.11.9：统计页的两个挡手问题
+## V1.11.10：第一次选文件夹就把目录建全；毛玻璃归到「自定义」
 
-- 时间范围的二级窗口（近 7 天 / 自定义区间那张浮层）不再被下面那张卡切掉一截 —— 开毛玻璃时每张卡各自成为层叠上下文，菜单的层级被关在卡里；现在打开时把整张卡抬起来。
-- 鼠标停在「按年份累计」的图例上，滚轮又能滚页面了（图例本来滚不动，却把滚轮原地吃掉了）。
-- 测试：pages 74 → 75、stability 397 → 398。
+- 选好本地备份文件夹的当下，`000视频下载`、`001错误报告`、`002同步报告`、`003database`、`004导出`、`005回收站`、`006报告` 七本辅助目录一次建出来（以前只建前四本，后三本要等真用到才出现）。
+- 这份名单只有 `archive-core.js` 的 `AUXILIARY_DIR_NAMES` 一份，收藏库与弹窗都引用它；名单是从保留名里按「三位数字开头」筛出来并按编号排序的，以后加 `007xxx` 只要往保留名里补一行。
+- 毛玻璃收进「自定义」外观：不是自定义时那一行不显示，`bca-glass` 也不挂 —— 选了白天 / 夜晚 / 跟随系统就不会再有毛玻璃。
+- 测试：archive-core 92 → 93、pages 75 → 76、stability 398 → 399。
 
 ## 测试与文档
 
@@ -151,7 +152,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:398 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:399 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

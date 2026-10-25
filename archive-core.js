@@ -105,6 +105,17 @@
     "006报告"
   ];
 
+  /* 1.11.10：这几本目录是插件自己的，选好本地备份文件夹时就一次性建出来。
+     名单**不再手写**：直接从上面那份保留名里挑「三位数字开头」的那几个 ——
+     以后要加 007xxx，只往 RESERVED_COLLECTION_NAMES 里补一行，这里自动跟上；
+     两个地方各写一遍迟早会漏（1.11.9 之前就只建了 000/001/002/003 四本，
+     004导出、005回收站、006报告 要等真正用到才出现，用户看到的根目录是残缺的）。 */
+  const AUXILIARY_DIR_NAMES = Object.freeze(
+    RESERVED_COLLECTION_NAMES
+      .filter((name) => /^\d{3}/.test(name))
+      .sort((left, right) => parseInt(left, 10) - parseInt(right, 10))
+  );
+
   function isReservedCollectionName(name) {
     return RESERVED_COLLECTION_NAMES.includes(safeCollectionName(name));
   }
@@ -1217,6 +1228,8 @@
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,
+    // 1.11.10：选好本地备份文件夹时要建出来的那几本辅助目录（顺序即编号顺序）
+    AUXILIARY_DIR_NAMES,
     RESERVED_COLLECTION_NAMES,
     withSourceCollection,
     isMissingError,

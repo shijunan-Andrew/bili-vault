@@ -5372,14 +5372,28 @@ async function refreshCurrentRoot() {
    这四个名字必须与 background.js 的 RESERVED_COLLECTION_NAMES 以及本文件里
    扫描时跳过的那份名单一致。创建失败（只读权限、用户拒绝）不影响主流程。
    1.5.0：多了 003database（本地数据库根目录，BcaStatsCore 负责读写它）。 */
-const ROOT_STRUCTURE_DIRECTORIES = ["000视频下载", "001错误报告", "002同步报告", "003database"];
+/* 1.11.10：名单移到 archive-core.js 当唯一一份（AUXILIARY_DIR_NAMES），这里只管建。
+   以前这里是手写的四个名字，004导出 / 005回收站 / 006报告 要等真用到才出现，
+   用户第一次选完文件夹，根目录是残缺的。 */
+const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore.AUXILIARY_DIR_NAMES;
 
 async function ensureRootStructure(handle) {
   if (!handle) return;
+  const failed = [];
   for (const name of ROOT_STRUCTURE_DIRECTORIES) {
-    try { await handle.getDirectoryHandle(name, { create: true }); } catch (_) { /* 跳过 */ }
+    try {
+      await handle.getDirectoryHandle(name, { create: true });
+    } catch (error) {
+      // 建不出来不影响主流程（只读权限、目录名被占用），但要留痕，别静默吞掉
+      failed.push(name);
+      console.warn(`辅助目录「${name}」没建出来（下次用到时会再试）`, error);
+    }
   }
+  return failed;
 }
+
+// 测试入口：pages 套件用它驱动「选好文件夹要建哪几本目录」，不用真的弹目录选择框
+globalThis.BcaLibraryRoot = Object.freeze({ ensureRootStructure, ROOT_STRUCTURE_DIRECTORIES });
 
 async function chooseAndScan() {
   if (!window.showDirectoryPicker) { showToast(BcaI18n.t("当前 Chrome 暂不支持选择本地备份文件夹，请更新浏览器后重试。")); return; }

@@ -7,7 +7,9 @@ const DOWNLOAD_FOLDER_NAME = "000视频下载";
 // V1.4.4：选完目录时一并建出来的几个固定目录（与 background.js 的保留目录名单、
 // library.js 的 ROOT_STRUCTURE_DIRECTORIES 保持一致 —— 几处改动要一起改）
 // 1.5.0：多了 003database（本地数据库根目录）
-const ROOT_STRUCTURE_DIRECTORIES = [DOWNLOAD_FOLDER_NAME, "001错误报告", "002同步报告", "003database"];
+/* 1.11.10：名单只有 archive-core.js 一份（AUXILIARY_DIR_NAMES），这里只引用。
+   以前弹窗与收藏库各写一份四名单，004导出 / 005回收站 / 006报告 要等真用到才出现。 */
+const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore.AUXILIARY_DIR_NAMES;
 const DB_STORE = "settings";
 
 const folderName = document.getElementById("folderName");

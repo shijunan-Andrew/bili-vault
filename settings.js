@@ -160,7 +160,8 @@ async function copyNativeCleanupCommand() {
   }
 }
 
-// 「自定义」才显示背景图那一组；毛玻璃是全局效果，但强度滑块只在开关打开时才有意义
+// 「自定义」才显示背景图那一组；1.11.10 起毛玻璃也归到自定义里
+// （不是自定义外观时整行藏起来，强度滑块还要再叠一层「开关打开」。）
 function renderAppearance() {
   const custom = BcaTheme.current() === "custom";
   const appearance = BcaTheme.appearance();
@@ -190,7 +191,10 @@ function renderAppearance() {
     // 「上次已经开着毛玻璃」的用户再打开设置页，会看到一个显示为「关」的开关。
     glass.classList.toggle("off", !appearance.glass);
   }
-  setVisible($("glassBlurRow"), Boolean(appearance.glass));
+  // 1.11.10：毛玻璃只在「自定义」外观下可用 —— 选了白天/夜晚还留着这个开关，
+  // 点开也不会有任何效果（theme.js 那边同样只在 custom 时挂 bca-glass）。
+  setVisible($("glassRow"), custom);
+  setVisible($("glassBlurRow"), custom && Boolean(appearance.glass));
   const glassBlur = $("glassBlur");
   if (glassBlur) {
     glassBlur.value = String(appearance.glassBlur);

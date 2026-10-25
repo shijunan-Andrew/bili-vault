@@ -800,6 +800,18 @@ test("导出文件的校验和能复算；改一个字节就验不过", () => {
   assert.equal(core.verifyArchiveExportChecksum({ ...parsed, checksum: { algorithm: "sha256", value: "" } }).ok, false, "空校验和不算过");
 });
 
+test("辅助目录名单从保留名里筛，按编号排，一共七本（1.11.10）", () => {
+  // 选好本地备份文件夹时要一次建全：000 到 006，缺一本用户看到的就是残缺的根目录
+  assert.deepEqual(
+    BcaArchiveCore.AUXILIARY_DIR_NAMES,
+    ["000视频下载", "001错误报告", "002同步报告", "003database", "004导出", "005回收站", "006报告"],
+    "顺序要按编号，不许跟着保留名表的书写顺序走"
+  );
+  // 旧的两个不带编号的别名是给「以前建过的目录」兜底的，不该被新建出来
+  assert.equal(BcaArchiveCore.AUXILIARY_DIR_NAMES.includes("错误报告"), false);
+  assert.equal(BcaArchiveCore.AUXILIARY_DIR_NAMES.includes("视频下载"), false);
+});
+
 test("导出文件名带时间戳，004导出 是保留目录", () => {
   assert.equal(core.exportFileName(new Date(2026, 10, 2, 9, 5, 7)), "归档元数据-20261102-090507.json");
   assert.equal(core.EXPORT_DIR_NAME, "004导出");
