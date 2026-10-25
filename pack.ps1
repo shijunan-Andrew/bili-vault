@@ -101,6 +101,7 @@ try {
     "content.js", "favorites-import.js", "guide.html", "i18n.js", "icons.js",
     "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png",
     "install-native-folder-opener.bat", "install-native-folder-opener.ps1",
+    "LICENSE",
     "library.css", "library.html", "library.js", "manifest.json", "mockup.css",
     "page.css", "pet-cat.png", "pet.css", "pet.js",
     "popup.css", "popup.html", "popup.js",

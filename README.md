@@ -218,3 +218,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - 本地文件夹由用户在扩展弹窗中选择，浏览器会记住目录授权；授权失效时重新选择文件夹即可。
 - `视频信息.txt` 的字段说明见上文「保存结构」与「从 B 站收藏夹导入」。
 - B 站收藏弹窗的页面结构调整后，可能需要更新弹窗检测逻辑。
+
+## 许可证
+
+MIT，全文见仓库根的 [`LICENSE`](LICENSE)。
+
+`bili-old-2015/` 里的彩蛋页是把 B 站 2015 年的首页 1:1 复刻下来：页头/导航/页脚与原站 CSS、sprite、缩略图都取自 [web.archive.org](https://web.archive.org/web/2015/http://www.bilibili.com/) 的归档快照，版权归哔哩哔哩所有，**不在**这份 MIT 许可证的范围内。
