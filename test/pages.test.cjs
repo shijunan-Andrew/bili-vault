@@ -20,6 +20,8 @@
 const assert = require("node:assert");
 const vm = require("node:vm");
 const harness = require("./harness.cjs");
+// 1.12.4：真跑 favorites-import.js 要一个像样的扩展 id（它只接受自己人发来的消息）
+const FAVORITES_EXT_ID = "abcdefghijklmnopabcdefghijklmnop";
 const dom = require("./dom-harness.cjs");
 
 const isMain = require.main === module;
@@ -1827,6 +1829,150 @@ test("「上次导入没有收尾」这一行只在真有记录时出现，能�
   assert.match(status, /清掉了/, "成功之后要给出回执，实际：" + status);
 });
 
+/* ---- 收藏夹页面桥（favorites-import.js） ----
+   1.12.4（审查 P2-6）：这个文件以前一行真执行测试都没有，而它是「导入」唯一的入口 ——
+   B 站页面上那条「导入」链路全靠它把消息转给后台。这里用 dom-harness 的 loadFragment
+   真跑脚本（它没有 DOM 依赖，只碰 window / location / chrome / fetch）。 */
+
+function openFavoritesBridge(options = {}) {
+  const sent = [];
+  const chrome = harness.makeChrome({
+    version: "1.12.4",
+    onRuntimeMessage(message, respond) {
+      sent.push(message);
+      if (typeof options.reply === "function") return options.reply(message, respond);
+      respond(options.reply === undefined ? { ok: true } : options.reply);
+      return undefined;
+    }
+  });
+  chrome.runtime.id = FAVORITES_EXT_ID;
+  const page = dom.loadFragment({
+    chrome,
+    location: {
+      href: "https://space.bilibili.com/1024/favlist?fid=1",
+      origin: "https://space.bilibili.com",
+      pathname: "/1024/favlist",
+      search: "?fid=1",
+      hash: ""
+    },
+    globals: options.globals || {},
+    scripts: ["favorites-import.js"]
+  });
+  return { page, chrome, sent };
+}
+
+function bridgeListener(page) {
+  const listeners = page.chrome.runtime.onMessage.listeners;
+  assert.equal(listeners.length, 1, "收藏夹页只该挂一个消息监听");
+  return listeners[0];
+}
+
+function ask(listener, message, sender = { id: FAVORITES_EXT_ID }) {
+  return new Promise((resolve) => {
+    const returned = listener(message, sender, resolve);
+    if (returned !== true) resolve(undefined);
+  });
+}
+
+async function suiteFavoritesImport() {
+  await test("收藏夹页：不是 favlist 页面就什么都不挂", async () => {
+    const page = dom.loadFragment({
+      location: { href: "https://www.bilibili.com/video/BV1xx", origin: "https://www.bilibili.com", pathname: "/video/BV1xx", search: "", hash: "" },
+      scripts: ["favorites-import.js"]
+    });
+    assert.equal(page.chrome.runtime.onMessage.listeners.length, 0, "视频页不该注册监听");
+  });
+
+  await test("收藏夹页：只接本扩展的消息，别人的直接忽略", async () => {
+    const { page } = openFavoritesBridge();
+    const listener = bridgeListener(page);
+    const reply = await ask(listener, { type: "bca-list-import-folders" }, { id: "someone-else" });
+    assert.equal(reply, undefined, "外来的 sendResponse 不该被调用");
+  });
+
+  await test("收藏夹页：页面请求只放行 https 的 B 站官方接口", async () => {
+    const { page } = openFavoritesBridge({ globals: { fetch: async () => { throw new Error("不该发请求"); } } });
+    const listener = bridgeListener(page);
+    for (const url of ["http://api.bilibili.com/x/v3/fav/resource/list", "https://evil.example.com/x", "https://api.bilibili.com.evil.example/x"]) {
+      const reply = await ask(listener, { type: "bca-page-api-get", url });
+      assert.equal(reply.ok, false, `${url} 必须被挡下`);
+    }
+    const bad = await ask(listener, { type: "bca-page-api-get", url: "不是地址" });
+    assert.equal(bad.ok, false);
+    assert.equal("接口地址无效。", bad.message, "文案要照抄脚本里的原话（这个文件不加载 i18n）");
+  });
+
+  await test("收藏夹页：真把接口结果透回去，uid 来自当前路径", async () => {
+    const seen = [];
+    const { page, sent } = openFavoritesBridge({
+      reply: (message, respond) => respond({ ok: true, folders: [{ id: 1, title: "默认收藏夹" }] }),
+      globals: {
+        fetch: async (url) => {
+          seen.push(String(url));
+          return { status: 200, json: async () => ({ code: 0, data: { list: [] } }) };
+        }
+      }
+    });
+    const listener = bridgeListener(page);
+
+    const api = await ask(listener, { type: "bca-page-api-get", url: "https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=1024" });
+    assert.equal(api.ok, true);
+    assert.equal(api.status, 200);
+    assert.deepEqual(api.payload, { code: 0, data: { list: [] } });
+    assert.equal(seen.length, 1);
+    assert.match(seen[0], /^https:\/\/api\.bilibili\.com\/x\/v3\/fav\/folder\/created\/list-all\?up_mid=1024$/);
+
+    const listed = await ask(listener, { type: "bca-list-import-folders" });
+    assert.equal(listed.ok, true, "后台回了什么就透什么");
+    assert.equal(sent.at(-1).type, "list-bili-favorite-folders");
+    assert.equal(sent.at(-1).uid, "1024", "uid 要从 /1024/favlist 里取");
+  });
+
+  await test("收藏夹页：导入请求把可选字段原样带下去", async () => {
+    const { page, sent } = openFavoritesBridge({ reply: { ok: true, started: true } });
+    const listener = bridgeListener(page);
+
+    await ask(listener, { type: "bca-import-selected-folders", folderIds: [11, 22] });
+    assert.deepEqual(sent.at(-1), { type: "import-bili-favorites", uid: "1024", folderIds: [11, 22] }, "不传可选项就不该多带字段");
+
+    await ask(listener, { type: "bca-import-selected-folders", folderIds: [11], recentDays: 7, limit: 300, resume: { folder: "默认收藏夹", page: 3 } });
+    assert.deepEqual(sent.at(-1), {
+      type: "import-bili-favorites",
+      uid: "1024",
+      folderIds: [11],
+      recentDays: 7,
+      limit: 300,
+      resume: { folder: "默认收藏夹", page: 3 }
+    });
+  });
+
+  await test("收藏夹页：后台一直不回就自己结束，不把面板挂死", async () => {
+    // 把 setTimeout 换成「立刻执行」，这样 15 秒兜底在测试里瞬间到点（1.7.14 加的兜底，
+    // 1.12.4 起第一次有测试盯着它）。
+    const timers = [];
+    const { page } = openFavoritesBridge({
+      // 真正的「不回」：返回一个永不 resolve 的 Promise，桩就不会替后台答话。
+      reply: () => new Promise(() => {}),
+      globals: {
+        setTimeout: (fn) => {
+          timers.push(fn);
+          return timers.length;
+        },
+        clearTimeout: () => {}
+      }
+    });
+    const listener = bridgeListener(page);
+    const reply = new Promise((resolve) => {
+      listener({ type: "bca-list-import-folders" }, { id: FAVORITES_EXT_ID }, resolve);
+    });
+    assert.equal(timers.length, 1, "挂起时正好有一个兜底计时器");
+    timers[0]();
+    const answered = await reply;
+    assert.equal(answered.ok, false);
+    assert.match(answered.message, /后台没有回应（超过 15 秒）/);
+  });
+}
+
 async function suiteRecycle() {
   await test("侧栏底部把版本号和两个链接收进同一块（1.10.14）", async () => {
     const page = await openLibrary();
@@ -2325,6 +2471,7 @@ async function suite() {
   await suitePopup();
   await suiteContent();
   await suiteSettings();
+  await suiteFavoritesImport();
   await suiteRecycle();
   await suiteStats();
   await suiteA11y();

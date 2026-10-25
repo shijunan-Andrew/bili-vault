@@ -360,6 +360,8 @@ const BACKGROUND_EXPORTS = [
   "createDirectoryOrExplain", "describeDirectoryCreateError",
   "saveFavorite", "readExistingRecordFolder", "bvOfInfoText", "favoriteLineOfInfoText",
   "loadBvIndex", "saveBvIndex", "enrichFavoriteMetadata", "buildInfo",
+  // 1.12.4（审查 P2-2）：自定义路径打码要能被单独驱动
+  "rememberLocalRoot", "maskKnownRoots",
   "writeFile", "fileExists"
 ];
 

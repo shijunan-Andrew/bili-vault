@@ -182,6 +182,7 @@ async function initializeActionIcon() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  rememberDownloadRootFromStorage();
   initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error));
   // 4.9：安装 / 更新 / 重新加载扩展之后不可能还有导入在跑，
   // 本地残留的 importState.running=true 要立刻复位，别让界面锁死
@@ -189,6 +190,18 @@ chrome.runtime.onInstalled.addListener(() => {
   // 1.9.6：统计快照丢了（只在收藏库扫描时才写）会让统计页一直显示「还没有数据」
   healStatsSnapshotOnStart().catch((error) => console.warn("补发统计快照失败", error));
 });
+// 1.12.4（审查 P2-2）：下载根的绝对路径只存在 storage 里，启动时同步进打码表。
+function rememberDownloadRootFromStorage() {
+  try {
+    chrome.storage.local.get("downloadRootPath", (saved) => {
+      const value = saved?.downloadRootPath;
+      if (value) rememberLocalRoot(value);
+    });
+  } catch (error) {
+    console.warn("读取下载根用于打码失败（报告里这个路径这次不会被替换）", error);
+  }
+}
+
 chrome.runtime.onStartup.addListener(() => {
   initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error));
   // 4.9：浏览器重新启动时 chrome.storage.session 已被清空，只剩 local 里的 running 残影，
@@ -197,6 +210,11 @@ chrome.runtime.onStartup.addListener(() => {
   healStatsSnapshotOnStart().catch((error) => console.warn("补发统计快照失败", error));
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  // 1.12.4：用户换了下载根就立刻更新打码表（旧路径继续留着，历史报告里可能还有它）。
+  if (areaName === "local" && changes?.downloadRootPath) {
+    const value = changes.downloadRootPath.newValue;
+    if (value) rememberLocalRoot(value);
+  }
   if (areaName === "local" && changes.enabled) {
     updateActionIcon(changes.enabled.newValue !== false).catch((error) => console.warn("更新扩展图标失败", error));
   }
@@ -972,12 +990,64 @@ const ERROR_REPORT_NOTICE = "提示：本报告包含本地目录路径与视频
    再也剥不掉 —— 几条「死代码不许回来」的断言就会误报。字符串形式绕开这个坑。 */
 const USER_DIR_PATTERN = new RegExp("([A-Za-z]:[\\\\/]Users[\\\\/])[^\\\\/\\r\\n\"'<>|]+", "gi");
 const LEGACY_USER_DIR_PATTERN = new RegExp("([A-Za-z]:[\\\\/]Documents and Settings[\\\\/])[^\\\\/\\r\\n\"'<>|]+", "gi");
+const POSIX_USER_DIR_PATTERN = new RegExp("(/(?:Users|home)/)[^/\\s\"'<>|]+", "g");
 const PATH_SPLIT_PATTERN = new RegExp("[\\\\/]+");
 
+/* 1.12.4（审查 P2-2）：只认「系统用户目录」不够 —— 插件还知道一个**用户自己选的**绝对路径：
+   下载根（`chrome.storage.local.downloadRootPath`，形如 `D:\我的备份\000视频下载`）。
+   打开目录失败时它会被写进错误文案与报告，而它可能落在任何盘、任何名字下，靠系统目录
+   形状永远匹配不到。所以另外记一份「已知本地根目录」，命中就整段换成 <本地文件夹>。
+
+   仍然不能覆盖的情况：文件系统访问 API 拿不到归档根的绝对路径，所以「备份文件夹」本身
+   如果不在用户目录下、也不在下载根里，它的盘符与父目录还是会出现在报告里。这条写进了
+   docs/PRIVACY.md 的「打码的边界」。 */
+const knownLocalRoots = new Set();
+
+function rememberLocalRoot(value) {
+  const root = String(value ?? "").trim().replace(/[\\\\/]+$/, "");
+  if (root.length < 3) return;
+  if (!/[\\\\/]/.test(root)) return;
+  knownLocalRoots.add(root);
+}
+
+const ROOT_BOUNDARY_CHARS = new Set(["", "\\", "/", "\"", "'", " ", "\n", "\r"]);
+
+/* 只在「根后面确实是路径边界」时替换：`D:\归档` 不能把兄弟目录 `D:\归档案` 也吃掉，
+   那种误伤会让用户更看不懂报告。 */
+function replaceKnownRoot(text, root) {
+  if (!root) return text;
+  let out = "";
+  let index = 0;
+  for (;;) {
+    const found = text.indexOf(root, index);
+    if (found === -1) return out + text.slice(index);
+    const after = text.charAt(found + root.length);
+    out += text.slice(index, found);
+    out += ROOT_BOUNDARY_CHARS.has(after) ? "<本地文件夹>" : root;
+    index = found + root.length;
+  }
+}
+
+/** 把已知本地根的绝对路径整段换掉（`\` 与 `/` 两种写法都认）。纯函数，方便单独测。 */
+function maskKnownRoots(text, roots) {
+  let out = String(text ?? "");
+  for (const root of roots || []) {
+    if (!root) continue;
+    out = replaceKnownRoot(out, root);
+    const slashed = root.replace(/\\/g, "/");
+    if (slashed !== root) out = replaceKnownRoot(out, slashed);
+  }
+  return out;
+}
+
 function maskLocalUserPaths(text) {
-  return String(text ?? "")
-    .replace(USER_DIR_PATTERN, "$1<用户>")
-    .replace(LEGACY_USER_DIR_PATTERN, "$1<用户>");
+  return maskKnownRoots(
+    String(text ?? "")
+      .replace(USER_DIR_PATTERN, "$1<用户>")
+      .replace(LEGACY_USER_DIR_PATTERN, "$1<用户>")
+      .replace(POSIX_USER_DIR_PATTERN, "$1<用户>"),
+    knownLocalRoots,
+  );
 }
 
 // 存进 storage 的报告路径只留归档内的相对位置（「001错误报告/xxx_错误报告.txt」），

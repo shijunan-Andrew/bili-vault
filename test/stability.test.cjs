@@ -8564,6 +8564,41 @@ test("1.12.3：缩略图缓存能跨会话留下来，且键里带着封面的 s
   assert.match(library, /void clearThumbnailStore\(\);/, "换目录时要清掉持久化的缩略图");
 });
 
+test("1.12.4：报告打码要认得用户自己选的下载根，而且不许误伤兄弟目录（审查 P2-2）", () => {
+  const background = readProjectFile("background.js");
+  // 这个文件里既没有裸的 carveFunction，也没有 harness（它只在别处 require）——按源码断言就够了。
+  assert.match(background, /const POSIX_USER_DIR_PATTERN = new RegExp\("\(\/\(\?:Users\|home\)\/\)/, "macOS 与 Linux 的用户目录也要盖");
+  assert.match(background, /const knownLocalRoots = new Set\(\);/);
+  assert.match(background, /function rememberLocalRoot\(value\) \{/);
+  assert.match(background, /function maskKnownRoots\(text, roots\) \{/);
+  // 边界判断是这个函数最容易写错的地方：D:\归档 不能把 D:\归档案 吃掉
+  assert.match(background, /const ROOT_BOUNDARY_CHARS = new Set\(\[/, "必须有路径边界判断");
+  assert.match(background, /ROOT_BOUNDARY_CHARS\.has\(after\) \? "<本地文件夹>" : root/);
+  // 下载根只在 storage 里，三条入口都要记
+  assert.match(background, /function rememberDownloadRootFromStorage\(\) \{/);
+  assert.match(background, /chrome\.storage\.local\.get\("downloadRootPath", \(saved\) => \{/);
+  assert.match(background, /if \(areaName === "local" && changes\?\.downloadRootPath\)/, "换下载根要立刻更新打码表");
+  // background.js 是 CRLF，正则里必须写 \r?\n
+  assert.match(background, /onInstalled\.addListener\(\(\) => \{\r?\n  rememberDownloadRootFromStorage\(\);/, "onInstalled 里也要记一次");
+  assert.ok(
+    /function maskLocalUserPaths\(text\) \{/.test(background) && /return maskKnownRoots\(/.test(background),
+    "maskLocalUserPaths 还是唯一的出口"
+  );
+});
+
+test("1.12.4：收藏夹页桥有真执行用例盯着（审查 P2-6）", () => {
+  const pages = readProjectFile("test/pages.test.cjs");
+  const bridge = readProjectFile("favorites-import.js");
+  assert.match(pages, /async function suiteFavoritesImport\(\) \{/);
+  assert.match(pages, /await suiteFavoritesImport\(\);/, "写了用例还要真的跑");
+  assert.match(bridge, /if \(sender && sender\.id && sender\.id !== chrome\.runtime\.id\) return;/, "外来消息必须挡掉");
+  for (const type of ["bca-page-api-get", "bca-list-import-folders", "bca-import-selected-folders"]) {
+    assert.ok(bridge.includes(`message?.type === "${type}"`), `三条消息分支都要在：${type}`);
+  }
+  assert.match(bridge, /const FAVORITES_MESSAGE_TIMEOUT_MS = 15000;/, "15 秒兜底是这条链路的护栏");
+  assert.match(bridge, /url\.protocol !== "https:" \|\| url\.hostname !== "api\.bilibili\.com"/, "只放行 B 站官方接口");
+});
+
 test("1.12.3：导入开始前先问一次可用空间，紧张就把话摆到界面上", () => {
   const background = readProjectFile("background.js");
   assert.match(background, /const IMPORT_SPACE_WARN_BYTES = 64 \* 1024 \* 1024;/, "阈值要写明白");

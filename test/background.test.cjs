@@ -601,6 +601,42 @@ async function suite() {
     );
   });
 
+  await test("本机路径打码：用户自己选的下载根也被整段换掉（1.12.4 / 审查 P2-2）", async () => {
+    const bg = loadBackground({ chrome: chromeWithMirror(null) });
+    // 系统用户目录之外的自定义盘符路径，靠形状永远匹配不到 —— 只有「记住了」才盖得掉。
+    bg.__test.rememberLocalRoot("D:\\我的备份\\000视频下载");
+    assert.equal(
+      bg.__test.maskLocalUserPaths("打开失败：D:\\我的备份\\000视频下载\\BV1xx"),
+      "打开失败：<本地文件夹>\\BV1xx",
+      "记住的下载根要整段换掉，剩下的子路径留着",
+    );
+    assert.equal(
+      bg.__test.maskLocalUserPaths("打开失败：D:/我的备份/000视频下载/BV1xx"),
+      "打开失败：<本地文件夹>/BV1xx",
+      "斜杠写法也要认",
+    );
+    assert.equal(
+      bg.__test.maskLocalUserPaths("E:\\别的目录\\000视频下载"),
+      "E:\\别的目录\\000视频下载",
+      "没记住的路径一个字符都不该动 —— 插件确实不知道它",
+    );
+  });
+
+  await test("本机路径打码：macOS / Linux 的用户目录也盖（1.12.4）", async () => {
+    const bg = loadBackground({ chrome: chromeWithMirror(null) });
+    const mask = bg.__test.maskLocalUserPaths;
+    assert.equal(mask("/Users/maxwell/Desktop/归档/000视频下载"), "/Users/<用户>/Desktop/归档/000视频下载");
+    assert.equal(mask("/home/maxwell/archive/BV1xx"), "/home/<用户>/archive/BV1xx");
+    assert.equal(mask("/var/tmp/归档"), "/var/tmp/归档", "不是用户目录的原样留着");
+  });
+
+  await test("本机路径打码：纯函数 maskKnownRoots 只替换登记过的根", async () => {
+    const bg = loadBackground({ chrome: chromeWithMirror(null) });
+    const roots = new Set(["D:\\归档"]);
+    assert.equal(bg.__test.maskKnownRoots("D:\\归档\\a 与 D:/归档/b", roots), "<本地文件夹>\\a 与 <本地文件夹>/b");
+    assert.equal(bg.__test.maskKnownRoots("D:\\归档案\\a", roots), "D:\\归档案\\a", "前缀相似但不是同一个根，不该误伤");
+  });
+
   await test("本机路径打码：打码之后不许留下用户名或盘符碎片", async () => {
     const bg = loadBackground({ chrome: chromeWithMirror(null) });
     const masked = bg.__test.maskLocalUserPaths("打开失败：C:\\Users\\Maxwell\\Desktop\\_测试归档\\000视频下载\\BV1xx（没有权限）");

@@ -137,12 +137,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.3：缩略图能跨会话留下来了，导入前会先说一句空间
+## V1.12.4：报告里的路径认得「你自己选的备份文件夹」了，收藏夹页面桥第一次有测试
 
-- **缩略图不再每次打开都重缩**：以前每打开一次收藏库，当页的封面都要重新解码、缩放一遍（只存在内存里，关掉就没了）。现在缩好的图会连同一份「封面文件的 size + 修改时间」存进 IndexedDB，下次直接取；封面一换，旧的那条自然取不到，不用额外失效逻辑。
-- **给这份缓存定了字节上限**：8 MB，超了按「最久没被用到」整条淘汰；拿不到 IndexedDB 或写入失败就退回「只在内存」，不影响任何功能。
-- **导入开始前问一次可用空间**：浏览器报的可用空间低于 64 MB 时，导入状态第一句会带上「本机可用空间只剩约 X，这次导入可能写到一半失败」。**只提示、不拦**——用户可能只想补几条。
-- **遗留** - 无。
+- **报告打码的第二道口子**：以前只盖系统用户目录（`C:\Users\<名>`），而插件其实还知道一个
+  用户自己选的绝对路径 —— 下载根（`chrome.storage.local.downloadRootPath`，形如
+  `D:\我的备份\000视频下载`）。打开目录失败时它会被写进错误文案与报告，落点在哪个盘、
+  叫什么名字完全由用户决定，靠目录形状永远匹配不到。1.12.4 起多记一份「已知本地根」，
+  命中整段换成 `<本地文件夹>`；判定还要求路径边界，`D:\归档` 不会把兄弟目录 `D:\归档案` 一起吃掉。
+- **macOS / Linux 的用户目录也盖**：`/Users/<名>`、`/home/<名>` 同样换成 `<用户>`（以前只认 Windows 两种）。
+- **`favorites-import.js` 第一次有真执行测试**：它是 B 站收藏夹页面上唯一的桥 —— 三条消息
+  分支、15 秒兜底、只放行 `https://api.bilibili.com`、只接受本扩展发来的消息。以前只有静态
+  断言，现在 `test/pages.test.cjs` 用 `dom-harness` 真跑它（`suiteFavoritesImport`，6 条）。
+- **测试项数**：`stability` 404 → 406，`pages` 78 → 84；后台套件 30 → 33。
+
+**遗留** - 无。
 
 ## 测试与文档
 
@@ -152,7 +160,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:404 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:406 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
