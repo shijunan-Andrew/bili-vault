@@ -1,6 +1,6 @@
 # bilibili 2015 首页 · 1:1 复刻
 
-单文件复刻：[`index.html`](index.html)（9.1 MB，完全离线自包含）。原页面：
+复刻成品：[`index.html`](index.html)（692 KB 外壳 + `assets/` 里的图片，完全离线自包含：断网也能打开）。原页面：
 <http://web.archive.org/web/20150701082208/http://www.bilibili.com/>
 
 **点页面上的任何位置都会跳转到 <https://www.bilibili.com/>**（新标签页打开）。
@@ -111,7 +111,7 @@ node tools/serve.js 8099        # http://127.0.0.1:8099/index.html
 
 | 路径 | 内容 |
 |---|---|
-| `index.html` | **交付物**，单文件 |
+| `index.html` | **交付物**：692 KB 的页面壳（1.11.0 起图片不再是内联 base64，改成 `assets/` 下的外链） |
 | `_ref/` | 归档原料：原始 HTML、head/body 片段、`new_z2.css`、`page.core.js` 等 |
 | `_ref/json/` | 归档的 `index/*.json`（轮播/排行/推广/番剧/推荐…），`SOURCES.md` 记录每份的真实抓取时间 |
 | `assets/` | 找回来的图片资源 + `MANIFEST.json` + `COVER-MAP.json` |
@@ -122,15 +122,25 @@ node tools/serve.js 8099        # http://127.0.0.1:8099/index.html
 ## 重新构建
 
 ```powershell
-node build/generate.js    # 归档 JSON → 各区块 HTML（build/fragments.json）
-node tools/build.js       # 组装 index.html（内联 CSS、图片、改链接、注入点击代理）
-node tools/verify.js      # 验收检查（链接、离线自包含、结构、计数器）
-node tools/verify-md5.js  # 内容寻址图片的字节级校验
+node build/generate.js            # 归档 JSON → 各区块 HTML（build/fragments.json）
+node tools/offline.js --no-inline # new_z2.css → build/index.css（图片写成 assets/… 相对路径）
+node tools/build.js               # 组装 index.html（内联 CSS、改链接、注入点击代理）
+node tools/verify.js              # 验收检查（链接、离线自包含、结构、计数器）
+node tools/verify-md5.js          # 内容寻址图片的字节级校验
 ```
+
+> **1.11.0 起默认输出「外链形态」**：图片留在 `assets/`，`index.html` 里写 `src="assets/…"`。
+> 原因：老形态把 551 处引用全部内联成 base64，其中只有 192 张唯一图片 —— 重复占了 6.6 MB。
+> 想要回「单文件、随手拷走」的形态，构建时加一个开关：
+> `node tools/build.js` 之外先跑 `INLINE_LIMIT=Infinity node tools/build.js`（此时 `offline.js`
+> 也不要带 `--no-inline`）。两种形态的渲染完全一致，`tools/verify.js` 两种都认。
+> 扩展发行包里只带**运行期子集**（`index.html` + `egg-2015.js` + `assets/` 里的图片），
+> 清单与排除规则写在仓库根的 `pack.ps1`。
 
 `tools/build.js` 做的事：删掉归档页里的所有 `<script>`、用生成的区块**整体替换**归档
 `#index_container` 里那两行空占位（`container-top-wrapper` + `#b_promote`）、把
-`build/index.css` + `jquery-ui.css` 内联成 `<style>`、把 `<img data-img="…">` 换成 base64、
+`build/index.css` + `jquery-ui.css` 内联成 `<style>`、把 `<img data-img="…">` 换成 base64
+（`INLINE_LIMIT=Infinity`）或 `assets/` 相对路径（默认）、
 把所有 `<a href>` 改写为 `https://www.bilibili.com/`，并在最后追加点击代理。
 
 ## 已知取舍

@@ -67,14 +67,20 @@ function walk(directory, prefix = "") {
 function main() {
   const pack = readPack();
   const excludeNames = stringArray(pack, "excludeNames");
+  // 1.11.0：彩蛋页进包后，`bili-old-2015` 不能整目录排除，改用「按前缀」的 $excludePaths
+  // 只挡掉里面的开发物（_ref/、build/、spec/、tools/、清单 JSON、文档）。规则同样只认 pack.ps1。
+  const excludePaths = stringArray(pack, "excludePaths");
   const allowedTopFiles = stringArray(pack, "allowedTopFiles");
   const allowedTopDirs = stringArray(pack, "allowedTopDirs");
   const maxFileBytes = threshold(pack, "maxFileBytes");
   const maxTotalBytes = threshold(pack, "maxTotalBytes");
   const maxFileCount = countLimit(pack);
 
-  // pack.ps1 的 $expected：根目录下除了排除名单以外的一切
-  const expected = walk(ROOT).filter((rel) => !excludeNames.includes(rel.split("/")[0]));
+  // pack.ps1 的 $expected：根目录下除了排除名单（顶层名 + 嵌套前缀）以外的一切
+  const expected = walk(ROOT).filter((rel) => {
+    if (excludeNames.includes(rel.split("/")[0])) return false;
+    return !excludePaths.some((skip) => rel === skip || rel.startsWith(`${skip}/`));
+  });
 
   const outside = expected.filter((rel) => {
     const top = rel.split("/")[0];
@@ -88,6 +94,7 @@ function main() {
   // 少一个就不该产出 zip，所以几个关键件单独钉一下
   for (const required of ["manifest.json", "background.js", "content.js", "archive-core.js",
     "archive-tools.js", "library.html", "settings.html", "stats.html", "recycle.html",
+    "bili-old-2015/index.html", "bili-old-2015/egg-2015.js",
     "locales/zh-TW.json", "locales/en.json"]) {
     if (!expected.includes(required)) fail(`运行期文件 ${required} 不在发布清单里`);
   }

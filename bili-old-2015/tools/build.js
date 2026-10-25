@@ -107,8 +107,11 @@ const localFor = (u) => {
   if (!n) return null;
   return byKey.get(n) || byKey.get(n.replace(/^https?:\/\/[^/]+/i, '')) || null;
 };
-// thumbnails average ~100 KB; the deliverable is ONE self-contained file, so inline everything
-const INLINE_LIMIT = process.env.INLINE_LIMIT ? Number(process.env.INLINE_LIMIT) : Infinity;
+// 默认把图片写成 assets/ 下的相对路径（2026-10-25 瘦身：同一张图被内联了 551 次，
+// 12 MB 里 6.6 MB 是纯重复）。要回到「单文件、随手拷走」的老形态，
+// 跑 `INLINE_LIMIT=Infinity node tools/build.js` 即可 —— 构建结果由这个开关决定，
+// 两种形态的渲染完全一致，verify.js 两种都认。
+const INLINE_LIMIT = process.env.INLINE_LIMIT ? Number(process.env.INLINE_LIMIT) : 0;
 
 // ---------------------------------------------------------------- fragments + archived body
 const frag = JSON.parse(readF(p('build', 'fragments.json')));
@@ -194,7 +197,21 @@ function imgToUri(tag) {
     stats.imgInlineBytes += rec.bytes;
     return tag.replace(/\bdata-img="[^"]*"/, `src="data:${mimeOf(rec.file)};base64,${b64}"`);
   }
-  return tag.replace(/\bdata-img="[^"]*"/, `src="${'assets/' + path.relative(p('assets'), rec.file).replace(/\\/g, '/')}"`);
+  // 外链形态的地址一律落回 `assets/<相对 assets 的路径>`。三个来源形状不同：
+  //   · MANIFEST 条目有 `path`（如 `pic/xxx.jpg`）与 `file`；
+  //   · NEEDED.json / COVER-MAP.json 的条目**只有 `file`**（甚至指向仓库外的老目录）。
+  // 所以先按 `path`，再按 `file` 里的 `…/assets/…` 片段切，最后校验文件真的存在；
+  // 实在拼不出来就退回内联 —— 宁可大一点，也不许产出打不开的图片地址。
+  const relOf = (rec) => {
+    if (rec.path) return String(rec.path).replace(/\\/g, '/').replace(/^\/+/, '');
+    const seg = /[\\/]assets[\\/](.+)$/i.exec(String(rec.file || ''));
+    return seg ? seg[1].replace(/\\/g, '/') : '';
+  };
+  const relAsset = relOf(rec);
+  const relPath = relAsset ? `assets/${relAsset}` : '';
+  if (relPath && size(p(relPath))) return tag.replace(/\bdata-img="[^"]*"/, `src="${relPath}"`);
+  const b64fallback = fs.readFileSync(rec.file).toString('base64');
+  return tag.replace(/\bdata-img="[^"]*"/, `src="data:${mimeOf(rec.file)};base64,${b64fallback}"`);
 }
 body = body.replace(/<img\b[^>]*>/gi, imgToUri);
 head = head.replace(/<img\b[^>]*>/gi, imgToUri);
@@ -208,14 +225,30 @@ for (const f of ['build/index.css', '_ref/jquery-ui.css']) {
   css = css.replace(/<\/style/gi, '<\\/style');
   cssParts.push(`/* ===== ${f} ===== */\n${css}`);
 }
-// any leftover remote url() in the css is neutralised: the deliverable is a single offline file
-// (only the jQuery-UI theme's ui-bg_flat_*/ui-icons sprites remain unobtainable — they belong to
-// dialog/datepicker chrome that the index page never shows)
+// 任何「浏览器真的会去取、但离线拿不到」的 url() 都换成 1x1 透明图：
+//   · 远程地址（含 wayback 残留）—— 这一页不许联网；
+//   · 相对地址但磁盘上没有对应文件（jQuery-UI 主题里那几张 ui-bg_flat_*/ui-icons 精灵图，
+//     offline.js 只重写 new_z2.css，没碰 jquery-ui.css）—— 它们属于本页从不显示的弹窗装饰。
+// 2026-10-25：这里**不能**粗暴清掉所有非 data: 的 url()，否则新生成的 `assets/…` 会被一起清掉，
+// 整页图片全变透明。
 let remoteLeft = 0;
+let missingLocal = 0;
+const cssResolve = (target) => {
+  const t = String(target || '').trim().replace(/^['"]|['"]$/g, '');
+  if (!t || /^(?:data:|#)/i.test(t)) return true;
+  if (/^(?:https?:)?\/\//i.test(t) || t.includes('..')) return false;
+  const abs = path.join(ROOT, decodeURI(t.split('?')[0].split('#')[0]));
+  return fs.existsSync(abs) && fs.statSync(abs).size > 0;
+};
 const cssAll = cssParts.join('\n')
   .replace(/url\((['"]?)\/?(?:https?:)?\/\/web\.archive\.org\/web\/[0-9a-z_]*\/(https?:\/\/)/gi, 'url($1$2')
-  .replace(/url\((?!(['"]?)data:)([^)]*)\)/gi, () => { remoteLeft++; return `url(${BLANK_GIF})`; });
-console.log('css url() with a dead remote target replaced by a blank:', remoteLeft);
+  .replace(/url\((['"]?)([^)'"]*)\1\)/gi, (m, q, target) => {
+    if (cssResolve(target)) return m;
+    if (/^(?:https?:)?\/\//i.test(String(target).trim())) remoteLeft++;
+    else missingLocal++;
+    return `url(${BLANK_GIF})`;
+  });
+console.log('css url() dead targets replaced by a blank:', remoteLeft, 'remote +', missingLocal, 'missing-local');
 
 // ---------------------------------------------------------------- header "new video" badges
 // The archived markup ships the literal placeholder `<span class="addnew_1">--</span>`: the real

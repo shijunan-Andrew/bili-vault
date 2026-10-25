@@ -26,7 +26,14 @@ if (remoteSrc.length) fails.push(`${remoteSrc.length} remote src references rema
 const linkHref = [...html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]);
 if (linkHref.length) fails.push(`${linkHref.length} <link> tags survived (stylesheets must be inlined)`);
 const cssUrlCount = [...html.matchAll(/url\((['"]?)([^)'"]+)\1\)/gi)].map((m) => m[2]);
-const cssRemote = cssUrlCount.filter((u) => !/^data:/i.test(u.trim()));
+// `data:` 与「真的存在、且在文档目录之内」的相对文件都算离线安全；其余（远程、跳出目录、缺文件）一律算失败。
+const cssRemote = cssUrlCount.filter((u) => {
+  const t = u.trim();
+  if (/^data:/i.test(t)) return false;
+  if (/^(?:https?:)?\/\//i.test(t) || t.includes('..')) return true;
+  const abs = path.join(ROOT, t.split('?')[0].split('#')[0]);
+  return !(fs.existsSync(abs) && fs.statSync(abs).size > 0);
+});
 if (cssRemote.length) fails.push(`${cssRemote.length} css url() still fetch a remote file (e.g. ${cssRemote.slice(0, 3).join(', ')})`);
 
 // 3. scripts: exactly two tags — the inline copy (for file://) and the external egg-2015.js
@@ -87,11 +94,13 @@ const wanted = [
 ];
 for (const [label, needle] of wanted) if (!html.includes(needle)) fails.push(`missing ${label}`);
 
-// 6. images: inline data uris vs. boxes deliberately left empty
+// 6. images: inline data uris vs. asset files vs. boxes deliberately left empty
 const dataImgs = count(/<img[^>]*src="data:image\//gi);
+const assetImgs = count(/<img[^>]*src="assets\//gi);
 const emptyImgs = count(/<img[^>]*data-empty="[^"]*"/gi);
 const unresolvedImgs = count(/<img[^>]*data-(?:img|missing)="[^"]*"/gi);
-if (!dataImgs) fails.push('no inlined images at all');
+// 两种形态都合法：老的单文件（全部内联）与 2026-10-25 起的瘦身形态（外链 assets/）。
+if (!dataImgs && !assetImgs) fails.push('no images at all (neither data: nor assets/ references)');
 if (unresolvedImgs) fails.push(`${unresolvedImgs} <img> are still waiting to be resolved (data-img/data-missing)`);
 
 // 7. the archived page is not still referenced
@@ -111,13 +120,20 @@ notes.push(`css url(data:) inline: ${count(/url\(['"]?data:/gi)}`);
 notes.push(`addnew badges filled: ${count(/class="addnew_\d+" title=/g)}`);
 notes.push(`scripts: ${scriptTags.length} (inline copy + egg-2015.js)`);
 
-// 9. the file must still work when opened directly from disk (file://): every sub-resource is a
-//    data: uri except the one sanctioned sibling script (a same-directory file:// <script src> is
-//    allowed and is exactly what the extension environment needs).
+// 9. 从磁盘直接打开（file://）也要能用：子资源只能是 data: URI、或同目录/子目录里的真实文件。
+//    2026-10-25 瘦身后默认走「外链 assets/」的形态（同一张图不再被内联 551 次），
+//    所以这里不再要求「一律 data:」，改成要求「相对引用必须真的在磁盘上」——
+//    远程主机、`../` 跳出目录、指向不存在的文件，仍然一律判失败。
 const relSrc = [...html.matchAll(/\b(?:src|href)="(?!data:|https:\/\/www\.bilibili\.com\/|#)([^"]*)"/gi)]
   .map((m) => m[1]).filter((u) => u && !/^javascript:/i.test(u) && u !== 'egg-2015.js');
-if (relSrc.length) fails.push(`${relSrc.length} relative sub-resource references would break file:// (e.g. ${relSrc.slice(0, 3).join(', ')})`);
-notes.push(`relative sub-resource refs besides egg-2015.js (file:// safety): ${relSrc.length}`);
+const badRefs = relSrc.filter((u) => {
+  if (/^(?:https?:)?\/\//i.test(u)) return true;          // 任何远程地址都不许留
+  if (u.includes('..')) return true;                       // 不许跳出这一层目录
+  const abs = path.join(ROOT, u.split('?')[0].split('#')[0]);
+  return !(fs.existsSync(abs) && fs.statSync(abs).size > 0);
+});
+if (badRefs.length) fails.push(`${badRefs.length} relative sub-resource references do not resolve to a real local file (e.g. ${badRefs.slice(0, 3).join(', ')})`);
+notes.push(`relative sub-resource refs (must exist on disk, e.g. assets/…): ${relSrc.length}, unresolved: ${badRefs.length}`);
 
 console.log('--- notes ---');
 notes.forEach((n) => console.log('  ', n));

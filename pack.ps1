@@ -21,11 +21,14 @@ $version = $manifest.version
 
 # 只排除「开发用」的东西；其余一律照打。
 #
-# 1.5.1（P0-3）：bili-old-2015/ 是 2015 年那版老站的整站快照，只给开发时对照界面用，
-#   不是扩展的一部分 —— 实测它一个目录就 672 个文件 / 约 39MB，而真正的扩展只有
-#   约 1.3MB / 42 个文件。少了这一条，发行包里 97% 的体积都是这份快照，上传又慢又容易被
-#   审核当成无关内容退回。_ref/ 是同一类"只给开发看的参考目录"（目前它嵌在
-#   bili-old-2015/ 里，一起写上是为了以后有人把参考文件放到根目录时不会再混进包）。
+# 1.5.1（P0-3）：bili-old-2015/ 曾是只给开发对照用的老站快照，整目录 672 文件 / 约 39MB，
+#   而扩展本体只有约 1.3MB —— 那时它整目录被排除。
+# 1.11.0：它成了功能的一部分（收藏库左下角「给 up 一个一键三连」点开就是这一页），
+#   所以从 1.5.1 起的「整目录排除」改成「只带运行期子集」：index.html + egg-2015.js +
+#   assets 里的图片。开发物（_ref/、build/、spec/、tools/、assets/_tools/、各种 *.md 与
+#   清单 JSON）一律不进包 —— 它们由下面的 $excludePaths 按前缀排除。
+#   瘦身过程见 docs/HISTORY.md 的 V1.11.0：内联 551 处 data: URI 改成 192 个外链文件，
+#   同一张图不再被重复内联。_ref/ 仍是"只给开发看的参考目录"，继续整目录排除。
 #
 # 注意：这里的每一项都会同时参与下面「运行期文件清单」的反向断言（$expected 与
 # $actual 必须完全一致）—— 排除多了会把运行期文件一起丢掉，脚本会当场报错，
@@ -33,7 +36,18 @@ $version = $manifest.version
 $excludeNames = @(
   ".git", ".gitattributes", ".gitignore", ".github", ".node-path", "test", "scripts",
   "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1", "pack.ps1",
-  "bili-old-2015", "_ref", "docs"
+  "_ref", "docs"
+)
+
+# 1.11.0：$excludeNames 只能按「顶层名字」排除，彩蛋页要「留目录、去开发物」，
+# 所以再补一份按前缀匹配的清单（相对仓库根，不带结尾斜杠）。命中规则见下面的 $expected 循环。
+$excludePaths = @(
+  "bili-old-2015/_ref", "bili-old-2015/build", "bili-old-2015/spec", "bili-old-2015/tools",
+  "bili-old-2015/README.md", "bili-old-2015/assets/_tools",
+  "bili-old-2015/assets/MANIFEST.json", "bili-old-2015/assets/NEEDED.json",
+  "bili-old-2015/assets/COVER-MAP.json", "bili-old-2015/assets/COVER-MAP.md",
+  "bili-old-2015/assets/COVER-WIRING.md", "bili-old-2015/assets/ICONS.md",
+  "bili-old-2015/assets/INDEX.md", "bili-old-2015/assets/thumbs.json"
 )
 
 $expected = New-Object System.Collections.Generic.List[string]
@@ -41,6 +55,9 @@ Get-ChildItem -LiteralPath $root -Recurse -File -Force | ForEach-Object {
   $rel = $_.FullName.Substring($root.Length + 1).Replace("\", "/")
   $top = $rel.Split("/")[0]
   if ($excludeNames -contains $top) { return }
+  foreach ($skip in $excludePaths) {
+    if ($rel -eq $skip -or $rel.StartsWith($skip + "/")) { return }
+  }
   $expected.Add($rel)
 }
 
@@ -66,7 +83,7 @@ try {
   foreach ($required in @("manifest.json", "background.js", "content.js", "popup.html", "library.html", "settings.html", "locales/zh-TW.json", "locales/en.json")) {
     if (-not ($actual -contains $required)) { throw "运行期文件 $required 不在打包结果里" }
   }
-  foreach ($dev in @("test", "scripts", ".github", "README.md", "AI_HANDOFF.md", "SMOKE_TEST.md", "release.ps1", "bili-old-2015", "_ref", "docs")) {
+  foreach ($dev in @("test", "scripts", ".github", "README.md", "AI_HANDOFF.md", "SMOKE_TEST.md", "release.ps1", "_ref", "docs")) {
     if ($actual | Where-Object { $_ -eq $dev -or $_ -like "$dev/*" }) { throw "开发文件 $dev 混进打包结果了" }
   }
 
@@ -89,11 +106,13 @@ try {
     "test-native-folder-opener.ps1", "tutorial.html", "tutorial.js",
     "uninstall-native-folder-opener.ps1"
   )
-  $allowedTopDirs = @("locales", "native")
+  $allowedTopDirs = @("locales", "native", "bili-old-2015")
+  # 1.11.0：彩蛋页进包后，运行期子集约 3.4MB（index.html 0.6MB + 重编码后的 assets 图片 2.4MB），
+  # 扩展本体仍约 2.1MB。上限按「本体 + 彩蛋」给足余量，同时继续挡住「把开发物打进来」。
   $maxFileBytes = 2MB
-  $maxTotalBytes = 6MB
-  $maxZipBytes = 3MB
-  $maxFileCount = 150
+  $maxTotalBytes = 7MB
+  $maxZipBytes = 5MB
+  $maxFileCount = 260
   foreach ($rel in $actual) {
     $top = $rel.Split("/")[0]
     $allowed = ($allowedTopFiles -contains $rel) -or ($allowedTopDirs -contains $top)
@@ -103,7 +122,7 @@ try {
   }
   if ($actual.Count -gt $maxFileCount) { throw "发布包里有 $($actual.Count) 个文件，超过 $maxFileCount 上限 —— 大概率是把开发文件打进来了" }
   $stagedBytes = (Get-ChildItem -LiteralPath $stage -Recurse -File | Measure-Object -Property Length -Sum).Sum
-  if ($stagedBytes -gt $maxTotalBytes) { throw "发布包总大小 $([math]::Round($stagedBytes / 1KB, 1)) KB，超过 6 MB 上限" }
+  if ($stagedBytes -gt $maxTotalBytes) { throw "发布包总大小 $([math]::Round($stagedBytes / 1KB, 1)) KB，超过 7 MB 上限" }
   if (-not $OutDir) { $OutDir = Split-Path $root -Parent }
   if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
   $zip = Join-Path $OutDir ("bili-vault-" + $version + ".zip")
@@ -113,7 +132,7 @@ try {
   $zipBytes = (Get-Item -LiteralPath $zip).Length
   if ($zipBytes -gt $maxZipBytes) {
     Remove-Item -LiteralPath $zip -Force
-    throw "zip 有 $([math]::Round($zipBytes / 1KB, 1)) KB，超过 3 MB 上限，已删掉这个包"
+    throw "zip 有 $([math]::Round($zipBytes / 1KB, 1)) KB，超过 5 MB 上限，已删掉这个包"
   }
   $size = [math]::Round($zipBytes / 1KB, 1)
   "[OK] $zip"

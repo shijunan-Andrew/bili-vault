@@ -7540,11 +7540,12 @@ test("商店上架三件套：homepage_url、隐私说明、文档里链得上�
 test("发布包有白名单和体积上限，包里不再可能混进开发文件（P3-12b）", () => {
   const pack = readProjectFile("pack.ps1");
   assert.match(pack, /\$allowedTopFiles = @\(/);
-  assert.match(pack, /\$allowedTopDirs = @\("locales", "native"\)/);
+  // 1.11.0：彩蛋页进包，白名单多一个目录、总量与 zip 上限跟着上调（理由写在 pack.ps1 里）
+  assert.match(pack, /\$allowedTopDirs = @\("locales", "native", "bili-old-2015"\)/);
   assert.match(pack, /\$maxFileBytes = 2MB/);
-  assert.match(pack, /\$maxTotalBytes = 6MB/);
-  assert.match(pack, /\$maxZipBytes = 3MB/);
-  assert.match(pack, /\$maxFileCount = 150/);
+  assert.match(pack, /\$maxTotalBytes = 7MB/);
+  assert.match(pack, /\$maxZipBytes = 5MB/);
+  assert.match(pack, /\$maxFileCount = 260/);
   assert.match(pack, /if \(-not \$allowed\) \{ throw "发布清单里出现了白名单之外的文件/);
   assert.match(pack, /if \(\$stagedBytes -gt \$maxTotalBytes\)/);
   assert.match(pack, /if \(\$zipBytes -gt \$maxZipBytes\)/);
@@ -8180,4 +8181,69 @@ test("1.10.22：安装教程的五步进度条跟着滚动走，点一下能跳�
     const dict = JSON.parse(readProjectFile(`locales/${locale}.json`).replace(/^\uFEFF/, ""));
     assert.ok(Object.prototype.hasOwnProperty.call(dict, "安装进度"), `${locale} 词典里要有「安装进度」`);
   }
+});
+
+test("1.11.0：彩蛋页随发行包发布，但只带运行期子集", () => {
+  const pack = readProjectFile("pack.ps1");
+
+  /* bili-old-2015 必须作为目录放行，不能再出现在整目录排除名单里 */
+  const excludeNames = /\$excludeNames\s*=\s*@\(([\s\S]*?)\)/.exec(pack);
+  assert.ok(excludeNames, "pack.ps1 里要有 $excludeNames");
+  assert.doesNotMatch(excludeNames[1], /"bili-old-2015"/, "彩蛋页要进包，不能再整目录排除");
+
+  const allowedDirs = /\$allowedTopDirs\s*=\s*@\(([^)]*)\)/.exec(pack);
+  assert.ok(allowedDirs, "pack.ps1 里要有 $allowedTopDirs");
+  assert.match(allowedDirs[1], /"bili-old-2015"/, "彩蛋页目录要在白名单里");
+
+  /* 开发物按前缀排除（$excludeNames 只能按顶层名字排，进不了目录内部） */
+  const excludePaths = /\$excludePaths\s*=\s*@\(([\s\S]*?)\)/.exec(pack);
+  assert.ok(excludePaths, "pack.ps1 里要有 $excludePaths（按前缀排除彩蛋页里的开发物）");
+  for (const skip of ["bili-old-2015/_ref", "bili-old-2015/build", "bili-old-2015/spec", "bili-old-2015/tools"]) {
+    assert.ok(excludePaths[1].includes(`"${skip}"`), `${skip} 应该被排除`);
+  }
+  assert.match(pack, /\$rel\.StartsWith\(\$skip \+ "\/"\)/, "嵌套排除要按前缀匹配，不能只比全等");
+
+  /* 阈值要跟新体积对得上：彩蛋页子集约 3.4MB，本体约 2.1MB（实测包 5.7MB / zip 3.9MB） */
+  assert.match(pack, /\$maxTotalBytes\s*=\s*7MB/, "总量上限要跟着彩蛋页调到 7MB");
+  assert.match(pack, /\$maxZipBytes\s*=\s*5MB/, "zip 上限要跟着调到 5MB");
+});
+
+test("1.11.0：彩蛋页的运行时子集是自足的（引用的每个文件都在，且不会被排除清单挡掉）", () => {
+  const html = readProjectFile("bili-old-2015/index.html");
+  const pack = readProjectFile("pack.ps1");
+  const excludePaths = /\$excludePaths\s*=\s*@\(([\s\S]*?)\)/.exec(pack);
+  assert.ok(excludePaths, "pack.ps1 里要有 $excludePaths");
+  const skipList = [...excludePaths[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]);
+
+  /* 1.11.0 起是外链形态：不许再有内联图片（否则又是「同一张图存了五遍」） */
+  assert.doesNotMatch(html, /<img[^>]*src="data:image\//, "图片不该再内联成 base64");
+
+  const refs = new Set();
+  for (const match of html.matchAll(/src="(assets\/[^"]+)"/g)) refs.add(decodeURI(match[1]));
+  for (const match of html.matchAll(/url\("?(assets\/[^)"']+)"?\)/g)) refs.add(decodeURI(match[1]));
+  assert.ok(refs.size > 100, `应该引用上百张图，实际 ${refs.size}`);
+
+  // 注意：`assets/…` 是相对 bili-old-2015/ 的，而 pack.ps1 的排除项是相对仓库根的。
+  const missing = [...refs].filter((rel) => {
+    if (!fs.existsSync(path.join(projectRoot, "bili-old-2015", rel))) return true;
+    const rootRel = `bili-old-2015/${rel}`;
+    return skipList.some((skip) => rootRel === skip || rootRel.startsWith(`${skip}/`));
+  });
+  assert.deepEqual(missing, [], `这些图在磁盘上没有、或被 pack.ps1 排除了：${missing.slice(0, 5).join(", ")}`);
+
+  /* 两个入口文件也必须在（pack.ps1 的白名单里按目录放行，靠的是这一条） */
+  for (const rel of ["bili-old-2015/index.html", "bili-old-2015/egg-2015.js"]) {
+    assert.ok(fs.existsSync(path.join(projectRoot, rel)), `${rel} 必须存在`);
+  }
+});
+
+test("1.11.0：默认输出外链形态，单文件形态仍留开关", () => {
+  const build = readProjectFile("bili-old-2015/tools/build.js");
+  assert.match(build, /process\.env\.INLINE_LIMIT \? Number\(process\.env\.INLINE_LIMIT\) : 0/, "默认应该是外链（0），单文件形态靠 INLINE_LIMIT=Infinity");
+  assert.match(build, /const relOf = \(rec\) => \{/, "外链地址要能把三种来源（MANIFEST / NEEDED / COVER-MAP）都归到 assets/<路径>");
+  assert.match(build, /assets\/\$\{relAsset\}/, "拼出来必须是 assets/<路径>");
+
+  /* 不能把「非 data: 的 url()」一律清成透明图 —— 那会把新生成的 assets 引用一起清掉 */
+  assert.doesNotMatch(build, /url\(\(\?!\('\"\)\?data:\)/, "不要再按「非 data:」一刀切清 url()");
+  assert.match(build, /const cssResolve = \(target\) => \{/, "CSS 里的 url() 要按「能不能在磁盘上解析」判定");
 });

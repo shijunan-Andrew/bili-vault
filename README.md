@@ -137,14 +137,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.22：安装教程能看出装到第几步
+## V1.11.0：2015 那页彩蛋真的装进包里了
 
-- **问题**：教程是「一口气五步」，滚到第 4 步时看不到还剩几步，也不知道自己刚才漏没漏第 2 步。
-- **改法**：步骤上方加一条五点进度条——编号就是步号，当前步实心、走过的步描边，点任意一点跳回那一步；滚动时跟着更新。
-- **吸顶**：`position: sticky; top: 0` + `background: var(--surface)`。必须给底色，否则正文会从下面透出来。
-- **判定口径**：与目录高亮同一套（取最后一个「刚滚过顶部 120px」的步骤），`scroll`/`resize` 用 `requestAnimationFrame` 合并，`load` 时再算一次。
-- **可访问性**：进度条有 `aria-label`（新词条「安装进度」），当前步挂 `aria-current="step"`。
-- **范围**：`tutorial.html`（五个 `<li id="step-N">` + 一个 `<nav>`）、`page.css` 五条 `.steps-*` 规则、`tutorial.js` 约 30 行；词典 1088 → **1089**；stability 385 → **386**，pages 66 → **67**。
+- **问题**：收藏库左下角「给 up 一个一键三连」点开的 2015 年首页，之前**只有从源码目录加载扩展的人能看**。发行包一直把它整目录排除（`pack.ps1` 的排除清单，注释写着「一个目录就 392 文件 / 约 39MB，占发行包 97%」），装 zip 或商店版的人点开只会看到一句「彩蛋页不在这份安装包里」。
+- **瘦身**：`index.html` 从 9.06 MB 降到 0.61 MB —— 老形态把 551 处引用全内联成 base64，其中只有 192 张唯一图片，同一张图存了五遍，重复占 6.6 MB。现在图片留在 `assets/`，页面写相对路径；`build/index.css` 从 3.69 MB 降到 0.25 MB；整个目录 22 MB → 7.3 MB。
+- **图片重编码**：PNG 走无损重压（解码后逐像素相同才采用），68 张 580 KB → 342 KB；JPEG 只在 PSNR ≥ 40 dB 时才替换（先试 q92，不行再试 q90，否则保留原图），77 张 3.87 MB → 2.15 MB。合计 4.35 MB → 2.44 MB。
+- **发行包**：`pack.ps1` 从「整目录排除」改成「只带运行期子集」——`index.html` + `egg-2015.js` + `assets/` 里的图片进包，`_ref/`、`build/`、`spec/`、`tools/`、清单 JSON 与三份生成文档按前缀排除（新增 `$excludePaths`，因为 `$excludeNames` 只能按顶层名字排）。上限跟着重算：总量 7 MB、zip 5 MB、260 个文件；实测 252 文件 / 5.7 MB / zip 3.9 MB。
+- **守卫**：`test/stability.test.cjs` 加三条（发行清单放行 + 前缀排除 + 阈值、运行时子集自足、默认外链形态）；`scripts/check-package-size.cjs` 学会读 `$excludePaths`，并把两个入口文件列进关键件。
+- **单文件形态没丢**：`INLINE_LIMIT=Infinity node tools/build.js` 仍能构建出「随手拷走」的单文件版本，`tools/verify.js` 两种形态都认。
 
 **遗留** - 无。
 
@@ -156,7 +156,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:386 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:389 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
