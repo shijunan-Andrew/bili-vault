@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **417** 项里<!-- test-count:417 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **418** 项里<!-- test-count:418 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,13 +54,13 @@
 
 ---
 
-## V1.13.2 新增的几条
+## V1.13.3 新增的几条
 
-- [ ] 在临时分支上试一次发版（`git switch -c tmp-try` 然后 `pwsh -NoProfile -File release.ps1 1.99.9 "试一下" -Yes`）→ 第一屏就报「当前分支是「tmp-try」，不是 main」并中止，`manifest.json` 一个字节没改；验完 `git switch main` 并把临时分支删掉。
-- [ ] 在 main 上用一个已经发过的版本号试（例如 `release.ps1 1.13.1 "试一下" -Yes`）→ 报「打 tag 失败：V1.13.1 可能已经存在」，不再把旧 tag 偷偷挪到新提交上。
-- [ ] 正常发版这一次：第 1 步能看到「在 main 上」，最后打印的「本地 main / 远程 main」两个短 sha 一致。
+- [ ] 挑一条归档，把 `视频信息.txt` 里 `视频收藏时间` 改成 `2026-10-25 10:15`（不合法格式）→ 收藏库页点「更新视频数据」→ 更新完打开 txt：这一行**还是** `2026-10-25 10:15`，没被改成当天；简介/标签/播放量正常更新。
+- [ ] 把同一行改成 `随便写写` → 再更新一次 → 这行仍然是 `随便写写`，页面上这一格显示「未知」。
+- [ ] 把 `视频收藏时间：` 整行删掉 → 再更新一次 → 导入来的记录会按 B 站收藏时间补回这一行；本地存的记录仍然没有这一行。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.13.1 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.13.2 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

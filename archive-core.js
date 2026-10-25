@@ -315,6 +315,50 @@
     return INFO_PLACEHOLDERS.has(String(value ?? "").trim());
   }
 
+  /* ---------- 「视频收藏时间」这一行（1.13.3，审查 P1-5） ---------- */
+
+  // 这一行写的是本地事实（什么时候收藏的），B 站接口不会给，所以任何人都不能靠
+  // 「重新抓一遍资料」把它算出来。原来的刷新链路只要解析失败就退回 new Date()，
+  // 于是用户手改成 `2026-10-25 10:15`、老版本写的无秒格式、从别处复制的
+  // `2026年10月25日`，都会在某次「更新视频数据」之后被悄悄改成更新时间。
+  // 现在：解析不出、又不是占位 → 原样钉回去，一个字节都不动。
+  const FAVORITE_TIME_KEY = "视频收藏时间";
+  const FAVORITE_TIME_PATTERN = /^视频收藏时间：(.*)$/m;
+
+  // 取这一行的值（去掉首尾空白）；没有这一行就返回空串。
+  function favoriteTimeTextOf(text) {
+    const match = String(text ?? "").match(FAVORITE_TIME_PATTERN);
+    return match ? match[1].trim() : "";
+  }
+
+  // 取整行原文（保存链路要原样搬过去，见 background.js 的 favoriteLineOfInfoText）。
+  function favoriteTimeLineOf(text) {
+    const match = String(text ?? "").match(FAVORITE_TIME_PATTERN);
+    return match ? match[0] : "";
+  }
+
+  // 只认插件自己写的格式：YYYY年M月D日H时M分S秒（六个字段齐全）。
+  // 秒不许省 —— 省了就说明不是插件写的，宁可留着原文也别猜。
+  function parseChineseDateTime(text) {
+    const match = String(text).match(/(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒/);
+    if (!match) return null;
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
+  }
+
+  // 原文那一行「读不出来、又不是占位值」→ 把重建结果里的那一行换回原文（原本丢了就补回去）。
+  function pinUnparsableFavoriteTime(originalText, rebuiltText) {
+    const rebuilt = String(rebuiltText ?? "");
+    const value = favoriteTimeTextOf(originalText);
+    if (!value || isPlaceholderValue(value)) return rebuilt;
+    if (parseChineseDateTime(value)) return rebuilt;
+    const line = `${FAVORITE_TIME_KEY}：${value}`;
+    if (FAVORITE_TIME_PATTERN.test(rebuilt)) {
+      return rebuilt.replace(FAVORITE_TIME_PATTERN, () => line);
+    }
+    // 整行都丢了：补在「【基本信息】」下面，别让收藏时间静默消失。
+    return rebuilt.replace(/^【基本信息】$/m, (heading) => `${heading}\n${line}`);
+  }
+
   function fieldValue(info, key) {
     return info?.fields?.[key] || "";
   }
@@ -1309,6 +1353,12 @@
     patchVolatileFields,
     // 1.8.3：刷新已有记录时的「不许降级」合并（background.js 的更新链路用）
     mergeInfoText,
+    // 1.13.3（审查 P1-5）：「视频收藏时间」这一行的读法、解析与钉回，全仓只有这一份
+    FAVORITE_TIME_KEY,
+    favoriteTimeTextOf,
+    favoriteTimeLineOf,
+    parseChineseDateTime,
+    pinUnparsableFavoriteTime,
     // 1.8.4：扫描缓存的容量与批量淘汰（library.js 不再写死 600）
     ARCHIVE_CACHE_MIN_CAPACITY,
     ARCHIVE_CACHE_HEADROOM,

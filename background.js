@@ -1267,9 +1267,9 @@ function bvOfInfoText(text) {
   return match ? match[1].trim() : "";
 }
 
+// 1.13.3（审查 P1-5）：「视频收藏时间」这一行的读法收在 archive-core.js 一处。
 function favoriteLineOfInfoText(text) {
-  const match = String(text || "").match(/^视频收藏时间：.*$/m);
-  return match ? match[0] : "";
+  return BcaArchiveCore.favoriteTimeLineOf(text);
 }
 
 async function loadBvIndex() {
@@ -3290,11 +3290,8 @@ async function importRecordNeedsRefresh(collection, record) {
   return recordNeedsRefresh(record);             // 复判：coverMissing 也是判据之一
 }
 
-function parseChineseDateTime(text) {
-  const match = String(text).match(/(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒/);
-  if (!match) return null;
-  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
-}
+// 1.13.3（审查 P1-5）：中文日期解析已挪进 archive-core.js 的 parseChineseDateTime，
+// 那是纯函数模块，archive-core.test.cjs 能直接表驱动测它；这里不许再留第二份。
 
 // 「信息保存于：…」是 buildInfo 用 savedAt 现写的时间戳（见 background.js 里那一行模板），
 // 每次运行都不一样。比对"这条记录的内容有没有真的变化"之前必须先把它抹掉，否则文件永远"变了"：
@@ -3308,9 +3305,11 @@ async function refreshImportedRecord(collection, record, item, journal) {
   const directory = await collection.getDirectoryHandle(record.directory);
   const infoHandle = await directory.getFileHandle("视频信息.txt");
   const original = await (await infoHandle.getFile()).text();
-  const favoriteAtText = original.match(/^视频收藏时间：(.+)$/m)?.[1]?.trim() || "";
-  const favoriteTimeUnknown = importIsPlaceholder(favoriteAtText);
-  const parsed = favoriteTimeUnknown ? null : parseChineseDateTime(favoriteAtText);
+  const favoriteAtText = BcaArchiveCore.favoriteTimeTextOf(original);
+  // 1.13.3（审查 P1-5）：解析不出也算「未知」—— 写盘时保留原文那一行，
+  // 不再退回 new Date() 把真实收藏时间改成「更新时间」。
+  const parsed = importIsPlaceholder(favoriteAtText) ? null : BcaArchiveCore.parseChineseDateTime(favoriteAtText);
+  const favoriteTimeUnknown = !parsed;
   const favoriteAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date();
   // coverMissing 还没算过就在这里补算一次——只有"需要刷新"的记录会走这条路径，正常记录不受影响。
   if (record.coverMissing === undefined) await recordMissingCover(collection, record);
@@ -3334,7 +3333,8 @@ async function refreshImportedRecord(collection, record, item, journal) {
   // 资料接口 / 标签接口任一失败时，重建出来的是一堆「未知」——直接写下去就是把真实的
   // 简介、标签、发布时间、时长、互动数据换成占位符，而且导入跑完之后没有退路。
   const rebuiltText = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, collection.name, new Date());
-  const refreshedText = BcaArchiveCore.mergeInfoText(original, rebuiltText);
+  // 1.13.3（审查 P1-5）：认不出的收藏时间原样钉回（判定见 archive-core.pinUnparsableFavoriteTime）
+  const refreshedText = BcaArchiveCore.pinUnparsableFavoriteTime(original, BcaArchiveCore.mergeInfoText(original, rebuiltText));
   let touched = false;
   if (cover) {
     // 先写封面、后写 txt：txt 始终是"这条记录写完了"的完成标记

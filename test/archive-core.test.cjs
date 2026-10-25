@@ -1083,6 +1083,47 @@ test("版本比较：按数字逐段比，不许用字典序（1.11.2）", () =>
   assert.equal(core.versionIsNewer("1.11.1", "1.11.1"), false);
   assert.equal(core.versionIsNewer("1.11.2", "1.11.10"), false);
 });
+test("收藏时间：认不出的写法不许被「现在」顶掉（1.13.3 · 审查 P1-5）", () => {
+  const original = ["【基本信息】", "视频收藏时间：2026-10-25 10:15", "视频标题：示例", ""].join("\r\n");
+  const rebuilt = ["【基本信息】", "视频收藏时间：未知", "视频标题：示例（新）", ""].join("\r\n");
+  const pinned = core.pinUnparsableFavoriteTime(original, rebuilt);
+  assert.match(pinned, /^视频收藏时间：2026-10-25 10:15$/m, "认不出的收藏时间要原样保留");
+  assert.match(pinned, /^视频标题：示例（新）$/m, "其它字段照常接受重建结果");
+
+  const good = ["视频收藏时间：2026年10月25日 10时15分30秒", ""].join("\r\n");
+  const rebuilt2 = ["视频收藏时间：2026年10月26日 11时16分31秒", ""].join("\r\n");
+  assert.match(core.pinUnparsableFavoriteTime(good, rebuilt2), /2026年10月26日 11时16分31秒/, "认得出的照常按重建结果写");
+
+  assert.match(
+    core.pinUnparsableFavoriteTime("视频收藏时间：未知", "视频收藏时间：2026年10月25日 10时15分30秒"),
+    /2026年10月25日 10时15分30秒/,
+    "原文是占位值时不动重建结果"
+  );
+  assert.equal(core.pinUnparsableFavoriteTime("视频标题：x", "视频标题：x"), "视频标题：x", "原文没有这一行就不凭空造");
+
+  const removed = core.pinUnparsableFavoriteTime("【基本信息】\r\n视频收藏时间：2026/10/25\r\n", "【基本信息】\r\n视频标题：x\r\n");
+  assert.match(removed, /^视频收藏时间：2026\/10\/25$/m, "重建结果把整行丢了也要补回来");
+});
+
+test("parseChineseDateTime：只有六字段齐全的中文时间才认（1.13.3 · 审查 P1-5）", () => {
+  const ok = core.parseChineseDateTime("2026年10月25日 10时15分30秒");
+  assert.ok(ok instanceof Date && !Number.isNaN(ok.getTime()), "六字段齐全要能解析");
+  assert.equal(ok.getFullYear(), 2026);
+  assert.equal(ok.getMonth(), 9);
+  assert.equal(ok.getDate(), 25);
+  for (const bad of ["2026-10-25 10:15", "2026年10月25日 10时15分", "2026/10/25", "2026年10月25日", "未知", ""]) {
+    assert.equal(core.parseChineseDateTime(bad), null, bad + " 不该被解析成时间");
+  }
+});
+
+test("favoriteTimeTextOf / favoriteTimeLineOf：这一行只有一种读法（1.13.3 · 审查 P1-5）", () => {
+  const text = "【基本信息】\r\n视频收藏时间： 2026年10月25日 10时15分30秒 \r\n视频标题：x\r\n";
+  assert.equal(core.favoriteTimeTextOf(text), "2026年10月25日 10时15分30秒");
+  assert.equal(core.favoriteTimeLineOf(text), "视频收藏时间： 2026年10月25日 10时15分30秒 ");
+  assert.equal(core.favoriteTimeTextOf("视频标题：x"), "");
+  assert.equal(core.favoriteTimeLineOf("视频标题：x"), "");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

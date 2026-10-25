@@ -5951,6 +5951,23 @@ test("CI 与发版跑同一套检查，检查清单只有一份（P0 工程）",
   assert.doesNotMatch(release, /Invoke-Native \$Node @\('test\//, "release.ps1 里不许再单独列测试项 —— 那样又会漂");
 });
 
+
+test("收藏时间认不出时保留原文，不再拿「现在」顶上（1.13.3 · 审查 P1-5）", () => {
+  const source = readProjectFile("background.js");
+  const core = readProjectFile("archive-core.js");
+
+  assert.match(core, /function pinUnparsableFavoriteTime\(/, "archive-core.js 要有「认不出就钉回原文」的实现");
+  assert.match(core, /function parseChineseDateTime\(/, "中文日期解析只有 archive-core.js 这一份");
+  assert.doesNotMatch(source, /function parseChineseDateTime/, "background.js 不许再留第二份解析");
+  assert.match(source, /BcaArchiveCore\.parseChineseDateTime\(/, "background.js 要调用 archive-core 的解析");
+  assert.match(source, /BcaArchiveCore\.pinUnparsableFavoriteTime\(/, "刷新记录时要钉回认不出的收藏时间");
+  assert.doesNotMatch(
+    source,
+    /const favoriteTimeUnknown = importIsPlaceholder\(favoriteAtText\);/,
+    "旧判据（只把占位当未知、解析失败退回现在）不许回来"
+  );
+});
+
 test("发版脚本的四道闸门：分支、提交、tag、主线（1.13.2 · 审查 P1-3/P1-4）", () => {
   const release = readProjectFile("release.ps1");
 
@@ -6263,8 +6280,9 @@ test("导入的「更新」链路写盘前先过「不许降级」合并（V1.8.
   assert.match(body, /const rebuiltText = buildInfo\(/, "重建结果要先落到 rebuiltText 上");
   assert.match(
     body,
-    /const refreshedText = BcaArchiveCore\.mergeInfoText\(original, rebuiltText\);/,
-    "写盘前必须过 mergeInfoText，否则接口一失败就把真实简介/标签换成「未知」"
+    /const refreshedText = BcaArchiveCore\.pinUnparsableFavoriteTime\(original, BcaArchiveCore\.mergeInfoText\(original, rebuiltText\)\);/,
+    "写盘前必须过 mergeInfoText，否则接口一失败就把真实简介/标签换成「未知」" +
+      "（1.13.3 起外面还要再包一层 pinUnparsableFavoriteTime，见 P1-5）"
   );
   assert.ok(
     body.indexOf("mergeInfoText(original, rebuiltText)") < body.indexOf('writeFile(directory, "视频信息.txt", refreshedText)'),

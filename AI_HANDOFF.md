@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 417 · archive-core 93 · stats-core 69 · background 33 · pages 90（后四套是真执行） |
+| 测试基线 | stability 418 · archive-core 96 · stats-core 69 · background 33 · pages 90（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-26 00:09，当时 HEAD `87ea56b`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-26 00:16，当时 HEAD `cb365b1`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -515,7 +515,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:417 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:418 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -845,6 +845,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 - 用户曾报告收藏成功但本地归档失败，并看到 B 站收藏弹窗提示 `The next() called multiple times`。另一次控制台网络错误指向 Kaspersky 浏览器组件的 `gc.kis.v2.scr.kaspersky-labs.com`。后者不是本项目域名；判断归因前需在禁用相关第三方扩展的环境中复现。不要把这类外部错误直接归为本扩展故障。
 - 3.8 修复的两个本地目录打开助手缺陷都是运行时问题，Node 静态检查发现不了：一个是 Chrome 静默忽略清单 `args`，一个是 PowerShell 5.1 的默认 ANSI 读取。改动这一块必须跑 `test-native-folder-opener.ps1`，不能只做语法检查。
 - **已定性（1.7.20 处理完）**：`content.js` 在 MV3 隔离世界里读不到页面的 `window.__INITIAL_STATE__`（清单没声明 `world: "MAIN"`），所以那段读取一直是死的。1.7.20 已把它删掉，只在代码里留一行注释说明为什么读不到；元数据一律走 DOM/meta 采集。**别再加回来**，要拿页面全局变量必须先加 MAIN 世界的桥。
+- **`视频收藏时间` 只认插件自己写的六字段格式**（`YYYY年M月D日H时M分S秒`；判定与钉回都在 `archive-core.js` 的 `pinUnparsableFavoriteTime()`，1.13.3 起）：解析不出（用户手改、老格式、从别处复制）**一律原样保留**，绝不退回「现在」—— 这一行是本地事实，B 站接口永远不会给。改这块先读 `docs/HISTORY.md` 的 V1.13.3。
 - **4.1–4.2 期遗留的两条历史限制**（档案资料完整度、个别 `UP主UID` 对不上）都在 4.2 解决了，背景见 [`docs/HISTORY.md`](docs/HISTORY.md) 的「4.1–4.2 期遗留的两条已知限制」。
 - 4.2 的导入会对每条视频发 2–3 个请求（view + tags + 每个 UP 一次的 relation/stat），**这是用户明确要求的完整抓取**。**注意速率在 4.3 已下调为串行 + 每条间隔 800ms**（原为并发 2 + 350ms）；如果将来风控变严，应先调 `IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`，而不是回到“只补缺失字段”的老逻辑。
 
