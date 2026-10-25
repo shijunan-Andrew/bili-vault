@@ -403,12 +403,17 @@ html[data-appearance="custom"][data-wallpaper="on"]:not([data-wallpaper-scope="p
    提示条要的是「一眼能读」，不是「和背景融在一起」：它的底色是反相的实色
    （--ink），字是 --surface，与毛玻璃无关。test/stability.test.cjs 有守卫盯着。 */
 html.bca-glass :is(.sidebar, .video-card, .detail-panel, .batch-toolbar,
-  .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav) {
+  .confirm-dialog, .editor-dialog, .diff-dialog, .settings-panel, .settings-nav) {
   background: var(--bca-glass-surface);
   border-color: var(--bca-glass-line);
   backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
   -webkit-backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
 }
+/* 1.11.8：清单里的 .settings-card 换成了 .settings-panel。1.11.6 起卡本身只是
+   「标题 + 引言」的透明容器，行才是有底色的那一层；把容器也列进来，等于给标题
+   糊上一块半透明的玻璃 —— 铺了自定义背景图时，标题就压在一块发脏的色带上，
+   既不像卡片也不像页面。标题要的是「直接落在页面上」，所以它完全透明、不参与毛玻璃；
+   毛玻璃只盖行那层 .settings-panel。test/stability.test.cjs 有守卫盯着。 */
 /* 上面这条带 (0,2,1) 的特异性，压得住 library.css:662-664 的卡片状态边框
    （.video-card:hover / .invalid-video / .selected，全是 (0,2,0)）——
    也就是「开着毛玻璃时三种状态反馈全看不见」。状态视觉属于卡片自己的设计，
@@ -424,7 +429,7 @@ html.bca-glass .topbar {
 /* 玻璃边缘高光：上左偏亮、下右偏暗，再加一圈内发光。没有它，半透明卡片
    看着像「没画完」而不是「磨砂」。三个颜色都从当前主题的 --surface 推出来，
    所以白天与夜晚各自成立，不是写死的白色。 */
-html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
+html.bca-glass :is(.video-card, .settings-panel, .detail-panel) {
   box-shadow:
     inset 1px 1px 1px -.5px color-mix(in srgb, var(--bca-glass-glow) 45%, transparent),
     inset -1px -1px 1px -.5px color-mix(in srgb, var(--bca-glass-shade) 32%, transparent),
@@ -452,7 +457,7 @@ html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
     scroll-behavior: auto !important;
   }
   html.bca-glass :is(.video-card, .detail-panel, .batch-toolbar,
-    .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav,
+    .confirm-dialog, .editor-dialog, .diff-dialog, .settings-panel, .settings-nav,
     .stats-card, .stats-foot, .stats-tile, .stats-top-row, .stats-picker-menu),
   html.bca-glass :is(.topbar, .stats-topbar) {
     backdrop-filter: none !important;
@@ -473,7 +478,7 @@ html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
    颜色一律用系统关键字（Canvas / CanvasText / LinkText），不是写死的色值。 */
 @media (forced-colors: active) {
   html.bca-glass :is(.sidebar, .video-card, .detail-panel, .batch-toolbar, .confirm-dialog,
-    .editor-dialog, .diff-dialog, .settings-card, .settings-nav,
+    .editor-dialog, .diff-dialog, .settings-panel, .settings-nav,
     .stats-card, .stats-foot, .stats-tile, .stats-top-row, .stats-picker-menu),
   html.bca-glass :is(.topbar, .stats-topbar) {
     backdrop-filter: none !important;

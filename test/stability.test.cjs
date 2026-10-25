@@ -5218,7 +5218,7 @@ test("毛玻璃糊在哪些面上、怎么糊，都钉住（静态回归）", ()
   assert.match(css, /backdrop-filter: blur\(var\(--bca-glass-blur\)\) saturate\(170%\)/);
   assert.match(css, /-webkit-backdrop-filter: blur\(var\(--bca-glass-blur\)\) saturate\(170%\)/, "Safari 要前缀");
   // 玻璃边缘高光：没有它，半透明卡片看着像「没画完」而不是「磨砂」
-  assert.match(css, /html\.bca-glass :is\(\.video-card, \.settings-card, \.detail-panel\) \{[\s\S]{0,240}inset 0 0 12px/);
+  assert.match(css, /html\.bca-glass :is\(\.video-card, \.settings-panel, \.detail-panel\) \{[\s\S]{0,240}inset 0 0 12px/);
   // 四个玻璃令牌都必须从当前主题的令牌推出来：写死白色的话，夜晚主题下
   // 卡片会亮成一片、字压在亮底上看不清，边缘高光还会顶着一圈白边（theme=dark&glass=1 真跑出来过）。
   // 底色 / 高光 / 暗部从 --surface 推，描边从 --line 推，两者都是跟着主题走的令牌。
@@ -8365,6 +8365,24 @@ test("1.11.5：使用说明里不再有「左下角两个浮标」（主题与�
   assert.equal(/\.float-(?:item|btn|menu)/.test(css), false, "只给它用的样式一起删，别留死代码");
   assert.match(guide, /主题和界面语言在哪改？/, "要在 FAQ 里说清改去哪了");
   assert.match(guide, /怎么知道有没有新版本？/, "要把检查更新写进 FAQ");
+});
+
+test("1.11.8：设置页的栏标题完全透明、不吃毛玻璃，玻璃只盖行那层", () => {
+  const theme = readProjectFile("theme.css");
+  const settingsCss = readProjectFile("settings.css");
+
+  const glassBlocks = (theme.match(/html\.bca-glass[^{]*\{[^}]*\}/g) || [])
+    .map((block) => block.split("{")[0]);
+  assert.ok(glassBlocks.length >= 3, "theme.css 里应该有多处毛玻璃清单");
+  const withCard = glassBlocks.filter((selector) => /\.settings-card\b/.test(selector));
+  assert.deepEqual(withCard, [], "毛玻璃清单里不许再有 .settings-card —— 那层是标题，必须完全透明");
+  const withPanel = glassBlocks.filter((selector) => /\.settings-panel\b/.test(selector));
+  assert.ok(withPanel.length >= 3, "毛玻璃要盖住 .settings-panel（行那层），三处清单都要有");
+
+  // 标题层自己不画底色，也不再自带模糊
+  assert.match(settingsCss, /\.settings-card \{[^}]*background: transparent;/, ".settings-card 要保持透明");
+  assert.doesNotMatch(settingsCss, /\.settings-card \{[^}]*backdrop-filter/, ".settings-card 不该自带模糊");
+  assert.match(settingsCss, /\.settings-panel \{[^}]*background: var\(--surface\);/, ".settings-panel 要有自己的底色");
 });
 
 test("1.11.7：底部提示条不吃毛玻璃，底色是不透明的反相色", () => {

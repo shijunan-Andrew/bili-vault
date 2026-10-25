@@ -137,13 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.11.7：底部提示不再被毛玻璃吃掉（同批还有设置页分层与收藏夹置顶）
+## V1.11.8：设置页的栏标题不再被毛玻璃糊住
 
-- 设置页：每栏的标题与引言回到页面底色，行收进白色圆角卡片；「检查更新」自成一栏（1.11.5）。
-- 收藏库：开源横幅文字居中；左侧收藏夹悬停出绿色图钉（置顶）与红色叉（删除）。
-- 设置页删掉「归档会记录收藏时间」那一行；详情页按钮改名「标记为已下载」。
-- **1.11.7**：开了毛玻璃之后，底部提示条变成「半透明底 + 同色字」，夜晚主题几乎读不出来 —— 原因是它自己也在 `html.bca-glass` 的清单里。现在提示条不参与毛玻璃，底色是不透明的反相色，两种主题都一眼能读。
-- 测试：pages 71 → 74、stability 394 → 396。
+- 铺自定义背景图 + 开毛玻璃时，设置页每栏的标题与引言原本会压在一条半透明的毛玻璃色带上，看着发脏、字也发虚。
+- 现在标题层完全透明（不参与毛玻璃），毛玻璃只盖「行」那一层 —— 一栏一块的分界仍然清楚。
+- 测试：stability 396 → 397。
 
 ## 测试与文档
 
@@ -153,7 +151,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:396 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:397 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
