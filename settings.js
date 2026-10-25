@@ -785,7 +785,8 @@ async function checkForUpdate() {
         settled = true;
         resolve(value);
       };
-      const timer = window.setTimeout(() => finish({ ok: false, reason: "timeout" }), 12000);
+      // 1.11.4：两个源是依次试的，每个源后台各给 6 秒超时；实测 GitHub 原文在国内网络会直接挂到超时，然后才轮到镜像，所以这里要等得比「6+6 秒」宽一点。等不到也没关系：结论会照常写进 storage，重开设置页能看见。
+      const timer = window.setTimeout(() => finish({ ok: false, reason: "timeout" }), 20000);
       try {
         chrome.runtime.sendMessage({ type: "bca-check-update", mode: "manual" }, (response) => {
           window.clearTimeout(timer);

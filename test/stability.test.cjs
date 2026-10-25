@@ -8282,6 +8282,8 @@ test("1.11.2：版本比较只有一份实现，「检查更新」只读两个�
   assert.match(background, /if \(message\?\.type === "bca-check-update"\) \{/, "要有 bca-check-update 这条消息");
   assert.match(background, /const UPDATE_CHECK_TIMEOUT_MS = 6000;/, "单次请求要有 6 秒超时");
   assert.match(settings, /type: "bca-check-update", mode: "manual"/, "设置页手动触发时带 mode=manual");
+  /* 两个源依次试（各 6 秒），页面侧要等得比 6+6 秒宽；实测 A 源会挂到超时才轮到镜像 */
+  assert.match(settings, /reason: "timeout" \}\), 20000\)/, "设置页的等待时间要盖住两个源串行超时");
 
   /* 结果要落到 storage，重开设置页能看见上次结论 */
   assert.match(background, /updateCheck: result/, "成功结果要写进 updateCheck");
