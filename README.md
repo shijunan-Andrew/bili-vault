@@ -137,19 +137,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.5：冷启动不再重读全部 视频信息.txt，断点续跑也有顶栏入口了
+## V1.12.6：文档里的数字能一键对齐，PowerShell 脚本进了检查
 
-- **扫描结果跨会话留存**：以前那份解析缓存是页面级 Map，每次打开收藏库都从空开始 —— 700 条库
-  在机械盘上就是首屏那 1~3 秒。现在把「解析好的 record + 它的 size / lastModified」存进 IndexedDB
-  （`bca-scan-cache/records`），下次扫描前先灌回内存缓存。命中判据一个字没改（还是比 size 与
-  lastModified），只是「上一轮的结果」留下来了；封面句柄不入库，命中时用这次枚举到的新句柄补上。
-- **断点续跑有了顶栏入口**：`bcaImportResume` 以前只有弹窗读，从不点扩展图标的人永远看不到
-  「还能接着跑」。现在收藏库顶栏挂一条同款提示，点「继续上次导入」按同一套消息把续跑参数发下去
-  （uid 取记住的那个，没有就明说）；关掉之后同一条断点不再反复冒出来，新的一轮中断才会重新出现。
-- **复制的权限留着，退路写实**：审查建议去掉 `clipboardWrite`。四处复制（视频目录路径、诊断信息、
-  清理命令）都必须一击即中，所以保留权限；隐私文档已把用途写全，`stability` 也钉着「四处都有看得见
-  的失败退路」。
-- **测试项数**：`stability` 406 → 409，`pages` 84 → 86。
+- **`node scripts/check-all.cjs --write`**：以前加一条测试要手工同步三处
+  `<!-- test-count:N -->`、`SMOKE_TEST.md` 正文那句「的 **N** 项里」、README 的
+  `<!-- i18n-count:N -->` 与「当前 N 条」—— 漏一处就红，红了还得先手改数字才能跑
+  `status.cjs --write`（它以前遇到红就整体失败）。现在一条命令把这几处按实际值改掉，
+  并顺带刷新 `AI_HANDOFF.md` 的「当前状态」块，跑完即绿。
+- **`.ps1` 也进检查了**：原生宿主那套（协议 4 + 调用方白名单）以前只有人工在 Windows 上
+  跑 `test-native-folder-opener.ps1` 才验得到，CI 连括号写错都拦不住。现在
+  `check-all` 用 PowerShell 自己的解析器（`PSParser::Tokenize`）过一遍全部 7 个 `.ps1`，
+  只查语法、不执行、不碰注册表；没装 `pwsh` 的机器跳过而不是判红。
+- **测试项数**：`stability` 409 → 410。
 
 **遗留** - 无。
 
@@ -161,7 +160,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:409 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:410 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

@@ -8700,3 +8700,33 @@ test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的�
   assert.match(background, /function withKeepAlive\(task, reason\)/);
 });
 
+test("1.12.6：文档里的数字能一键对齐，.ps1 也不用等人工才验得到（审查 P3-1 / P3-2）", () => {
+  const checkAll = readProjectFile("scripts/check-all.cjs");
+
+  // P3-1：--write 把「正文数字 + HTML 标记」一起改，而且第一趟要在跑测试之前改完 ——
+  // 否则稳定性套件先跑在旧数字上，一次 --write 仍然红一次。
+  assert.ok(checkAll.includes('const WRITE = process.argv.includes("--write")'), "check-all 要有 --write 开关");
+  assert.ok(checkAll.includes("function prewriteDocCounts()"), "要先对齐文档数字再跑测试");
+  assert.ok(checkAll.includes("if (WRITE) prewriteDocCounts();"), "main 的第一句要调它");
+  assert.ok(checkAll.includes("function rewriteTestCounts("), "测试项数要连正文一起改");
+  assert.ok(checkAll.includes("function rewriteDictionaryCounts("), "词典条数要连正文一起改");
+  assert.ok(checkAll.includes("<!--\\s*test-count:") && checkAll.includes("<!--\\s*i18n-count:"),
+    "两种 HTML 标记都要能被重写");
+  assert.ok(checkAll.includes("项里") && checkAll.includes("当前 "),
+    "SMOKE 的「的 **N** 项里」与 README 的「当前 N 条」也要一起改");
+
+  // P3-2：.ps1 只做语法检查（PSParser），不执行、不碰注册表；没装 pwsh 的机器跳过而不是判红。
+  assert.ok(checkAll.includes("function checkPowerShellSyntax()"), "要有 .ps1 语法检查");
+  assert.ok(checkAll.includes("PSParser]::Tokenize"), "要用 PowerShell 自己的解析器");
+  assert.ok(checkAll.includes('spawnSync("pwsh"'), "要真调 pwsh");
+  assert.ok(checkAll.includes("跳过 .ps1 语法检查"), "没有 pwsh 要跳过，不能直接判红");
+  assert.match(checkAll, /checkPowerShellSyntax\(\);\s*\r?\n\s*for \(const \[label, file\] of SUITES\)/,
+    "main 里要紧跟语法检查之后跑");
+
+  // P3-1 的另一半：状态块先写、再报红（以前先抛错，导致必须先手改数字才能跑 --write）。
+  const status = readProjectFile("test/status.cjs");
+  assert.ok(!status.includes('throw new Error(name + " 有 "'), "有失败项不许直接抛，要照实写进状态块");
+  assert.ok(status.includes("状态块已按实际结果刷新"), "写完之后再报红");
+  assert.ok(status.includes("process.exitCode = 1"), "红要带退出码");
+});
+

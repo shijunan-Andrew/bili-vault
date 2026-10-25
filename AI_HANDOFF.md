@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1124 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 409 · archive-core 93 · stats-core 69 · background 33 · pages 86（后四套是真执行） |
+| 测试基线 | stability 410 · archive-core 93 · stats-core 69 · background 33 · pages 86（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-25 21:36，当时 HEAD `f8add76`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-25 21:52，当时 HEAD `9061150`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -462,7 +462,12 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 各套的项数**不写死在这里**（会漂）：五套的当前值见上面「当前状态」那张脚本生成的表，`stability.test.cjs` 的总数另有三处 `<!-- test-count:N -->` 标记由 `scripts/check-all.cjs` 核对。
 
-在项目根目录执行。**下面五套都要跑**；`node scripts/check-all.cjs` 把「这五套 + 语法 + 词典 + 状态块 + 文档标记」一次跑完（发版第 4 步与 GitHub Actions 用的都是它），任一退出码非 0 就算失败：
+在项目根目录执行。**下面五套都要跑**；`node scripts/check-all.cjs` 把「这五套 + 语法 + `.ps1` 语法 + 词典 + 状态块 + 文档标记 + 发布清单」一次跑完（发版第 4 步与 GitHub Actions 用的都是它），任一退出码非 0 就算失败。
+
+**数字不用手改**：加完测试或词条后跑 `node scripts/check-all.cjs --write` —— 它会把三处
+`<!-- test-count:N -->` / `<!-- i18n-count:N -->` 与正文里对应的那句（「的 **N** 项里」「当前 N 条」）
+一起改成实际值，并顺带刷新下面「当前状态」块（1.12.6，审查 P3-1）。`--write` 只改数字，
+不放宽任何断言；`release.ps1` 跑的是不带 `--write` 的那条。
 
 ```powershell
 node test/stability.test.cjs      # 静态回归断言为主（项数以实际输出为准，别写死）
@@ -474,7 +479,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:409 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:410 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

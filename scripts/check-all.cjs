@@ -20,12 +20,16 @@
  *   7. docs/HISTORY.md 的「版本 → 起始行」索引是最新的（1.8.23，TODO P2-11）
  *   8. 发布清单与体积（1.10.1）：pack.ps1 的白名单要覆盖根目录下全部运行期文件，
  *      单文件 / 总量 / 文件数上限全部从 pack.ps1 读 —— 阈值只有一处权威。
+ *   9. .ps1 的语法（1.12.6，审查 P3-2）：用 PowerShell 自己的解析器过一遍，不执行任何语句。
+ *      没装 pwsh 的机器跳过（不当失败）—— 原生宿主那条链路以前只有人工在 Windows 上才验得到。
  *
  * 刻意不做的事：Windows 专属自检（test-native-folder-opener.ps1、csc 编译原生助手）不进
  * 这里，它们只能在真机上跑；CI 是 ubuntu-latest，那些检查留给人肉验证（见 SMOKE_TEST.md）。
  *
  * 用法：
- *   node scripts/check-all.cjs      # 全部通过 exit 0，任一失败 exit 1
+ *   node scripts/check-all.cjs             # 全部通过 exit 0，任一失败 exit 1
+ *   node scripts/check-all.cjs --write     # 先把三处文档里的词典条数 / 测试项数按实际值改掉，再照常复检
+ *                                          # （1.12.6，审查 P3-1：这类数字以前全靠手工同步，漏改一处就红）
  *
  * 仓库规矩（AI_HANDOFF.md）：改这里的检查项时，同时改 test/stability.test.cjs 里对应的
  * 守卫断言，否则下一个人只能靠读代码猜「到底该跑哪些」。
@@ -38,6 +42,10 @@ const { spawnSync } = require("child_process");
 const root = path.resolve(__dirname, "..");
 const node = process.execPath;
 const DOCS = ["README.md", "AI_HANDOFF.md", "SMOKE_TEST.md"];
+
+// 1.12.6（审查 P3-1）：`--write` 把文档里那几个会漂的数字按实际值改掉，再走一遍正常复检。
+// 「跑一条命令改数字」比「红了以后手工改三处」少一半失误 —— 审查期间确实因为漏改一处红了三次。
+const WRITE = process.argv.includes("--write");
 
 // 五套测试的标签沿用 release.ps1 里的说法：发版的人看成一样的输出。
 const SUITES = [
@@ -73,6 +81,34 @@ function readText(relativePath) {
   const file = path.join(root, relativePath);
   if (!fs.existsSync(file)) return null;
   return fs.readFileSync(file, "utf8");
+}
+
+function writeText(relativePath, text) {
+  fs.writeFileSync(path.join(root, relativePath), text, "utf8");
+}
+
+// 文档里的数字有两份：渲染时看不见的 HTML 标记，和正文里那句人话。
+// 只改一处就会出现「标记说 409、正文说 407」，比完全没改更难查 —— 所以一起改。
+function rewriteTestCounts(relativePath, real) {
+  const text = readText(relativePath);
+  if (text === null) return false;
+  const next = text
+    .replace(/<!--\s*test-count:\d+\s*-->/g, `<!-- test-count:${real} -->`)
+    .replace(/(的 \*\*)\d+(\*\* 项里)/g, `$1${real}$2`);
+  if (next === text) return false;
+  writeText(relativePath, next);
+  return true;
+}
+
+function rewriteDictionaryCounts(relativePath, real) {
+  const text = readText(relativePath);
+  if (text === null) return false;
+  const next = text
+    .replace(/<!--\s*i18n-count:\d+\s*-->/g, `<!-- i18n-count:${real} -->`)
+    .replace(/(\*\*当前 )\d+( 条\*\*)/g, `$1${real}$2`);
+  if (next === text) return false;
+  writeText(relativePath, next);
+  return true;
 }
 
 // 跑一个 node 脚本（都是本仓的 .cjs，零依赖）。合并 stdout 与 stderr：node:test 的
@@ -222,8 +258,17 @@ function checkDocDictionary() {
   }
   if (markers === 0) return bad("三处文档里都找不到 <!-- i18n-count:N --> 标记");
   if (stale.length) {
+    if (WRITE) {
+      let touched = 0;
+      for (const doc of DOCS) if (rewriteDictionaryCounts(doc, real)) touched += 1;
+      if (touched) {
+        note(`--write：已把 ${touched} 份文档里的词典条数改成 ${real}`);
+        return ok(`文档里的词典条数已按实际值补齐（${real} 条）`);
+      }
+    }
     for (const line of stale) bad(line);
     note(`改法：把这几处的词典条数改成 ${real}（只改数字，标记一起改）`);
+    note("或者直接跑 node scripts/check-all.cjs --write 让脚本改");
     return undefined;
   }
   return ok(`文档里的词典条数与词典一致（${real} 条）`);
@@ -258,8 +303,17 @@ function checkDocTestCount() {
     }
   }
   if (problems.length) {
+    if (WRITE) {
+      let touched = 0;
+      for (const doc of DOCS) if (rewriteTestCounts(doc, real)) touched += 1;
+      if (touched) {
+        note(`--write：已把 ${touched} 份文档里的测试项数改成 ${real}`);
+        return ok(`三处文档的测试项数已按实际值补齐（${real} 项）`);
+      }
+    }
     for (const line of problems) bad(line);
     note(`改法：把这三处文档里的 test-count 标记统一改成 ${real}（只改数字）`);
+    note("或者直接跑 node scripts/check-all.cjs --write 让脚本改");
     return undefined;
   }
   return ok(`三处文档都记着 ${real} 项`);
@@ -298,8 +352,102 @@ function checkPackageSize() {
   return ok("发布清单与体积都在 pack.ps1 的规则内");
 }
 
+// ───────── 9. .ps1 的语法 ─────────
+//
+// 1.12.6（审查 P3-2）：原生宿主那套「协议 4 + 调用方白名单」只有在 Windows 上人工跑
+// test-native-folder-opener.ps1 才验得到；CI 是 ubuntu-latest，改坏一个括号、一个 `if` 结构，
+// 静态正则照样全绿。这里用 PowerShell 自己的解析器（PSParser::Tokenize）只做语法检查：
+// 不执行任何语句、不碰注册表、不需要 settings.json。本地 Windows 与 GitHub 的 ubuntu-latest
+// 都带 pwsh 7；没装的机器跳过而不是判红 —— 否则贡献者会被一条基础设施卡住。
+function listPowerShellFiles(dir, prefix, out) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name === ".git" || entry.name === "_ref") continue;
+      listPowerShellFiles(path.join(dir, entry.name), relative, out);
+    } else if (/\.ps1$/i.test(entry.name)) {
+      out.push(relative);
+    }
+  }
+  return out;
+}
+
+function checkPowerShellSyntax() {
+  section("PowerShell 语法…");
+  const files = listPowerShellFiles(root, "", []).sort();
+  if (!files.length) return bad("一个 .ps1 都没找到，清单是不是错了");
+  const probe = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", "exit 0"], {
+    encoding: "utf8"
+  });
+  if (probe.error || probe.status !== 0) {
+    note("这台机器上没有 pwsh（PowerShell 7），跳过 .ps1 语法检查；Windows 上它一般在 PATH 里");
+    return undefined;
+  }
+  const list = files.map((file) => `'${file.replace(/'/g, "''")}'`).join(", ");
+  const script = [
+    "$failed = 0",
+    `foreach ($file in @(${list})) {`,
+    "  $errors = $null",
+    "  [void][System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw -LiteralPath $file), [ref]$errors)",
+    "  if ($errors.Count -gt 0) {",
+    "    $failed = 1",
+    "    foreach ($item in $errors) { Write-Output ($file + '：' + $item.Message) }",
+    "  }",
+    "}",
+    "exit $failed"
+  ].join("; ");
+  const run = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  if (run.status !== 0) {
+    printTail(`${run.stdout || ""}${run.stderr || ""}`, 20);
+    return bad("有 .ps1 解析不过（上面是 PowerShell 给出的位置与原因）");
+  }
+  return ok(`${files.length} 个 .ps1 全部解析通过（只查语法，不执行）`);
+}
+
+// --write 的第一趟：先把文档数字按实际值修好，再让五套测试去核。
+// 不加这一趟的话，stability 套件会先跑在「旧数字」上红一次，用户得跑两遍 --write 才绿
+// （1.12.6 实测踩到过：stability 里有一条「文档里的测试项数和真实数量一致」）。
+function realTestCount() {
+  const source = readText("test/stability.test.cjs") || "";
+  return (source.match(/^test\(/gm) || []).length;
+}
+
+function realDictionaryCount() {
+  const run = runNode([path.join(root, "test/i18n-extract.cjs"), "--check"]);
+  const counts = [...`${run.output}`.matchAll(/词条\s+(\d+)\s+条/g)].map((match) => Number(match[1]));
+  const unique = [...new Set(counts)];
+  return unique.length === 1 ? unique[0] : 0;
+}
+
+// 「当前状态」块也是脚本生成的（test/status.cjs），同样会漂；--write 里一起刷。
+// 代价是 status.cjs 自己会把五套再跑一遍（--write 慢一点，但一次就绿）。
+function refreshStatusBlock() {
+  const run = runNode([path.join(root, "test/status.cjs"), "--write"]);
+  for (const line of run.output.split(/\r?\n/)) {
+    if (/当前状态|状态块/.test(line)) note(line.trim());
+  }
+  if (run.code !== 0) note("状态块已按实际结果刷新，但有红的套件（下面会逐条报）");
+}
+
+function prewriteDocCounts() {
+  const dict = realDictionaryCount();
+  const tests = realTestCount();
+  let touched = 0;
+  if (dict) for (const doc of DOCS) if (rewriteDictionaryCounts(doc, dict)) touched += 1;
+  if (tests) for (const doc of DOCS) if (rewriteTestCounts(doc, tests)) touched += 1;
+  section("--write：先按实际值对齐文档里的数字…");
+  if (touched) note(`已改 ${touched} 处（词典 ${dict || "?"} 条 / 测试 ${tests || "?"} 项）`);
+  else note("没有需要改的（数字已经对得上）");
+  refreshStatusBlock();
+}
+
 function main() {
+  if (WRITE) prewriteDocCounts();
   checkSyntax();
+  checkPowerShellSyntax();
   for (const [label, file] of SUITES) checkSuite(label, file);
   checkStatus();
   checkDictionary();
