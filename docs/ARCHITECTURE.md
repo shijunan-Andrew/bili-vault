@@ -624,3 +624,9 @@ UP主主页：https://space.bilibili.com/……
   `compareVersions()` / `versionIsNewer()` 一份（`1.11.10` 不能排在 `1.11.2` 前面），`background.js` 与设置页都调它。
   `test/stability.test.cjs` 有守卫钉着「没有第二份比较函数」「只读那两个固定域名」「检查更新里不许出现下载 / 替换动作」
   以及「`version.json` 的版本必须在 `docs/HISTORY.md` 里有一节、且不高于 `manifest.json`」。
+
+### 设置页的层次与收藏夹顺序（1.11.6）
+
+- **标题与行分两层**：`.settings-card[data-group]` 只放 `<h2>` 与 `.card-lead`（透明），行与状态段落都放进 `.settings-panel`（白底）。`settings.js` 的导航、搜索分组、页内跳转都按 `.settings-card[data-group]` 定位，所以再往里加行不用改 JS —— 但要记住 **`data-group` 与 `<h2>` 必须在同一个 `.settings-card` 里**，否则导航文字取不到。
+- **收藏夹顺序只有一处权威**：`collectionOrder`。拖拽（`installCollectionDrag`）与置顶（`pinCollection`）都会先重排 `collections`、再用同一份「这次没扫到的收藏夹接在后面」的规则覆盖 `collectionOrder`，最后写 `chrome.storage.local`。新加任何排序入口都要复用这套顺序表，别再引入第二份顺序。
+- `test/stability.test.cjs` 有守卫钉着「十张卡都有 `.settings-panel`」「横幅居中」「图钉三件套（图标/按钮/`pinCollection`）」「旧按钮名不再出现」；`test/pages.test.cjs` 真点一次图钉核顺序与落库。

@@ -115,6 +115,8 @@
         <h2 data-i18n="外观">外观</h2>
         <p class="card-lead" data-i18n="白天、夜晚、跟随系统，或者用自己的图片铺在页面背后。">白天、夜晚、跟随系统，或者用自己的图片铺在页面背后。</p>
 
+        <div class="settings-panel">
+
         <div class="setting-row">
           <div class="setting-row-text">
             <p class="setting-row-title" data-i18n="界面主题">界面主题</p>
@@ -210,12 +212,15 @@
             </div>
           </div>
         </div>
+        </div>
       </section>
 
       <!-- 语言名是各语言的自称，任何界面下都原样显示，所以不挂 data-i18n -->
       <section class="settings-card" id="group-language" data-group="language">
         <h2 data-i18n="语言">语言</h2>
         <p class="card-lead" data-i18n="界面文字用哪种语言显示。">界面文字用哪种语言显示。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -234,11 +239,14 @@
                它独占一行：这句话可能很长，塞进右侧控件列会把左边的说明挤成一条竖线。 -->
           <p class="row-error" id="localeStatus" role="status" hidden></p>
         </div>
+        </div>
       </section>
 
       <section class="settings-card" id="group-guide" data-group="guide">
         <h2 data-i18n="使用说明">使用说明</h2>
         <p class="card-lead" data-i18n="第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。">第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -259,11 +267,14 @@
             <a class="button button-quiet" href="guide.html" target="_blank" rel="noopener" data-i18n="打开使用说明">打开使用说明</a>
           </div>
         </div>
+        </div>
       </section>
 
       <section class="settings-card" id="group-stats" data-group="stats">
         <h2 data-i18n="数据统计">数据统计</h2>
         <p class="card-lead" data-i18n="收了多少、最近在收什么，插件都记在本机的 003database 里。">收了多少、最近在收什么，插件都记在本机的 003database 里。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -291,6 +302,7 @@
 
         <p class="row-status" id="rebuildStatsStatus" role="status" hidden></p>
         <p class="row-error" id="rebuildStatsError" role="alert" hidden></p>
+        </div>
       </section>
 
       <!-- V1.5.4：宠物挂件从「数据统计」卡里独立成一组。挂件右键菜单的「宠物设置」
@@ -300,6 +312,8 @@
            等词条补上再照别的卡补一句。 -->
       <section class="settings-card" id="group-pet" data-group="pet">
         <h2 data-i18n="宠物">宠物</h2>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -342,6 +356,7 @@
             <p class="setting-row-desc" data-i18n="若看不到动画效果，请在 Windows → 辅助功能 → 视觉效果里开启「动画效果」；浏览器开启「减少动态效果」时，宠物会安静地待着不动。">若看不到动画效果，请在 Windows → 辅助功能 → 视觉效果里开启「动画效果」；浏览器开启「减少动态效果」时，宠物会安静地待着不动。</p>
           </div>
         </div>
+        </div>
       </section>
 
       <!-- 1.7.11（facet-privacy P2-3 / P2-5）：本机到底留了哪些和「你是谁」有关的东西，
@@ -352,6 +367,8 @@
       <section class="settings-card" id="group-transfer" data-group="transfer">
         <h2 data-i18n="导入与导出">导入与导出</h2>
         <p class="card-lead" data-i18n="配置文件只含界面偏好；归档元数据写进本地备份文件夹的 004导出/ 里。">配置文件只含界面偏好；归档元数据写进本地备份文件夹的 004导出/ 里。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -399,6 +416,7 @@
 
         <p class="row-status" id="transferStatus" role="status" hidden></p>
         <p class="row-error" id="transferError" role="alert" hidden></p>
+        </div>
       </section>
 
       <!-- 1.9.0：归档体检（只读报告）与回收站入口。清空回收站不再是收藏库上的一个盲按钮，
@@ -406,6 +424,8 @@
       <section class="settings-card" id="group-maintenance" data-group="maintenance">
         <h2 data-i18n="归档维护">归档维护</h2>
         <p class="card-lead" data-i18n="体检只读不修，报告会写到 006报告/。">体检只读不修，报告会写到 006报告/。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -442,10 +462,13 @@
 
         <p class="row-status" id="maintenanceStatus" role="status" hidden></p>
         <p class="row-error" id="maintenanceError" role="alert" hidden></p>
+        </div>
       </section>
       <section class="settings-card" id="group-recycle" data-group="recycle">
         <h2 data-i18n="回收站">回收站</h2>
         <p class="card-lead" data-i18n="打开回收站可以查看最近删掉的视频：挑着恢复到原收藏夹，或者彻底删掉。彻底删掉不可逆，不会进系统回收站。">打开回收站可以查看最近删掉的视频：挑着恢复到原收藏夹，或者彻底删掉。彻底删掉不可逆，不会进系统回收站。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -460,11 +483,14 @@
             <button id="settingsOpenRecycle" class="button button-quiet" type="button"><span data-icon="trash"></span><span data-i18n="查看回收站">查看回收站</span></button>
           </div>
         </div>
+        </div>
       </section>
 
       <section class="settings-card" id="group-localdata" data-group="localdata">
         <h2 data-i18n="本机数据">本机数据</h2>
         <p class="card-lead" data-i18n="插件只在本机留东西，不会上传。下面这些和「你是谁」有关，可以随时清掉。">插件只在本机留东西，不会上传。下面这些和「你是谁」有关，可以随时清掉。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -476,12 +502,6 @@
           </div>
         </div>
 
-        <div class="setting-row">
-          <div class="setting-row-text">
-            <p class="setting-row-title" data-i18n="归档会记录收藏时间">归档会记录收藏时间</p>
-            <p class="setting-row-desc" data-i18n="每条 视频信息.txt 里都写着这条视频的收藏时刻（精确到秒），用来排序和时间线。它会反映你的作息和兴趣变化，介意的话可以整目录删掉。">每条 视频信息.txt 里都写着这条视频的收藏时刻（精确到秒），用来排序和时间线。它会反映你的作息和兴趣变化，介意的话可以整目录删掉。</p>
-          </div>
-        </div>
 
         <!-- 1.7.17（facet-privacy P1-1）：Chrome 卸载扩展不会动原生消息宿主，残留的是
              8 个 HKCU 注册表项 + %LOCALAPPDATA%\BcaFolderOpener（settings.json 里存着扩展 ID
@@ -520,12 +540,15 @@
         <p class="row-status" id="forgetUidStatus" role="status" hidden></p>
         <p class="row-status" id="nativeCleanupStatus" role="status" hidden></p>
         <p class="row-status" id="recentErrorStatus" role="status" hidden></p>
+        </div>
       </section>
       <!-- 1.11.5：单独一栏。检查更新只读仓库根那份 version.json（代表用户认可的公开版），
            不下载、不替换任何文件，所以文案只说「查到什么」，不说「正在更新」。 -->
       <section class="settings-card" id="group-update" data-group="update">
         <h2 data-i18n="检查更新">检查更新</h2>
         <p class="card-lead" data-i18n="扩展是解压加载的，没有商店那条自动更新通道，只能手动查一次。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。">扩展是解压加载的，没有商店那条自动更新通道，只能手动查一次。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。</p>
+
+        <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
@@ -544,6 +567,7 @@
         <p class="row-status" id="updateShaRow" hidden>
           <span data-i18n="下载后可以自己核对 SHA-256：">下载后可以自己核对 SHA-256：</span><code id="updateSha"></code>
         </p>
+        </div>
       </section>
 
       <p class="settings-foot" data-i18n="外观、语言、数据统计和使用说明都在这里改，改完立即生效。">外观、语言、数据统计和使用说明都在这里改，改完立即生效。</p>

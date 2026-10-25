@@ -1404,6 +1404,30 @@ function reorderCollection(sourceName, targetName, afterTarget) {
   chrome.storage.local.set({ collectionOrder }).then(() => showToast(BcaI18n.t("收藏夹顺序已保存"))).catch((error) => showToast(BcaI18n.t("保存排序失败：{message}", { message: error?.message || BcaI18n.t("插件存储不可用") })));
 }
 
+// 1.11.6：置顶 = 把这个收藏夹挪到顺序表最前面。排序仍然只有 collectionOrder 一处权威，
+// 所以这里和拖拽共用同一份「这次没扫到的收藏夹接在后面」的规则，不会把别人的位置挤掉。
+function pinCollection(name) {
+  const index = collections.findIndex((collection) => collection.name === name);
+  if (index < 0) return;
+  if (index === 0) {
+    showToast(BcaI18n.t("「{name}」已经在最上面了", { name }));
+    return;
+  }
+  const [target] = collections.splice(index, 1);
+  collections.unshift(target);
+  const visibleNames = new Set(collections.map((collection) => collection.name));
+  collectionOrder = [...collections.map((collection) => collection.name), ...collectionOrder.filter((item) => !visibleNames.has(item))];
+  renderCollections();
+  if (!collectionOrderLoaded) {
+    // 和拖拽那条一样：没成功读到磁盘上的顺序，就不能拿这次的结果去覆盖它
+    showToast(BcaI18n.t("这次没能读到已保存的收藏夹顺序，为避免覆盖它，本次排序只临时生效。"));
+    return;
+  }
+  chrome.storage.local.set({ collectionOrder })
+    .then(() => showToast(BcaI18n.t("已把「{name}」置顶", { name })))
+    .catch((error) => showToast(BcaI18n.t("保存排序失败：{message}", { message: error?.message || BcaI18n.t("插件存储不可用") })));
+}
+
 function applyCollectionOrder(items) {
   const orderIndex = new Map(collectionOrder.map((name, index) => [name, index]));
   items.sort((left, right) => {
@@ -1461,6 +1485,17 @@ function buildCollectionRow(row) {
   if (row.key !== "*") {
     wrapper.classList.add("collection-row-draggable");
     installCollectionDrag(wrapper, row.name);
+    const pinButton = document.createElement("button");
+    pinButton.className = "collection-pin";
+    pinButton.type = "button";
+    pinButton.innerHTML = BcaIcons.svg("pin");
+    pinButton.title = BcaI18n.t("把「{name}」置顶", { name: row.name });
+    pinButton.setAttribute("aria-label", BcaI18n.t("把「{name}」置顶", { name: row.name }));
+    pinButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      pinCollection(row.name);
+    });
+    wrapper.append(pinButton);
     const deleteButton = document.createElement("button");
     deleteButton.className = "collection-delete";
     deleteButton.type = "button";
@@ -3108,7 +3143,7 @@ function openDetail(video, restoreTo, options = {}) {
     ? `<a class="detail-title-link" href="${escapeHtml(detailHref)}" target="_blank" rel="noopener noreferrer" title="${detailHrefLabel}"></a>`
     : "";
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `${coverHtml}<span class="detail-collection"></span><h2 class="detail-title">${titleHtml}</h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}${video.isInvalid ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("将下载到本地的视频放入收藏夹中"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频数据"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span>${detailIncomplete ? `<span class="detail-refresh-warning">${escapeHtml(BcaI18n.t("该视频数据不完整（粉丝数N/A或互动数据N/A），更新视频数据将重新获取这些信息，或能解决"))}</span>` : ""}<p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
+  detailContent.innerHTML = `${coverHtml}<span class="detail-collection"></span><h2 class="detail-title">${titleHtml}</h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}${video.isInvalid ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("标记为已下载"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频数据"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span>${detailIncomplete ? `<span class="detail-refresh-warning">${escapeHtml(BcaI18n.t("该视频数据不完整（粉丝数N/A或互动数据N/A），更新视频数据将重新获取这些信息，或能解决"))}</span>` : ""}<p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · ${BcaI18n.t("已失效")}` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   // 1.8.6：详情封面同样「用到才读」；读完只替换占位图，不重画整个面板

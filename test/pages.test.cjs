@@ -185,6 +185,26 @@ async function suiteLibrary() {
     assert.equal(textOf(doc.getElementById("currentCollection")), "全部收藏");
   });
 
+  await test("侧栏收藏夹能置顶：点图钉就排到最前，顺序存进 collectionOrder（1.11.6 真执行）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    await settle(6);
+    const doc = page.document;
+    const rows = () => idsIn(doc.getElementById("collectionList"), ".collection-name");
+    assert.deepEqual(rows(), ["全部收藏", "另一个夹", "小鲸鱼测试"], "默认按名字排");
+
+    const row = [...doc.querySelectorAll("#collectionList .collection-row")]
+      .find((item) => textOf(item.querySelector(".collection-name")) === "小鲸鱼测试");
+    const pin = row.querySelector(".collection-pin");
+    assert.ok(pin, "非「全部收藏」的行都要有置顶按钮");
+    assert.equal(doc.querySelectorAll("#collectionList .collection-pin").length, 2, "「全部收藏」那一行没有置顶按钮");
+
+    pin.click();
+    await settle(6);
+    assert.deepEqual(rows(), ["全部收藏", "小鲸鱼测试", "另一个夹"], "点完就排到最前");
+    const stored = page.__chrome.storage.local.dump().collectionOrder;
+    assert.deepEqual(stored.slice(0, 2), ["小鲸鱼测试", "另一个夹"], "顺序写进了 collectionOrder");
+  });
+
   await test("侧栏过滤框：输不中的词只剩「没有匹配的收藏夹」，清空后全部回来（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;
@@ -1142,6 +1162,24 @@ function recycleEntry(stamp, extra = {}) {
 }
 
 async function suiteSettings() {
+  await test("每张卡的标题留在页面底色上，只有行包在白卡里（1.11.6 真执行）", async () => {
+    const page = await openSettings();
+    const doc = page.document;
+    const cards = [...doc.querySelectorAll(".settings-main .settings-card[data-group]")];
+    assert.equal(cards.length, 10, "十张卡");
+    for (const card of cards) {
+      const title = card.querySelector("h2");
+      assert.ok(title, `${card.id} 要有标题`);
+      assert.equal(title.closest(".settings-panel"), null, `${card.id} 的标题不该被包进白卡`);
+      const panel = card.querySelector(".settings-panel");
+      assert.ok(panel, `${card.id} 要有 .settings-panel`);
+      assert.ok(panel.querySelector(".setting-row"), `${card.id} 的行要留在白卡里`);
+      assert.equal(panel.contains(title), false);
+    }
+    const localdata = doc.getElementById("group-localdata");
+    assert.equal(localdata.textContent.includes("归档会记录收藏时间"), false, "这一行 1.11.6 已移除");
+  });
+
   await test("设置页滑杆 input 连发只写一次 storage，松手落最后一次（1.8.12 真执行）", async () => {
     const page = await openSettings();
     const blur = page.document.getElementById("wallpaperBlur");

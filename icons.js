@@ -12,6 +12,8 @@
   "use strict";
 
   const PATHS = {
+    // 1.11.6：「置顶」按钮要一个图钉形状，原来那套图标里没有
+    pin: '<path d="M8.8 4.8h6.4l-.9 3.9 2.6 2.6H7.1l2.6-2.6z"/><path d="M12 11.3v8.2"/>',
     library: '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
     collection: '<path d="M3.5 7.2a2 2 0 0 1 2-2h3.1l1.6 2h8.3a2 2 0 0 1 2 2v7.6a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z"/>',
     "collection-open": '<path d="M3.6 8.2V6.6a2 2 0 0 1 2-2h3l1.6 2h7.3a2 2 0 0 1 2 2v.8"/><path d="M3 10.6h17.6l-1.9 7a2 2 0 0 1-1.9 1.5H6.2a2 2 0 0 1-1.9-1.5z"/>',

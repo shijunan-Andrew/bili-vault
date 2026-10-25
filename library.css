@@ -30,7 +30,8 @@ html.banner-visible { --banner-h: 42px; }
   color: #fff;                       /* 绿色底上的白字，不随主题变 */
   box-shadow: var(--shadow-sm);
 }
-.banner-track { display: flex; align-items: center; flex: 1; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; }
+/* 1.11.6：横幅文字居中（以前靠左，宽屏上右边空出一长条，看着像没画完）。 */
+.banner-track { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; }
 /* 1.10.10 起不再滚动：一句静态文字，容器窄了就省略号。
    以前是跑马灯 + 按宽度克隆 4–5 份，宽屏上等于满屏重复同一句话。 */
 .banner-run {
@@ -198,6 +199,22 @@ html.banner-visible { --banner-h: 42px; }
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 .collection-row:hover .collection-delete, .collection-delete:focus-visible { color: var(--danger); background: var(--danger-soft); opacity: 1; }
+/* 1.11.6：置顶按钮。和删除同一套显隐节奏（悬停才出现），只是绿色 —— 侧栏不该常驻一排图标。 */
+.collection-pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  background: transparent;
+  font-size: var(--fs-md);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.collection-row:hover .collection-pin, .collection-pin:focus-visible { color: var(--success-solid); background: var(--success-soft); opacity: 1; }
 
 .collection-row-draggable { cursor: grab; }
 .collection-row-draggable:active { cursor: grabbing; }
@@ -1213,7 +1230,7 @@ a.detail-tag:hover { border-color: var(--brand-line); color: var(--brand-deep); 
   .collection-list { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
   .collection-row { flex: 0 0 auto; }
   .collection-button { width: auto; min-height: 36px; flex: 0 1 auto; gap: 6px; padding: 0 var(--sp-3); border: 1px solid var(--line); }
-  .collection-delete, .collection-drag-handle { display: none; }
+  .collection-delete, .collection-pin, .collection-drag-handle { display: none; }
   .main-area { margin-left: 0; }
   .topbar { position: static; min-height: 60px; padding: 0 var(--sp-4); }
   .root-label, .usage-label { display: none; }

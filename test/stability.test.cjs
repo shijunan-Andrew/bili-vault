@@ -2600,8 +2600,8 @@ test("缓存的 B 站 UID 有清除入口，剪贴板提示说了实话（V1.7.1
   const library = readProjectFile("library.js");
 
   assert.match(settingsHtml, /id="forgetUid"/, "设置页要有「忘记已记住的 UID」按钮");
-  assert.match(settingsHtml, /data-i18n="归档会记录收藏时间"/,
-    "归档会记收藏时刻这件事要让用户知情（facet-privacy P2-5）");
+  // 1.11.6：用户要求删掉这一行说明（收藏时间仍写在 视频信息.txt 里，只是不再单独占一行）
+  assert.doesNotMatch(settingsHtml, /归档会记录收藏时间/, "这一行已经不显示了");
   assert.match(settingsJs, /chrome\.storage\.local\.remove\("lastImportUid"\)/,
     "按钮必须真的清掉 lastImportUid");
   assert.match(settingsJs, /\$\("forgetUid"\)\?\.addEventListener\("click"/);
@@ -8366,3 +8366,32 @@ test("1.11.5：使用说明里不再有「左下角两个浮标」（主题与�
   assert.match(guide, /主题和界面语言在哪改？/, "要在 FAQ 里说清改去哪了");
   assert.match(guide, /怎么知道有没有新版本？/, "要把检查更新写进 FAQ");
 });
+
+test("1.11.6：标题与行分成两层，收藏夹能置顶，旧按钮名不再出现", () => {
+  const html = readProjectFile("settings.html");
+  const css = readProjectFile("settings.css");
+  const libraryCss = readProjectFile("library.css");
+  const library = readProjectFile("library.js");
+  const icons = readProjectFile("icons.js");
+
+  // 设置页：每张卡一个 .settings-panel，h2 在白卡外面
+  assert.equal((html.match(/<div class="settings-panel">/g) || []).length, 10, "十张卡各有一个白卡容器");
+  assert.match(css, /\.settings-card \{[^}]*background: transparent;/, ".settings-card 自己不该再有底色");
+  assert.match(css, /\.settings-panel \{[^}]*background: var\(--surface\);/, "白底要挪到 .settings-panel 上");
+  assert.doesNotMatch(css, /\.card-lead \+ \.setting-row/, "旧的首行规则已经没有作用对象");
+
+  // 横幅文字居中
+  assert.match(libraryCss, /\.banner-track \{[^}]*justify-content: center;/, "开源横幅的文字要居中");
+
+  // 置顶：图标、按钮、逻辑三处都在，顺序仍然只认 collectionOrder
+  assert.match(icons, /\bpin: '/, "图标集里要有图钉");
+  assert.match(library, /className = "collection-pin"/, "收藏夹行要有置顶按钮");
+  assert.match(libraryCss, /\.collection-row:hover \.collection-pin/, "悬停才出现");
+  assert.match(library, /function pinCollection\(name\) \{/, "置顶逻辑要有一份实现");
+  assert.match(library, /chrome\.storage\.local\.set\(\{ collectionOrder \}\)/, "置顶要落到 collectionOrder");
+
+  // 界面上不再出现旧按钮名（README / HISTORY 里作为「原名叫什么」的说明不算）
+  const sources = ["library.js", "guide.html"].map(readProjectFile).join("\n");
+  assert.doesNotMatch(sources, /将下载到本地的视频放入收藏夹中/, "1.11.6 起叫「标记为已下载」");
+});
+

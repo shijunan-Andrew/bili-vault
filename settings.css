@@ -163,14 +163,25 @@
 .nav-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 分组卡：卡片本身就是一条分界，标题不用 page.css 那条上边框 */
+/* 1.11.6：标题与说明挪到页面底色上，只有「行」留在白卡里 —— 一栏一块的边界更清楚，
+   也把长引言和行分开（以前整块都是白的，标题等于也被包在框里）。 */
 .settings-card {
   margin-top: var(--sp-4);
-  padding: var(--sp-4) var(--sp-5) var(--sp-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.settings-panel {
+  margin-top: var(--sp-2);
+  padding: 0 var(--sp-4);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
+.settings-panel > .setting-row:first-child { border-top: 0; }
 .settings-card:first-child { margin-top: 0; }
 .settings-card h2 { margin: 0 0 4px; padding-top: 0; border-top: 0; font-size: var(--fs-lg); }
 .card-lead { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--fs-base); }
@@ -190,7 +201,6 @@
   /* 搜索跳到这里时留出顶栏的高度，同时给 1.5s 的高亮留个落脚点 */
   scroll-margin-top: calc(56px + var(--sp-4));
 }
-.card-lead + .setting-row { border-top: 0; }
 .setting-row-text { min-width: 0; }
 .setting-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; color: var(--ink); font-size: var(--fs-md); font-weight: 600; }
 .setting-row-desc { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
