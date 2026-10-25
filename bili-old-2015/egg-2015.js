@@ -1,10 +1,9 @@
 // 2015 replica: every click leads to the live bilibili homepage, plus the easter-egg dialog.
 //
-// 这一段在两个地方出现，内容必须逐字一致：
-//   1) index.html 末尾的内联 <script>  —— 双击 index.html 直接打开（file://）时靠它；
-//   2) 同目录的 egg-2015.js，由 <script src="egg-2015.js"> 引入 —— chrome-extension:// 页面
-//      的 CSP 是 script-src 'self'，内联脚本会被整段拦掉（真机上「知道啦」点不动的根因就是这个）。
-// 两份都加载时靠 window.__bili2015Wired 保证只有第一份生效。
+// 只有这一份：同目录的 egg-2015.js，由 <script src="egg-2015.js"> 引入。
+// 不要改回内联 —— chrome-extension:// 页面的 CSP 是 script-src 'self'，内联脚本会被整段拦掉，
+// 插件后台就会一直挂着一条「错误」。1.11.1 之前正是这样。
+// window.__bili2015Wired 仍是幂等记号：同一份被加载两次也只生效一次。
 (function () {
   if (window.__bili2015Wired) return;
   window.__bili2015Wired = 1;

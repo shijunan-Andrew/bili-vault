@@ -8247,3 +8247,20 @@ test("1.11.0：默认输出外链形态，单文件形态仍留开关", () => {
   assert.doesNotMatch(build, /url\(\(\?!\('\"\)\?data:\)/, "不要再按「非 data:」一刀切清 url()");
   assert.match(build, /const cssResolve = \(target\) => \{/, "CSS 里的 url() 要按「能不能在磁盘上解析」判定");
 });
+
+test("1.11.1：彩蛋页不许再带内联 <script>（MV3 的 CSP 会拦，插件后台会记一条错误）", () => {
+  const html = readProjectFile("bili-old-2015/index.html");
+  const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>/gi)].map((m) => m[0]);
+  assert.deepEqual(inline, [], `index.html 里还有内联 <script>：${inline.join(" | ")}`);
+  assert.match(html, /<script src="egg-2015\.js"><\/script>\s*<\/html>/, "页面结尾必须只靠 egg-2015.js 这一段外部脚本");
+
+  /* 生成器不许把内联副本写回去 */
+  const build = readProjectFile("bili-old-2015/tools/build.js");
+  assert.doesNotMatch(build, /<script>\n\\$\{EGG_JS\}<\/script>/, "build.js 不许再把 EGG_JS 内联进 index.html");
+  assert.match(build, /<script src="egg-2015\.js"><\/script>/, "build.js 必须仍然外链 egg-2015.js");
+
+  /* verify.js 也要把这条守住，否则重新构建一次就悄悄回来了 */
+  const verify = readProjectFile("bili-old-2015/tools/verify.js");
+  assert.match(verify, /inline <script> block\(s\) survived/, "verify.js 必须把「出现内联脚本」判成失败");
+  assert.match(verify, /expected exactly 1 <script> tag \(egg-2015\.js\)/, "verify.js 必须要求只有一个 <script>，且是 egg-2015.js");
+});

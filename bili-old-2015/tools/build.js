@@ -328,18 +328,18 @@ body = body.replace(/<form\b[^>]*>/gi, `<form action="${TARGET}" target="_blank"
 const PAGE_CURSOR_CSS = `<style>a{cursor:pointer}.index-nav .n-i,.b-slt-tab li,.b-slt .list li,.b-slt,.page,.i-link,.more-link,.b-head-t,.top-list li,.v,.rlist li,.rm-list li,.slider-bar li,.search-keyword{cursor:pointer}</style>`;
 
 // ---------------------------------------------------------------- 页面行为（click router + 彩蛋对话框）
-// 一段 JS，两种落地形式：index.html 末尾的内联 <script>，以及同目录的 egg-2015.js（<script src>）。
-// 内联那份是给「直接把 index.html 拖进浏览器」用的；外部那份是给扩展环境用的 —— MV3 扩展页面
-// 默认 CSP 是 script-src 'self'，chrome-extension:// 下的内联脚本一律不执行，只有扩展目录里的
-// 外部 js 能跑。两份内容逐字相同，靠 window.__bili2015Wired 记号保证只生效一次；
-// tools/verify.js 会逐字比对这两份，防止改了内联忘了外部。
+// 一段 JS，只落在同目录的 egg-2015.js，由 <script src="egg-2015.js"> 引入。
+//
+// 1.11.1 起不再往 index.html 里塞内联 <script>：MV3 扩展页面的 CSP 是 script-src 'self'，
+// chrome-extension:// 下的内联脚本一律被拦（控制台一条 CSP 违规、插件「错误」里也记一条），
+// 而它拦住的那份内联副本本来也没用 —— 外部同源脚本在 file://（双击打开）和
+// chrome-extension://（扩展里打开）两种环境都能跑。所以只留一份，谁也不用再逐字比对。
 const EGG_JS = `// 2015 replica: every click leads to the live bilibili homepage, plus the easter-egg dialog.
 //
-// 这一段在两个地方出现，内容必须逐字一致：
-//   1) index.html 末尾的内联 <script>  —— 双击 index.html 直接打开（file://）时靠它；
-//   2) 同目录的 egg-2015.js，由 <script src="egg-2015.js"> 引入 —— chrome-extension:// 页面
-//      的 CSP 是 script-src 'self'，内联脚本会被整段拦掉（真机上「知道啦」点不动的根因就是这个）。
-// 两份都加载时靠 window.__bili2015Wired 保证只有第一份生效。
+// 只有这一份：同目录的 egg-2015.js，由 <script src="egg-2015.js"> 引入。
+// 不要改回内联 —— chrome-extension:// 页面的 CSP 是 script-src 'self'，内联脚本会被整段拦掉，
+// 插件后台就会一直挂着一条「错误」。1.11.1 之前正是这样。
+// window.__bili2015Wired 仍是幂等记号：同一份被加载两次也只生效一次。
 (function () {
   if (window.__bili2015Wired) return;
   window.__bili2015Wired = 1;
@@ -618,8 +618,6 @@ ${PAGE_CURSOR_CSS}${QA}
 </body>
 ${EGG_CSS}
 ${EGG_MARKUP}
-<script>
-${EGG_JS}</script>
 <script src="egg-2015.js"></script>
 </html>
 `.replace(/\r\n/g, '\n');

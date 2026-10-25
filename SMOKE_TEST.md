@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **389** 项里<!-- test-count:389 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **390** 项里<!-- test-count:390 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -716,6 +716,13 @@
 **出问题看**：先确认它是不是在抓详情（那会让耗时从分钟级变成小时级）；再看有没有拿到 uid（报错会说"请先打开一次自己的 B 站收藏夹页面"）。
 
 ---
+
+## V1.11.1 新增的几条
+
+1. **不再记 CSP 错误**：点开彩蛋页，回到 `chrome://extensions` 展开插件的「错误」——不应再出现新的
+   `Executing inline script violates … 'script-src 'self''`（旧的那几条可以「全部清除」后再复看）。
+2. **彩蛋页行为没退化**：「知道啦」能关掉对话框，关掉之后页面上的链接点一下会跳 B 站首页。
+3. **`file://` 双击打开也行**：直接把 `bili-old-2015/index.html` 拖进浏览器，对话框与点击跳转同样有效（外部脚本不依赖 CSP）。
 
 ## V1.11.0 新增的几条
 
