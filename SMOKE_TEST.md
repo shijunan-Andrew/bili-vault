@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **415** 项里<!-- test-count:415 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **416** 项里<!-- test-count:416 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,13 +54,12 @@
 
 ---
 
-## V1.12.11 新增的几条
+## V1.12.12 新增的几条
 
-- 打开 `AI_HANDOFF.md`，「两条轨」那一节应当正常渲染（不是一坨代码），命令只出现在 `**发版**` 下面的代码块里。
-- 打开 `docs/PRIVACY.md`，第一段下面写的是「更新时间：2026-10-25（对应 V1.12.11）」。
-- 设置页「检查更新」点一次：仍只查询、不下载、不替换任何文件（这一版没动行为）。
+- [ ] `AI_HANDOFF.md` 里能看到「发版时的三条禁令（1.12.12）」「页面测试与预览站的坑（1.12.12）」两节，以及修改原则第 32、33 条。
+- [ ] 随便挑一条对照实际代码说得通：例如 `test/pages.test.cjs` 里桩确实挂在 `dom.loadPage()` 之后，`release.ps1` 的命令行里确实没有代理环境变量。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.12.10 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.12.11 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

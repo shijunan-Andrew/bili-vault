@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 415 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
+| 测试基线 | stability 416 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-25 22:40，当时 HEAD `a3e689e`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-25 22:52，当时 HEAD `7b8d1d2`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -126,6 +126,13 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 
 `version.json` 的语义是**用户认可的公开版**，不是最新 tag —— 所以它可能比 `manifest.json` 旧，这在平时是正常的；
 `test/stability.test.cjs` 只要求「它不高于 manifest、且版本在 `docs/HISTORY.md` 里有一节」。
+
+### 发版时的三条禁令（1.12.12）
+
+1. **`release.ps1` 在跑的时候，工作区一行都不许动。** 脚本最后一步是 `git add -A` 然后提交，你在它跑的时候改文件，改的东西会被一起并进那个发布提交。1.10.8 就这么把 R-1 的 `recycle.html` 并进了发布提交（`2795d77`），结果那个 tag 里的页面是新 HTML 配旧样式。**发布提交只能包含「版本号 + 这一版该有的文件」**；发版期间要改的东西，等脚本退出再动。
+2. **不要给 `release.ps1` 预设代理环境变量。** `HTTP_PROXY=…` / `HTTPS_PROXY=…` 会让脚本里「先直连」那一步也被带到那个代理上；Clash 内核没开时直连和代理一起死，脚本报「直连和代理都到不了 GitHub」直接中止（1.10.19 踩过，白等一轮）。脚本自己会先直连、不通再走 `127.0.0.1:7897`；真要开代理就只开 Clash Verge。
+3. **发版后补的文档，单独提交，不要混进发布提交。** 发布后的文档修正直接提交到 `main`（不打 tag、不改 manifest），`main` 会比 tag 多一个提交 —— 这是正常的，`5bffd21`、`7b8d1d2` 都是这样。别为了「让 tag 等于 HEAD」去补 tag。
+
 
 它会：检查工作区干净与能不能到 GitHub → 改写 manifest.json 这一处版本号（界面上的版本由脚本从 manifest 现读，测试只验格式）→ 跑全部检查（`node scripts/check-all.cjs`，与 GitHub Actions 同一套）→ 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
 
@@ -465,6 +472,21 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 
 各套的项数**不写死在这里**（会漂）：五套的当前值见上面「当前状态」那张脚本生成的表，`stability.test.cjs` 的总数另有三处 `<!-- test-count:N -->` 标记由 `scripts/check-all.cjs` 核对。
 
+### 页面测试与预览站的坑（1.12.12）
+
+**写页面级用例（`test/pages.test.cjs`）的四条铁律** —— 这四条各踩过一次，症状都是「用例看着对、结果不对」：
+
+1. **桩要在 `dom.loadPage()` 之后挂。** `settings.html` / `stats.html` 自己会加载真的 `archive-tools.js`、`archive-core.js`，它们会把 `globals` 里注入的同名桩**覆盖掉**。正确顺序是：先 `const page = await openSettings(...)`，再 `page.window.BcaArchiveTools = stub`。页面是调用时才按全局名取，换完就生效。
+2. **回调式 `sendMessage` 的桩必须真的调 callback。** `settings.js` / `stats.js` 用的是 `chrome.runtime.sendMessage(msg, cb)`；桩里只 `return` 不调 `cb`，页面就会一直等到超时兜底（看起来像「功能没实现」）。
+3. **测「后台不回」时要返回一个永不 resolve 的 Promise。** 返回 `undefined` 会被 harness 判成「已经回话了」，用例直接测不到超时分支。
+4. **`dom-harness` 比浏览器少两样东西**：没有 `CSS.escape`（用到它的列表项点不动，改用「全选」这类按钮），也没有 `page.window.fireUserEvent`（用 `dom.fireUserEvent(el, "click")`）。
+
+**预览站（参考区 `_appearance-preview.cjs`）三条原则**：
+
+1. **桩的数据照真实字段形状造。** 预览桩曾把 `topCollection.recent` 写成 `count`，于是统计页出现「区间内新增 11 / 收藏夹近 7 天保存 447」这种刻意造出来的「bug」，白查一轮。造配额数据之前，先去被渲染的页面里看它读哪几个字段。
+2. **判断颜色、对比度、层叠，读 `getComputedStyle` 或取像素，别只看截图。** headless 截图带 `--virtual-time-budget` 时会拍到 CSS 过渡中途的半透明态（毛玻璃提示条那条一度被判成「看不见」）。
+3. **`#library` 里的顶栏提示必须加 `?forceview=1` 才看得见。** 那个区块默认 `hidden`，且 `library.js` 初始化后会再藏一次、欢迎态还会占满主区；`?forceview=1` 会在初始化后重显 `#library` 并藏掉 `#welcome`。
+
 在项目根目录执行。**下面五套都要跑**；`node scripts/check-all.cjs` 把「这五套 + 语法 + `.ps1` 语法 + 词典 + 状态块 + 文档标记 + 发布清单」一次跑完（发版第 4 步与 GitHub Actions 用的都是它），任一退出码非 0 就算失败。
 
 **数字不用手改**：加完测试或词条后跑 `node scripts/check-all.cjs --write` —— 它会把三处
@@ -482,7 +504,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:415 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:416 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -729,6 +751,9 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     3. **不翻译数据。** 视频标题、UP 主名、简介、标签、示例目录名这类固有名称一律保留原文（`i18n.js` 顶部写着这条规矩）。`guide.html` 的演示卡片里有示例标题和示例收藏夹名，切语言时它们不该跟着变。
     4. **`<title>` 不在 `data-i18n*` 的能力范围内**（那套属性只能写元素的 `textContent` / `innerHTML` / `title` 属性 / `placeholder` / `aria-label`），页面标题要在 JS 里 `document.title = BcaI18n.t("…")`。
     5. **拟态「别的软件」的部分不翻译。** 使用说明与安装教程里都有 Windows 资源管理器、cmd 黑窗、`chrome://extensions` 的拟真卡片 —— 那些画的是**用户自己系统语言下的其他软件**，不是本插件的界面（安装脚本真实打印的就是中文），切语言时它们保持简体中文。判据是「这块字是谁的界面」：本插件自己画的界面（弹窗、收藏库、详情面板、浮标）跟着语言变，别家软件的界面、目录名与示例数据都不变。
+    6. **`_i18n-surgery.cjs` 要用 Node 调，不要用 Python 的 `subprocess` 收输出。** 它会把结果打到 stdout，而 Windows 控制台默认 GBK，Python 用 `capture_output=True` + `text=True` 会直接 `UnicodeDecodeError` 崩掉（编码不是词条的问题，是管道的问题）。写法：`.cjs` 驱动脚本里 `execFileSync(process.execPath, [surgery, file, "[]", JSON.stringify(pairs)], { encoding: "utf8" })`。
+    7. **译文不许改真实文件名与真实标志。** `视频信息.txt`、`目录`、`000视频下载`、`chrome://extensions` 这类是磁盘与浏览器上真实存在的字符串，翻成「影片資訊.txt」会让文档与归档对不上；繁中译文里出现 `视频信息.txt` 的「视频」两个字就是错。`test/stability.test.cjs` 有守卫盯着这一条。
+    8. **繁中不许等于简体。** 有些字是简繁同形（「条」「录」「档」在不同词里不同），照抄简体最容易漏译；写完用 `--check` 之外，再随手抽 5 条看繁中值是否与键逐字相同，相同的就是没译。
 
 22. **一个入口开新标签页时必须给退路；设置类改动要「就地生效、人留在原地」。**（V1.3.2 把右下角三个浮标收成一个齿轮、点开独立设置页 `settings.html`。）收藏库那个齿轮只是**入口**，真正的设置在别的文档里，于是有三条硬要求：
 
@@ -798,6 +823,8 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     1. `stats-core.js` 的 `recordFromVideo()` 只读 `parseFavoriteTime(source.date || source.directory || "")`，**不要**改成优先 `favoriteAt`。老视频重新收藏 / 补档 / 搬运时目录名沿用旧时间，统计就落在第一次进库那天；卡片与详情上的日期来自 `视频信息.txt` 的「视频收藏时间」，两者本来就可以不同。
     2. 1.9.2 曾改成 `firstParsedTime([source.date, source.favoriteAt, source.directory])` 去「修」这件事，用户判定是 bug 并要求回退（已回退到 V1.9.1 基线，`stability` 有守卫钉住 `firstParsedTime` 不许再出现）。**看到「今日新增」比卡片上的「今天」少，先想想是不是这个特性，不要动统计口径。**
     3. 真要改这个权衡，得用户先下指令，并且同时改 `docs/ARCHITECTURE.md` 的已知限制和这条守卫。
+32. **补丁脚本半途抛错时，已经写盘的部分不会回滚。** 所有一次性改动都写在 `.py` / `.cjs` 里、按锚点替换（`assert 命中 == 1`），但脚本是逐份 `write` 的：第 3 份失败时前两份**已经落了**（`_p42.py`、`_p206.py`、`_p241.py` 都这样，`_p244.py` 还因此把同一段守卫插了两遍）。所以：① 动手前先 dry-run 打印每处命中数；② 脚本失败后**先 `grep` 复核真实状态，再写第二个脚本补完**，不要凭记忆假设「什么都没改」。
+33. **写守卫断言的三件事。** ① **CRLF 文件的多行正则必须写 `\r?\n`**（`background.js`、`library.js`、`settings.js` 都是 CRLF，`\n` 匹配不到，守卫会假红）。② **断言「不许出现 X」之前先剥注释**（`/\*[\s\S]*?\*/` 与 `//[^\n]*`），否则会被自己写的说明文字撞红。③ **单条规则的匹配范围用 `[^}]*`，不要用 `[\s\S]*?`** —— 后者会一路匹配到下一条规则，把合法写法也判成违规。
 
 ## 已知限制与历史背景
 

@@ -8703,6 +8703,35 @@ test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的�
   assert.match(background, /function withKeepAlive\(task, reason\)/);
 });
 
+test("1.12.12：交接文档里那七条经验真的落地了", () => {
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  // 发版时的三条禁令
+  assert.match(handoff, /### 发版时的三条禁令（1\.12\.12）/, "缺「发版时的三条禁令」小节");
+  assert.match(handoff, /release\.ps1` 在跑的时候，工作区一行都不许动/, "缺「发版期间别动工作区」");
+  assert.match(handoff, /不要给 `release\.ps1` 预设代理环境变量/, "缺「别预设代理」");
+  assert.match(handoff, /发版后补的文档，单独提交/, "缺「补文档单独提交」");
+  // 页面测试与预览站
+  assert.match(handoff, /### 页面测试与预览站的坑（1\.12\.12）/, "缺「页面测试与预览站的坑」小节");
+  assert.match(handoff, /桩要在 `dom\.loadPage\(\)` 之后挂/, "缺桩的挂载顺序");
+  assert.match(handoff, /永不 resolve 的 Promise/, "缺「后台不回」的写法");
+  assert.match(handoff, /没有 `CSS\.escape`/, "缺 dom-harness 的能力边界");
+  assert.match(handoff, /读取 `getComputedStyle` 或取像素|读 `getComputedStyle` 或取像素/, "缺「读计算样式」");
+  assert.match(handoff, /\?forceview=1/, "缺预览站 forceview 的说明");
+  // 修改原则 32 / 33
+  assert.match(handoff, /^32\. \*\*补丁脚本半途抛错时/m, "缺第 32 条（脚本半途失败）");
+  assert.match(handoff, /^33\. \*\*写守卫断言的三件事/m, "缺第 33 条（守卫三件事）");
+  assert.match(handoff, /CRLF 文件的多行正则必须写 `\\r\?\\n`/, "缺 CRLF 正则的写法");
+  // i18n 三坑
+  assert.match(handoff, /`_i18n-surgery\.cjs` 要用 Node 调/, "缺「用 Node 调手术脚本」");
+  assert.match(handoff, /译文不许改真实文件名与真实标志/, "缺「别翻真实文件名」");
+  assert.match(handoff, /繁中不许等于简体/, "缺「繁中不许等于简体」");
+  // 发版命令示例里不许带代理环境变量（第 2 条的现场证据）
+  const releaseLine = handoff.split("\n").find((line) => /release\.ps1\s+\d/.test(line) && !line.includes("`#"));
+  if (releaseLine) {
+    assert.doesNotMatch(releaseLine, /HTTP_PROXY|HTTPS_PROXY/, "发版命令里不许预设代理");
+  }
+});
+
 test("1.12.11：交接文档的代码围栏要成对，围栏里不许夹标题", () => {
   const handoff = readProjectFile("AI_HANDOFF.md");
   const fences = (handoff.match(/^```/gm) || []).length;

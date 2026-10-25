@@ -137,13 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.11：交接前的文档体检
+## V1.12.12：把踩过的坑写进交接文档
 
-- **`AI_HANDOFF.md` 修好一处渲染事故**：「两条轨：平时只打 tag」整节被包在 ```powershell 代码块里（上一版插入时漏了一个闭合围栏），在编辑器与 GitHub 上都显示成一坨代码。现在命令回到代码块里，那一节回到正文。
-- **发版口径写进原文**：把用户 2026-10-25 的原话作为引用放进那一节开头 —— 平时只打 tag、不打包 release；等用户说「这版可以发」我再 `pack.ps1`，zip 由用户自己拖到 Release 页面。
-- **状态块的「审查欠账」那行跟上了**：从「2026-10-22 的 14 条待办均未开始」改成「2026-10-25 大审查 P0 / P1 / P2 / P3 全部收口，仅『拆 `library.js`』按用户要求记为决定不改」。
-- **隐私说明的「对应版本」**从 V1.12.1 跟到 V1.12.11（内容本身自 1.12.7 补了必应那段之后没再变）。
-- **新增守卫**：`test/stability.test.cjs` 断言 `AI_HANDOFF.md` 的代码围栏成对、且围栏里不夹 `##`/`###` 标题 —— 这类事故静态检查一次就能拦住。
+- **`AI_HANDOFF.md` 多了七条经验**：发版时的三条禁令（发版脚本跑着不许动工作区、别预设代理环境变量、发版后的文档单独提交）、页面级测试的四条铁律、预览站的三条原则、补丁脚本半途失败该怎么办、写守卫断言的三件事、`_i18n-surgery.cjs` 的三个具体坑。
+- **每条都附了症状与正解**：不是「要注意 XX」，而是「上次踩到时看到的是什么、下次怎么绕过去」。例如「桩要在 `dom.loadPage()` 之后挂」「`?forceview=1` 才看得见收藏库顶栏提示」「CRLF 文件的多行正则要写 `\r?\n`」。
+- **加了一条守卫** `1.12.12`：这些新小节、新条目、关键字眼被删掉或被改写时，`stability.test.cjs` 会红。
 
 **遗留** - 无。
 
@@ -155,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:415 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:416 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
