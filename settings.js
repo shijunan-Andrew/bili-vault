@@ -733,6 +733,12 @@ function updateResultText(result) {
   }
   const latest = updateVersionLabel(result.latest);
   if (result.newer !== true) {
+    // 1.11.3：自己从源码加载的常常比公开版还新（开发版）。那种情况说「已经是最新公开版（1.11.1）」
+    // 会让人以为自己装的是 1.11.1，所以按两个版本的实际大小分两句话说。
+    const current = updateVersionLabel(result.current) || updateVersionLabel(chrome.runtime.getManifest().version);
+    if (BcaArchiveCore.compareVersions(current, latest) > 0) {
+      return BcaI18n.t("你装的 {current} 比公开版（{version}）还新，不用更新。", { current, version: latest });
+    }
     return BcaI18n.t("已经是最新公开版（{version}）。", { version: latest });
   }
   if (result.released !== true) {

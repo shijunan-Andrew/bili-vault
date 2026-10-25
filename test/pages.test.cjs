@@ -1594,6 +1594,38 @@ async function suiteSettings() {
     assert.equal(page.document.getElementById("updateShaRow").hidden, true);
   });
 
+
+  await test("设置页「检查更新」：自己装的是比公开版新的开发版时，要说清「不用更新」（1.11.3）", async () => {
+    const page = await openSettings();
+    page.window.chrome.runtime.getManifest = () => ({ version: "1.11.3" });
+    page.window.chrome.runtime.sendMessage = (message, callback) => {
+      if (typeof callback === "function") {
+        callback({
+          ok: true,
+          mode: "manual",
+          current: "1.11.3",
+          latest: "1.11.1",
+          newer: false,
+          released: false,
+          date: "2026-10-25",
+          source: "github",
+          releasePageUrl: "https://github.com/shijunan-Andrew/bili-vault/releases",
+          zipName: "",
+          sha256: "",
+          notes: []
+        });
+      }
+      return undefined;
+    };
+    dom.fireUserEvent(page.document.getElementById("checkUpdate"), "click");
+    await settle(6);
+    assert.equal(
+      textOf(page.document.getElementById("updateStatus")),
+      BcaT(page, "你装的 {current} 比公开版（{version}）还新，不用更新。", { current: "1.11.3", version: "1.11.1" }),
+      "开发版比公开版新时，不许说成「已经是最新公开版（1.11.1）」"
+    );
+    assert.equal(page.document.getElementById("updateShaRow").hidden, true);
+  });
   await test("设置页「检查更新」：重开页面先显示上次查到的结论（1.11.2）", async () => {
     const page = await openSettings({
       localData: {

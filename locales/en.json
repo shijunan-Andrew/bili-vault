@@ -362,6 +362,7 @@
   "目标收藏夹里已有同名目录，这条存成了「{name}」。": "A folder with the same name already exists in the target collection, so this one was saved as “{name}”.",
   "目录里共 {real} 个记录目录，另有 {unknown} 项不是本插件写入的；": "{real} record folders here, plus {unknown} items not written by this extension;",
   "目录名太长（{count}）": "Folder name too long ({count})",
+  "你装的 {current} 比公开版（{version}）还新，不用更新。": "You are on {current}, newer than the public version ({version}) — nothing to update.",
   "配置": "Config",
   "配置文件只含界面偏好；归档元数据写进本地备份文件夹的 004导出/ 里。": "The config file holds interface preferences only; archive metadata is written into 004导出/ inside your local backup folder.",
   "批量更新视频数据": "Update video data in bulk",
