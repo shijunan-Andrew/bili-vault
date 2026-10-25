@@ -43,3 +43,44 @@ if (typeof BcaI18n !== "undefined" && typeof BcaI18n.init === "function") {
         : BcaI18n.t("本地目录打开助手 · 安装教程");
     });
 }
+
+/* 1.10.21：目录高亮。使用说明页的目录是十条锚点，滚动时告诉读者「现在读到第几节」。
+   不用 IntersectionObserver：这里只要「谁刚滚过顶部」，量一次坐标比维护观察器简单，
+   也没有异步回调，测试里打一次 scroll 就能验。 */
+function markCurrentSection() {
+  /* 用「取出来自己筛」而不是 [href^="#"]：属性前缀选择器在部分环境里不支持，
+     而这里本来就只关心同页锚点。 */
+  const links = Array.from(document.querySelectorAll(".toc a"))
+    .filter((link) => String(link.getAttribute("href") || "").startsWith("#"));
+  if (!links.length) return;
+  const heads = links.map((link) => document.getElementById(link.getAttribute("href").slice(1)));
+  let current = 0;
+  heads.forEach((head, index) => {
+    if (!head) return;
+    if (head.getBoundingClientRect().top <= 140) current = index;
+  });
+  links.forEach((link, index) => {
+    const isCurrent = index === current;
+    link.classList.toggle("is-current", isCurrent);
+    if (isCurrent) link.setAttribute("aria-current", "location");
+    else link.removeAttribute("aria-current");
+  });
+}
+
+if (document.querySelector(".toc")) {
+  let queued = false;
+  const schedule = () => {
+    if (queued) return;
+    queued = true;
+    window.requestAnimationFrame(() => {
+      queued = false;
+      markCurrentSection();
+    });
+  };
+  window.addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("resize", schedule);
+  /* 带 #hash 打开时，浏览器的锚点滚动发生在脚本之后，首帧可能还停在第一节 ——
+     等 load 再量一次，目录就能对上用户实际看到的那一节。 */
+  window.addEventListener("load", markCurrentSection);
+  markCurrentSection();
+}

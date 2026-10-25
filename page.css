@@ -90,8 +90,13 @@ table.terms th:first-child, table.terms td:first-child { width: 34%; }
 /* 目录卡：两列网格，窄屏退回一列（原来固定两列，英文界面上会挤成一团） */
 .toc { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; margin: 0 0 8px; padding: 14px 18px;
        border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: var(--fs-base); }
-.toc a { color: var(--accent); text-decoration: none; }
-.toc a:hover { text-decoration: underline; }
+/* 1.10.21：目录原来是「去掉下划线的蓝字」，静态看着像普通文字，读者不会去点。
+   常态给一条虚线下划线，悬停转实线并铺一点底色；滚到哪一节，那一节在目录里高亮。 */
+.toc a { color: var(--accent); text-decoration: underline; text-decoration-style: dotted;
+         text-decoration-color: var(--accent-line); text-underline-offset: 3px;
+         border-radius: var(--r-xs); }
+.toc a:hover { text-decoration-style: solid; background: var(--accent-soft); }
+.toc a.is-current { color: var(--accent); background: var(--accent-soft); text-decoration-style: solid; font-weight: 650; }
 @media (max-width: 620px) { .toc { grid-template-columns: 1fr; } }
 
 .end { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); text-align: center; }

@@ -8127,3 +8127,29 @@ test("1.10.20：两个文档页都要有「回去的路」，出口指向真实�
     assert.ok(Object.prototype.hasOwnProperty.call(zh, key), `词典里要有「${key}」`);
   }
 });
+
+test("1.10.21：使用说明的目录有链接感，滚动时只高亮当前一节", () => {
+  const css = readProjectFile("page.css");
+  const rule = css.slice(css.indexOf(".toc a {"), css.indexOf(".toc a {") + 320);
+  assert.match(rule, /text-decoration:\s*underline/, "目录常态要有下划线，否则看着像纯文字");
+  assert.match(rule, /text-decoration-style:\s*dotted/, "常态用虚线，悬停才转实线");
+  assert.match(css, /\.toc a\.is-current\s*\{[^}]*background:\s*var\(--accent-soft\)/, "当前节要铺底色");
+
+  const js = readProjectFile("tutorial.js");
+  assert.match(js, /function markCurrentSection\(\)/, "要有算当前节的地方");
+  assert.match(js, /getBoundingClientRect\(\)\.top <= 140/, "按「刚滚过顶部」判定");
+  assert.match(js, /link\.classList\.toggle\("is-current", isCurrent\)/, "只给一节挂 is-current");
+  assert.match(js, /setAttribute\("aria-current", "location"\)/, "当前节要读得出来");
+  assert.match(js, /window\.addEventListener\("scroll", schedule, \{ passive: true \}\)/, "滚动要跟着更新");
+  assert.match(js, /window\.addEventListener\("load", markCurrentSection\)/, "带 #hash 打开时首帧也要对上");
+
+  /* 目录里的每个锚点都要有对应的标题，否则点了没反应 */
+  const html = readProjectFile("guide.html");
+  assert.equal(html.split('class="toc"').length - 1, 1, "guide.html 里应该只有一个目录");
+  const toc = html.slice(html.indexOf('class="toc"'), html.indexOf("</nav>", html.indexOf('class="toc"')));
+  const ids = Array.from(toc.matchAll(/href="#([\w-]+)"/g)).map((m) => m[1]);
+  assert.ok(ids.length >= 10, "目录至少十节");
+  for (const id of ids) {
+    assert.ok(html.includes(`<h2 id="${id}"`), `目录里的 #${id} 要有对应的 <h2 id>`);
+  }
+});

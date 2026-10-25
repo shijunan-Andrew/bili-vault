@@ -137,12 +137,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.20：使用说明和安装教程有了「回去的路」
+## V1.10.21：使用说明的目录能点、也知道你读到哪一节
 
-- **问题**：这两页是从设置页点开、在新标签里看的；看完想回设置页或收藏库，除了关掉标签没有别的入口（页尾只有「知道了」）。
-- **改法**：两页正文最上方加一行轻量导航——「返回设置」`settings.html`、「打开本地收藏库」`library.html`；正文末尾在「知道了」旁边加「回到顶部」（`#top` 锚在 `<body>` 上，点了才真的会滚）。
-- **为什么用文字链接而不是按钮**：这两个动作是「离开这一页」，不该和正文里的主按钮抢注意力；字号用 `--fs-sm`、底色只在悬停时给一点品牌色。
-- **范围**：`guide.html`、`tutorial.html` 各两处、`page.css` 三条 `.doc-bar*` 规则与 `.actions` 的 `gap`；**没有新增文案**（三个词条都是现成的），词典仍是 **1088** 条；`test/stability.test.cjs` 加 1 条守卫（383 → **384**），`test/pages.test.cjs` 新增 `suiteDocs` 1 条真执行用例（64 → **65**）。
+- **问题**：目录里十条看起来像普通文字——`text-decoration: none`，只有悬停才冒出下划线；滚动时也没有任何「现在在第几节」的反馈，长文档读到一半找不到位置。
+- **改法**：常态给虚线下划线（`--accent-line`）、悬停转实线并铺 `--accent-soft`；新增「当前节」样式 `is-current`（实线 + 底色 + 稍重字重）。
+- **高亮怎么算**：不引 IntersectionObserver，直接量每个 `<h2>` 的 `getBoundingClientRect().top`，取「最后一个已经滚过顶部 140px」的那节；`scroll` 与 `resize` 都用 `requestAnimationFrame` 合并成一次计算。
+- **带 `#hash` 打开**：浏览器的锚点滚动发生在脚本之后，首帧会算错，所以在 `load` 时再量一次。
+- **可访问性**：当前节额外挂 `aria-current="location"`，读屏能听出「你现在在这一节」。
+- **范围**：`page.css` 三条 `.toc a*` 规则、`tutorial.js` 约 30 行；无新增文案，词典仍是 **1088** 条；`test/stability.test.cjs` 加 1 条守卫（384 → **385**），`test/pages.test.cjs` 的 `suiteDocs` 加 1 条真执行用例（65 → **66**）。
 
 **遗留** - 无。
 
@@ -154,7 +156,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:384 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:385 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

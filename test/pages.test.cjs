@@ -1934,6 +1934,25 @@ async function suiteDocs() {
       assert.ok(document.body.id === "top", "#top 要真的落在 <body> 上，否则点了没反应");
     }
   });
+
+  await test("使用说明的目录能点、跳得到，并且只高亮一节（1.10.21 真执行）", async () => {
+    const page = dom.loadPage({ htmlFile: "guide.html" });
+    await settle(12);
+    const document = page.document;
+
+    /* dom-harness 的选择器引擎不支持 [href^='#'] 这种属性前缀匹配，取出来自己筛 */
+    const links = Array.from(document.querySelectorAll(".toc a"))
+      .filter((link) => String(link.getAttribute("href")).startsWith("#"));
+    assert.ok(links.length >= 10, "目录应该有整十节");
+    for (const link of links) {
+      const id = link.getAttribute("href").slice(1);
+      assert.ok(document.getElementById(id), `目录里的 #${id} 要真的指向一个标题`);
+    }
+
+    const current = links.filter((link) => link.classList.contains("is-current"));
+    assert.equal(current.length, 1, "任何时刻只有一节是当前节");
+    assert.equal(current[0].getAttribute("aria-current"), "location", "当前节要告诉读屏");
+  });
 }
 
 async function suite() {
