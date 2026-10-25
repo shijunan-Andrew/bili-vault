@@ -137,12 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.13.1：回收站不再删掉你自己改过名的目录
+## V1.13.2：发版脚本不会再「骗你说已经发出去了」
 
-- **修掉一个会直接删除用户文件的问题**：`005回收站` 的 30 天清理原先把「名字看不懂的目录」当成过期目录，下一次打开收藏库就递归删除，既不进系统回收站、也没有确认。也就是说，你把自己删掉的收藏夹改个名、或者手动挪进回收站，它连同里面的视频信息会一起消失。
-- **现在判据反过来了**：名字解析不出时间戳的目录**一律留着**；只有「名字是插件写的时间戳、且真的超过 30 天」才会被清掉。这与回收站页面一直承诺的「改名过的目录不会被误删」终于一致。
-- **补了 3 条真执行测试**（`test/pages.test.cjs`）：给定一组目录名逐一钉住「删哪些、留哪些」，再加「没有 `005回收站` 时不报错」与「`stampTime` 只认 `YYYYMMDD-HHMMSS`」两条表驱动断言。
-- **交接文档记下发布渠道**：稳定版只发 GitHub Release，暂时不上架商店。
+- **修掉三个让发版脚本报假成功的洞**（审查 P1-3 / P1-4）：①提交失败时脚本照旧打印「已提交并打 tag」，还把 tag 强行挪到旧提交上；②`git tag -f` 会把已经发布过的版本号悄悄指向新提交，等于改写发布历史；③在别的分支上发版，tag 打在分支提交上、`main` 一动没动，CI 也不会跑这一版 —— 这三种都能一路绿灯跑到最后一行。
+- **现在有四道闸门**：第 1 步先确认当前分支是 `main`；提交失败立刻停下并说明「版本号改动还在工作区，tag 没打」；打 tag 不再带 `-f`，同名 tag 已存在就停下让你换版本号；推完再用 `git merge-base --is-ancestor` 确认 tag 真的进了 `origin/main` 的历史。
+- **钉了守卫**：`test/stability.test.cjs` 里新增一条测试，把「分支断言 / 提交退出码 / 不用 `-f` / 主线断言」四件事都钉住，以后谁改回去都会红。
 
 **遗留** - 无。
 
@@ -154,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:416 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:417 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

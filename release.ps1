@@ -118,6 +118,16 @@ if ($dirty.Count -gt 0) {
 }
 Say "  [$([char]0x2713)] 干净" $C_GREEN
 
+# 分支必须是 main。在别的分支上发版时，这次的提交落在分支上，而第 6 步推的是
+# origin main —— 屏幕报成功，main 却少这一版；ci.yml 只监听 push[main]，连 CI 都不会跑。
+$branch = (Invoke-Native $Git @('rev-parse', '--abbrev-ref', 'HEAD')) -join ""
+if ($branch.Trim() -ne 'main') {
+  Say "  当前分支是「$($branch.Trim())」，不是 main。" $C_RED
+  Say "  在别的分支发版，tag 会打在分支提交上，main 不动，CI 也不会跑这一版。" $C_YELLOW
+  Die "发布中止：先切回 main 再发版（git switch main）。"
+}
+Say "  [$([char]0x2713)] 在 main 上" $C_GREEN
+
 # Chrome 拒绝加载任何以 _ 开头的文件/目录（"Filenames starting with \"_\" are reserved"）。
 # 排查用的临时脚本如果留在扩展根目录，插件就直接加载不了 —— 真机上发生过一次。
 # 更麻烦的是 .gitignore 里有 _*.cjs，git status 看不见它，上面那个净树检查会漏掉，
@@ -256,8 +266,16 @@ $msgFile = Join-Path $env:TEMP 'bv-release-msg.txt'
 [System.IO.File]::WriteAllText($msgFile, $msg, $utf8NoBom)
 Invoke-Native $Git @('add', '-A') | Out-Null
 Invoke-Native $Git @('commit', '-q', '-F', $msgFile) | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  Remove-Item -LiteralPath $msgFile -Force -ErrorAction SilentlyContinue
+  Die "提交失败（上面有 git 的输出）。版本号改动还在工作区里，tag 没打。"
+}
 Remove-Item -LiteralPath $msgFile -Force -ErrorAction SilentlyContinue
-Invoke-Native $Git @('tag', '-f', $Tag) | Out-Null
+# 不许 -f：同名 tag 已存在说明这个版本号发过了，静默挪动它会重写发布历史。
+Invoke-Native $Git @('tag', $Tag) | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  Die "打 tag 失败：$Tag 可能已经存在。请换一个版本号（不要覆盖已发布的 tag）。"
+}
 Say "  [$([char]0x2713)] 已提交并打 tag $Tag" $C_GREEN
 
 $pushOut = Invoke-GitRemote @('push', 'origin', 'main', '--tags')
@@ -267,6 +285,13 @@ if ($LASTEXITCODE -ne 0) {
   Say "`n  提交和 tag 都在本地，网络恢复后手动重推即可：" $C_YELLOW
   Say "    git push origin main --tags" $C_YELLOW
   exit 1
+}
+
+# 推完再确认 tag 真的进了 origin/main 的历史：分支选错时 push 也会成功。
+Invoke-GitRemote @('fetch', 'origin', '--quiet') | Out-Null
+Invoke-Native $Git @('merge-base', '--is-ancestor', $Tag, 'origin/main') | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  Die "tag $Tag 不在 origin/main 的历史里：这一版没进主线。请在 main 上重发（先删掉本地与远端的这个 tag）。"
 }
 
 $localSha = (Invoke-Native $Git @('rev-parse', '--short', 'main')) -join ""

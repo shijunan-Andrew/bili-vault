@@ -5951,6 +5951,37 @@ test("CI 与发版跑同一套检查，检查清单只有一份（P0 工程）",
   assert.doesNotMatch(release, /Invoke-Native \$Node @\('test\//, "release.ps1 里不许再单独列测试项 —— 那样又会漂");
 });
 
+test("发版脚本的四道闸门：分支、提交、tag、主线（1.13.2 · 审查 P1-3/P1-4）", () => {
+  const release = readProjectFile("release.ps1");
+
+  // ① 分支必须是 main —— 在别的分支发版，提交只落在分支上，main 不动、CI 也不跑这一版
+  assert.match(release, /--abbrev-ref/, "release.ps1 要用 rev-parse --abbrev-ref 取当前分支");
+  assert.match(release, /-ne 'main'/, "release.ps1 要断言当前分支是 main");
+
+  // ② 提交失败必须停机 —— 旧写法不看退出码，会把 tag 打到旧 HEAD 上再报成功
+  assert.match(
+    release,
+    /commit', '-q', '-F', \$msgFile\)[\s\S]{0,240}\$LASTEXITCODE -ne 0/,
+    "release.ps1 提交后要查 \$LASTEXITCODE（审查 P1-3）"
+  );
+
+  // ③ tag 不许用 -f 强推已发布的版本号
+  assert.doesNotMatch(release, /@\('tag',\s*'-f'/, "release.ps1 不许用 git tag -f（审查 P1-3）");
+  assert.match(release, /@\('tag',\s*\$Tag\)/, "release.ps1 要直接 git tag \$Tag");
+  assert.match(
+    release,
+    /@\('tag',\s*\$Tag\)[\s\S]{0,200}\$LASTEXITCODE -ne 0/,
+    "打 tag 后要查 \$LASTEXITCODE"
+  );
+
+  // ④ 推完要确认 tag 真进了 origin/main 的历史
+  assert.match(
+    release,
+    /merge-base',\s*'--is-ancestor'/,
+    "release.ps1 要断言 tag 是 origin/main 的祖先（审查 P1-4）"
+  );
+});
+
 test("发布清单与体积阈值只有 pack.ps1 一处权威（1.10.1）", () => {
   const pack = readProjectFile("pack.ps1");
   const size = readProjectFile(path.join("scripts", "check-package-size.cjs"));

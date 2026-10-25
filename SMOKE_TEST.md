@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **416** 项里<!-- test-count:416 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **417** 项里<!-- test-count:417 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,15 +54,13 @@
 
 ---
 
-## V1.13.1 新增的几条
+## V1.13.2 新增的几条
 
-- [ ] 收藏库删一个收藏夹 → 打开 `005回收站`，把那个时间戳目录**改个名**（比如后面加「-保留」）→ 回收藏库点「刷新」→ 那个改名目录**还在**（本版修的就是它以前会被当成过期立刻删掉）。
-- [ ] 同名桶里再放一个名字是 30 天以前的时间戳目录（如 `20250101-000000`）→ 再刷新一次 → 它被清掉，改名那个仍在。
-- [ ] 回收站页里，改名过的目录显示「时间未知」，点「彻底删除」只影响你点的那一条。
-- [ ] `test/pages.test.cjs` 里能搜到 `suitePruneRecycler`，`node test/pages.test.cjs` 打出的项数从 87 变成 90。
-- [ ] `AI_HANDOFF.md` 的「发版」一节下面能看到「发布渠道：只发 GitHub Release，暂时不上架商店」。
+- [ ] 在临时分支上试一次发版（`git switch -c tmp-try` 然后 `pwsh -NoProfile -File release.ps1 1.99.9 "试一下" -Yes`）→ 第一屏就报「当前分支是「tmp-try」，不是 main」并中止，`manifest.json` 一个字节没改；验完 `git switch main` 并把临时分支删掉。
+- [ ] 在 main 上用一个已经发过的版本号试（例如 `release.ps1 1.13.1 "试一下" -Yes`）→ 报「打 tag 失败：V1.13.1 可能已经存在」，不再把旧 tag 偷偷挪到新提交上。
+- [ ] 正常发版这一次：第 1 步能看到「在 main 上」，最后打印的「本地 main / 远程 main」两个短 sha 一致。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.12.12 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.13.1 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

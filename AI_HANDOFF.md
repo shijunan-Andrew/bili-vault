@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 416 · archive-core 93 · stats-core 69 · background 33 · pages 90（后四套是真执行） |
+| 测试基线 | stability 417 · archive-core 93 · stats-core 69 · background 33 · pages 90（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-25 23:53，当时 HEAD `358d4a5`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-26 00:09，当时 HEAD `87ea56b`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -144,6 +144,8 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 
 
 它会：检查工作区干净与能不能到 GitHub → 改写 manifest.json 这一处版本号（界面上的版本由脚本从 manifest 现读，测试只验格式）→ 跑全部检查（`node scripts/check-all.cjs`，与 GitHub Actions 同一套）→ 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
+
+**脚本自己有四道闸门（1.13.2 加）**：第 1 步就要求当前分支是 `main`（在别的分支发版，tag 会打在分支提交上、`main` 不动、CI 也不跑这一版）；提交失败立刻停，不会继续把 tag 挪到旧提交上；打 tag 不带 `-f`，同名 tag 已存在就停下来让你换版本号；推完用 `git merge-base --is-ancestor $Tag origin/main` 确认这一版真的进了主线。这四件事在 `test/stability.test.cjs` 里有守卫钉着，谁改回去都会红。
 
 **十条不能破的硬规则**（来由见「修改原则」）
 
@@ -513,7 +515,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:416 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:417 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
