@@ -821,6 +821,8 @@ function dropRootCaches(rootKey) {
   downloadIndexCache.delete(rootKey);
   // 缩略图缓存按「收藏夹/目录名」记，换根目录或点了「刷新」时一起丢掉，别留旧图。
   clearThumbnailUrls();
+  // 1.12.3：换目录 / 首次扫描时把持久化的缩略图一起清掉（键里带 size/mtime，本来也不会串）。
+  void clearThumbnailStore();
   const at = archiveCacheOrder.indexOf(rootKey);
   if (at >= 0) archiveCacheOrder.splice(at, 1);
 }
@@ -916,6 +918,122 @@ async function hydrateCover(video) {
    收益小于风险。哪天冷启动的封面重建真成了瓶颈，再往 IndexedDB 挪。
 
    详情面板故意不用缩略图：那里是看大图的地方，糊了就是退步。 */
+
+/* 1.12.3（审查 P2「缩略图缓存只存内存」）：跨会话留一份缩略图。
+   1.10.2 当时只放内存是有意的（缩一张 10–30 ms、原图随时能重建），代价是每次打开
+   收藏库都要把当页的封面重新解一遍。现在多存一层到 IndexedDB：
+
+   - 键里带 `size` 与 `lastModified`：封面文件一换，旧缩略图自然不会再被取到（不用额外失效逻辑）。
+   - 走 `blob`，不存 `blob:` URL（URL 的生命周期只跟着页面走，存下来下次就是死链）。
+   - 有一份字节预算 `THUMBNAIL_CACHE_BYTES`，超了按「最久没被用到」整条删掉。
+   - 拿不到 IndexedDB、或写入失败，一律退回「只在内存」——缩略图是纯优化，不许因此出错。 */
+const THUMBNAIL_DB_NAME = "bca-thumbnail-cache";
+const THUMBNAIL_STORE = "thumbs";
+const THUMBNAIL_DB_VERSION = 1;
+const THUMBNAIL_CACHE_BYTES = 8 * 1024 * 1024;
+let thumbnailDbPromise = null;
+
+function openThumbnailDb() {
+  if (thumbnailDbPromise) return thumbnailDbPromise;
+  thumbnailDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") { reject(new Error("这个环境没有 IndexedDB")); return; }
+    const request = indexedDB.open(THUMBNAIL_DB_NAME, THUMBNAIL_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (db.objectStoreNames.contains(THUMBNAIL_STORE)) return;
+      const store = db.createObjectStore(THUMBNAIL_STORE, { keyPath: "key" });
+      store.createIndex("usedAt", "usedAt");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("打不开缩略图库"));
+  }).catch((error) => { thumbnailDbPromise = null; throw error; });
+  return thumbnailDbPromise;
+}
+
+// 键 = 「收藏夹/目录」+ 封面文件的 size 与修改时间。文件换了就自然 miss。
+function thumbnailCacheId(baseKey, file) {
+  return `${baseKey}@${Number(file?.size) || 0}-${Number(file?.lastModified) || 0}`;
+}
+
+async function thumbnailRead(id) {
+  try {
+    const db = await openThumbnailDb();
+    const stored = await new Promise((resolve, reject) => {
+      const request = db.transaction(THUMBNAIL_STORE, "readonly").objectStore(THUMBNAIL_STORE).get(id);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("读缩略图失败"));
+    });
+    if (!stored?.blob) return null;
+    return stored.blob;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function thumbnailWrite(id, blob) {
+  if (!blob || !(Number(blob.size) > 0)) return;
+  try {
+    const db = await openThumbnailDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(THUMBNAIL_STORE, "readwrite");
+      transaction.objectStore(THUMBNAIL_STORE).put({ key: id, blob, usedAt: Date.now() });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error("写缩略图失败"));
+      transaction.onabort = () => reject(transaction.error || new Error("写缩略图被中止"));
+    });
+  } catch (error) {
+    console.warn("缩略图没能存下来（这张下次还会重新缩一遍）", error);
+    return;
+  }
+  pruneThumbnailStore().catch((error) => console.warn("缩略图清理没跑成（下次写入再试）", error));
+}
+
+// 记账式清理：顺着 usedAt 从旧到新走一遍，超过预算就把最旧的整条删掉。
+async function pruneThumbnailStore() {
+  const db = await openThumbnailDb();
+  const entries = await new Promise((resolve, reject) => {
+    const request = db.transaction(THUMBNAIL_STORE, "readonly").objectStore(THUMBNAIL_STORE).index("usedAt").openCursor();
+    const collected = [];
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) { resolve(collected); return; }
+      collected.push({ key: cursor.value?.key, bytes: Number(cursor.value?.blob?.size) || 0 });
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error || new Error("扫缩略图失败"));
+  });
+  let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+  if (total <= THUMBNAIL_CACHE_BYTES) return 0;
+  const doomed = [];
+  for (const entry of entries) {
+    if (total <= THUMBNAIL_CACHE_BYTES) break;
+    doomed.push(entry.key);
+    total -= entry.bytes;
+  }
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(THUMBNAIL_STORE, "readwrite");
+    const store = transaction.objectStore(THUMBNAIL_STORE);
+    for (const key of doomed) store.delete(key);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("删缩略图失败"));
+  });
+  return doomed.length;
+}
+
+async function clearThumbnailStore() {
+  try {
+    const db = await openThumbnailDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(THUMBNAIL_STORE, "readwrite");
+      transaction.objectStore(THUMBNAIL_STORE).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error("清缩略图失败"));
+    });
+  } catch (error) {
+    console.warn("清缩略图库失败（下次换目录时还会再试）", error);
+  }
+}
+
 const thumbnailUrls = new Map(); // "收藏夹/目录" -> blob: URL
 const thumbnailOrder = [];
 const THUMBNAIL_MAX_CACHED = 240;
@@ -977,10 +1095,29 @@ async function cardThumbnailUrl(video) {
     return hydrateCover(video);
   }
   if (!BcaArchiveCore.thumbnailEligible(file.size)) return hydrateCover(video);
+  // 1.12.3：先问 IndexedDB 有没有用过同一份封面缩出来的图；没有再现场缩。
+  const id = thumbnailCacheId(key, file);
+  const stored = await thumbnailRead(id);
+  if (stored) {
+    const cachedUrl = URL.createObjectURL(stored);
+    rememberThumbnailUrl(key, cachedUrl);
+    return cachedUrl;
+  }
   const url = await makeThumbnailUrl(file);
   if (!url) return hydrateCover(video);
   rememberThumbnailUrl(key, url);
+  void thumbnailWrite(id, await blobFromObjectUrl(url));
   return url;
+}
+
+// blob: URL 读回 Blob —— write 是异步的，不挡卡片的显示。
+async function blobFromObjectUrl(url) {
+  try {
+    const response = await fetch(url);
+    return await response.blob();
+  } catch (_) {
+    return null;
+  }
 }
 
 // 读一条归档记录。命中缓存时只取 File 的元数据（不读正文），未命中才 getFile().text()。

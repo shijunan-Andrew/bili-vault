@@ -632,4 +632,4 @@ UP主主页：https://space.bilibili.com/……
 - `test/stability.test.cjs` 有守卫钉着「十张卡都有 `.settings-panel`」「横幅居中」「图钉三件套（图标/按钮/`pinCollection`）」「旧按钮名不再出现」；`test/pages.test.cjs` 真点一次图钉核顺序与落库。
 
 - **导入中断后的清理线索（1.12.2）**：回滚日志的权威副本有两处 —— 内存 journal（含原文，只在取消时用）与 `chrome.storage.local` 里的 `bcaImportLeftover`（只有名字，跨重启用）。中断时后者会被打上 `interruptedAt`，由 `cleanupLeftoverImport()` 消费；它只删本轮新建的目录与空收藏夹，`modifiedFiles` 不还原。`test/stability.test.cjs` 有守卫钉着「只动那三类」与「两处中断分支都要留副本」。
-
+- **缩略图缓存（1.12.3）**：两层，内存 `thumbnailUrls`（`blob:` URL，随页面）＋ IndexedDB `bca-thumbnail-cache/thumbs`（存 `blob`）。键由 `${collection}/${directory}@${size}-${lastModified}` 组成，所以「封面换了」不需要额外的失效逻辑；字节预算 `THUMBNAIL_CACHE_BYTES = 8 MB`，`pruneThumbnailStore()` 按 `usedAt` 从旧到新淘汰。拿不到 IndexedDB 时退回「只在内存」—— 缩略图是纯优化，任何失败都不许影响卡片显示。`test/stability.test.cjs` 钉着这些写法。

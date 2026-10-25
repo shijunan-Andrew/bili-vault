@@ -4557,6 +4557,38 @@ async function importBiliFavorites(data, tabId = null) {
   }
 }
 
+// 1.12.3（审查 P2「导入前不查磁盘空间」）：导入会往 IndexedDB 里写统计库、往
+// chrome.storage 里写快照与断点，也往备份文件夹里写目录与 txt。这几样都受「源配额」
+// 限制，配额用满时不是提前拒绝，而是写到一半抛错。所以开始前问一次可用空间，
+// 不够就把话摆到界面上（不拦导入：用户可能只想补几条，真有空间谁也说不准）。
+const IMPORT_SPACE_WARN_BYTES = 64 * 1024 * 1024;
+
+function formatSpaceBytes(bytes) {
+  const value = Math.max(0, Number(bytes) || 0);
+  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (value >= 1024 * 1024) return `${Math.round(value / (1024 * 1024))} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${Math.round(value)} B`;
+}
+
+/** 可用空间紧张时返回一句提示，正常（或问不到）返回空字符串。 */
+async function storageHeadroomNote() {
+  if (typeof navigator === "undefined" || !navigator.storage?.estimate) return "";
+  let estimate = null;
+  try {
+    estimate = await navigator.storage.estimate();
+  } catch (error) {
+    console.warn("问不到浏览器可用空间（这次导入不做空间提示）", error);
+    return "";
+  }
+  const quota = Number(estimate?.quota) || 0;
+  const usage = Number(estimate?.usage) || 0;
+  if (!quota) return "";
+  const available = Math.max(0, quota - usage);
+  if (available >= IMPORT_SPACE_WARN_BYTES) return "";
+  return BcaI18n.t("本机可用空间只剩约 {free}，这次导入可能写到一半失败。", { free: formatSpaceBytes(available) });
+}
+
 async function importBiliFavoritesInner(data, tabId = null) {
   const selectedIds = new Set((Array.isArray(data?.folderIds) ? data.folderIds : []).map(String));
   // 报告里必须写明**产生它的插件版本**。
@@ -4623,7 +4655,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
   // 1.7.18（destructive P1-3）：本轮导入真正**新建**的统计行 key。取消时按这份名单做减法。
   const importStatsKeys = [];
   importRateLimitStreak = 0;
-  publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: "正在准备导入…", summary: "", interrupted: false, rateLimited: false }, true);
+  // 1.12.3：先问一次可用空间，紧张就把提示并进这条状态（不中断导入）。
+  const spaceNote = await storageHeadroomNote();
+  publishImportState({ running: true, paused: false, startedAt: Date.now(), finishedAt: 0, text: spaceNote ? `正在准备导入…${spaceNote}` : "正在准备导入…", summary: "", interrupted: false, rateLimited: false }, true);
   // 断点落盘：ImportRun 的关键字段（active/paused/cancelled/游标/计数）与回滚日志
   // 写进 chrome.storage.session，SW 被回收后还能知道"上次跑到哪、写了哪些目录"
   resetImportRunSnapshot(journal, data?.folderIds);

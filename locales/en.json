@@ -126,6 +126,7 @@
   "本地文件夹操作失败。": "The local folder operation failed.",
   "本地已下载": "Downloaded locally",
   "本地资料": "Local info",
+  "本机可用空间只剩约 {free}，这次导入可能写到一半失败。": "Only about {free} of free space is left on this machine, so this import may fail partway through.",
   "本机数据": "Local data",
   "本项目已在 GitHub 上开源，点击查看": "This project is open source on GitHub — click to see it",
   "本月": "This month",

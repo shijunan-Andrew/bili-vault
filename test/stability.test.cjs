@@ -8550,6 +8550,30 @@ test("1.11.6：标题与行分成两层，收藏夹能置顶，旧按钮名不�
   assert.doesNotMatch(sources, /将下载到本地的视频放入收藏夹中/, "1.11.6 起叫「标记为已下载」");
 });
 
+test("1.12.3：缩略图缓存能跨会话留下来，且键里带着封面的 size 与修改时间", () => {
+  const library = readProjectFile("library.js");
+  assert.match(library, /const THUMBNAIL_DB_NAME = "bca-thumbnail-cache";/, "要有独立的缩略图库");
+  assert.match(library, /const THUMBNAIL_STORE = "thumbs";/);
+  assert.match(library, /const THUMBNAIL_CACHE_BYTES = 8 \* 1024 \* 1024;/, "要有明确的字节预算");
+  assert.match(library, /function thumbnailCacheId\(baseKey, file\) \{/, "键必须由封面的身份算出来");
+  assert.match(library, /@\$\{Number\(file\?\.size\) \|\| 0\}-\$\{Number\(file\?\.lastModified\) \|\| 0\}/, "键里要带 size 与 lastModified，封面一换自然 miss");
+  assert.match(library, /const stored = await thumbnailRead\(id\);/, "先用库里的");
+  assert.match(library, /void thumbnailWrite\(id, await blobFromObjectUrl\(url\)\);/, "缩完再存回去");
+  assert.match(library, /async function pruneThumbnailStore\(\) \{/, "要有按 usedAt 淘汰的清理");
+  assert.doesNotMatch(library, /objectStore\(THUMBNAIL_STORE\)\.put\(\{[^}]*url:/, "不许把 blob: URL 存进库（下次打开就是死链）");
+  assert.match(library, /void clearThumbnailStore\(\);/, "换目录时要清掉持久化的缩略图");
+});
+
+test("1.12.3：导入开始前先问一次可用空间，紧张就把话摆到界面上", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /const IMPORT_SPACE_WARN_BYTES = 64 \* 1024 \* 1024;/, "阈值要写明白");
+  assert.match(background, /async function storageHeadroomNote\(\) \{/, "判断只留一处");
+  assert.match(background, /estimate = await navigator\.storage\.estimate\(\);/, "真的是问浏览器");
+  assert.match(background, /const spaceNote = await storageHeadroomNote\(\);/, "导入开始前要问一次");
+  assert.match(background, /text: spaceNote \? `正在准备导入…\$\{spaceNote\}` : "正在准备导入…"/, "提示要并进状态文案");
+  assert.doesNotMatch(background, /if \(spaceNote\) return \{ ok: false/, "空间紧张不许拦掉导入（用户可能只想补几条）");
+});
+
 test("1.12.2：被打断的导入要留下跨重启的清理线索（审查 P1-3）", () => {
   const background = readProjectFile("background.js");
   const settingsJs = readProjectFile("settings.js");
