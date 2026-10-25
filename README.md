@@ -137,11 +137,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.10：本机预览站能造出以前只能真机撞出来的几种状态
+## V1.12.11：交接前的文档体检
 
-- **预览站的三个新开关**（本机调试用，不进发行包）：`?stats=empty`（统计库在、但一条都没有）、`?resume=1`（收藏库顶栏的「继续上次导入」）、`?leftover=1`（设置页的「上次导入没有收尾」）。这几个界面以前只能在真机上等它出现。
-- **`?forceview=1` 修好了**：它以前只把 `#library` 的 `hidden` 扒掉，`library.js` 初始化时又藏回去，顶栏那几条提示永远看不见；现在会延时重显并同时藏掉欢迎态。
-- **能力边界写清楚了**：`docs/ARCHITECTURE.md` 新增一节「预览站能造哪些状态、造不出哪些」——参数表 12 项 + 「造不出来的」（真实文件系统句柄、IndexedDB、原生助手、通知、写死的版本号、760px 以下会隐藏的按钮）。
+- **`AI_HANDOFF.md` 修好一处渲染事故**：「两条轨：平时只打 tag」整节被包在 ```powershell 代码块里（上一版插入时漏了一个闭合围栏），在编辑器与 GitHub 上都显示成一坨代码。现在命令回到代码块里，那一节回到正文。
+- **发版口径写进原文**：把用户 2026-10-25 的原话作为引用放进那一节开头 —— 平时只打 tag、不打包 release；等用户说「这版可以发」我再 `pack.ps1`，zip 由用户自己拖到 Release 页面。
+- **状态块的「审查欠账」那行跟上了**：从「2026-10-22 的 14 条待办均未开始」改成「2026-10-25 大审查 P0 / P1 / P2 / P3 全部收口，仅『拆 `library.js`』按用户要求记为决定不改」。
+- **隐私说明的「对应版本」**从 V1.12.1 跟到 V1.12.11（内容本身自 1.12.7 补了必应那段之后没再变）。
+- **新增守卫**：`test/stability.test.cjs` 断言 `AI_HANDOFF.md` 的代码围栏成对、且围栏里不夹 `##`/`###` 标题 —— 这类事故静态检查一次就能拦住。
 
 **遗留** - 无。
 
@@ -153,7 +155,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:414 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:415 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

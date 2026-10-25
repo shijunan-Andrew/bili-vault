@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 414 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
-| 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-25 22:25，当时 HEAD `7a55c80`；重跑 `node test/status.cjs --write` 刷新 |
+| 测试基线 | stability 415 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
+| 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
+| 生成 | 2026-10-25 22:36，当时 HEAD `fc80f0b`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -106,8 +106,12 @@ node test/i18n-extract.cjs --check
 **发版**（版本号不带 `V`，两个位置参数）：
 
 ```powershell
+pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
+```
 
 ### 两条轨：平时只打 tag，Release 由用户宣布（2026-10-25 起）
+
+> **用户原话（2026-10-25）**：「由于现在大部分版本都为开发版本，不要一个版本发一个 release，而是在经过一段时间的使用和测试后，由我决定哪个版本作为 release 版本，让你打包，然后我手动把 zip 拖到 Release 页面，平时的开发只要打 tag 不要打包 release。」
 
 从 1.11.2 起发版分两条轨，**别混用**：
 
@@ -122,9 +126,6 @@ node test/i18n-extract.cjs --check
 
 `version.json` 的语义是**用户认可的公开版**，不是最新 tag —— 所以它可能比 `manifest.json` 旧，这在平时是正常的；
 `test/stability.test.cjs` 只要求「它不高于 manifest、且版本在 `docs/HISTORY.md` 里有一节」。
-
-pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
-```
 
 它会：检查工作区干净与能不能到 GitHub → 改写 manifest.json 这一处版本号（界面上的版本由脚本从 manifest 现读，测试只验格式）→ 跑全部检查（`node scripts/check-all.cjs`，与 GitHub Actions 同一套）→ 提交 → 打 tag → 推送。**必须用 `pwsh`（PowerShell 7），不要用 `powershell.exe`（5.1）** —— 5.1 在沙箱里拿不到子进程输出，会让检查步骤假失败并回滚版本号。
 
@@ -481,7 +482,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:414 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:415 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

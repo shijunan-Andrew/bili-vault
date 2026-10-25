@@ -8703,6 +8703,24 @@ test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的�
   assert.match(background, /function withKeepAlive\(task, reason\)/);
 });
 
+test("1.12.11：交接文档的代码围栏要成对，围栏里不许夹标题", () => {
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  const fences = (handoff.match(/^```/gm) || []).length;
+  assert.equal(fences % 2, 0, `AI_HANDOFF.md 的代码围栏不成对（${fences} 个）`);
+
+  const lines = handoff.split(/\r?\n/);
+  let inside = false;
+  const trapped = [];
+  for (const line of lines) {
+    if (line.startsWith("```")) {
+      inside = !inside;
+      continue;
+    }
+    if (inside && /^#{2,3} /.test(line)) trapped.push(line.trim());
+  }
+  assert.deepEqual(trapped, [], `有标题掉进了代码块：${trapped.join(" / ")}`);
+});
+
 test("1.12.10：预览站支持哪些异常态、造不出什么，文档里写清楚了（审查 P3-8）", () => {
   const architecture = readProjectFile("docs/ARCHITECTURE.md");
   const handoff = readProjectFile("AI_HANDOFF.md");
