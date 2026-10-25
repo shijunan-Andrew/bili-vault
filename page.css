@@ -83,6 +83,19 @@ table.terms th:first-child, table.terms td:first-child { width: 34%; }
 /* 教程页的步骤正文是 <p class="what">，卡片已经有 16px 内边距，首行不用再留 12px */
 .steps > li > .what { margin-top: 0; }
 
+/* 1.10.22：安装教程的五步进度。吸顶是为了「滚到第 4 步也知道还剩几步」，
+   底色必须给，否则正文会从底下透出来。圆点是编号本身，不做图标。 */
+.steps-progress { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: var(--sp-2);
+                  margin: 0 0 var(--sp-4); padding: var(--sp-2) 0; background: var(--surface);
+                  border-bottom: 1px solid var(--line); }
+.steps-dot { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+             border: 1px solid var(--line); border-radius: 50%; color: var(--muted);
+             font-size: var(--fs-sm); font-weight: 600; text-decoration: none;
+             transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.steps-dot:hover { color: var(--accent); border-color: var(--accent-line); }
+.steps-dot.is-done { color: var(--accent); border-color: var(--accent-line); }
+.steps-dot.is-current { color: #fff; background: var(--accent); border-color: var(--accent); }
+
 .faq { margin: 0; }
 .faq dt { margin-top: 18px; font-weight: 600; }
 .faq dd { margin: 5px 0 0; color: var(--muted); }

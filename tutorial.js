@@ -84,3 +84,38 @@ if (document.querySelector(".toc")) {
   window.addEventListener("load", markCurrentSection);
   markCurrentSection();
 }
+
+/* 1.10.22：安装教程的五步进度条。判定口径与目录高亮一致（刚滚过顶部那一条），
+   只是这里要区分「走过了」与「正在这一步」：走过的点描边、当前的实心。 */
+function markCurrentStep() {
+  const dots = Array.from(document.querySelectorAll(".steps-dot"));
+  if (!dots.length) return;
+  const steps = dots.map((dot) => document.getElementById(String(dot.getAttribute("href") || "").slice(1)));
+  let current = 0;
+  steps.forEach((step, index) => {
+    if (!step) return;
+    if (step.getBoundingClientRect().top <= 120) current = index;
+  });
+  dots.forEach((dot, index) => {
+    dot.classList.toggle("is-current", index === current);
+    dot.classList.toggle("is-done", index < current);
+    if (index === current) dot.setAttribute("aria-current", "step");
+    else dot.removeAttribute("aria-current");
+  });
+}
+
+if (document.querySelector(".steps-progress")) {
+  let stepQueued = false;
+  const scheduleStep = () => {
+    if (stepQueued) return;
+    stepQueued = true;
+    window.requestAnimationFrame(() => {
+      stepQueued = false;
+      markCurrentStep();
+    });
+  };
+  window.addEventListener("scroll", scheduleStep, { passive: true });
+  window.addEventListener("resize", scheduleStep);
+  window.addEventListener("load", markCurrentStep);
+  markCurrentStep();
+}

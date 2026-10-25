@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **385** 项里<!-- test-count:385 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **386** 项里<!-- test-count:386 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -716,6 +716,12 @@
 **出问题看**：先确认它是不是在抓详情（那会让耗时从分钟级变成小时级）；再看有没有拿到 uid（报错会说"请先打开一次自己的 B 站收藏夹页面"）。
 
 ---
+
+## V1.10.22 新增的几条
+
+1. 设置页点「打开安装教程」：五步上方有一条五点进度，打开时第 1 点是实心的。
+2. 往下滚到第 3 步：第 3 点实心、前两点描边、后面两点是灰色；点第 5 点直接跳到第 5 步。
+3. 切到 English 再看一眼：进度条的无障碍名字（读屏或检查器里的 `aria-label`）变成英文。
 
 ## V1.10.21 新增的几条
 

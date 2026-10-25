@@ -8153,3 +8153,31 @@ test("1.10.21：使用说明的目录有链接感，滚动时只高亮当前一�
     assert.ok(html.includes(`<h2 id="${id}"`), `目录里的 #${id} 要有对应的 <h2 id>`);
   }
 });
+
+test("1.10.22：安装教程的五步进度条跟着滚动走，点一下能跳回那一步", () => {
+  const html = readProjectFile("tutorial.html");
+  assert.ok(html.includes('<nav class="steps-progress"'), "要有进度条");
+  assert.ok(html.includes('data-i18n-aria="安装进度"'), "进度条要有无障碍名字");
+  for (let n = 1; n <= 5; n += 1) {
+    assert.ok(html.includes(`href="#step-${n}"`), `第 ${n} 个点要指向 #step-${n}`);
+    assert.ok(html.includes(`<li id="step-${n}">`), `第 ${n} 步要有 id`);
+  }
+
+  const css = readProjectFile("page.css");
+  const bar = css.slice(css.indexOf(".steps-progress"), css.indexOf(".steps-progress") + 400);
+  assert.match(bar, /position:\s*sticky/, "进度条要吸顶，否则滚下去就看不见");
+  assert.match(bar, /background:\s*var\(--surface\)/, "吸顶必须给底色，不然正文会透出来");
+  assert.match(css, /\.steps-dot\.is-current\s*\{[^}]*background:\s*var\(--accent\)/, "当前步要实心");
+
+  const js = readProjectFile("tutorial.js");
+  assert.match(js, /function markCurrentStep\(\)/, "要有算当前步的地方");
+  assert.match(js, /dot\.classList\.toggle\("is-done", index < current\)/, "走过的步要区分出来");
+  assert.match(js, /setAttribute\("aria-current", "step"\)/, "当前步要读得出来");
+  assert.match(js, /window\.addEventListener\("scroll", scheduleStep, \{ passive: true \}\)/, "滚动要跟着更新");
+
+  /* 文案要真的进了两本词典 */
+  for (const locale of ["zh-TW", "en"]) {
+    const dict = JSON.parse(readProjectFile(`locales/${locale}.json`).replace(/^\uFEFF/, ""));
+    assert.ok(Object.prototype.hasOwnProperty.call(dict, "安装进度"), `${locale} 词典里要有「安装进度」`);
+  }
+});

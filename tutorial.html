@@ -24,8 +24,18 @@
   <h1 data-i18n="本地目录打开助手 · 安装教程">本地目录打开助手 · 安装教程</h1>
   <p class="lead" data-i18n-html="装好之后，收藏库里的「打开本地视频目录」就能直接在文件资源管理器里定位到视频文件夹。<strong>总共五步，装一次就行。</strong>">装好之后，收藏库里的「打开本地视频目录」就能直接在文件资源管理器里定位到视频文件夹。<strong>总共五步，装一次就行。</strong></p>
 
+  <!-- 1.10.22：五步是一口气做完的，滚到第 4 步时看不到「还剩几步」。
+       顶部这一点进度条跟着滚动更新，点一下能跳回任意一步。 -->
+  <nav class="steps-progress" aria-label="安装进度" data-i18n-aria="安装进度">
+    <a class="steps-dot" href="#step-1">1</a>
+    <a class="steps-dot" href="#step-2">2</a>
+    <a class="steps-dot" href="#step-3">3</a>
+    <a class="steps-dot" href="#step-4">4</a>
+    <a class="steps-dot" href="#step-5">5</a>
+  </nav>
+
   <ol class="steps">
-    <li>
+    <li id="step-1">
       <p class="what" data-i18n-html="双击插件目录里的 <code>install-native-folder-opener.bat</code>">双击插件目录里的 <code>install-native-folder-opener.bat</code></p>
       <p class="hint" data-i18n-html="就在你加载插件时选的那个文件夹里，和 <code>manifest.json</code> 放在一起。">就在你加载插件时选的那个文件夹里，和 <code>manifest.json</code> 放在一起。</p>
       <div class="win">
@@ -42,7 +52,7 @@
       </div>
     </li>
 
-    <li>
+    <li id="step-2">
       <p class="what" data-i18n-html="在弹出的黑窗口里，粘贴<strong>扩展程序 ID</strong>">在弹出的黑窗口里，粘贴<strong>扩展程序 ID</strong></p>
       <p class="hint" data-i18n-html="先去 <code>chrome://extensions</code>，找到「哔哩藏库」，把插件介绍<strong>下方那串 ID</strong> 复制下来（就是红框里的那串），粘贴到黑窗口里按回车。">先去 <code>chrome://extensions</code>，找到「哔哩藏库」，把插件介绍<strong>下方那串 ID</strong> 复制下来（就是红框里的那串），粘贴到黑窗口里按回车。</p>
       <div class="win ext-page">
@@ -64,7 +74,7 @@
       </div>
     </li>
 
-    <li>
+    <li id="step-3">
       <p class="what" data-i18n-html="再粘贴<strong>视频下载目录的绝对路径</strong>">再粘贴<strong>视频下载目录的绝对路径</strong></p>
       <p class="hint" data-i18n-html="打开你的视频下载文件夹（默认是本地备份文件夹下的 <code>000视频下载</code>），在文件资源管理器<strong>上方的地址栏点一下</strong>，把里面的完整地址复制过来，粘贴到黑窗口里按回车。">打开你的视频下载文件夹（默认是本地备份文件夹下的 <code>000视频下载</code>），在文件资源管理器<strong>上方的地址栏点一下</strong>，把里面的完整地址复制过来，粘贴到黑窗口里按回车。</p>
       <div class="win">
@@ -94,7 +104,7 @@
       </div>
     </li>
 
-    <li>
+    <li id="step-4">
       <p class="what" data-i18n="看到「安装完成」就成功了">看到「安装完成」就成功了</p>
       <p class="hint" data-i18n="窗口里会列出扩展程序 ID、宿主启动器、原生消息清单和下载目录。看到这几行就说明写进去了。">窗口里会列出扩展程序 ID、宿主启动器、原生消息清单和下载目录。看到这几行就说明写进去了。</p>
       <div class="cmd">
@@ -116,7 +126,7 @@
       </div>
     </li>
 
-    <li>
+    <li id="step-5">
       <p class="what" data-i18n="完全退出 Chrome，再重新打开">完全退出 Chrome，再重新打开</p>
       <p class="hint" data-i18n-html="关掉<strong>所有</strong> Chrome 窗口（必要时在任务管理器里结束 <code>chrome.exe</code>），然后重新打开。">关掉<strong>所有</strong> Chrome 窗口（必要时在任务管理器里结束 <code>chrome.exe</code>），然后重新打开。</p>
       <div class="note" data-i18n-html="<strong>不需要重新加载插件</strong> —— 完全重启 Chrome 就够了。重启后回到收藏库，点「打开本地视频目录」试试。"><strong>不需要重新加载插件</strong> —— 完全重启 Chrome 就够了。重启后回到收藏库，点「打开本地视频目录」试试。</div>

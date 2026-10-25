@@ -54,6 +54,7 @@
   "1.3.0 起不再提供下载功能": "Downloading was removed in 1.3.0",
   "1.7.9 起统一改口：以前本地那份也叫「本地收藏夹」，和 B 站上的收藏夹只差两个字，删东西时很容易点错。现在本地那份一律叫「本地归档」。": "Renamed in 1.7.9: the local copy used to be called a \"local collection\" as well, only two characters away from a Bilibili collection, which made it easy to delete the wrong thing. The local copy is now always called a \"local archive\".",
   "3 个月前": "3 months ago",
+  "安装进度": "Install progress",
   "按 UP 主筛选": "Filter by uploader",
   "按本地归档重新数一遍：总数、今日新增、最近 14 天、收藏夹排行和宠物记录都会按文件夹里的实际情况重算。只重建 003database 里的统计库，不动任何视频文件夹；动手前会先把现在这份库另存一份带时间戳的副本。": "Recount everything from the local archive: totals, today's new saves, the last 14 days, the folder ranking and the pet record. Only the stats database in 003database is rebuilt — no video folder is touched, and the current database is first saved as a timestamped copy.",
   "按标签筛选": "Filter by tag",

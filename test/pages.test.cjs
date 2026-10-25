@@ -1953,6 +1953,28 @@ async function suiteDocs() {
     assert.equal(current.length, 1, "任何时刻只有一节是当前节");
     assert.equal(current[0].getAttribute("aria-current"), "location", "当前节要告诉读屏");
   });
+
+  await test("安装教程带五步进度，点一下能跳回那一步（1.10.22 真执行）", async () => {
+    const page = dom.loadPage({ htmlFile: "tutorial.html" });
+    await settle(12);
+    const document = page.document;
+
+    const bar = document.querySelector(".steps-progress");
+    assert.ok(bar, "要有进度条");
+    const dots = Array.from(bar.querySelectorAll("a.steps-dot"));
+    assert.equal(dots.length, 5, "五步就是五个点");
+
+    dots.forEach((dot, index) => {
+      assert.equal(dot.getAttribute("href"), `#step-${index + 1}`);
+      const step = document.getElementById(`step-${index + 1}`);
+      assert.ok(step, `#step-${index + 1} 要真的指向一个步骤`);
+      assert.equal(dot.textContent.trim(), String(index + 1), "点里就是步号");
+    });
+
+    const current = dots.filter((dot) => dot.classList.contains("is-current"));
+    assert.equal(current.length, 1, "任何时刻只有一步是当前步");
+    assert.equal(current[0].getAttribute("aria-current"), "step", "当前步要告诉读屏");
+  });
 }
 
 async function suite() {

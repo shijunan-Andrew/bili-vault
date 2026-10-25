@@ -137,14 +137,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.10.21：使用说明的目录能点、也知道你读到哪一节
+## V1.10.22：安装教程能看出装到第几步
 
-- **问题**：目录里十条看起来像普通文字——`text-decoration: none`，只有悬停才冒出下划线；滚动时也没有任何「现在在第几节」的反馈，长文档读到一半找不到位置。
-- **改法**：常态给虚线下划线（`--accent-line`）、悬停转实线并铺 `--accent-soft`；新增「当前节」样式 `is-current`（实线 + 底色 + 稍重字重）。
-- **高亮怎么算**：不引 IntersectionObserver，直接量每个 `<h2>` 的 `getBoundingClientRect().top`，取「最后一个已经滚过顶部 140px」的那节；`scroll` 与 `resize` 都用 `requestAnimationFrame` 合并成一次计算。
-- **带 `#hash` 打开**：浏览器的锚点滚动发生在脚本之后，首帧会算错，所以在 `load` 时再量一次。
-- **可访问性**：当前节额外挂 `aria-current="location"`，读屏能听出「你现在在这一节」。
-- **范围**：`page.css` 三条 `.toc a*` 规则、`tutorial.js` 约 30 行；无新增文案，词典仍是 **1088** 条；`test/stability.test.cjs` 加 1 条守卫（384 → **385**），`test/pages.test.cjs` 的 `suiteDocs` 加 1 条真执行用例（65 → **66**）。
+- **问题**：教程是「一口气五步」，滚到第 4 步时看不到还剩几步，也不知道自己刚才漏没漏第 2 步。
+- **改法**：步骤上方加一条五点进度条——编号就是步号，当前步实心、走过的步描边，点任意一点跳回那一步；滚动时跟着更新。
+- **吸顶**：`position: sticky; top: 0` + `background: var(--surface)`。必须给底色，否则正文会从下面透出来。
+- **判定口径**：与目录高亮同一套（取最后一个「刚滚过顶部 120px」的步骤），`scroll`/`resize` 用 `requestAnimationFrame` 合并，`load` 时再算一次。
+- **可访问性**：进度条有 `aria-label`（新词条「安装进度」），当前步挂 `aria-current="step"`。
+- **范围**：`tutorial.html`（五个 `<li id="step-N">` + 一个 `<nav>`）、`page.css` 五条 `.steps-*` 规则、`tutorial.js` 约 30 行；词典 1088 → **1089**；stability 385 → **386**，pages 66 → **67**。
 
 **遗留** - 无。
 
@@ -152,11 +152,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1088 条**<!-- i18n-count:1088 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1089 条**<!-- i18n-count:1089 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:385 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:386 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
