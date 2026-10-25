@@ -137,25 +137,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.11.4：检查更新在「主源挂住」时也能等到镜像的答案
+## V1.11.5：「检查更新」在设置页自成一行，使用说明清掉过时的一节
 
-- **实测**：`raw.githubusercontent.com` 在某些网络下会直接挂到超时（`curl` 15 秒拿不到），而 `cdn.jsdelivr.net` 正常返回。
-  这时后台要先等主源 6 秒、再问镜像，设置页原来只等 12 秒，容易在镜像还没答完时就报「后台没有回应」。
-- **改法**：设置页的等待时间从 12 秒放到 20 秒（两个源串行各 6 秒 + 余量）；等不到也不影响结论 ——
-  后台拿到结果照样写进 storage，重开设置页就能看见。
-- **顺带说明**：这就是当初保留镜像源的原因；不把主源换掉，是因为它和 tag 永远同步、没有 CDN 延迟。
+- 设置页左栏多了「检查更新」这一栏：原来它塞在「本机数据」卡的最下面，而那张卡的引言讲的是「和你是谁有关」的清理项，两头都别扭。现在单独一栏，标题、说明、按钮各就各位。
+- 卡片里写清边界：**扩展是解压加载的，没有商店那条自动更新通道**，只能手动查一次；查到新版本给下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。
+- 使用说明（`guide.html`）删掉了「左下角两个浮标」一整节 —— 主题与语言早在 1.4.0 就搬进设置页的「外观」「语言」两栏了，那节示意图配的是已经不存在的界面。只给它用的 6 条样式（`mockup.css` 的 `.floats` / `.float-*`）一起删掉，没留死代码。
+- 同一页的弹窗示意图里也删掉了「跟随系统 / 白天 / 夜晚」那行（1.4.0 起弹窗里没有主题开关）。
+- FAQ 补了两条用户真会问的：「主题和界面语言在哪改？」「怎么知道有没有新版本？」。
+- 守卫：`stability.test.cjs` 钉住三件事 —— 检查更新必须是独立一栏且不再出现在「本机数据」卡里、导航项与卡片必须一一对应、使用说明里不许再出现浮标那一节与 `float-*` 样式。`pages.test.cjs` 在真跑起来的设置页上核同样的结构。
 
 **遗留** - 无。
-
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1100 条**<!-- i18n-count:1100 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1100 条**<!-- i18n-count:1103 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:392 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:394 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

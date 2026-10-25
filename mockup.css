@@ -161,11 +161,3 @@
 .detail-note { margin: 0; color: var(--muted); font-size: 12.5px; }
 
 /* ── 主题 / 语言浮标 ── */
-.floats { display: flex; gap: 26px; align-items: flex-start; margin-top: 12px; }
-.float-item { text-align: center; }
-.float-btn { width: 46px; height: 46px; margin: 0 auto; border-radius: 50%; border: 1px solid var(--brand-line);
-             background: var(--surface); color: var(--brand); display: grid; place-items: center; font-size: 19px; box-shadow: var(--shadow-md); }
-.float-item p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
-.float-menu { margin-top: 8px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-md); text-align: left; }
-.float-menu div { padding: 6px 10px; border-radius: var(--r-xs); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-.float-menu div.on { background: var(--brand-soft); color: var(--brand); font-weight: 700; }

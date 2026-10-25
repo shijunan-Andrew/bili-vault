@@ -8333,3 +8333,36 @@ test("1.11.1：彩蛋页不许再带内联 <script>（MV3 的 CSP 会拦，插�
   assert.match(verify, /inline <script> block\(s\) survived/, "verify.js 必须把「出现内联脚本」判成失败");
   assert.match(verify, /expected exactly 1 <script> tag \(egg-2015\.js\)/, "verify.js 必须要求只有一个 <script>，且是 egg-2015.js");
 });
+test("1.11.5：「检查更新」在设置页自成一行，不再埋在本机数据卡里", () => {
+  const html = readProjectFile("settings.html");
+  assert.match(html, /<button type="button" class="nav-item" data-group="update">/, "左导航要有检查更新这一项");
+  const card = html.match(/<section class="settings-card" id="group-update" data-group="update">[\s\S]*?<\/section>/);
+  assert.ok(card, "检查更新要自成一栏");
+  assert.match(card[0], /id="checkUpdate"/, "按钮要在这张卡里");
+  assert.match(card[0], /id="updateStatus"/, "状态行也要在这张卡里");
+  assert.match(card[0], /id="updateShaRow"/, "SHA 行也要在这张卡里");
+  assert.match(card[0], /<h2 data-i18n="检查更新">/, "卡片标题就是「检查更新」");
+
+  /* 反过来：本机数据卡里不许再有它，否则又是两份入口 */
+  const local = html.match(/<section class="settings-card" id="group-localdata" data-group="localdata">[\s\S]*?<\/section>/);
+  assert.ok(local, "本机数据卡还在");
+  assert.equal(/checkUpdate/.test(local[0]), false, "本机数据卡里不该再有检查更新按钮");
+  assert.equal(/updateStatus/.test(local[0]), false, "本机数据卡里不该再有更新状态行");
+
+  /* 导航项与卡片一一对应：settings.js 按 data-group 现取，对不上就会点了没反应 */
+  const navGroups = [...html.matchAll(/class="nav-item" data-group="([^"]+)"/g)].map((m) => m[1]);
+  const cardGroups = [...html.matchAll(/class="settings-card" id="group-[^"]+" data-group="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(navGroups, cardGroups, "导航项与卡片必须一一对应、顺序一致");
+  assert.ok(navGroups.includes("update"), "update 这一组要在名单里");
+});
+
+test("1.11.5：使用说明里不再有「左下角两个浮标」（主题与语言已经搬进设置页）", () => {
+  const guide = readProjectFile("guide.html");
+  assert.equal(guide.includes("左下角两个浮标"), false, "浮标那一节要删掉");
+  assert.equal(/class="floats?"/.test(guide), false, "示意图容器也要删");
+  assert.equal(guide.includes("float-menu"), false, "浮标菜单的示意图也要删");
+  const css = readProjectFile("mockup.css");
+  assert.equal(/\.float-(?:item|btn|menu)/.test(css), false, "只给它用的样式一起删，别留死代码");
+  assert.match(guide, /主题和界面语言在哪改？/, "要在 FAQ 里说清改去哪了");
+  assert.match(guide, /怎么知道有没有新版本？/, "要把检查更新写进 FAQ");
+});

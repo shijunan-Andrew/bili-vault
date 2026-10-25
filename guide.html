@@ -62,7 +62,6 @@
       </div>
       <span class="pill"><span data-i18n="打开本地收藏库">打开本地收藏库</span> ↗</span>
     </div>
-    <div class="seg"><span class="on" data-i18n="跟随系统">跟随系统</span><span data-i18n="白天">白天</span><span data-i18n="夜晚">夜晚</span></div>
     <div class="seg"><span class="on">简体中文</span><span>繁體中文</span><span>English</span></div>
     <div class="card">
       <b data-i18n="请求速度">请求速度</b>
@@ -300,25 +299,6 @@
     </div>
   </div>
 
-  <h3 data-i18n="左下角两个浮标">左下角两个浮标</h3>
-  <p class="hint" data-i18n-html="浮标里的图标是插件自带的线性 SVG 图标（<code>icons.js</code>），不是系统 emoji。">浮标里的图标是插件自带的线性 SVG 图标（<code>icons.js</code>），不是系统 emoji。</p>
-  <div class="floats">
-    <div class="float-item">
-      <div class="float-btn"><svg class="mock-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.4" y="4.8" width="17.2" height="11.6" rx="2.4"/><path d="M9 20h6M12 16.4V20"/></svg></div>
-      <p data-i18n="主题">主题</p>
-      <div class="float-menu"><div class="on">☀ <span data-i18n="跟随系统">跟随系统</span> ✓</div><div>☀ <span data-i18n="白天">白天</span></div><div>☾ <span data-i18n="夜晚">夜晚</span></div></div>
-    </div>
-    <div class="float-item">
-      <div class="float-btn"><svg class="mock-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8"/><path d="M12 3.6c2.3 2.4 3.5 5.3 3.5 8.4S14.3 18 12 20.4c-2.3-2.4-3.5-5.3-3.5-8.4S9.7 6 12 3.6z"/></svg></div>
-      <p data-i18n="语言">语言</p>
-      <div class="float-menu">
-        <div class="on"><svg class="mock-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8"/><path d="M12 3.6c2.3 2.4 3.5 5.3 3.5 8.4S14.3 18 12 20.4c-2.3-2.4-3.5-5.3-3.5-8.4S9.7 6 12 3.6z"/></svg> 简体中文 ✓</div>
-        <div><svg class="mock-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8"/><path d="M12 3.6c2.3 2.4 3.5 5.3 3.5 8.4S14.3 18 12 20.4c-2.3-2.4-3.5-5.3-3.5-8.4S9.7 6 12 3.6z"/></svg> 繁體中文</div>
-        <div><svg class="mock-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8"/><path d="M12 3.6c2.3 2.4 3.5 5.3 3.5 8.4S14.3 18 12 20.4c-2.3-2.4-3.5-5.3-3.5-8.4S9.7 6 12 3.6z"/></svg> English</div>
-      </div>
-    </div>
-  </div>
-
   <div class="callout">
     <b data-i18n="批量操作">批量操作</b>
     <span data-i18n-html="在卡片上勾选若干视频，底部会出现那条蓝色工具条：<strong>更新视频数据 / 移动或复制 / 删除</strong>。一次最多处理 80 条，超出的部分完成后可以再点一次继续。">在卡片上勾选若干视频，底部会出现那条蓝色工具条：<strong>更新视频数据 / 移动或复制 / 删除</strong>。一次最多处理 80 条，超出的部分完成后可以再点一次继续。</span>
@@ -389,6 +369,12 @@
 
     <dt data-i18n="本地删了会影响 B 站吗？">本地删了会影响 B 站吗？</dt>
     <dd data-i18n="不会。本地文件和 B 站账户完全独立，删除本地归档不影响线上收藏。">不会。本地文件和 B 站账户完全独立，删除本地归档不影响线上收藏。</dd>
+
+    <dt data-i18n="主题和界面语言在哪改？">主题和界面语言在哪改？</dt>
+    <dd data-i18n="在设置页的「外观」和「语言」两栏里改，改完立刻生效；收藏库右下角的齿轮也能进设置页。">在设置页的「外观」和「语言」两栏里改，改完立刻生效；收藏库右下角的齿轮也能进设置页。</dd>
+
+    <dt data-i18n="怎么知道有没有新版本？">怎么知道有没有新版本？</dt>
+    <dd data-i18n="在设置页的「检查更新」里点一下，会去 GitHub 查一次当前公开版；查到新版本会给你下载页和 SHA-256，覆盖安装要你自己来，插件不会自动更新。">在设置页的「检查更新」里点一下，会去 GitHub 查一次当前公开版；查到新版本会给你下载页和 SHA-256，覆盖安装要你自己来，插件不会自动更新。</dd>
 
     <dt data-i18n="换电脑怎么迁移？">换电脑怎么迁移？</dt>
     <dd data-i18n="把整个本地备份文件夹拷过去，在新电脑上重新选择这个文件夹即可。目录结构是普通文件夹，不依赖插件。">把整个本地备份文件夹拷过去，在新电脑上重新选择这个文件夹即可。目录结构是普通文件夹，不依赖插件。</dd>

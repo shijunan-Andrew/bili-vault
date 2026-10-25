@@ -430,6 +430,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 交互外壳（4.5.1）
 
+- **设置页一栏 = 一段 HTML（1.11.5 明确）**：左导航项（`#settingsNav [data-group]`）与卡片（`.settings-main .settings-card[data-group]`）都由 `settings.js` 从 DOM 现取，导航、面包屑、搜索三处自动跟上 —— 加一栏只写一段 HTML，**不要再加第二份分组清单**。两边的 `data-group` 必须一一对应、顺序一致，`test/stability.test.cjs` 与 `test/pages.test.cjs` 各有一条断言盯着（1.9.7 的回收站、1.11.5 的检查更新都是这么加的）。
 - **设置入口**：收藏库右下角挂着**两个圆球**（`.floating-dock`，`position: fixed; z-index: 6; bottom: calc(var(--sp-6) + var(--sp-5))`）—— 上面是**回到顶部** `#scrollTopFab`（`.is-hidden` 时 `opacity: 0` + `pointer-events: none`，滚过 `SCROLL_TOP_REVEAL_AT = 240` 才淡出来，点击 `window.scrollTo({ top: 0, behavior: 平滑或 auto })`，`prefers-reduced-motion` 时直接跳），下面是齿轮 `#settingsFab`，点击 `chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") })` 打开**独立设置页**。设置页分三张卡：外观（`BcaTheme`）、语言（`BcaI18n`）、使用说明（`guide.html` + `tutorial.html` 两个入口）。**改完立即生效、人留在设置页**；「返回收藏库」直接 `chrome.tabs.getCurrent` + `chrome.tabs.update(tab.id, { url })` **就地导航**（V1.4.1 起不再用 `window.close()` —— 关标签页只在「上一个被激活的标签恰好是收藏库」时才对）。**主题名要翻译**（`跟随系统/白天/夜晚/自定义` 是界面文字），**语言名不翻译**（`简体中文/繁體中文/English` 是各语言自称）。旧的三球浮层菜单（`THEME_ICONS` / `toggleDockMenu` / `closeDockMenus` / `buildDockMenu` / `renderDockMenus` / `.dock-menu` / `.guide-fab`）已整块删除，测试里有反向断言，不要再抄回来。
 - **插件弹窗的分段控件**：`.segmented`，按钮用 `aria-pressed` 表达选中。**主题按钮的文字必须套 `<span data-i18n>`**——按钮里还有 `<span class="segmented-icon">` 图标，`data-i18n` 用 `textContent` 会把图标清掉。
 - **新建收藏夹**在收藏夹列表之后（`.collection-create-tail`），不要再放回「我的收藏夹」标题行。

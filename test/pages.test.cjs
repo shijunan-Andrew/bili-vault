@@ -1651,6 +1651,25 @@ async function suiteSettings() {
       BcaT(page, "已经是最新公开版（{version}）。", { version: "1.11.2" })
     );
     assert.equal(page.document.getElementById("updateShaRow").hidden, true, "没发布就不该显示 SHA");
+    /* 1.11.5：这一行必须在自己的卡里，而不是埋在本机数据卡最后面。
+       元素 id 不变 → 上面几条用例照样过；但只测 id 存在的话，搬家也能悄悄回退。 */
+    const updateCard = page.document.getElementById("group-update");
+    assert.ok(updateCard, "设置页要有独立的检查更新卡");
+    assert.equal(updateCard.dataset.group, "update");
+    assert.ok(updateCard.contains(page.document.getElementById("checkUpdate")), "按钮要在这张卡里");
+    assert.ok(updateCard.contains(page.document.getElementById("updateStatus")), "状态行要在这张卡里");
+    assert.equal(
+      page.document.getElementById("group-localdata").contains(page.document.getElementById("checkUpdate")),
+      false,
+      "本机数据卡里不该再有它",
+    );
+    const navGroups = [...page.document.querySelectorAll("#settingsNav [data-group]")].map((el) => el.dataset.group);
+    const cardGroups = [...page.document.querySelectorAll(".settings-main .settings-card[data-group]")].map(
+      (el) => el.dataset.group,
+    );
+    assert.deepEqual(navGroups, cardGroups, "导航与卡片必须一一对应");
+    assert.ok(navGroups.includes("update"), "update 这一组要在名单里");
+
   });
 }
 

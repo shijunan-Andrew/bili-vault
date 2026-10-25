@@ -98,6 +98,12 @@
           <span class="nav-icon" data-icon="shield"></span>
           <span class="nav-text" data-i18n="本机数据">本机数据</span>
         </button>
+        <!-- 1.11.5：检查更新原来塞在「本机数据」卡的最下面，用户在那张卡里找不到它，
+             那张卡的 lead 讲的又是「和你是谁有关」的清理项，两边都别扭，单独一栏。 -->
+        <button type="button" class="nav-item" data-group="update">
+          <span class="nav-icon" data-icon="refresh"></span>
+          <span class="nav-text" data-i18n="检查更新">检查更新</span>
+        </button>
       </nav>
     </aside>
 
@@ -496,26 +502,6 @@
         </div>
 
 
-        <!-- 1.11.2：扩展是解压加载的，没有商店那条自动更新通道，所以这里做「手动查一次」：
-             读仓库根的 version.json（代表用户认可的公开版），比出有没有新版本，
-             然后给下载页链接 + SHA-256，让用户自己覆盖安装。不做定时轮询、不自动下载。 -->
-        <div class="setting-row">
-          <div class="setting-row-text">
-            <p class="setting-row-title" data-i18n="检查更新">检查更新</p>
-            <p class="setting-row-desc" data-i18n="手动查一次最新公开版是多少。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。">手动查一次最新公开版是多少。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。</p>
-          </div>
-          <div class="setting-row-control">
-            <button type="button" class="button button-quiet" id="checkUpdate" data-i18n="检查更新">检查更新</button>
-          </div>
-        </div>
-        <p class="row-status" id="updateStatus" role="status" hidden></p>
-        <p class="row-error" id="updateError" role="alert" hidden></p>
-        <p class="row-status" id="updateLinkRow" hidden>
-          <a class="text-link" id="updateLink" href="https://github.com/shijunan-Andrew/bili-vault/releases" target="_blank" rel="noopener" data-i18n="在 GitHub 上打开下载页">在 GitHub 上打开下载页</a>
-        </p>
-        <p class="row-status" id="updateShaRow" hidden>
-          <span data-i18n="下载后可以自己核对 SHA-256：">下载后可以自己核对 SHA-256：</span><code id="updateSha"></code>
-        </p>
         <!-- 1.10.0（TODO P0-3）：失败原来只在弹窗里闪一下就没了（lastError 只有一个槽位，
              后一次会顶掉前一次）。这里留最近 3 条，再给一个「复制诊断信息」。
              摘要写进 storage 之前就已经过 maskLocalUserPaths()，复制出去不会带用户名。 -->
@@ -534,6 +520,30 @@
         <p class="row-status" id="forgetUidStatus" role="status" hidden></p>
         <p class="row-status" id="nativeCleanupStatus" role="status" hidden></p>
         <p class="row-status" id="recentErrorStatus" role="status" hidden></p>
+      </section>
+      <!-- 1.11.5：单独一栏。检查更新只读仓库根那份 version.json（代表用户认可的公开版），
+           不下载、不替换任何文件，所以文案只说「查到什么」，不说「正在更新」。 -->
+      <section class="settings-card" id="group-update" data-group="update">
+        <h2 data-i18n="检查更新">检查更新</h2>
+        <p class="card-lead" data-i18n="扩展是解压加载的，没有商店那条自动更新通道，只能手动查一次。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。">扩展是解压加载的，没有商店那条自动更新通道，只能手动查一次。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。</p>
+
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="当前版本">当前版本</p>
+            <p class="setting-row-desc" data-i18n="点右边按钮，向 GitHub 查一次最新公开版是多少。">点右边按钮，向 GitHub 查一次最新公开版是多少。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="checkUpdate" data-i18n="检查更新">检查更新</button>
+          </div>
+        </div>
+        <p class="row-status" id="updateStatus" role="status" hidden></p>
+        <p class="row-error" id="updateError" role="alert" hidden></p>
+        <p class="row-status" id="updateLinkRow" hidden>
+          <a class="text-link" id="updateLink" href="https://github.com/shijunan-Andrew/bili-vault/releases" target="_blank" rel="noopener" data-i18n="在 GitHub 上打开下载页">在 GitHub 上打开下载页</a>
+        </p>
+        <p class="row-status" id="updateShaRow" hidden>
+          <span data-i18n="下载后可以自己核对 SHA-256：">下载后可以自己核对 SHA-256：</span><code id="updateSha"></code>
+        </p>
       </section>
 
       <p class="settings-foot" data-i18n="外观、语言、数据统计和使用说明都在这里改，改完立即生效。">外观、语言、数据统计和使用说明都在这里改，改完立即生效。</p>
