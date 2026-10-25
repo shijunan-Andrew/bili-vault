@@ -8367,6 +8367,28 @@ test("1.11.5：使用说明里不再有「左下角两个浮标」（主题与�
   assert.match(guide, /怎么知道有没有新版本？/, "要把检查更新写进 FAQ");
 });
 
+test("1.11.9：时间范围菜单抬得起来，年份图例不再吞掉滚轮", () => {
+  const css = readProjectFile("stats.css");
+  const js = readProjectFile("stats.js");
+
+  // A. 菜单打开时整张卡要抬起来（否则毛玻璃给每张卡造的层叠上下文会把它切掉）
+  assert.match(css, /\.stats-card\.menu-open \{[^}]*position: relative;[^}]*z-index: 5;/, "要有 .menu-open 把卡片抬起来");
+  assert.match(js, /function setMenuElevated\(on\)/, "提升只写一处");
+  assert.match(js, /card\.classList\.toggle\("menu-open", on\)/);
+  const openBlock = js.slice(js.indexOf("function openPicker()"), js.indexOf("function closePicker()"));
+  assert.match(openBlock, /setMenuElevated\(true\);/, "打开时抬起来");
+  const closeBlock = js.slice(js.indexOf("function closePicker()"), js.indexOf("function closePicker()") + 800);
+  assert.equal((closeBlock.match(/setMenuElevated\(false\);/g) || []).length, 2, "两条收起路径都要放下去");
+
+  // B. 图例不许再写 overscroll-behavior（会把滚轮原地吃掉）
+  const legend = /\.stats-legend \{([\s\S]*?)\n\}/.exec(css);
+  assert.ok(legend, "stats.css 里应该有 .stats-legend 规则");
+  // 注释里提到这个属性名是正常的（那里正解释为什么不许用它），先剥注释再断言
+  const legendBody = legend[1].replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.doesNotMatch(legendBody, /overscroll-behavior/, ".stats-legend 不许再吞滚轮");
+  assert.match(legend[1], /overflow-y: auto;/, "图例该滚的时候还是要能滚");
+});
+
 test("1.11.8：设置页的栏标题完全透明、不吃毛玻璃，玻璃只盖行那层", () => {
   const theme = readProjectFile("theme.css");
   const settingsCss = readProjectFile("settings.css");

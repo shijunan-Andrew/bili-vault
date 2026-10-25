@@ -1988,6 +1988,27 @@ async function suiteStats() {
     yearly: [{ year: "2026", count: 12 }]
   };
 
+  await test("打开时间范围菜单时把那张卡抬起来，选完再放下去（1.11.9 真执行）", async () => {
+    const page = await openStats({ localData: { bcaStats: snapshot } });
+    const doc = page.document;
+    const button = doc.getElementById("statsRangeButton");
+    const menu = doc.getElementById("statsRangeMenu");
+    assert.ok(button && menu, "统计页要有时间范围按钮与菜单");
+    const card = menu.closest(".stats-card");
+    assert.ok(card, "菜单要在一张 .stats-card 里");
+    assert.equal(card.classList.contains("menu-open"), false, "一开始没抬起来");
+
+    button.click();
+    await settle(4);
+    assert.equal(menu.hidden, false, "点开菜单");
+    assert.equal(card.classList.contains("menu-open"), true, "打开时整张卡抬起来");
+
+    button.click();
+    await settle(4);
+    assert.equal(menu.hidden, true, "再点一次收起");
+    assert.equal(card.classList.contains("menu-open"), false, "收起时放下去");
+  });
+
   await test("统计页空态点「重新读取统计库」会让后台补发快照，回来就重绘（1.10.0 真执行）", async () => {
     let asked = 0;
     const page = await openStats({

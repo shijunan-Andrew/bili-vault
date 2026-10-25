@@ -1695,6 +1695,12 @@
     });
   }
 
+  /* 1.11.9：菜单所在的卡片在打开期间要抬到兄弟卡之上（见 stats.css 的 .menu-open） */
+  function setMenuElevated(on) {
+    const card = ui.rangeMenu ? ui.rangeMenu.closest(".stats-card") : null;
+    if (card) card.classList.toggle("menu-open", on);
+  }
+
   function openPicker() {
     picker.open = true;
     picker.mode = preset === "custom" ? "custom" : "preset";
@@ -1705,6 +1711,7 @@
     picker.paged = false;
     picker.view = calendarView();
     show(ui.rangeMenu, true);
+    setMenuElevated(true);
     show(ui.calendar, picker.mode === "custom");
     if (ui.rangeButton) ui.rangeButton.setAttribute("aria-expanded", "true");
     renderCalendar();
@@ -1713,12 +1720,14 @@
   function closePicker() {
     if (!picker.open) {
       show(ui.rangeMenu, false);
+      setMenuElevated(false);
       if (ui.rangeButton) ui.rangeButton.setAttribute("aria-expanded", "false");
       return;
     }
     picker.open = false;
     picker.mode = "preset";
     show(ui.rangeMenu, false);
+    setMenuElevated(false);
     show(ui.calendar, false);
     if (ui.rangeButton) {
       ui.rangeButton.setAttribute("aria-expanded", "false");

@@ -252,6 +252,15 @@ body {
   position: relative;
   margin: 0;
 }
+/* 1.11.9：菜单是绝对定位的浮层，原本靠 z-index 40 压过后面的卡片。
+   但一旦开毛玻璃，每张 .stats-card 都会因为 backdrop-filter 而各自成为一个
+   层叠上下文 —— 菜单的 40 变成「这张卡内部的 40」，整张卡仍按文档顺序排在下
+   一张下面，于是二级窗口被「每日新增收藏数」那张卡切掉一截。
+   打开菜单时由 stats.js 给这张卡挂 .menu-open，把整张卡抬到兄弟卡之上。 */
+.stats-card.menu-open {
+  position: relative;
+  z-index: 5;
+}
 .stats-picker-button {
   display: inline-flex;
   align-items: center;
@@ -634,7 +643,10 @@ html[data-theme="dark"] .stats-pie {
      右侧留一点 padding 给滚动条，免得滚动条压住百分比。 */
   max-height: min(38vh, 320px);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* 1.11.9：这里原来还有一条 overscroll-behavior: contain。
+     它让「鼠标停在图例上滚轮只给图例用」—— 可图例只有几行、根本滚不动，
+     于是滚轮被原地吃掉，整页滚不了。宁可滚动到底时顺带滚一下页面，
+     也不能让指针停在图上就再也翻不动。 */
   padding-right: var(--sp-1);
 }
 .stats-legend-item {
