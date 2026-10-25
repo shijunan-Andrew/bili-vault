@@ -1664,7 +1664,7 @@ async function suiteSettings() {
   });
 
 
-  await test("设置页「检查更新」：自己装的是比公开版新的开发版时，要说清「不用更新」（1.11.3）", async () => {
+  await test("设置页「检查更新」：公开版存在、自己装的是更新的开发版时，要说清「不用更新」（1.11.3 / 1.12.1 调口径）", async () => {
     const page = await openSettings();
     page.window.chrome.runtime.getManifest = () => ({ version: "1.11.3" });
     page.window.chrome.runtime.sendMessage = (message, callback) => {
@@ -1675,7 +1675,7 @@ async function suiteSettings() {
           current: "1.11.3",
           latest: "1.11.1",
           newer: false,
-          released: false,
+          released: true,
           date: "2026-10-25",
           source: "github",
           releasePageUrl: "https://github.com/shijunan-Andrew/bili-vault/releases",
@@ -1695,6 +1695,38 @@ async function suiteSettings() {
     );
     assert.equal(page.document.getElementById("updateShaRow").hidden, true);
   });
+  await test("设置页「检查更新」：还没有正式下载包时，不许说「已经是最新」也不给下载页（1.12.1）", async () => {
+    const page = await openSettings();
+    page.window.chrome.runtime.sendMessage = (message, callback) => {
+      if (typeof callback === "function") {
+        callback({
+          ok: true,
+          mode: "manual",
+          current: "1.12.1",
+          latest: "1.12.1",
+          newer: false,
+          released: false,
+          date: "2026-10-25",
+          source: "github",
+          releasePageUrl: "https://github.com/shijunan-Andrew/bili-vault/releases",
+          zipName: "",
+          sha256: "",
+          notes: []
+        });
+      }
+      return undefined;
+    };
+    dom.fireUserEvent(page.document.getElementById("checkUpdate"), "click");
+    await settle(6);
+    assert.equal(
+      textOf(page.document.getElementById("updateStatus")),
+      BcaT(page, "作者还没有发布正式下载包；你现在装的是 {current}，就是这个仓库的最新版本。", { current: "1.12.1" }),
+      "还没发布下载包时，不能声称「已经是最新公开版」，也不能说「比公开版还新」"
+    );
+    assert.equal(page.document.getElementById("updateLinkRow").hidden, true, "没有 zip 就别给下载页");
+    assert.equal(page.document.getElementById("updateShaRow").hidden, true);
+  });
+
   await test("设置页「检查更新」：重开页面先显示上次查到的结论（1.11.2）", async () => {
     const page = await openSettings({
       localData: {
@@ -1704,7 +1736,7 @@ async function suiteSettings() {
           current: "1.11.2",
           latest: "1.11.2",
           newer: false,
-          released: false,
+          released: true,
           date: "2026-10-25",
           source: "jsdelivr",
           releasePageUrl: "https://github.com/shijunan-Andrew/bili-vault/releases",

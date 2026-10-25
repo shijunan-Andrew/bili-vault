@@ -8303,8 +8303,13 @@ test("1.11.2：version.json 代表「用户认可的公开版」，不是最新 
 
   assert.match(String(release.version), /^\d+\.\d+\.\d+$/, "version.json 的版本号必须是三段数字");
   assert.equal(typeof release.released, "boolean", "released 必须是布尔值");
-  assert.ok(core.compareVersions(release.version, manifest.version) <= 0,
-    `version.json（${release.version}）不能比当前 manifest（${manifest.version}）还新 —— 那等于告诉用户一个还不存在的版本`);
+  /* 1.12.1（审查 P1-2）：只有「已经宣布发布」时，公开版才不能超过当前 manifest ——
+     否则等于给用户一个还不存在的下载包。还没发布时，version.json 写的就是仓库最新版本，
+     界面会明说「还没有正式下载包」，不会拿它去比大小。 */
+  if (release.released === true) {
+    assert.ok(core.compareVersions(release.version, manifest.version) <= 0,
+      `已经宣布发布的 version.json（${release.version}）不能比当前 manifest（${manifest.version}）还新`);
+  }
 
   /* 它必须真的出现在 HISTORY 里，否则「最新公开版」无从追溯 */
   const history = readProjectFile("docs/HISTORY.md");
@@ -8453,6 +8458,68 @@ test("1.11.7：底部提示条不吃毛玻璃，底色是不透明的反相色",
   assert.doesNotMatch(toastBlock[1], /background: color-mix\(/, ".toast 的底色不许再掺 transparent");
   // 字色与底色是一对反相：字用 --surface、底用 --ink，换主题时两边一起翻
   assert.match(toastBlock[1], /color: var\(--surface\);/, ".toast 的字色要写成 var(--surface)");
+});
+
+
+test("1.12.1：版本信息与界面说法对得上，「还没发布正式下载包」不许说成「已经是最新」（审查 P1-1/P1-2）", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  const latest = JSON.parse(readProjectFile("version.json"));
+  const settings = readProjectFile("settings.js");
+  const privacy = readProjectFile("docs/PRIVACY.md");
+
+  const numeric = (value) =>
+    String(value == null ? "" : value)
+      .trim()
+      .replace(/^[vV]/, "")
+      .split(".")
+      .map((part) => Number.parseInt(String(part).replace(/[^0-9]/g, ""), 10) || 0);
+  const compare = (left, right) => {
+    const a = numeric(left);
+    const b = numeric(right);
+    for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+      const one = a[index] || 0;
+      const two = b[index] || 0;
+      if (one !== two) return one - two;
+    }
+    return 0;
+  };
+
+  // version.json 自洽：版本号形态、released 是布尔、发布了就必须带 zip 名与摘要
+  assert.match(latest.version, /^\d+\.\d+\.\d+$/, "version.json 的版本号要是 x.y.z");
+  assert.equal(typeof latest.released, "boolean", "released 必须是布尔值");
+  assert.match(latest.date, /^\d{4}-\d{2}-\d{2}$/, "版本文件要写发布 / 更新日期");
+  assert.ok(Array.isArray(latest.notes) && latest.notes.length > 0, "要点几条说明，下载页和界面都用得上");
+  if (latest.released === true) {
+    assert.match(String(latest.zipName || ""), /\.zip$/, "宣布发布之后必须写 zip 文件名");
+    assert.match(String(latest.sha256 || ""), /^[0-9a-f]{64}$/, "宣布发布之后必须写 SHA-256");
+  } else {
+    assert.equal(String(latest.zipName || ""), "", "还没发布就不许写 zip 文件名，免得点进下载页扑空");
+    assert.equal(String(latest.sha256 || ""), "", "还没发布就不许写 SHA-256");
+  }
+  // 只有「宣布发布」之后才要求公开版不超过 manifest；未发布时它代表仓库最新版本
+  if (latest.released === true) {
+    assert.ok(
+      compare(latest.version, manifest.version) <= 0,
+      `已经宣布发布的 version.json（${latest.version}）不该比 manifest（${manifest.version}）还新`
+    );
+  }
+
+  // 界面：released=false 的分支必须排在「比公开版还新」之前，且下载页只在发布后出现
+  const releasedBranch = settings.indexOf("if (result.released !== true) {");
+  const newerBranch = settings.indexOf("if (result.newer !== true) {");
+  assert.ok(releasedBranch > 0, "没有「还没发布」这个分支，用户会被告诉「已经是最新公开版」");
+  assert.ok(newerBranch > 0 && releasedBranch < newerBranch, "「还没发布」要先判断，否则开发版会走到「比公开版还新」");
+  assert.match(settings, /作者还没有发布正式下载包；你现在装的是 \{current\}/, "未发布时的说法要留一句人话");
+  assert.match(settings, /const released = ok && result\?\.released === true;/, "下载页开关要认 released");
+  assert.match(settings, /setVisible\(\$\("updateLinkRow"\), released\);/, "没发布就别给下载页");
+
+  // 隐私说明不能再是 1.8.x 的陈旧版本，且要写明「三类」与彩蛋页
+  assert.doesNotMatch(privacy, /对应 V1\.8\.[0-9]+/, "隐私说明的对应版本不能是 1.8 线");
+  assert.match(privacy, /三类/, "第 2 节标题与总述要写成三类请求");
+  assert.match(privacy, /raw\.githubusercontent\.com/, "检查更新用的源要写进去");
+  assert.match(privacy, /cdn\.jsdelivr\.net/, "镜像源也要写进去");
+  assert.match(privacy, /bili-old-2015/, "彩蛋页的存在要交代清楚");
+  assert.match(privacy, /掩码的边界/, "路径掩码的范围要诚实写明");
 });
 
 test("1.11.6：标题与行分成两层，收藏夹能置顶，旧按钮名不再出现", () => {

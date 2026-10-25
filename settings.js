@@ -736,6 +736,12 @@ function updateResultText(result) {
     return BcaI18n.t("查不到最新版本：GitHub 和镜像都没回应，过一会儿再试。");
   }
   const latest = updateVersionLabel(result.latest);
+  if (result.released !== true) {
+    // 1.12.1（审查 P1-2）：released=false 表示「作者还没打包正式下载包」。
+    // 这时候不能说「已经是最新公开版」，也不能说「比公开版还新」—— 根本没有公开版。
+    const current = updateVersionLabel(result.current) || updateVersionLabel(chrome.runtime.getManifest().version);
+    return BcaI18n.t("作者还没有发布正式下载包；你现在装的是 {current}，就是这个仓库的最新版本。", { current });
+  }
   if (result.newer !== true) {
     // 1.11.3：自己从源码加载的常常比公开版还新（开发版）。那种情况说「已经是最新公开版（1.11.1）」
     // 会让人以为自己装的是 1.11.1，所以按两个版本的实际大小分两句话说。
@@ -757,9 +763,12 @@ function updateResultText(result) {
 function renderUpdateResult(result) {
   const ok = result?.ok === true;
   showUpdateMessage(updateResultText(result), !ok);
-  setVisible($("updateLinkRow"), ok);
+  // 1.12.1：下载页只在「有公开版」时给。released=false 时那个页面里没有 zip，
+  // 点过去只会看到「没有发布包」，等于骗用户跑一趟。
+  const released = ok && result?.released === true;
+  setVisible($("updateLinkRow"), released);
   const link = $("updateLink");
-  if (link && ok) {
+  if (link && released) {
     // 只接受本仓库的 releases 地址：后台已经校验过一遍，这里再兜一次，防止坏数据把用户带去别处。
     const url = String(result.releasePageUrl || "");
     const target = /^https:\/\/github\.com\/shijunan-Andrew\/bili-vault\/releases/.test(url)

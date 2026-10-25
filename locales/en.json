@@ -1044,6 +1044,7 @@
   "最早收藏": "Oldest first",
   "最长的自定义区间是 {years} 年，请把范围缩小一点。": "The longest custom range is {years} years; please narrow it down.",
   "昨天": "Yesterday",
+  "作者还没有发布正式下载包；你现在装的是 {current}，就是这个仓库的最新版本。": "The author has not published an official download yet; you are on {current}, which is the latest version in this repository.",
   "做完之后，卡片上会出现「已下载」，详情里的「打开本地视频目录」会直接跳到这个目录。": "After that the card shows 「Downloaded」, and 「Open local video folder」 in the details jumps straight to that folder.",
   "av 号": "av ID",
   "B 站视频解析或本地保存失败。": "Parsing the Bilibili video or saving it locally failed.",
