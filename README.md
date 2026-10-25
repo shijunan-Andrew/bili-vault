@@ -137,18 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.6：文档里的数字能一键对齐，PowerShell 脚本进了检查
+## V1.12.7：导入结束的通知可以关掉了，隐私说明写清了必应那条链接
 
-- **`node scripts/check-all.cjs --write`**：以前加一条测试要手工同步三处
-  `<!-- test-count:N -->`、`SMOKE_TEST.md` 正文那句「的 **N** 项里」、README 的
-  `<!-- i18n-count:N -->` 与「当前 N 条」—— 漏一处就红，红了还得先手改数字才能跑
-  `status.cjs --write`（它以前遇到红就整体失败）。现在一条命令把这几处按实际值改掉，
-  并顺带刷新 `AI_HANDOFF.md` 的「当前状态」块，跑完即绿。
-- **`.ps1` 也进检查了**：原生宿主那套（协议 4 + 调用方白名单）以前只有人工在 Windows 上
-  跑 `test-native-folder-opener.ps1` 才验得到，CI 连括号写错都拦不住。现在
-  `check-all` 用 PowerShell 自己的解析器（`PSParser::Tokenize`）过一遍全部 7 个 `.ps1`，
-  只查语法、不执行、不碰注册表；没装 `pwsh` 的机器跳过而不是判红。
-- **测试项数**：`stability` 409 → 410。
+- **「导入结束弹通知」开关**：设置页「导入与导出」里多了一行开关，默认开（保持 1.7.3 起的行为）。关掉之后 `background.js` 的 `notifyImportOutcome()` 先读设置、直接返回，一条都不弹。通知正文仍是简体 —— 后台拿不到同步词典，所以给「看不懂就关掉」这个出路。
+- **隐私说明补一段**：`docs/PRIVACY.md` 第 3 节前写清「失效视频详情里的『全网搜索该视频』只是一条普通链接，点开会在新标签页里跳到必应（`www.bing.com`），插件本身不发请求」。这条链接早在 1.9.x 就有，但一直没写进隐私说明。
+- **顺手修一处自相矛盾的注释**：`IMPORT_RESUME_KEY` 那行写着「断点 + 回滚日志」，而同段下一条注释明确说「不含回滚日志」（1.12.2 把回滚日志挪进了独立的 `bcaImportLeftover`）。改成「只有断点，不含回滚日志」。
 
 **遗留** - 无。
 
@@ -156,11 +149,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1124 条**<!-- i18n-count:1124 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1129 条**<!-- i18n-count:1129 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:410 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:411 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

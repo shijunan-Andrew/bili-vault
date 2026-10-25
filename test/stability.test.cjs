@@ -8700,6 +8700,41 @@ test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的�
   assert.match(background, /function withKeepAlive\(task, reason\)/);
 });
 
+test("1.12.7：导入结束的通知有开关，后台真的照它办事（审查 P3-3）", () => {
+  const background = readProjectFile("background.js");
+  const settingsSource = readProjectFile("settings.js");
+  const settingsHtml = readProjectFile("settings.html");
+  const privacy = readProjectFile("docs/PRIVACY.md");
+
+  // 后台：外壳保持同步（「导入占位」那条会把它抠出来 new Function 跑），
+  // 真正的发送搬到 sendImportNotification，只有设置不为 false 时才发。
+  assert.match(background, /function notifyImportOutcome\(title, message\) \{/);
+  assert.equal(/async function notifyImportOutcome\(/.test(background), false, "外壳不许变 async");
+  assert.match(background, /async function sendImportNotification\(title, message\) \{/);
+  assert.match(background, /chrome\.storage\.local\s*\.get\("notifyImportFinished"\)/);
+  assert.match(background, /stored\?\.notifyImportFinished === false \? undefined : sendImportNotification\(title, message\)/);
+  assert.equal(/importNotifyEnabled/.test(background), false, "旧的 importNotifyEnabled 不该残留");
+
+  // 设置页：开关 + 默认开 + 写回 storage
+  assert.match(settingsHtml, /id="notifyImportToggle"/);
+  assert.match(settingsHtml, /id="notifyImportToggle"[^>]*aria-pressed="true"/);
+  assert.match(settingsSource, /const NOTIFY_STORAGE_KEY = "notifyImportFinished";/);
+  assert.match(settingsSource, /function renderNotifyToggle\(enabled\) \{/);
+  assert.match(settingsSource, /async function restoreNotifyToggle\(\) \{/);
+  assert.match(settingsSource, /\$\("notifyImportToggle"\)\?\.addEventListener\("click"/);
+  assert.match(settingsSource, /writeStoredSettings\(\{ \[NOTIFY_STORAGE_KEY\]: next \}\)/);
+
+  // 隐私说明要把「跳必应」这件事写清（审查 P3-4）
+  assert.match(privacy, /www\.bing\.com/, "隐私说明要提到必应那条链接");
+  assert.match(privacy, /插件本身\s*\r?\n\s*不发任何请求/, "要写清插件本身不发请求");
+
+  // 附注：IMPORT_RESUME_KEY 那行注释自相矛盾的问题修掉了
+  const resumeLine = background.split("\n").find((line) => line.includes("const IMPORT_RESUME_KEY"));
+  assert.ok(resumeLine, "background.js 里应有 IMPORT_RESUME_KEY");
+  assert.ok(!/断点 \+ 回滚日志/.test(resumeLine), "注释不许再说含回滚日志（实际只有断点）");
+  assert.ok(/只有断点，不含回滚日志/.test(resumeLine), "注释要写明只有断点");
+});
+
 test("1.12.6：文档里的数字能一键对齐，.ps1 也不用等人工才验得到（审查 P3-1 / P3-2）", () => {
   const checkAll = readProjectFile("scripts/check-all.cjs");
 

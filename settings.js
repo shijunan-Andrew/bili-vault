@@ -1501,8 +1501,37 @@ async function copyDiagnostics() {
   return text;
 }
 
+// 1.12.7（审查 P3-3）：导入结束的系统通知开关。默认开 —— 保持 1.7.3 起的行为，
+// 关掉之后 background.js 的 notifyImportOutcome() 直接返回，一条都不弹。
+const NOTIFY_STORAGE_KEY = "notifyImportFinished";
+
+function renderNotifyToggle(enabled) {
+  const toggle = $("notifyImportToggle");
+  if (!toggle) return;
+  toggle.setAttribute("aria-pressed", String(Boolean(enabled)));
+  toggle.classList.toggle("off", !enabled);
+}
+
+async function restoreNotifyToggle() {
+  try {
+    const stored = await readStoredSettings([NOTIFY_STORAGE_KEY]);
+    renderNotifyToggle(stored?.[NOTIFY_STORAGE_KEY] !== false);
+  } catch (error) {
+    console.warn("读不到「导入结束弹通知」的设置，按默认（开）显示", error);
+    renderNotifyToggle(true);
+  }
+}
+
 function wireTransferAndMaintenance() {
   $("settingsExportConfig")?.addEventListener("click", () => { downloadConfigFile(true); });
+  $("notifyImportToggle")?.addEventListener("click", () => {
+    const toggle = $("notifyImportToggle");
+    const next = toggle.getAttribute("aria-pressed") !== "true";
+    renderNotifyToggle(next);
+    writeStoredSettings({ [NOTIFY_STORAGE_KEY]: next })
+      .then(() => showTransferMessage(next ? BcaI18n.t("导入结束会弹系统通知。") : BcaI18n.t("导入结束不再弹系统通知。")))
+      .catch(() => showTransferMessage(BcaI18n.t("这个开关没存下来，重开设置页会恢复原样。"), true));
+  });
   // 1.10.18（S-2）：「更多导出」是原生 details 下拉，选完一项就收起；
   // 点空白处或按 Esc 也收起，免得它一直开着挡住下面的行。
   const exportMore = $("exportMore");
@@ -1803,6 +1832,7 @@ async function boot() {
 
   // 1.10.0（TODO P0-3）：启动时把「最近出错」面板填上（i18n 已就绪，文案才是当前语言）
   renderRecentErrors().catch(() => {});
+  restoreNotifyToggle().catch(() => {});
   restoreUpdateResult().catch(() => {});
   refreshLeftoverImport().catch(() => {});
 

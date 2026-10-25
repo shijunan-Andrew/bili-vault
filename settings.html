@@ -412,6 +412,18 @@
           </div>
         </div>
 
+        <!-- 1.12.7（审查 P3-3）：导入结束的系统通知以前没有开关。默认开（保持原有行为），
+             关掉之后后台一条都不弹 —— 繁中 / 英文用户至少可以自己静音。 -->
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="导入结束弹通知">导入结束弹通知</p>
+            <p class="setting-row-desc" data-i18n="导入或更新跑完时，系统会弹一条通知——你多半已经切走页面了。关掉之后只在插件里看结果。">导入或更新跑完时，系统会弹一条通知——你多半已经切走页面了。关掉之后只在插件里看结果。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="toggle-switch" id="notifyImportToggle" aria-pressed="true" aria-label="导入结束弹通知" data-i18n-aria="导入结束弹通知"><span></span></button>
+          </div>
+        </div>
+
         <p class="row-status" id="exportMarkdownStatus" role="status" hidden></p>
         <p class="row-error" id="exportMarkdownError" role="alert" hidden></p>
 

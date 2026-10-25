@@ -1539,17 +1539,32 @@ async function withQueueDeadline(queue, timeoutMs, label) {
 /* 1.7.3：导入要跑几分钟，用户多半已经切走页面、弹窗也关了 —— 只把结果写进 storage
    等于没有提示（真机反馈：「导入结束后不显示已完成的弹窗，要点开插件才看到」）。
    这里补一条系统通知：成功、失败各一条。通知失败不影响导入结果，所以整段都吞异常。 */
+// 1.12.7（审查 P3-3）：这条通知以前没有开关，每轮导入结束必弹一次。
+// 设置页「导入与导出」里有 notifyImportFinished（默认开）—— 关掉就完全不弹。
+// 通知正文仍是简体（后台拿不到同步词典，见文件头 BcaI18n 兜底那段的说明），
+// 繁中 / 英文用户至少可以把它关掉。
+async function sendImportNotification(title, message) {
+  const pending = chrome.notifications.create("", {
+    type: "basic",
+    iconUrl: "icon-128.png",
+    title,
+    message: String(message || "").slice(0, 300),
+    silent: false
+  });
+  // create() 在旧版 Chrome 上返回 Promise，新版可能返回 undefined —— 两样都认
+  if (pending && typeof pending.catch === "function") pending.catch(() => {});
+  if (pending && typeof pending.then === "function") await pending;
+}
+
+// 这个外壳必须保持「同步函数」：stability 的「导入占位」那条会把这段函数原样抠出来
+// 放进 new Function 里跑，函数体里只要出现顶层 await 就解析不了。
 function notifyImportOutcome(title, message) {
   try {
     if (!chrome.notifications || typeof chrome.notifications.create !== "function") return;
-    const pending = chrome.notifications.create("", {
-      type: "basic",
-      iconUrl: "icon-128.png",
-      title,
-      message: String(message || "").slice(0, 300),
-      silent: false
-    });
-    if (pending && typeof pending.catch === "function") pending.catch(() => {});
+    chrome.storage.local
+      .get("notifyImportFinished")
+      .then((stored) => (stored?.notifyImportFinished === false ? undefined : sendImportNotification(title, message)))
+      .catch((error) => console.warn("系统通知发送失败（不影响导入结果）", error));
   } catch (error) {
     console.warn("系统通知发送失败（不影响导入结果）", error);
   }
@@ -2545,7 +2560,7 @@ const IMPORT_RUN_SESSION_KEY = "bcaImportRun";
 /* P1-7（2026-10 审阅）：中断后要能「接着上次跑」，所以把断点里那句「停在哪」
    缩小成一条极小的记录放进 local —— 它只含收藏夹名、页号、三个计数与收藏夹 id，
    不含回滚日志、不含视频正文，重启浏览器后照样能读到（session 里的会被清掉）。 */
-const IMPORT_RESUME_KEY = "bcaImportResume";                  // 正在进行的导入（断点 + 回滚日志）
+const IMPORT_RESUME_KEY = "bcaImportResume";                  // 正在进行的导入（只有断点，不含回滚日志）
 /* 1.12.2（审查 P1-3）：回滚日志原来是只写 chrome.storage.session 的，浏览器一重启就没了，
    被打断的那一轮永远说不清「它建了哪些目录」。这里在 local 里留一份【只有名字】的副本，
    断电 / 关浏览器之后也能照着它把本轮新建的空目录清掉（正文改过的文件不在此列，见下方说明）。 */

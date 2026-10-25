@@ -1806,6 +1806,32 @@ async function suiteSettings() {
    1.9.0 起回收站是独立页，但 pages.test 一直只覆盖 library / settings / popup / content，
    这一页的渲染、多选、确认文案全靠人眼看过。这里换成桩驱动真代码。 */
 
+test("「导入结束弹通知」开关默认开，点一下关掉并存下来（1.12.7）", async () => {
+  // 默认：没有存过任何值 → 开
+  const page = await openSettings();
+  const toggle = page.document.getElementById("notifyImportToggle");
+  assert.ok(toggle, "设置页应当有「导入结束弹通知」开关");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true", "默认是开着的");
+  assert.equal(toggle.classList.contains("off"), false, "开着的时候不该有 off 类");
+
+  // 点一下：变成关，并且写进 storage
+  dom.fireUserEvent(toggle, "click");
+  await settle();
+  assert.equal(toggle.getAttribute("aria-pressed"), "false", "点一下应当变成关");
+  assert.equal(toggle.classList.contains("off"), true, "关掉时要有 off 类");
+  const dumped = page.__chrome.storage.local.dump();
+  assert.equal(dumped.notifyImportFinished, false, "关掉要存进 storage");
+  assert.equal(textOf(page.document.getElementById("transferStatus")), BcaT(page, "导入结束不再弹系统通知。"), "要给出回执");
+
+  // 存过 false 的页面：开起来就是关的
+  {
+    const off = await openSettings({ localData: { notifyImportFinished: false } });
+    const offToggle = off.document.getElementById("notifyImportToggle");
+    assert.equal(offToggle.getAttribute("aria-pressed"), "false", "存过 false 时应当是关着的");
+    assert.equal(offToggle.classList.contains("off"), true, "存过 false 时要有 off 类");
+  }
+});
+
 test("「上次导入没有收尾」这一行只在真有记录时出现，能清掉它建的目录（1.12.2）", async () => {
   // 没有记录：整行藏起来
   {
