@@ -18,6 +18,8 @@
  *   5. 三份文档的 <!-- i18n-count:N --> 与实际词典条数一致
  *   6. 三份文档的 <!-- test-count:N --> 与 stability.test.cjs 的 test() 项数一致
  *   7. docs/HISTORY.md 的「版本 → 起始行」索引是最新的（1.8.23，TODO P2-11）
+ *   9. 彩蛋页视觉基线（1.12.9）：bili-old-2015 的运行期子集要与 egg-baseline.json 对得上，
+ *      改图之后必须显式重记基线，不能悄悄换图。
  *   8. 发布清单与体积（1.10.1）：pack.ps1 的白名单要覆盖根目录下全部运行期文件，
  *      单文件 / 总量 / 文件数上限全部从 pack.ps1 读 —— 阈值只有一处权威。
  *   9. .ps1 的语法（1.12.6，审查 P3-2）：用 PowerShell 自己的解析器过一遍，不执行任何语句。
@@ -336,6 +338,19 @@ function checkHistoryIndex() {
   return ok(result.message);
 }
 
+function checkEggBaseline() {
+  section("彩蛋页视觉基线（2015 那页的图片与外壳）…");
+  const result = runNode(["scripts/check-egg-baseline.cjs"]);
+  if (result.code !== 0) {
+    bad("彩蛋页与基线不一致");
+    printTail(result.output, 12);
+    note("改法：确认改动无误后跑 node scripts/check-egg-baseline.cjs --write 重记基线，并把这份改动写进 HISTORY。");
+    return false;
+  }
+  note(result.output.trim().split("\n").pop());
+  return ok("彩蛋页与基线一致");
+}
+
 function checkPackageSize() {
   section("发布清单与体积（pack.ps1 说了算）…");
   const result = runNode(["scripts/check-package-size.cjs"]);
@@ -455,6 +470,7 @@ function main() {
   checkDocDictionary();
   checkDocTestCount();
   checkHistoryIndex();
+  checkEggBaseline();
   checkPackageSize();
   console.log("");
   if (failed) {

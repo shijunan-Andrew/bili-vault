@@ -44,6 +44,7 @@ $excludeNames = @(
 $excludePaths = @(
   "bili-old-2015/_ref", "bili-old-2015/build", "bili-old-2015/spec", "bili-old-2015/tools",
   "bili-old-2015/README.md", "bili-old-2015/assets/_tools",
+  "bili-old-2015/egg-baseline.json",
   "bili-old-2015/assets/MANIFEST.json", "bili-old-2015/assets/NEEDED.json",
   "bili-old-2015/assets/COVER-MAP.json", "bili-old-2015/assets/COVER-MAP.md",
   "bili-old-2015/assets/COVER-WIRING.md", "bili-old-2015/assets/ICONS.md",

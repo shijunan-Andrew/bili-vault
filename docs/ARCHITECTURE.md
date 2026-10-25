@@ -646,3 +646,16 @@ UP主主页：https://space.bilibili.com/……
   （`#resumeImportNotice`）读的是同一条 `chrome.storage.local.bcaImportResume`，发的也是同一种
   `import-bili-favorites` + `resume: {folder, page}`。收藏库这边多存一个 `bcaResumeNoticeDismissedAt`，
   与断点记录的 `at` 比新旧 —— 关掉的只是「这一条」，新的一轮中断仍会重新提示。
+
+## 彩蛋页的视觉基线（1.12.9）
+
+`bili-old-2015/egg-baseline.json` 记的是**运行期子集**的 sha256：`index.html`、`egg-2015.js`、
+`assets/` 下的全部图片（200 个）。构建期产物 —— `assets/_tools/`、`assets/MANIFEST.json`、
+`NEEDED.json`、`COVER-MAP.*`、`INDEX.md` —— 刻意不进基线，重跑生成器不会把它弄红。
+
+`scripts/check-egg-baseline.cjs` 是唯一入口：不加参数就比对（不一致退非零），`--write` 重记基线，
+`--diff` 只打印差异。它由 `scripts/check-all.cjs` 的第 9 项调用，所以 CI 与发版第 4 步都会跑。
+
+改图的正确顺序：换文件 → 用 httpserver 或 `chrome --headless --screenshot` 目测一次 →
+`node scripts/check-egg-baseline.cjs --write` → 把这次改动写进 `docs/HISTORY.md`。
+基线文件本身不进发行包（`pack.ps1` 的 `$excludePaths` 排除了它）。

@@ -137,11 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.8：冒烟清单只留当前一版，历史增量归档到 docs/SMOKE-HISTORY.md
+## V1.12.9：2015 彩蛋页有了视觉基线，改图会被拦住
 
-- **清单瘦身**：`SMOKE_TEST.md` 从 1011 行压到 60 多行 —— 只留「为什么需要它 / 前置条件 / 当前全量验收清单 / 本版新增的几条」。更早版本的「新增的几条」104 节挪进 `docs/SMOKE-HISTORY.md`，要回查某个版本当时怎么验，按版本号去那边找。
-- **每次发版照旧**：新版本小节加在 `SMOKE_TEST.md`，把上一版那一节移进历史文件（`stability.test.cjs` 有守卫盯着「当前清单里只许有当前这一版」）。
-- **文档地图**：`AI_HANDOFF.md` 第 32 行的文档清单加上了这份新文件。
+- **基线**：新增 `bili-old-2015/egg-baseline.json`（203 个文件的 sha256：`index.html` + `egg-2015.js` + `assets/` 下全部图片），由 `scripts/check-egg-baseline.cjs` 生成与比对。
+- **进检查**：`node scripts/check-all.cjs` 多了一项「彩蛋页视觉基线」，CI 与发版第 4 步都会跑；改图之后不重记基线就红，提示跑 `--write`。
+- **不进发行包**：基线是开发期产物，`pack.ps1` 的 `$excludePaths` 排除了它（包仍是 252 个文件 / 5,883.8 KB）。
 
 **遗留** - 无。
 
@@ -153,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:412 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:413 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

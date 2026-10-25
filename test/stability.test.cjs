@@ -8703,6 +8703,34 @@ test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的�
   assert.match(background, /function withKeepAlive\(task, reason\)/);
 });
 
+test("1.12.9：彩蛋页有视觉基线，改图必须显式重记（审查 P3-7）", () => {
+  const script = readProjectFile("scripts/check-egg-baseline.cjs");
+  const checkAll = readProjectFile("scripts/check-all.cjs");
+  const pack = readProjectFile("pack.ps1");
+  const baseline = JSON.parse(readProjectFile("bili-old-2015/egg-baseline.json"));
+
+  // 基线本身：覆盖外壳 + 脚本 + 图片，且只收图片（构建期产物不进基线）
+  assert.ok(baseline.files["index.html"], "基线要含 index.html");
+  assert.ok(baseline.files["egg-2015.js"], "基线要含 egg-2015.js");
+  const images = Object.keys(baseline.files).filter((rel) => rel.startsWith("assets/"));
+  assert.ok(images.length > 100, `基线里的图片太少（${images.length}）`);
+  for (const rel of images) {
+    assert.match(rel, /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i, `基线里混进了非图片：${rel}`);
+  }
+  assert.equal(Object.keys(baseline.files).some((rel) => rel.startsWith("assets/_tools/")), false, "assets/_tools 不该进基线");
+
+  // 脚本：能对比、能重记、不一致时退非零
+  assert.match(script, /const WRITE = args\.has\("--write"\);/);
+  assert.match(script, /if \(!DIFF_ONLY\) process\.exitCode = 1;/);
+  assert.match(script, /crypto\.createHash\("sha256"\)/);
+
+  // 接线：check-all 跑它；基线文件不进发行包
+  assert.match(checkAll, /function checkEggBaseline\(\) \{/);
+  assert.match(checkAll, /runNode\(\["scripts\/check-egg-baseline\.cjs"\]\)/);
+  assert.match(checkAll, /  checkEggBaseline\(\);/);
+  assert.match(pack, /"bili-old-2015\/egg-baseline\.json"/);
+});
+
 test("1.12.8：冒烟清单只留当前一版，历史增量在 docs/SMOKE-HISTORY.md（审查 P3-5）", () => {
   const smoke = readProjectFile("SMOKE_TEST.md");
   const history = readProjectFile("docs/SMOKE-HISTORY.md");

@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **412** 项里<!-- test-count:412 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **413** 项里<!-- test-count:413 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,8 +54,13 @@
 
 ---
 
-## V1.12.8 新增的几条
+## V1.12.9 新增的几条
 
-- 打开 `SMOKE_TEST.md`：从标题到「当前全量验收清单」一屏之内能看完（约 60 行），中间没有成片的旧版本章节。
-- 点文末那个链接能打开 `docs/SMOKE-HISTORY.md`，随意挑 `V1.12.7 新增的几条`、`V1.11.0 新增的几条`、`V1.8.20 新增的几条` 都能找到。
-- 真跑一遍上面的前置条件与全量清单：行为与本版无关（这次只动文档）。
+- `node scripts/check-all.cjs` 应当多出「彩蛋页视觉基线」一项，输出 `[egg] 与基线一致：203 个文件、3.63 MB`。
+- 顺手改一张彩蛋页图片（或换掉 `index.html` 里任意一个字节）再跑一次：应当红，并提示跑 `node scripts/check-egg-baseline.cjs --write`；改回来再跑，恢复绿。
+- 打出来的 zip 里不该有 `bili-old-2015/egg-baseline.json`（`pack.ps1` 已把它排除）。
+
+---
+
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.12.8 及以前）。
+> 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。
