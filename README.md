@@ -137,11 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.7：导入结束的通知可以关掉了，隐私说明写清了必应那条链接
+## V1.12.8：冒烟清单只留当前一版，历史增量归档到 docs/SMOKE-HISTORY.md
 
-- **「导入结束弹通知」开关**：设置页「导入与导出」里多了一行开关，默认开（保持 1.7.3 起的行为）。关掉之后 `background.js` 的 `notifyImportOutcome()` 先读设置、直接返回，一条都不弹。通知正文仍是简体 —— 后台拿不到同步词典，所以给「看不懂就关掉」这个出路。
-- **隐私说明补一段**：`docs/PRIVACY.md` 第 3 节前写清「失效视频详情里的『全网搜索该视频』只是一条普通链接，点开会在新标签页里跳到必应（`www.bing.com`），插件本身不发请求」。这条链接早在 1.9.x 就有，但一直没写进隐私说明。
-- **顺手修一处自相矛盾的注释**：`IMPORT_RESUME_KEY` 那行写着「断点 + 回滚日志」，而同段下一条注释明确说「不含回滚日志」（1.12.2 把回滚日志挪进了独立的 `bcaImportLeftover`）。改成「只有断点，不含回滚日志」。
+- **清单瘦身**：`SMOKE_TEST.md` 从 1011 行压到 60 多行 —— 只留「为什么需要它 / 前置条件 / 当前全量验收清单 / 本版新增的几条」。更早版本的「新增的几条」104 节挪进 `docs/SMOKE-HISTORY.md`，要回查某个版本当时怎么验，按版本号去那边找。
+- **每次发版照旧**：新版本小节加在 `SMOKE_TEST.md`，把上一版那一节移进历史文件（`stability.test.cjs` 有守卫盯着「当前清单里只许有当前这一版」）。
+- **文档地图**：`AI_HANDOFF.md` 第 32 行的文档清单加上了这份新文件。
 
 **遗留** - 无。
 
@@ -153,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:411 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:412 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

@@ -29,7 +29,7 @@
 
 ## 项目文档的维护规范
 
-**这套文档是什么**：`AI_HANDOFF.md`（入口：现状、规矩、红线）、`README.md`（用户看到的：装什么、怎么用、每个版本改了什么）、`SMOKE_TEST.md`（发版前的真机清单）、`docs/ARCHITECTURE.md`（机制、数据流、接口）、`docs/HISTORY.md`（逐版本的根因与教训）、`docs/PRIVACY.md`（隐私说明：数据存哪、请求哪些域名、每个权限干什么；商店审核对照用），以及仓库外的 `Desktop\bili_vault_ref\TODO.md`（唯一「活的」待办：进行中、下一步方向、暂缓与不做）与 `Desktop\bili_vault_ref\TODO_finished.md`（已完成记录，2026-10-24 从 TODO.md 拆出）。
+**这套文档是什么**：`AI_HANDOFF.md`（入口：现状、规矩、红线）、`README.md`（用户看到的：装什么、怎么用、每个版本改了什么）、`SMOKE_TEST.md`（发版前的真机清单，只留当前一版）+ `docs/SMOKE-HISTORY.md`（更早版本的「新增的几条」，回查用）、`docs/ARCHITECTURE.md`（机制、数据流、接口）、`docs/HISTORY.md`（逐版本的根因与教训）、`docs/PRIVACY.md`（隐私说明：数据存哪、请求哪些域名、每个权限干什么；商店审核对照用），以及仓库外的 `Desktop\bili_vault_ref\TODO.md`（唯一「活的」待办：进行中、下一步方向、暂缓与不做）与 `Desktop\bili_vault_ref\TODO_finished.md`（已完成记录，2026-10-24 从 TODO.md 拆出）。
 
 **命名以界面为准**：1.9.7 起界面把「更新视频状态」改叫「更新视频数据」、确认框按钮叫「开始更新视频数据」，`docs/ARCHITECTURE.md` 与 `SMOKE_TEST.md` 已同步；`docs/HISTORY.md` 与旧审查材料里的旧名是当时记录，不用追改。
 
@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 411 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
+| 测试基线 | stability 412 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-25 22:03，当时 HEAD `c0edf53`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-25 22:11，当时 HEAD `e5f2ace`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -479,7 +479,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:411 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:412 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

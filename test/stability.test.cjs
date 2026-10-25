@@ -3240,8 +3240,11 @@ test("交接用的两份索引不许被删（V1.7.28）", () => {
   const smoke = readProjectFile("SMOKE_TEST.md");
   const history = readProjectFile("docs/HISTORY.md");
   assert.match(smoke, /^## 当前全量验收清单（按功能，不按版本）$/m, "冒烟清单要给新人一份「当前该跑哪几条」");
+  // 1.12.8 起历史增量搬进 docs/SMOKE-HISTORY.md，这里只要求「全量清单排在第一个版本小节之前」
+  const firstVersionSection = smoke.search(/^## V\d+\.\d+\.\d+ 新增的几条$/m);
+  assert.notEqual(firstVersionSection, -1, "冒烟清单里应当留一节当前版本的增量记录");
   assert.ok(
-    smoke.indexOf("## 当前全量验收清单") < smoke.indexOf("## V1.7.27 新增的几条"),
+    smoke.indexOf("## 当前全量验收清单") < firstVersionSection,
     "当前全量清单要排在版本增量清单之前，否则新人还是先看到增量",
   );
   // 2026-10：README 的历史整体并入 HISTORY 之后，那 17 个批次已经有真正的小节，不再需要索引表
@@ -8698,6 +8701,34 @@ test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的�
   const calls = (background.match(/keepServiceWorkerAlive\("/g) || []).length;
   assert.ok(calls >= 8, `保活调用点只剩 ${calls} 处，应该有 api / paused / rollback / scan / page / refresh / cover / diff`);
   assert.match(background, /function withKeepAlive\(task, reason\)/);
+});
+
+test("1.12.8：冒烟清单只留当前一版，历史增量在 docs/SMOKE-HISTORY.md（审查 P3-5）", () => {
+  const smoke = readProjectFile("SMOKE_TEST.md");
+  const history = readProjectFile("docs/SMOKE-HISTORY.md");
+  const handoff = readProjectFile("AI_HANDOFF.md");
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  const current = manifest.version.split(".").map(Number);
+
+  // 当前清单里只许有「一版」的小节，而且不能比 manifest 旧
+  // （发版脚本会先把 manifest 改到新版本再跑检查，所以允许「等于或高一档」）
+  const sections = smoke.match(/^## V(\d+\.\d+\.\d+) 新增的几条$/gm) || [];
+  assert.equal(sections.length, 1, `SMOKE_TEST.md 只留当前这一版，实际 ${sections.length} 节`);
+  const only = sections[0].replace(/^## V/, "").replace(/ 新增的几条$/, "").split(".").map(Number);
+  const newer = only[0] > current[0] || (only[0] === current[0] && (only[1] > current[1] || (only[1] === current[1] && only[2] >= current[2])));
+  assert.ok(newer, `当前小节 ${only.join(".")} 比 manifest ${current.join(".")} 旧了，发版前要换成本版`);
+
+  assert.match(smoke, /docs\/SMOKE-HISTORY\.md/, "SMOKE_TEST.md 要指向历史文件");
+  assert.match(smoke, /<!-- test-count:\d+ -->/, "文档数字标记必须还在 SMOKE_TEST.md 上");
+
+  // 归档文件确实接住了历史，且不重复当前版
+  assert.ok(history.includes("## V1.12.7 新增的几条"), "历史里应当有上一版 1.12.7");
+  assert.ok(history.includes("## V1.11.0 新增的几条"), "历史里应当有 1.11.0");
+  assert.ok(history.includes("## V1.8.20 新增的几条"), "历史里应当有 1.8.20");
+  assert.equal(history.includes(sections[0].slice(3)), false, "历史文件里不该有当前这一版");
+  assert.match(history, /\.\.\/SMOKE_TEST\.md/, "历史文件要指回当前清单");
+
+  assert.match(handoff, /docs\/SMOKE-HISTORY\.md/, "AI_HANDOFF 的文档地图要提到它");
 });
 
 test("1.12.7：导入结束的通知有开关，后台真的照它办事（审查 P3-3）", () => {
