@@ -1055,6 +1055,22 @@ test("巡检：缺封面只认 diagnostics 里那些没进 records 的目录（1
   assert.equal(summary.attention, 2, "缺封面 1 + 缺文本 1");
 });
 
+
+test("版本比较：按数字逐段比，不许用字典序（1.11.2）", () => {
+  /* 字典序会把 1.11.10 排到 1.11.2 前面 —— 那会让「检查更新」把老版本说成新版本 */
+  assert.equal(core.compareVersions("1.11.2", "1.11.10"), -1);
+  assert.equal(core.compareVersions("1.11.10", "1.11.2"), 1);
+  assert.equal(core.compareVersions("1.11.2", "1.11.2"), 0);
+  /* 大小写 v 前缀、段数不同都要认 */
+  assert.equal(core.compareVersions("V1.11.1", "1.11.1"), 0);
+  assert.equal(core.compareVersions("1.9", "1.9.0"), 0);
+  /* 坏输入不许抛：退化成 0（宁可说「一样新」，也别让「检查更新」整条崩掉） */
+  assert.equal(core.compareVersions("nonsense", "1.0.0"), -1);
+  assert.equal(core.compareVersions("", "0.0.0"), 0);
+  assert.equal(core.versionIsNewer("1.11.2", "1.11.1"), true);
+  assert.equal(core.versionIsNewer("1.11.1", "1.11.1"), false);
+  assert.equal(core.versionIsNewer("1.11.2", "1.11.10"), false);
+});
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

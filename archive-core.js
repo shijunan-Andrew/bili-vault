@@ -1179,6 +1179,41 @@
      test/stability.test.cjs 直接调；parseShareStats 与 background.js:1944 那份是等价实现，
      stability 有「两份必须一致」的守卫；patchVolatileFields 则是生产路径在用（本体只有这一份）。
      真要清掉前三个，得先把那些单元测试改成反射内部函数，收益不够。 */
+
+  /**
+   * 比较两个「点分版本号」，返回 -1（左小）/ 0（相等）/ 1（左大）。
+   *
+   * 只做一件事：按点切开逐段比数字。`1.11.2` 与 `1.11.10` 用字典序会把 10 排到 2 前面，
+   * 所以不能直接字符串比。允许前面带 v/V（`V1.11.2`），也允许段数不同（`1.9` 视同 `1.9.0`）。
+   * 非数字段按 0 处理：这段代码跑在服务 worker 里，一个坏版本号不该让「检查更新」整条挂掉，
+   * 宁可判「相等」，也不要抛错弹红字。
+   */
+  function compareVersions(left, right) {
+    const parse = (value) =>
+      String(value == null ? "" : value)
+        .trim()
+        .replace(/^[vV]/, "")
+        .split(".")
+        .map((part) => {
+          const digits = parseInt(String(part).replace(/[^0-9]/g, ""), 10);
+          return Number.isFinite(digits) ? digits : 0;
+        });
+    const a = parse(left);
+    const b = parse(right);
+    const length = Math.max(a.length, b.length);
+    for (let index = 0; index < length; index += 1) {
+      const one = a[index] || 0;
+      const two = b[index] || 0;
+      if (one > two) return 1;
+      if (one < two) return -1;
+    }
+    return 0;
+  }
+
+  /** candidate 比 current 新吗（`v` 前缀与段数差异都交给 compareVersions）。 */
+  function versionIsNewer(candidate, current) {
+    return compareVersions(candidate, current) > 0;
+  }
   const api = Object.freeze({
     safeCollectionName,
     isReservedCollectionName,
@@ -1273,7 +1308,10 @@
     thumbnailEligible,
     thumbnailFit,
     thumbnailKey,
-    archiveCacheDropCount
+    archiveCacheDropCount,
+    // 1.11.2：「检查更新」的版本比较只有这一份（background.js 与设置页都调它）
+    compareVersions,
+    versionIsNewer
   });
   global.BcaArchiveCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

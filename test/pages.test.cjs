@@ -1531,6 +1531,95 @@ async function suiteSettings() {
     );
     assert.ok(count.includes("447") && count.includes("11"), "两个数都要在");
   });
+
+  await test("设置页「检查更新」：点一下问后台，把新版本、下载页和 SHA-256 摆出来（1.11.2）", async () => {
+    const page = await openSettings();
+    const sent = [];
+    const reply = {
+      ok: true,
+      mode: "manual",
+      current: "1.11.2",
+      latest: "1.12.0",
+      newer: true,
+      released: true,
+      date: "2026-11-01",
+      source: "github",
+      releasePageUrl: "https://github.com/shijunan-Andrew/bili-vault/releases/tag/V1.12.0",
+      zipName: "bili-vault-1.12.0.zip",
+      sha256: "a".repeat(64),
+      notes: []
+    };
+    page.window.chrome.runtime.sendMessage = (message, callback) => {
+      sent.push(message);
+      if (typeof callback === "function") callback(reply);
+      return undefined;
+    };
+    const button = page.document.getElementById("checkUpdate");
+    assert.ok(button, "设置页要有「检查更新」按钮");
+    dom.fireUserEvent(button, "click");
+    await settle(6);
+
+    assert.equal(sent.length, 1, "点一下只该问一次后台");
+    assert.equal(sent[0].type, "bca-check-update");
+    assert.equal(sent[0].mode, "manual", "手动触发要带 mode=manual");
+    assert.equal(
+      textOf(page.document.getElementById("updateStatus")),
+      BcaT(page, "有新版本 {version}（{date}），去下载页拿 zip 覆盖安装。", { version: "1.12.0", date: "2026-11-01" })
+    );
+    assert.equal(page.document.getElementById("updateStatus").hidden, false);
+    assert.equal(page.document.getElementById("updateError").hidden, true, "成功不该走错误行");
+    const link = page.document.getElementById("updateLink");
+    assert.equal(page.document.getElementById("updateLinkRow").hidden, false, "有下载页要给链接");
+    assert.equal(link.getAttribute("href"), reply.releasePageUrl, "链接要指到后台给的那个下载页");
+    assert.equal(page.document.getElementById("updateShaRow").hidden, false, "发布了就要给 SHA-256");
+    assert.equal(textOf(page.document.getElementById("updateSha")), reply.sha256);
+    assert.equal(button.disabled, false, "查完按钮要能再点");
+  });
+
+  await test("设置页「检查更新」：查不到时只留一句错误，下载页和 SHA 收起来（1.11.2）", async () => {
+    const page = await openSettings();
+    page.window.chrome.runtime.sendMessage = (message, callback) => {
+      if (typeof callback === "function") callback({ ok: false, reason: "unreachable" });
+      return undefined;
+    };
+    dom.fireUserEvent(page.document.getElementById("checkUpdate"), "click");
+    await settle(6);
+    assert.equal(page.document.getElementById("updateStatus").hidden, true, "失败不该占用状态行");
+    assert.equal(page.document.getElementById("updateError").hidden, false);
+    assert.equal(
+      textOf(page.document.getElementById("updateError")),
+      BcaT(page, "查不到最新版本：GitHub 和镜像都没回应，过一会儿再试。")
+    );
+    assert.equal(page.document.getElementById("updateLinkRow").hidden, true);
+    assert.equal(page.document.getElementById("updateShaRow").hidden, true);
+  });
+
+  await test("设置页「检查更新」：重开页面先显示上次查到的结论（1.11.2）", async () => {
+    const page = await openSettings({
+      localData: {
+        updateCheck: {
+          ok: true,
+          mode: "manual",
+          current: "1.11.2",
+          latest: "1.11.2",
+          newer: false,
+          released: false,
+          date: "2026-10-25",
+          source: "jsdelivr",
+          releasePageUrl: "https://github.com/shijunan-Andrew/bili-vault/releases",
+          zipName: "",
+          sha256: "",
+          notes: []
+        }
+      }
+    });
+    await settle(8);
+    assert.equal(
+      textOf(page.document.getElementById("updateStatus")),
+      BcaT(page, "已经是最新公开版（{version}）。", { version: "1.11.2" })
+    );
+    assert.equal(page.document.getElementById("updateShaRow").hidden, true, "没发布就不该显示 SHA");
+  });
 }
 
 /* ---------------- 回收站页（1.10.0） ----------------

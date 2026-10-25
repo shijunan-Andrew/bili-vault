@@ -615,3 +615,11 @@ UP主主页：https://space.bilibili.com/……
 - **快照预热与整库扫描共用同一份换算（1.10.6）**：「归档记录 → 界面视频对象」只有 `BcaArchiveTools.recordToVideo(collectionName, recordEntry, record, { downloadIndex, previous })` 一处实现（1.9.0 从 `library.js` 搬来并改名）。整库扫描（`scanRoot()` 的 job）带 `{ downloadIndex, previous }`，快照预热（`paintSnapshot()`）带 `{ previous }`，谁也不许另写一份、更不许再调搬走之前的旧名字。`paintSnapshot()` 外面包着 try/catch、失败只写一条 `console.warn` 再退回整库读 —— 这条路坏了界面**照样能用**，只是「先出上次结果」与「快照顺手灌内存缓存」静默失效（1.9.0 到 1.10.5 就是这种状态）。`test/stability.test.cjs` 有守卫钉着：`library.js` 不许出现旧名字，且 `paintSnapshot()` 里调用的裸函数名必须在本文件内有定义。
 
 - **2015 彩蛋页（1.11.0）**：这一页作为功能随发行包发布，但只带运行期子集 —— `bili-old-2015/index.html` + `egg-2015.js` + `assets/` 里的图片。哪些算运行期由 `pack.ps1` 的 `$excludePaths` 说了算（前缀匹配），`scripts/check-package-size.cjs` 按同一份规则在 CI 里复算。图片是外链形态（不是 base64 内联），所以**改图只换文件、不必重新构建**；反过来，改了 `_ref/new_z2.css` 要重新跑 `tools/offline.js --no-inline` 与 `tools/build.js`。`test/stability.test.cjs` 有守卫钉着「引用的每个文件都在、且没被排除清单挡掉」。
+
+- **「检查更新」的数据源与唯一实现（1.11.2）**：版本号只从仓库根的 `version.json` 读 —— 它代表**用户认可的公开版**，
+  不是最新 tag；平时发版只打 tag、不动它，用户宣布某版可以发时才改（并填 `zipName` / `sha256`）。两个地址固定写在
+  `background.js` 的 `UPDATE_SOURCES` 里（GitHub 原文 + jsDelivr 镜像），不接受任何来自页面的 url 参数；两域名都带
+  `Access-Control-Allow-Origin: *`，所以**没有**新增 `host_permissions`。版本比较只有 `archive-core.js` 的
+  `compareVersions()` / `versionIsNewer()` 一份（`1.11.10` 不能排在 `1.11.2` 前面），`background.js` 与设置页都调它。
+  `test/stability.test.cjs` 有守卫钉着「没有第二份比较函数」「只读那两个固定域名」「检查更新里不许出现下载 / 替换动作」
+  以及「`version.json` 的版本必须在 `docs/HISTORY.md` 里有一节、且不高于 `manifest.json`」。

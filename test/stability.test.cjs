@@ -4087,9 +4087,12 @@ test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
   //   biliImportApiGet        —— 限速器所在的唯一出网口
   //   loadCoverPng            —— 封面图走图片 CDN（credentials: omit），
   //                              且被详情循环的 IMPORT_DETAIL_DELAY_MS 带着走，不会快
+  //   fetchUpdateManifest     —— 1.11.2 的「检查更新」：只读仓库根的 version.json（GitHub 原文 +
+  //                              jsDelivr 镜像两个固定地址），不碰 B 站接口、不吃限速器；
+  //                              手动触发、6 秒超时、一次只发一个请求
   //   （fetchManualVideoMetadata 在 1.6.0 的 P0-2 里改走 biliImportApiGet，已撤下豁免；
   //     下载链路 getDownloadWbiKey / biliDownloadApi 已随 1.3.0 整体删除，不再登记）
-  const allowlist = ["biliImportApiGet", "loadCoverPng"];
+  const allowlist = ["biliImportApiGet", "loadCoverPng", "fetchUpdateManifest"];
   const offenders = [];
   let current = "(顶层)";
   for (const line of src.split("\n")) {
@@ -8248,6 +8251,70 @@ test("1.11.0：默认输出外链形态，单文件形态仍留开关", () => {
   assert.match(build, /const cssResolve = \(target\) => \{/, "CSS 里的 url() 要按「能不能在磁盘上解析」判定");
 });
 
+test("1.11.2：版本比较只有一份实现，「检查更新」只读两个固定地址", () => {
+  const core = readProjectFile("archive-core.js");
+  const background = readProjectFile("background.js");
+  const settings = readProjectFile("settings.js");
+
+  /* 比较函数只能有一份：background / settings 里都不许自己再写一个 */
+  assert.match(core, /function compareVersions\(left, right\) \{/, "compareVersions 要放在 archive-core.js");
+  assert.match(core, /function versionIsNewer\(candidate, current\) \{/, "versionIsNewer 也要放在 archive-core.js");
+  assert.match(core, /    compareVersions,\n    versionIsNewer\n|    compareVersions,\r\n    versionIsNewer\r\n/,
+    "两个函数都要从 archive-core 导出（background 与设置页共用）");
+  const copyElsewhere = [background, settings].filter((text) => /function compareVersions\(/.test(text));
+  assert.deepEqual(copyElsewhere, [], "不许出现第二份 compareVersions");
+
+  /* 只认 github 原文 + jsdelivr 镜像这两个固定地址，不许把地址拼成可变参数 */
+  assert.match(background, /const UPDATE_SOURCES = Object\.freeze\(\[/, "两个源要写成冻结常量");
+  assert.match(background, /raw\.githubusercontent\.com\/shijunan-Andrew\/bili-vault\/main\/version\.json/,
+    "A 源是仓库根的 version.json");
+  assert.match(background, /cdn\.jsdelivr\.net\/gh\/shijunan-Andrew\/bili-vault@main\/version\.json/,
+    "B 源是 jsDelivr 镜像");
+  assert.doesNotMatch(background, /fetchUpdateManifest\(\s*(?:source\.)?url\s*\)?[\s\S]{0,40}message/,
+    "不许把页面传来的 url 拼进请求");
+
+  /* 只做「发现」不「安装」：不许出现下载/覆盖/写盘动作 */
+  const updateBlock = background.slice(background.indexOf("const UPDATE_SOURCES"), background.indexOf("async function commitStatsDatabaseFromPage"));
+  assert.doesNotMatch(updateBlock, /createWritable|downloads\.download|showSaveFilePicker/,
+    "检查更新不许下载或替换任何文件");
+
+  /* 消息与超时 */
+  assert.match(background, /if \(message\?\.type === "bca-check-update"\) \{/, "要有 bca-check-update 这条消息");
+  assert.match(background, /const UPDATE_CHECK_TIMEOUT_MS = 6000;/, "单次请求要有 6 秒超时");
+  assert.match(settings, /type: "bca-check-update", mode: "manual"/, "设置页手动触发时带 mode=manual");
+
+  /* 结果要落到 storage，重开设置页能看见上次结论 */
+  assert.match(background, /updateCheck: result/, "成功结果要写进 updateCheck");
+  assert.match(settings, /async function restoreUpdateResult\(\)/, "设置页开机要还原上次结论");
+});
+
+test("1.11.2：version.json 代表「用户认可的公开版」，不是最新 tag", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  const release = JSON.parse(readProjectFile("version.json"));
+  const core = require("../archive-core.js");
+
+  assert.match(String(release.version), /^\d+\.\d+\.\d+$/, "version.json 的版本号必须是三段数字");
+  assert.equal(typeof release.released, "boolean", "released 必须是布尔值");
+  assert.ok(core.compareVersions(release.version, manifest.version) <= 0,
+    `version.json（${release.version}）不能比当前 manifest（${manifest.version}）还新 —— 那等于告诉用户一个还不存在的版本`);
+
+  /* 它必须真的出现在 HISTORY 里，否则「最新公开版」无从追溯 */
+  const history = readProjectFile("docs/HISTORY.md");
+  assert.ok(history.includes(`## V${release.version}：`), `docs/HISTORY.md 里缺少 V${release.version} 那一节`);
+
+  /* 未发布时不许写 zip 名，发布了就必须两个都写全（否则用户拿不到校验手段） */
+  const hasZip = String(release.zipName || "").length > 0;
+  const hasSha = /^[0-9a-f]{64}$/.test(String(release.sha256 || ""));
+  assert.equal(hasZip, hasSha, "zipName 与 sha256 必须同时存在或同时为空");
+  assert.equal(hasZip, release.released, "只有在 released:true 时才该有 zipName / sha256");
+
+  /* 平时只打 tag 不发 Release：检查更新的数据源不许跟着 tag 走 */
+  const pack = readProjectFile("pack.ps1");
+  /* 打包脚本可以「提到」version.json（把它排除出发行包），但不许去写它 —— 那是用户宣布发布时才动的东西 */
+  assert.doesNotMatch(pack, /Set-Content[^\n]*version\.json/i, "pack.ps1 不许改写 version.json");
+  assert.doesNotMatch(pack, /Out-File[^\n]*version\.json/i, "pack.ps1 不许改写 version.json");
+  assert.match(pack, /"version\.json"/, "version.json 要在 pack.ps1 的排除清单里（不进发行包）");
+});
 test("1.11.1：彩蛋页不许再带内联 <script>（MV3 的 CSP 会拦，插件后台会记一条错误）", () => {
   const html = readProjectFile("bili-old-2015/index.html");
   const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>/gi)].map((m) => m[0]);

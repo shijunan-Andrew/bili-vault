@@ -137,17 +137,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.11.1：打开彩蛋页不再往插件「错误」里记一条 CSP
+## V1.11.2：能查更新了 —— 手动查一次，剩下的你自己装
 
-- **现象**：1.11.0 让彩蛋页随包发之后，真机上每次打开它，`chrome://extensions` 的「错误」里就多一条
-  `Executing inline script violates the following Content Security Policy directive 'script-src 'self''`。
-- **原因**：页面末尾同时存在两份同样的脚本 —— 一份内联（给 `file://` 双击打开用）、一份 `egg-2015.js`（给扩展用）。
-  MV3 扩展页面的 CSP 固定是 `script-src 'self'`，内联脚本一律被拦；拦掉的那份本来也没用，因为**外部同源脚本在两种环境下都能跑**。
-- **改法**：`index.html` 只保留 `<script src="egg-2015.js"></script>`，删掉内联副本（`633 KB → 629,427 B`）；
-  `tools/verify.js` 把「出现内联 `<script>`」直接判成失败；`test/stability.test.cjs` 增加一条守卫，盯着页面、生成器与验收脚本三处。
-- **验证**：拿带 `Content-Security-Policy: script-src 'self'` 头的静态服务器对照跑 —— 旧页面记 1 条 CSP 违规，新页面 0 条，
-  且 `#eggDialogOverlay` 被打上 `data-egg-show`（证明 `egg-2015.js` 真的执行了）。
-- **学到了**：`file://` 没有 CSP，用它验证扩展页面会漏掉这一类问题；要验证 CSP 就得让页面**真的在 `script-src 'self'` 下跑**。
+- **为什么是「手动查」**：扩展以「解压加载」分发，没有商店那条自动更新通道（自托管 `.crx` + `update_url` 在 Windows/macOS 上基本只对企业策略放行，解压加载连 `update_url` 都不读）。所以这条功能只能做「发现新版本 + 给你下载页」，**不会自动下载、不会替换任何文件**。
+- **查的是哪一份数据**：仓库根的 `version.json`，它代表**你认可的公开版**，不是最新 tag。平时开发只打 tag、不发 Release；等你用过一段时间说「这版可以发」，才会更新它并打包 zip。
+- **两个源**：GitHub 原文（`raw.githubusercontent.com`）为主，jsDelivr 镜像（`cdn.jsdelivr.net`）回退；两个地址都固定写在 `background.js` 里，6 秒超时，**不接受任何来自页面的 url 参数**。这两个域名都带 `Access-Control-Allow-Origin: *`，所以没有新增 `host_permissions` 权限。
+- **界面**：设置页「本机数据」→「检查更新」。查到新版本会给出版本号、日期、下载页链接和 SHA-256（发布了才有），打开设置页时会先显示上次查到的结论。
+- **版本比较**：新增 `compareVersions()` / `versionIsNewer()`，全项目只有 `archive-core.js` 这一份 —— `1.11.10` 必须排在 `1.11.2` 后面，字典序会把它排前面，那种错会让「检查更新」把老版本说成新版本。
+- **守卫**：`test/stability.test.cjs` 盯着「比较函数不许有第二份」「只读那两个固定域名」「检查更新里不许出现下载/替换动作」「`version.json` 的版本必须在 HISTORY 里有一节、且不高于 manifest」。
 
 **遗留** - 无。
 
@@ -155,11 +152,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1089 条**<!-- i18n-count:1089 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1099 条**<!-- i18n-count:1099 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:390 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:392 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

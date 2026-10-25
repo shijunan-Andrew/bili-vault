@@ -4044,6 +4044,95 @@ async function restoreStatsDatabaseBackup(root, file) {
    就地写只要几毫秒）；换名完成时页面还会顺便写一份 bcaStats，回声再触发一次没必要的
    重扫与重绘。现在写者只有这一个：备份、就地写、写完自检、失败用 database.bak.json
    顶回，全在同一条 commitStatsDatabase 上。 */
+
+// 1.11.2：检查更新。扩展以「解压加载」分发，没有商店那条自动更新通道，所以这里只做
+// 「发现新版本 + 引导用户手动覆盖」，绝不自动下载或替换任何文件。
+//
+// 两个源都是纯静态文件（仓库根的 version.json），按 A → B 依次试：
+//   A. raw.githubusercontent.com（GitHub 原文，更新最及时）
+//   B. cdn.jsdelivr.net（国内可达性好，有几分钟 CDN 延迟）
+// 两个域名都带 `Access-Control-Allow-Origin: *`，所以不需要往 manifest 的 host_permissions
+// 里加东西（那会撑开权限面、隐私说明也得改口径）。
+const UPDATE_SOURCES = Object.freeze([
+  { name: "github", url: "https://raw.githubusercontent.com/shijunan-Andrew/bili-vault/main/version.json" },
+  { name: "jsdelivr", url: "https://cdn.jsdelivr.net/gh/shijunan-Andrew/bili-vault@main/version.json" }
+]);
+const UPDATE_CHECK_TIMEOUT_MS = 6000;
+const UPDATE_RELEASE_PAGE = "https://github.com/shijunan-Andrew/bili-vault/releases";
+const UPDATE_CHECK_MODES = Object.freeze(["manual", "startup"]);
+
+/**
+ * 读一个源的 version.json。超时、非 200、坏 JSON 都当这次源失败（交给下一个源）。
+ * 只读 GET，且只请求上面那两个固定地址；不接受任何来自页面的 url 参数。
+ */
+async function fetchUpdateManifest(source) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
+  try {
+    const response = await fetch(source.url, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) return null;
+    const text = await response.text();
+    const parsed = JSON.parse(text);
+    const version = String(parsed?.version || "").trim();
+    if (!/^\d+\.\d+\.\d+$/.test(version)) return null;
+    return {
+      version,
+      released: parsed?.released === true,
+      date: String(parsed?.date || ""),
+      releasePageUrl: /^https:\/\/github\.com\/shijunan-Andrew\/bili-vault\/releases/.test(String(parsed?.releasePageUrl || ""))
+        ? String(parsed.releasePageUrl)
+        : UPDATE_RELEASE_PAGE,
+      zipName: String(parsed?.zipName || ""),
+      sha256: String(parsed?.sha256 || ""),
+      notes: Array.isArray(parsed?.notes) ? parsed.notes.map((note) => String(note)).slice(0, 6) : []
+    };
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 检查更新（手动触发；`mode` 只影响记录，不影响结果）。
+ *
+ * 「最新版」的权威是 version.json —— 它代表**用户认可的公开版**，不是最新的 tag。
+ * 仓库平时只打 tag、不发 Release；用户宣布某个版本可以发之后，才会更新 version.json。
+ */
+async function checkForUpdate(mode = "manual") {
+  const current = chrome.runtime.getManifest().version;
+  const checkedAt = Date.now();
+  const failures = [];
+  for (const source of UPDATE_SOURCES) {
+    const manifest = await fetchUpdateManifest(source);
+    if (!manifest) {
+      failures.push(source.name);
+      continue;
+    }
+    const newer = BcaArchiveCore.versionIsNewer(manifest.version, current);
+    const result = {
+      ok: true,
+      mode: UPDATE_CHECK_MODES.includes(mode) ? mode : "manual",
+      current,
+      latest: manifest.version,
+      newer,
+      released: manifest.released,
+      date: manifest.date,
+      source: source.name,
+      releasePageUrl: manifest.releasePageUrl || UPDATE_RELEASE_PAGE,
+      zipName: manifest.zipName,
+      sha256: manifest.sha256,
+      notes: manifest.notes,
+      checkedAt
+    };
+    await safeLocalSet({ updateCheck: result }, "检查更新结果");
+    return result;
+  }
+  const failed = { ok: false, reason: "unreachable", tried: failures, current, checkedAt };
+  await safeLocalSet({ updateCheck: failed }, "检查更新结果");
+  return failed;
+}
+
 async function commitStatsDatabaseFromPage(payload) {
   const root = await getRootHandle().catch(() => null);
   if (!root) return { ok: false, reason: "no-root" };
@@ -5648,6 +5737,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "bca-stats-republish") {
     // 1.9.6：统计页在「还没有数据」时可以让后台按现成的数据库重发一次快照（只读）。
     republishStatsSnapshot()
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, reason: error?.message || "failed" }));
+    return true;
+  }
+  if (message?.type === "bca-check-update") {
+    // 1.11.2：设置页「检查更新」。只读 GET 两个固定地址；结果同时写 storage，设置页下次打开先显示上次结论。
+    checkForUpdate(message?.mode === "startup" ? "startup" : "manual")
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, reason: error?.message || "failed" }));
     return true;

@@ -1,0 +1,13 @@
+{
+  "version": "1.11.1",
+  "date": "2026-10-25",
+  "released": false,
+  "releasePageUrl": "https://github.com/shijunan-Andrew/bili-vault/releases",
+  "zipName": "",
+  "sha256": "",
+  "notes": [
+    "彩蛋页（2015 年那份怀旧首页）现在随发行包一起发，装 zip 版也能打开",
+    "彩蛋页去掉了内联脚本，扩展「错误」页里不再出现 CSP 违规记录",
+    "彩蛋图片做了无损 / 近无损重编码，彩蛋目录从 22 MB 降到 7.3 MB"
+  ]
+}

@@ -277,6 +277,11 @@
    但走 --muted 而不是 --warning —— 成功不是警告，不该用警示色。 */
 .row-status { margin: 0; color: var(--muted); font-size: var(--fs-base); }
 
+/* 1.11.2：「检查更新」结果里的下载页链接与 SHA-256。链接用 --brand-deep（白底对比度够，深色主题自动换成浅蓝），并且恒显下划线 —— 不靠颜色单独表达「可点」。 */
+.text-link { color: var(--brand-deep); text-decoration: underline; text-underline-offset: 3px; }
+.text-link:hover { text-decoration-thickness: 2px; }
+#updateSha { font-size: var(--fs-sm); color: var(--muted); word-break: break-all; }
+
 /* 1.10.0（TODO P0-3）：设置页「最近出错」的三条记录。这里只管排版与层级，
    颜色、圆角、间距全部走令牌 —— 深色主题与玻璃效果自动跟着换，不许写死色值。 */
 .recent-error-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }

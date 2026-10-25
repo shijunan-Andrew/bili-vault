@@ -495,6 +495,27 @@
           </div>
         </div>
 
+
+        <!-- 1.11.2：扩展是解压加载的，没有商店那条自动更新通道，所以这里做「手动查一次」：
+             读仓库根的 version.json（代表用户认可的公开版），比出有没有新版本，
+             然后给下载页链接 + SHA-256，让用户自己覆盖安装。不做定时轮询、不自动下载。 -->
+        <div class="setting-row">
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="检查更新">检查更新</p>
+            <p class="setting-row-desc" data-i18n="手动查一次最新公开版是多少。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。">手动查一次最新公开版是多少。查到新版本会给你下载页和 SHA-256，覆盖安装由你自己来，插件不会自动下载或替换任何文件。</p>
+          </div>
+          <div class="setting-row-control">
+            <button type="button" class="button button-quiet" id="checkUpdate" data-i18n="检查更新">检查更新</button>
+          </div>
+        </div>
+        <p class="row-status" id="updateStatus" role="status" hidden></p>
+        <p class="row-error" id="updateError" role="alert" hidden></p>
+        <p class="row-status" id="updateLinkRow" hidden>
+          <a class="text-link" id="updateLink" href="https://github.com/shijunan-Andrew/bili-vault/releases" target="_blank" rel="noopener" data-i18n="在 GitHub 上打开下载页">在 GitHub 上打开下载页</a>
+        </p>
+        <p class="row-status" id="updateShaRow" hidden>
+          <span data-i18n="下载后可以自己核对 SHA-256：">下载后可以自己核对 SHA-256：</span><code id="updateSha"></code>
+        </p>
         <!-- 1.10.0（TODO P0-3）：失败原来只在弹窗里闪一下就没了（lastError 只有一个槽位，
              后一次会顶掉前一次）。这里留最近 3 条，再给一个「复制诊断信息」。
              摘要写进 storage 之前就已经过 maskLocalUserPaths()，复制出去不会带用户名。 -->

@@ -711,6 +711,104 @@ async function importIsRunning() {
   }
 }
 
+
+/* 1.11.2：检查更新。
+   扩展以「解压加载」分发，没有商店那条自动更新通道，所以这里只做「查一次 + 给下载页」：
+   绝不自动下载、绝不替换文件，覆盖安装始终由用户自己完成。
+   结果除了即时渲染，也由后台写进 chrome.storage.local 的 updateCheck，
+   下次打开设置页先显示上次结论（用户不用每次重查）。 */
+const updateRow = { status: "updateStatus", error: "updateError" };
+
+function showUpdateMessage(text, isError = false) {
+  showRowMessage(updateRow, text, isError);
+}
+
+function updateVersionLabel(version) {
+  return String(version || "").trim() || "—";
+}
+
+function updateResultText(result) {
+  if (!result || result.ok !== true) {
+    return BcaI18n.t("查不到最新版本：GitHub 和镜像都没回应，过一会儿再试。");
+  }
+  const latest = updateVersionLabel(result.latest);
+  if (result.newer !== true) {
+    return BcaI18n.t("已经是最新公开版（{version}）。", { version: latest });
+  }
+  if (result.released !== true) {
+    return BcaI18n.t("有新版本 {version}，但这一版还没打包发布；等发布之后再来。", { version: latest });
+  }
+  const date = String(result.date || "").trim();
+  return date
+    ? BcaI18n.t("有新版本 {version}（{date}），去下载页拿 zip 覆盖安装。", { version: latest, date })
+    : BcaI18n.t("有新版本 {version}，去下载页拿 zip 覆盖安装。", { version: latest });
+}
+
+function renderUpdateResult(result) {
+  const ok = result?.ok === true;
+  showUpdateMessage(updateResultText(result), !ok);
+  setVisible($("updateLinkRow"), ok);
+  const link = $("updateLink");
+  if (link && ok) {
+    // 只接受本仓库的 releases 地址：后台已经校验过一遍，这里再兜一次，防止坏数据把用户带去别处。
+    const url = String(result.releasePageUrl || "");
+    const target = /^https:\/\/github\.com\/shijunan-Andrew\/bili-vault\/releases/.test(url)
+      ? url
+      : "https://github.com/shijunan-Andrew/bili-vault/releases";
+    // 用 setAttribute 而不是 .href：属性值就是浏览器真正会跳的地址，测试也能直接断言。
+    link.setAttribute("href", target);
+  }
+  const sha = String(result?.sha256 || "").trim();
+  const showSha = ok && result?.newer === true && result?.released === true && sha.length > 0;
+  setVisible($("updateShaRow"), showSha);
+  if (showSha) writeText($("updateSha"), sha);
+}
+
+async function checkForUpdate() {
+  const button = $("checkUpdate");
+  if (button?.disabled) return null;
+  if (button) button.disabled = true;
+  showUpdateMessage(BcaI18n.t("正在检查…"));
+  setVisible($("updateLinkRow"), false);
+  setVisible($("updateShaRow"), false);
+  try {
+    const result = await new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const timer = window.setTimeout(() => finish({ ok: false, reason: "timeout" }), 12000);
+      try {
+        chrome.runtime.sendMessage({ type: "bca-check-update", mode: "manual" }, (response) => {
+          window.clearTimeout(timer);
+          if (chrome.runtime.lastError) {
+            finish({ ok: false, reason: "no-response" });
+            return;
+          }
+          finish(response || { ok: false, reason: "no-response" });
+        });
+      } catch (_) {
+        window.clearTimeout(timer);
+        finish({ ok: false, reason: "no-runtime" });
+      }
+    });
+    renderUpdateResult(result);
+    return result;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function restoreUpdateResult() {
+  const stored = await readStoredSettings(["updateCheck"]);
+  const result = stored?.updateCheck;
+  if (!result) return null;
+  renderUpdateResult(result);
+  return result;
+}
+
 async function exportArchiveMetadata() {
   try {
     const handle = await BcaArchiveTools.loadRootHandle();
@@ -1313,6 +1411,7 @@ function wireTransferAndMaintenance() {
   });
 
   $("settingsExportArchive")?.addEventListener("click", () => { exportArchiveMetadata(); });
+  $("checkUpdate")?.addEventListener("click", () => { checkForUpdate(); });
   $("settingsHealthCheck")?.addEventListener("click", () => { writeHealthReport(); });
   $("settingsOpenRecycle")?.addEventListener("click", openRecyclePage);
   // 1.10.0：统计库随时能重建；「最近出错」随时能刷新、能复制诊断信息。
@@ -1333,7 +1432,9 @@ globalThis.BcaSettingsTransfer = Object.freeze({
   writeHealthReport,
   rebuildStatsDatabase,
   renderRecentErrors,
-  copyDiagnostics
+  copyDiagnostics,
+  checkForUpdate,
+  restoreUpdateResult
 });
 
 wireTransferAndMaintenance();
@@ -1572,6 +1673,7 @@ async function boot() {
 
   // 1.10.0（TODO P0-3）：启动时把「最近出错」面板填上（i18n 已就绪，文案才是当前语言）
   renderRecentErrors().catch(() => {});
+  restoreUpdateResult().catch(() => {});
 
   BcaI18n.onChange(() => {
     applyTitle();

@@ -47,7 +47,10 @@ $excludePaths = @(
   "bili-old-2015/assets/MANIFEST.json", "bili-old-2015/assets/NEEDED.json",
   "bili-old-2015/assets/COVER-MAP.json", "bili-old-2015/assets/COVER-MAP.md",
   "bili-old-2015/assets/COVER-WIRING.md", "bili-old-2015/assets/ICONS.md",
-  "bili-old-2015/assets/INDEX.md", "bili-old-2015/assets/thumbs.json"
+  "bili-old-2015/assets/INDEX.md", "bili-old-2015/assets/thumbs.json",
+  # 1.11.2：检查更新读的是仓库（和 jsDelivr 镜像）上那份 version.json，本地这份只给发布流程用，
+  # 装进包里反而让人以为要手改它。
+  "version.json"
 )
 
 $expected = New-Object System.Collections.Generic.List[string]
