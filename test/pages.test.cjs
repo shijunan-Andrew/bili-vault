@@ -2451,7 +2451,7 @@ async function suiteA11y() {
 }
 
 /* ---------------- 跑 ---------------- */
-
+
 /* ---- 两个文档页：使用说明、安装教程（1.10.20 起） ---- */
 async function suiteDocs() {
   await test("使用说明与安装教程都有「回去的路」：两个出口 + 回到顶部（1.10.20 真执行）", async () => {
@@ -2515,6 +2515,171 @@ async function suiteDocs() {
     const current = dots.filter((dot) => dot.classList.contains("is-current"));
     assert.equal(current.length, 1, "任何时刻只有一步是当前步");
     assert.equal(current[0].getAttribute("aria-current"), "step", "当前步要告诉读屏");
+  });
+}
+
+/* 1.13.4（审查 P1-1）：回收站与「搬运」这一片以前只有内存桩 —— 桩里没有真文件系统。
+   而它正是项目里唯一不可逆删用户数据的地方，也是唯一连一行都没被执行过的代码（P0-1 那条
+   误删就长在这片盲区里）。这组用例用 harness 的内存 FileSystem 真跑 archive-tools.js：
+   删除 / 挪动 / 恢复 / 彻底删除，每一步都断言磁盘上的真实结构 —— 挪过去的字节对不对、
+   源目录还在不在、重名怎么断、空掉的时间戳目录有没有清掉。
+   harness 的目录句柄没有 move()，所以 moveDirectoryInto 跑的是「复制 → 逐文件比字节 →
+   才删源」那条兜底路径，正是最该被测到的一条。 */
+async function suiteRecycleTools() {
+  require("../archive-core.js");
+  const tools = require("../archive-tools.js");
+  const RECORD_NAME = "2026年10月25日10时15分3秒";
+  const recordTree = (title) => ({
+    "视频信息.txt": `【基本信息】\r\n标题：${title}\r\n`,
+    "封面.jpg": `封面字节-${title}`
+  });
+  const freshRoot = async (tree) =>
+    makeDirectoryTree({ _测试归档: tree }).getDirectoryHandle("_测试归档");
+
+  await test("回收整个收藏夹：整棵目录挪进 005回收站，原位置不再有它，别的收藏夹不受影响（1.13.4 真执行 · P1-1）", async () => {
+    const root = await freshRoot({
+      我的收藏: { [RECORD_NAME]: recordTree("甲") },
+      别的收藏: { "2026年10月25日10时15分9秒": recordTree("乙") }
+    });
+    const kept = (await root.getDirectoryHandle("别的收藏")).__dump();
+
+    const movedPath = await tools.recycleCollection(root, "我的收藏");
+
+    assert.equal(root.__has("我的收藏"), false, "收藏夹还留在原地");
+    assert.equal(root.__has("别的收藏"), true, "回收一个收藏夹不该动到别的");
+    assert.deepEqual((await root.getDirectoryHandle("别的收藏")).__dump(), kept, "别的收藏夹被动过了");
+    assert.match(movedPath, /^005回收站\/\d{8}-\d{6}\/我的收藏$/, "返回的路径不对");
+
+    const bucket = await root.getDirectoryHandle(tools.RECYCLE_DIR_NAME);
+    const stamps = bucket.__list();
+    assert.equal(stamps.length, 1, "应该只建一个时间戳目录");
+    const moved = bucket.__child(stamps[0]).__child("我的收藏");
+    assert.ok(moved, "回收站里找不到挪过去的收藏夹");
+    assert.deepEqual(moved.__dump(), { [RECORD_NAME]: recordTree("甲") }, "挪过去的字节跟原来不一样");
+  });
+
+  await test("复制中途失败时源目录必须原样留着：搬一半就删源是不可逆事故（1.13.4 真执行 · P1-1）", async () => {
+    const root = await freshRoot({ 我的收藏: { [RECORD_NAME]: recordTree("甲") } });
+    const source = await root.getDirectoryHandle("我的收藏");
+    (await (await source.getDirectoryHandle(RECORD_NAME)).getFileHandle("视频信息.txt")).__failRead = new Error("权限被撤了");
+
+    await assert.rejects(() => tools.recycleCollection(root, "我的收藏"), /权限被撤了/);
+    assert.equal(root.__has("我的收藏"), true, "复制失败了却把源目录删掉 —— 用户的记录就这么没了");
+    assert.equal(source.__has(RECORD_NAME), true);
+    assert.equal((await source.getDirectoryHandle(RECORD_NAME)).__has("封面.jpg"), true);
+  });
+
+  await test("搬目录时「复制后比字节」不一致必须报错，且绝不删源（1.13.4 真执行 · P1-1）", async () => {
+    let reads = 0;
+    const driftingFile = {
+      kind: "file",
+      name: "视频信息.txt",
+      async getFile() {
+        reads += 1;
+        const size = reads === 1 ? 3 : 5;
+        return { name: "视频信息.txt", size, __bytes: new Uint8Array(size) };
+      }
+    };
+    const sourceHandle = { kind: "directory", name: "我的收藏", async *values() { yield driftingFile; } };
+    const sourceParent = {
+      async removeEntry() { throw new Error("校验不一致时竟然还去删源目录了"); }
+    };
+    const targetParent = await freshRoot({});
+
+    await assert.rejects(
+      () => tools.moveDirectoryInto(sourceHandle, sourceParent, "我的收藏", targetParent, "我的收藏"),
+      /复制到回收站后校验不一致/
+    );
+  });
+
+  await test("批量回收记录：每条都挪进同一个时间戳目录，进度按条回调，路径逐条对得上（1.13.4 真执行 · P1-1）", async () => {
+    const root = await freshRoot({
+      我的收藏: { [RECORD_NAME]: recordTree("甲"), "2026年10月25日10时15分9秒": recordTree("乙") },
+      别的收藏: { "2026年10月25日10时16分0秒": recordTree("丙") }
+    });
+    const seen = [];
+
+    const result = await tools.recycleRecords(root, [
+      { collection: "我的收藏", directory: RECORD_NAME },
+      { collection: "别的收藏", directory: "2026年10月25日10时16分0秒" }
+    ], (item) => seen.push(item.directory));
+
+    assert.equal(result.moved.length, 2);
+    assert.deepEqual(seen, [RECORD_NAME, "2026年10月25日10时16分0秒"], "进度回调没按条触发");
+    assert.match(result.stamp, /^\d{8}-\d{6}$/);
+    for (const moved of result.moved) {
+      assert.equal(moved.path, `005回收站/${result.stamp}/${moved.collection}/${moved.name}`);
+    }
+    const bucket = await root.getDirectoryHandle(tools.RECYCLE_DIR_NAME);
+    assert.deepEqual(bucket.__child(result.stamp).__child("我的收藏").__dump(), { [RECORD_NAME]: recordTree("甲") });
+    assert.deepEqual(bucket.__child(result.stamp).__child("别的收藏").__dump(), { "2026年10月25日10时16分0秒": recordTree("丙") });
+    assert.equal((await root.getDirectoryHandle("我的收藏")).__has(RECORD_NAME), false, "记录挪走了却还留在收藏夹里");
+  });
+
+  await test("恢复：原收藏夹里已有同名目录时顺延成 -2，两份内容都完整，空掉的时间戳目录顺手清掉（1.13.4 真执行 · P1-1）", async () => {
+    const root = await freshRoot({ 我的收藏: { [RECORD_NAME]: recordTree("甲") } });
+    await tools.recycleCollection(root, "我的收藏");
+    const coll = await root.getDirectoryHandle("我的收藏", { create: true });
+    await coll.getDirectoryHandle(RECORD_NAME, { create: true });
+    const bucket = await root.getDirectoryHandle(tools.RECYCLE_DIR_NAME);
+    const stamp = bucket.__list()[0];
+
+    const entries = await tools.listRecycled(root);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].stamp, stamp);
+    assert.equal(entries[0].directory, RECORD_NAME);
+    assert.equal(entries[0].path, `005回收站/${stamp}/我的收藏/${RECORD_NAME}`);
+
+    const result = await tools.restoreRecycled(root, entries);
+
+    assert.deepEqual(result.failures, []);
+    assert.equal(result.restored.length, 1);
+    assert.equal(result.restored[0].restoredName, `${RECORD_NAME}-2`, "重名时没有顺延到 -2");
+    const after = (await root.getDirectoryHandle("我的收藏")).__dump();
+    assert.deepEqual(after[RECORD_NAME], {}, "用户自己那条记录被覆盖了");
+    assert.deepEqual(after[`${RECORD_NAME}-2`], recordTree("甲"), "恢复回来的内容不对");
+    assert.equal(bucket.__has(stamp), false, "时间戳目录空掉了却没清");
+  });
+
+  await test("彻底删除：只删指定的那一条，其余仍在，删空的目录清掉，重复删只进 failures（1.13.4 真执行 · P1-1）", async () => {
+    const root = await freshRoot({
+      我的收藏: { [RECORD_NAME]: recordTree("甲"), "2026年10月25日10时15分9秒": recordTree("乙") }
+    });
+    await tools.recycleRecords(root, [
+      { collection: "我的收藏", directory: RECORD_NAME },
+      { collection: "我的收藏", directory: "2026年10月25日10时15分9秒" }
+    ]);
+    const entries = await tools.listRecycled(root);
+    assert.equal(entries.length, 2, "两条记录应该都在回收站里");
+
+    const first = await tools.deleteRecycled(root, [entries[0]]);
+    assert.equal(first.removed, 1);
+    assert.deepEqual(first.failures, []);
+    assert.equal((await tools.listRecycled(root)).length, 1, "点了一条却删了不止一条");
+
+    const second = await tools.deleteRecycled(root, [entries[1]]);
+    assert.equal(second.removed, 1);
+    const bucket = await root.getDirectoryHandle(tools.RECYCLE_DIR_NAME);
+    assert.deepEqual(bucket.__list(), [], "时间戳目录没清干净");
+
+    const again = await tools.deleteRecycled(root, [entries[1]]);
+    assert.equal(again.removed, 0);
+    assert.equal(again.failures.length, 1);
+    assert.ok(again.failures[0].includes("已经不在回收站里了"), "重复删除的提示不对：" + again.failures[0]);
+  });
+
+  await test("清空回收站：每个时间戳目录都消失（连认不出名字的也删），返回删掉几个（1.13.4 真执行 · P1-1）", async () => {
+    const root = await freshRoot({});
+    const bucket = await root.getDirectoryHandle(tools.RECYCLE_DIR_NAME, { create: true });
+    await bucket.getDirectoryHandle("20260901-120000", { create: true });
+    await bucket.getDirectoryHandle("认不出的名字", { create: true });
+    (await bucket.getFileHandle("散落文件.txt", { create: true })) ;
+
+    const result = await tools.purgeRecycler(root);
+
+    assert.equal(result.removed, 3, "清空时要连文件一起清");
+    assert.deepEqual(result.failures, []);
+    assert.deepEqual(bucket.__list(), []);
   });
 }
 
@@ -2593,6 +2758,7 @@ async function suite() {
   await suiteStats();
   await suiteA11y();
   await suiteDocs();
+  await suiteRecycleTools();
   await suitePruneRecycler();
 }
 

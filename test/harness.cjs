@@ -224,6 +224,10 @@ function makeFileHandle(name, bytes) {
           if (typeof chunk === "string") buffer.push(new TextEncoder().encode(chunk));
           else if (chunk instanceof Uint8Array) buffer.push(new Uint8Array(chunk));
           else if (chunk && chunk.__bytes) buffer.push(new Uint8Array(chunk.__bytes));
+          /* 真 Chrome 的 createWritable().write() 吃 Blob / File；1.13.4 之前这里没有这一支，
+             于是「把 A 文件的 File 写进 B 文件」会退化成 JSON 文本 —— copyFileHandle 因此在
+             测试里永远产出 0 字节，moveDirectoryInto 的复制校验分支从没被测到过。 */
+          else if (chunk && typeof chunk.arrayBuffer === "function") buffer.push(new Uint8Array(await chunk.arrayBuffer()));
           else buffer.push(bytesOf(chunk));
         },
         async close() {

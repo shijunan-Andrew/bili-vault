@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 418 · archive-core 96 · stats-core 69 · background 33 · pages 90（后四套是真执行） |
+| 测试基线 | stability 418 · archive-core 96 · stats-core 69 · background 33 · pages 97（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-26 00:16，当时 HEAD `cb365b1`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-26 00:25，当时 HEAD `9aee758`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -480,6 +480,8 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | `stats-core.test.cjs` | 真执行 `stats-core.js`：数据库模型、快照、区间计算 | 统计口径变了 |
 | `background.test.cjs` | 在 vm 里跑 `background.js`：内存版 `chrome.*` + FileSystem，覆盖统计库写入 / 回队 / 回滚 / 互斥、归档写锁 | service worker 的契约破了 |
 | `pages.test.cjs` | 在最小 DOM 里跑 `library.js` / `popup.js` / `stats.js` / `content.js` | 页面交互、选择器或事件链破了 |
+
+**`pages.test.cjs` 里从 1.13.4 起有一段真 FileSystem 用例**（`suiteRecycleTools`）：回收 / 恢复 / 彻底删除 / 搬目录都在 `test/harness.cjs` 的内存目录树上真跑。写这类用例前先知道：`createWritable().write()` 现在认 Blob / File 了（1.13.4 补的），此前它只认字符串和 `Uint8Array`，于是 `copyFileHandle` 在测试里恒产 0 字节、「复制 → 比字节 → 才删源」这条路径根本跑不通 —— 回收站误删能在这么深的地方活 30 多个版本，一部分原因就是它。
 
 各套的项数**不写死在这里**（会漂）：五套的当前值见上面「当前状态」那张脚本生成的表，`stability.test.cjs` 的总数另有三处 `<!-- test-count:N -->` 标记由 `scripts/check-all.cjs` 核对。
 

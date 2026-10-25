@@ -137,12 +137,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.13.3：更新视频数据不再把你的收藏时间改成「现在」
+## V1.13.4：回收站和搬目录这一段，终于有真执行测试了
 
-- **修掉「认不出的收藏时间被静默覆盖」**（审查 P1-5）：解析只认插件自己写的 `2026年10月25日 10时15分30秒` 六字段格式，所以手改成 `2026-10-25 10:15`、更早版本写的无秒格式、从别处复制来的 `2026年10月25日`，都会在某次「更新视频数据」之后被写成当前时间 —— 而「视频收藏时间」是本地事实，B 站接口永远不会给你，等于永久丢失。
-- **现在认不出就原样保留**：那一行一个字节都不动，其它字段照常更新；原文里整行丢了也会补回去。
-- **这一行的读写收在一处**：`archive-core.js` 的 `favoriteTimeTextOf` / `favoriteTimeLineOf` / `parseChineseDateTime` / `pinUnparsableFavoriteTime`，`background.js` 只调用，不许再留第二份解析。
-- **测试**：新增 3 条 `archive-core` 真执行测试（钉回原文、六字段表驱动、一行两种读法）+ 1 条 stability 守卫。
+- **补上真执行测试**（审查 P1-1）：回收收藏夹、批量回收记录、恢复、彻底删除、清空回收站、搬目录 —— 七条用例全部在内存文件系统上真跑 `archive-tools.js`，每一步都断言磁盘上的真实结构：挪过去的字节、源目录还在不在、重名怎么断、空掉的时间戳目录有没有清掉。这是项目里唯一不可逆删数据的代码，之前只有内存桩。
+- **顺手补上 harness 的一处失真**：`createWritable().write()` 以前不认「从 `getFile()` 拿到的 File」，于是 `copyFileHandle` 在测试里永远产 0 字节 —— 「复制 → 逐文件比字节 → 才删源」这条最该测的路径，从来没有被执行过。
+- **冒烟清单里那条点不出来的步骤改掉了**（审查 P1-2）：「点『收藏到本地』」是 1.7 之前的行为，现在是关掉 B 站收藏弹窗后自动归档。
+- **README 的出网域名口径与隐私说明对齐**（审查 P1-7）：只有三类，第三类是点「检查更新」时才读一次的两个地址。
 
 **遗留** - 无。
 
@@ -208,7 +208,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 ### 代码层面的安全属性（已核查）
 
 - **从不修改 B 站服务端状态**：全部请求都是 GET，没有 POST/PUT/DELETE，不可能误删你的线上收藏或代替你发言。
-- **无第三方域名、无遥测**：出网域名只有 `api.bilibili.com` 与 `*.hdslb.com`（图片 CDN）。**1.3.0 起 `*.bilivideo.com`、`*.bilivideo.cn`、`*.akamaized.net` 这三条视频流域名权限已从 `manifest.json` 中删除** —— 这是「插件已经没有取流能力」在代码层面最直接的证据。
+- **只连三类域名、无遥测**：`api.bilibili.com`（收藏夹与视频资料）、`*.hdslb.com`（封面图 CDN）；另有两个**只在点「检查更新」时**才各请求一次的地址 —— `raw.githubusercontent.com` 与 `cdn.jsdelivr.net`，读的是仓库根那个 `version.json`，详见 `docs/PRIVACY.md`。**1.3.0 起 `*.bilivideo.com`、`*.bilivideo.cn`、`*.akamaized.net` 这三条视频流域名权限已从 `manifest.json` 中删除** —— 这是「插件已经没有取流能力」在代码层面最直接的证据。
 - **无远程代码**：没有 `eval`、没有动态加载脚本、MV3 默认严格 CSP，也没有任何 npm 依赖。
 - **扩展页不对任何网页开放**：`library.html` 不作为 web_accessible resource 暴露，并额外拒绝被 iframe 嵌套。
 - **错误报告含本地路径**，文件里已加提示，请勿公开分享。
