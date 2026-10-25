@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **400** 项里<!-- test-count:400 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **402** 项里<!-- test-count:402 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -716,6 +716,13 @@
 **出问题看**：先确认它是不是在抓详情（那会让耗时从分钟级变成小时级）；再看有没有拿到 uid（报错会说"请先打开一次自己的 B 站收藏夹页面"）。
 
 ---
+
+## V1.12.2 新增的几条
+
+- **中断后能收尾**：导入跑到一半时直接关浏览器（或 `chrome://extensions` 里点「重新加载」），下次打开设置页 → 「导入与导出」，应出现「上次导入没有收尾」一行，说明里写着这一轮建了几个视频目录；点「清理它建的空目录」→ 确认 → 回执写清删了几样。
+- **确认框要写实话**：那个确认框必须出现「被覆盖过的 视频信息.txt 不会还原」——没有这句话就是文案退化了。
+- **没有记录时不该出现**：正常跑完一轮导入后，这一行必须是 hidden（刷新设置页仍 hidden）。
+- **回归**：「检查更新」「最近出错」「重建统计库」三条老路径不受影响。
 
 ## V1.12.1 新增的几条
 

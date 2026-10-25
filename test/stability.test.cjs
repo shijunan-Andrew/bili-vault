@@ -8550,3 +8550,41 @@ test("1.11.6：标题与行分成两层，收藏夹能置顶，旧按钮名不�
   assert.doesNotMatch(sources, /将下载到本地的视频放入收藏夹中/, "1.11.6 起叫「标记为已下载」");
 });
 
+test("1.12.2：被打断的导入要留下跨重启的清理线索（审查 P1-3）", () => {
+  const background = readProjectFile("background.js");
+  const settingsJs = readProjectFile("settings.js");
+  const settingsHtml = readProjectFile("settings.html");
+  // 回滚日志必须带一份到 local，否则浏览器一重启就再也说不清这轮建了什么
+  assert.match(background, /const IMPORT_LEFTOVER_KEY = "bcaImportLeftover";/);
+  assert.match(background, /chrome\.storage\.local\.set\(\{ \[IMPORT_LEFTOVER_KEY\]: leftoverRecordOf\(snapshot\) \}\)/,
+    "写 session 快照时要顺带落一份到 local");
+  assert.match(background, /async function cleanupLeftoverImport\(\) \{/);
+  // 只许动「本轮新建」的三类；改写过的 txt 不许声称能还原
+  const cleanup = background.slice(background.indexOf("async function cleanupLeftoverImport()"));
+  const body = cleanup.slice(0, cleanup.indexOf("  return result;"));
+  assert.match(body, /journal\.createdRecords/);
+  assert.match(body, /journal\.addedFiles/);
+  assert.match(body, /journal\.createdCollections/);
+  assert.doesNotMatch(body, /modifiedFiles\.reverse/, "改写过的文件没有可信原文，不许假装还原");
+  assert.match(background, /message\?\.type === "bca-import-cleanup-leftover"/);
+  assert.match(settingsHtml, /id="leftoverRow"/);
+  assert.match(settingsHtml, /id="cleanupLeftover"/);
+  assert.match(settingsJs, /const IMPORT_LEFTOVER_KEY = "bcaImportLeftover";/);
+  assert.match(settingsJs, /type: "bca-import-cleanup-leftover"/);
+  // 中断路必须真的把 local 副本留下（两处）
+  assert.equal((background.match(/keepLeftover: true/g) || []).length, 2, "两处中断分支都要留 local 副本");
+});
+
+test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的更正）", () => {
+  const background = readProjectFile("background.js");
+  // 这一条是给「审查里误判成没有保活」留的钉子：实现一直是 keepServiceWorkerAlive
+  assert.match(background, /async function keepServiceWorkerAlive\(reason = "import"\) \{/);
+  const interval = background.match(/const IMPORT_KEEPALIVE_INTERVAL_MS = (\d+);/);
+  assert.ok(interval, "保活间隔常量不见了");
+  assert.ok(Number(interval[1]) <= 25000, "保活间隔必须明显小于 30 秒的回收阈值");
+  assert.match(background, /await chrome\.runtime\.getPlatformInfo\(\)/);
+  const calls = (background.match(/keepServiceWorkerAlive\("/g) || []).length;
+  assert.ok(calls >= 8, `保活调用点只剩 ${calls} 处，应该有 api / paused / rollback / scan / page / refresh / cover / diff`);
+  assert.match(background, /function withKeepAlive\(task, reason\)/);
+});
+

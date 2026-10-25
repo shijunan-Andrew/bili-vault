@@ -829,6 +829,109 @@ async function restoreUpdateResult() {
   return result;
 }
 
+
+/* 1.12.2（审查 P1-3）：被打断的导入会在 chrome.storage.local 留一条「这一轮建了哪些东西」
+   的记录（只有名字）。这里给它一个明确的清理入口 —— 不然用户只能自己翻 005回收站 之外的目录。 */
+const IMPORT_LEFTOVER_KEY = "bcaImportLeftover";
+const leftoverRow = { status: "leftoverStatus", error: "leftoverError" };
+const IMPORT_CLEANUP_TIMEOUT_MS = 60000;
+
+function showLeftoverMessage(text, isError = false) {
+  showRowMessage(leftoverRow, text, isError);
+}
+
+function leftoverPartsText(summary) {
+  const count = (value) => BcaArchiveCore.formatCountText(Math.max(0, Number(value) || 0));
+  const parts = [];
+  if (Number(summary?.records) > 0) parts.push(BcaI18n.t("{count} 个视频目录", { count: count(summary.records) }));
+  if (Number(summary?.collections) > 0) parts.push(BcaI18n.t("{count} 个收藏夹", { count: count(summary.collections) }));
+  if (Number(summary?.files) > 0) parts.push(BcaI18n.t("{count} 个新封面", { count: count(summary.files) }));
+  return parts.length ? parts.join(BcaI18n.t("、")) : BcaI18n.t("不多");
+}
+
+async function refreshLeftoverImport() {
+  let record = null;
+  try {
+    const stored = await readStoredSettings([IMPORT_LEFTOVER_KEY]);
+    record = stored?.[IMPORT_LEFTOVER_KEY] || null;
+  } catch (error) {
+    console.warn("读「上次中断的导入」记录失败（这一行先不显示）", error);
+    record = null;
+  }
+  const usable = Boolean(record?.interruptedAt && record?.journal);
+  setVisible($("leftoverRow"), usable);
+  if (!usable) {
+    setVisible($("leftoverStatus"), false);
+    setVisible($("leftoverError"), false);
+    return null;
+  }
+  writeText($("leftoverDesc"), BcaI18n.t("上次导入被打断，留下了：{parts}。清理只会删掉这一轮新建、而且已经空了的东西；被覆盖过的 视频信息.txt 不会自动还原。", {
+    parts: leftoverPartsText(record.summary)
+  }));
+  const button = $("cleanupLeftover");
+  if (button) button.disabled = false;
+  return record;
+}
+
+async function cleanupLeftoverImport() {
+  const record = await refreshLeftoverImport();
+  if (!record) {
+    showLeftoverMessage(BcaI18n.t("没有需要清理的东西。"));
+    return false;
+  }
+  if (!askConfirm("清理上次中断留下的目录：只删这一轮新建、而且已经空了的东西，被覆盖过的 视频信息.txt 不会还原。确定吗？")) {
+    return false;
+  }
+  const button = $("cleanupLeftover");
+  if (button) button.disabled = true;
+  showLeftoverMessage(BcaI18n.t("正在清理上次中断留下的文件…"));
+  const response = await new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    try {
+      chrome.runtime.sendMessage({ type: "bca-import-cleanup-leftover" }, (reply) => {
+        if (chrome.runtime.lastError) {
+          finish({ ok: false, reason: "no-response" });
+          return;
+        }
+        finish(reply || { ok: false, reason: "no-response" });
+      });
+    } catch (error) {
+      finish({ ok: false, reason: "no-runtime" });
+    }
+    window.setTimeout(() => finish({ ok: false, reason: "timeout" }), IMPORT_CLEANUP_TIMEOUT_MS);
+  });
+  if (button) button.disabled = false;
+  if (!response?.ok) {
+    const reason = String(response?.reason || "");
+    const text = reason === "no-root"
+      ? BcaI18n.t("先选一个本地备份文件夹，再清理上次中断留下的文件。")
+      : reason === "no-permission"
+        ? BcaI18n.t("没有获得本地备份文件夹的写入权限。")
+        : reason === "running"
+          ? BcaI18n.t("导入正在跑，等它结束再试。")
+          : reason === "nothing"
+            ? BcaI18n.t("没有需要清理的东西。")
+            : BcaI18n.t("清理失败：{message}", { message: BcaI18n.t("上次中断留下的文件没能删掉，稍后再试。") });
+    showLeftoverMessage(text, true);
+    return false;
+  }
+  await refreshLeftoverImport();
+  const done = BcaI18n.t("清掉了 {records} 个视频目录、{collections} 个空收藏夹、{files} 个新封面。", {
+    records: BcaArchiveCore.formatCountText(Math.max(0, Number(response.removedRecords) || 0)),
+    collections: BcaArchiveCore.formatCountText(Math.max(0, Number(response.removedCollections) || 0)),
+    files: BcaArchiveCore.formatCountText(Math.max(0, Number(response.removedFiles) || 0))
+  });
+  showLeftoverMessage(Number(response.failed) > 0
+    ? `${done}${BcaI18n.t("还有 {failed} 项没删掉，下次还能再试。", { failed: BcaArchiveCore.formatCountText(Number(response.failed) || 0) })}`
+    : done);
+  return true;
+}
+
 async function exportArchiveMetadata() {
   try {
     const handle = await BcaArchiveTools.loadRootHandle();
@@ -1422,6 +1525,11 @@ function wireTransferAndMaintenance() {
     exportMarkdownInventory();
   });
 
+  // 1.12.2（审查 P1-3）：上次导入被打断时，这里能把它留下的空目录清掉。
+  $("cleanupLeftover")?.addEventListener("click", () => {
+    cleanupLeftoverImport();
+  });
+
   $("runIntegrityCheck")?.addEventListener("click", () => {
     scanIntegrity();
   });
@@ -1454,7 +1562,9 @@ globalThis.BcaSettingsTransfer = Object.freeze({
   renderRecentErrors,
   copyDiagnostics,
   checkForUpdate,
-  restoreUpdateResult
+  restoreUpdateResult,
+  refreshLeftoverImport,
+  cleanupLeftoverImport
 });
 
 wireTransferAndMaintenance();
@@ -1694,6 +1804,7 @@ async function boot() {
   // 1.10.0（TODO P0-3）：启动时把「最近出错」面板填上（i18n 已就绪，文案才是当前语言）
   renderRecentErrors().catch(() => {});
   restoreUpdateResult().catch(() => {});
+  refreshLeftoverImport().catch(() => {});
 
   BcaI18n.onChange(() => {
     applyTitle();

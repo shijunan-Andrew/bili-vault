@@ -630,3 +630,6 @@ UP主主页：https://space.bilibili.com/……
 - **标题与行分两层**：`.settings-card[data-group]` 只放 `<h2>` 与 `.card-lead`（透明），行与状态段落都放进 `.settings-panel`（白底）。`settings.js` 的导航、搜索分组、页内跳转都按 `.settings-card[data-group]` 定位，所以再往里加行不用改 JS —— 但要记住 **`data-group` 与 `<h2>` 必须在同一个 `.settings-card` 里**，否则导航文字取不到。
 - **收藏夹顺序只有一处权威**：`collectionOrder`。拖拽（`installCollectionDrag`）与置顶（`pinCollection`）都会先重排 `collections`、再用同一份「这次没扫到的收藏夹接在后面」的规则覆盖 `collectionOrder`，最后写 `chrome.storage.local`。新加任何排序入口都要复用这套顺序表，别再引入第二份顺序。
 - `test/stability.test.cjs` 有守卫钉着「十张卡都有 `.settings-panel`」「横幅居中」「图钉三件套（图标/按钮/`pinCollection`）」「旧按钮名不再出现」；`test/pages.test.cjs` 真点一次图钉核顺序与落库。
+
+- **导入中断后的清理线索（1.12.2）**：回滚日志的权威副本有两处 —— 内存 journal（含原文，只在取消时用）与 `chrome.storage.local` 里的 `bcaImportLeftover`（只有名字，跨重启用）。中断时后者会被打上 `interruptedAt`，由 `cleanupLeftoverImport()` 消费；它只删本轮新建的目录与空收藏夹，`modifiedFiles` 不还原。`test/stability.test.cjs` 有守卫钉着「只动那三类」与「两处中断分支都要留副本」。
+

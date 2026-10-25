@@ -415,6 +415,22 @@
         <p class="row-status" id="exportMarkdownStatus" role="status" hidden></p>
         <p class="row-error" id="exportMarkdownError" role="alert" hidden></p>
 
+
+        <!-- 1.12.2（审查 P1-3）：被打断的导入会在 storage 里留一条「这一轮建了哪些东西」的记录。
+             平时 hidden，只有真的存在「上次没走完的导入」时才出现。 -->
+        <div class="setting-row" id="leftoverRow" hidden>
+          <div class="setting-row-text">
+            <p class="setting-row-title" data-i18n="上次导入没有收尾">上次导入没有收尾</p>
+            <p class="setting-row-desc" id="leftoverDesc"></p>
+          </div>
+          <div class="setting-row-control">
+            <button id="cleanupLeftover" class="button button-quiet" type="button"><span data-icon="trash"></span><span data-i18n="清理它建的空目录">清理它建的空目录</span></button>
+          </div>
+        </div>
+
+        <p class="row-status" id="leftoverStatus" role="status" hidden></p>
+        <p class="row-error" id="leftoverError" role="alert" hidden></p>
+
         <p class="row-status" id="transferStatus" role="status" hidden></p>
         <p class="row-error" id="transferError" role="alert" hidden></p>
         </div>

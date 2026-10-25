@@ -2476,6 +2476,10 @@ const IMPORT_RUN_SESSION_KEY = "bcaImportRun";
    缩小成一条极小的记录放进 local —— 它只含收藏夹名、页号、三个计数与收藏夹 id，
    不含回滚日志、不含视频正文，重启浏览器后照样能读到（session 里的会被清掉）。 */
 const IMPORT_RESUME_KEY = "bcaImportResume";                  // 正在进行的导入（断点 + 回滚日志）
+/* 1.12.2（审查 P1-3）：回滚日志原来是只写 chrome.storage.session 的，浏览器一重启就没了，
+   被打断的那一轮永远说不清「它建了哪些目录」。这里在 local 里留一份【只有名字】的副本，
+   断电 / 关浏览器之后也能照着它把本轮新建的空目录清掉（正文改过的文件不在此列，见下方说明）。 */
+const IMPORT_LEFTOVER_KEY = "bcaImportLeftover";
 // 必须明显小于 30 秒的回收阈值，留出一次请求的最长耗时（15 秒）的余量
 const IMPORT_KEEPALIVE_INTERVAL_MS = 20000;
 const IMPORT_RUN_PUBLISH_INTERVAL_MS = 15000;                   // 断点落盘节流（1.7.7：5000 → 15000，会话快照最多 2MB，别每 5 秒序列化一次）
@@ -2609,8 +2613,20 @@ function writeImportRunSnapshot() {
   // 串行化写入，避免慢写覆盖快写
   importRunPublishChain = importRunPublishChain
     .then(() => chrome.storage.session.set({ [IMPORT_RUN_SESSION_KEY]: snapshot }))
+    .then(() => chrome.storage.local.set({ [IMPORT_LEFTOVER_KEY]: leftoverRecordOf(snapshot) }))
     .catch(() => {});
   return importRunPublishChain;
+}
+
+// 1.12.2（P1-3）：跨重启留下来的那一份只记名字 —— handle 不能进 storage，正文也不在这里
+function leftoverRecordOf(snapshot) {
+  return {
+    startedAt: Number(snapshot?.startedAt) || 0,
+    updatedAt: Number(snapshot?.updatedAt) || Date.now(),
+    counts: snapshot?.counts || null,
+    cursor: snapshot?.cursor || null,
+    journal: snapshot?.journal || null
+  };
 }
 
 function resetImportRunSnapshot(journal, folderIds = []) {
@@ -2669,15 +2685,133 @@ async function readImportRunSnapshot() {
   }
 }
 
-async function clearImportRunSnapshot() {
+async function clearImportRunSnapshot({ keepLeftover = false } = {}) {
   importRunSnapshot = null;
   importRunPublishAt = 0;
   importRunPublishedMeasured = "";
   // 排进同一条写入链：否则排队中的快照可能在 remove 之后落地，留下"幽灵活动记录"
   importRunPublishChain = importRunPublishChain
     .then(() => chrome.storage.session.remove(IMPORT_RUN_SESSION_KEY))
+    .then(() => (keepLeftover ? null : chrome.storage.local.remove(IMPORT_LEFTOVER_KEY)))
     .catch(() => {});
   await importRunPublishChain;
+}
+
+// 1.12.2（P1-3）：把这一轮标成「已中断」，让设置页能拿出「清理它建的空目录」
+async function markImportLeftoverInterrupted(snapshot, text) {
+  const record = leftoverRecordOf(snapshot);
+  if (!record.journal) return;
+  const stamped = {
+    ...record,
+    interruptedAt: Date.now(),
+    text: String(text || ""),
+    summary: {
+      collections: (record.journal.createdCollections || []).length,
+      records: (record.journal.createdRecords || []).length,
+      files: (record.journal.addedFiles || []).length,
+      rewritten: (record.journal.modifiedFiles || []).length
+    }
+  };
+  try {
+    await chrome.storage.local.set({ [IMPORT_LEFTOVER_KEY]: stamped });
+  } catch (error) {
+    console.warn("中断记录没能落盘（设置页这次不会出现「清理上次中断」）", error);
+  }
+}
+
+/* 1.12.2（P1-3）：清理被打断那一轮留下的东西。
+   只动【本轮新建】的目录与文件：createdCollections / createdRecords / addedFiles。
+   被覆盖过的 视频信息.txt（modifiedFiles）【不还原】—— 原文本从来只存在内存 journal 里，
+   进不了 storage，跨重启之后没有可信来源，宁可不做也不许假装做过。
+   收藏夹只在不含任何条目时才删（跟 rollbackImport 同一口径）。 */
+async function cleanupLeftoverImport() {
+  if (importRun.active) return { ok: false, reason: "running" };
+  let record = null;
+  try {
+    const stored = await chrome.storage.local.get(IMPORT_LEFTOVER_KEY);
+    record = stored?.[IMPORT_LEFTOVER_KEY] || null;
+  } catch (_) {
+    record = null;
+  }
+  if (!record?.journal || !record?.interruptedAt) return { ok: false, reason: "nothing" };
+  const root = await getRootHandle();
+  if (!root) return { ok: false, reason: "no-root" };
+  const granted = await root.queryPermission({ mode: "readwrite" });
+  if (granted !== "granted") return { ok: false, reason: "no-permission" };
+
+  const journal = record.journal;
+  let removedRecords = 0;
+  let removedFiles = 0;
+  let removedCollections = 0;
+  const failures = [];
+  const noteFailure = (what, error) => {
+    failures.push(`${what}：${(error && error.message) || error || "未知错误"}`);
+  };
+  const collectionOf = async (name) => {
+    if (!name) return null;
+    try {
+      return await root.getDirectoryHandle(name);
+    } catch (_) {
+      return null;
+    }
+  };
+
+  for (const entry of [...(journal.createdRecords || [])].reverse()) {
+    await keepServiceWorkerAlive("cleanup");
+    try {
+      const collection = await collectionOf(entry.collection);
+      if (!collection) continue;
+      await collection.removeEntry(entry.name, { recursive: true });
+      removedRecords += 1;
+    } catch (error) {
+      noteFailure(`撤回新建的 ${entry.name}`, error);
+    }
+  }
+  for (const entry of [...(journal.addedFiles || [])].reverse()) {
+    await keepServiceWorkerAlive("cleanup");
+    try {
+      const collection = await collectionOf(entry.collection);
+      if (!collection) continue;
+      const directory = await collection.getDirectoryHandle(entry.directory);
+      await directory.removeEntry(entry.name);
+      removedFiles += 1;
+    } catch (error) {
+      noteFailure(`删除新增的 ${entry.name}`, error);
+    }
+  }
+  for (const entry of [...(journal.createdCollections || [])].reverse()) {
+    await keepServiceWorkerAlive("cleanup");
+    try {
+      const collection = await collectionOf(entry.name);
+      if (!collection) continue;
+      let empty = true;
+      for await (const child of collection.values()) {
+        void child;
+        empty = false;
+        break;
+      }
+      if (!empty) continue;
+      await root.removeEntry(entry.name, { recursive: true });
+      removedCollections += 1;
+    } catch (error) {
+      noteFailure(`删除空收藏夹 ${entry.name}`, error);
+    }
+  }
+
+  const result = {
+    ok: true,
+    removedRecords,
+    removedFiles,
+    removedCollections,
+    failed: failures.length,
+    failures: failures.slice(0, 5)
+  };
+  // 一条都没删成、且全是失败 → 留着记录，别让用户失去再来一次的机会
+  if (failures.length && !removedRecords && !removedFiles && !removedCollections) {
+    return { ...result, ok: false, reason: "failed" };
+  }
+  await chrome.storage.local.remove(IMPORT_LEFTOVER_KEY).catch(() => {});
+  return result;
 }
 
 // P1-7：把「上次停在哪」写成一条可跨重启的小记录（只有收藏夹名 / 页号 / 计数 / 收藏夹 id）
@@ -2766,6 +2900,8 @@ async function importAnnounceInterruption(snapshot) {
   await chrome.storage.local.set({ importState }).catch(() => {});
   // P1-7：写一份跨重启的断点，让弹窗能给出「继续上次导入」
   await writeImportResume(snapshot);
+  // 1.12.2（P1-3）：把跨重启的回滚日志标成「已中断」
+  await markImportLeftoverInterrupted(snapshot, text);
   const stored = await chrome.storage.local.get("lastResult").catch(() => ({}));
   if ((Number(stored?.lastResult?.createdAt) || 0) <= activityAt) {
     await chrome.storage.local.set({ lastResult: { message: text, createdAt: Date.now() } }).catch(() => {});
@@ -2810,9 +2946,9 @@ async function importReconcileState() {
     return { active: false, reset: false };
   }
   await importAnnounceInterruption(leftover);
-  // V1.4.2：以前这里还会把这份快照挪到 bcaInterruptedImport 键上留作"可回滚"的一份，
-  // 但没有任何界面会去回滚它（见 importInterruptedSummary 上方的说明），所以不再留。
-  await clearImportRunSnapshot();
+  // 1.12.2（P1-3）：session 里的快照照旧清掉，但 local 里那份【已中断】的副本要留着 ——
+  // 设置页据此给出「清理上次中断留下的目录」。
+  await clearImportRunSnapshot({ keepLeftover: true });
   return { active: false, reset: true };
 }
 
@@ -2830,7 +2966,7 @@ async function importRecoverInterruptedImport() {
   if (current?.startedAt !== snapshot.startedAt) return false;
   // V1.4.2：不再把快照挪到 bcaInterruptedImport（那个键没有任何读者了），
   // 但中断报告文件照写 —— 用户需要知道停在哪、已经写了多少。
-  await clearImportRunSnapshot();
+  await clearImportRunSnapshot({ keepLeftover: true });
   const { text, detail } = await importAnnounceInterruption(snapshot);
   // 有断点才写报告文件：报告里能写清"停在哪个收藏夹第几页、已经写了多少"
   const report = [
@@ -5734,6 +5870,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ ok: false }));
     return true;
   }
+  if (message?.type === "bca-import-cleanup-leftover") {
+    cleanupLeftoverImport()
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, reason: error?.message || "failed" }));
+    return true;
+  }
+
   if (message?.type === "bca-stats-republish") {
     // 1.9.6：统计页在「还没有数据」时可以让后台按现成的数据库重发一次快照（只读）。
     republishStatsSnapshot()
