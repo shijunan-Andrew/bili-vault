@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 416 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
+| 测试基线 | stability 416 · archive-core 93 · stats-core 69 · background 33 · pages 90（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-25 22:52，当时 HEAD `7b8d1d2`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-25 23:53，当时 HEAD `358d4a5`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -126,6 +126,15 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 
 `version.json` 的语义是**用户认可的公开版**，不是最新 tag —— 所以它可能比 `manifest.json` 旧，这在平时是正常的；
 `test/stability.test.cjs` 只要求「它不高于 manifest、且版本在 `docs/HISTORY.md` 里有一节」。
+
+### 发布渠道：只发 GitHub Release，暂时不上架商店（2026-10-25）
+
+> **用户原话（2026-10-25）**：「本插件稳定版只发 GitHub Release，暂时不上架商店。」
+
+- **稳定版的分发方式只有一个**：`pack.ps1` 打出 zip，用户自己把 zip 拖到 GitHub 的 Release 页面。**不上架** Chrome Web Store / Microsoft Edge 加载项，也不做任何商店提交。
+- **因此不构成阻塞的**：商店清单、截图、单一用途说明、权限 justification、可公开访问的隐私政策 URL 那一套素材。但 `docs/PRIVACY.md` 仍要维护 —— 它的读者是用户（数据存哪、请求哪些域名、每个权限干什么），不是审核员。
+- **不上架不等于可以放宽**：`host_permissions` 仍按最小化维护（现在只有 `api.bilibili.com` 与 `*.hdslb.com`），不要因为「反正没人审」就加域名或权限；也不要往 `manifest.json` 里加 `key` / `update_url` 这类商店或自更新字段。
+- **以后真要上架**，先补齐上面那套素材与说明，再按商店的审核口径重新核一遍权限与「单一用途」。
 
 ### 发版时的三条禁令（1.12.12）
 

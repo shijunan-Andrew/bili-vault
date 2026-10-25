@@ -2518,6 +2518,71 @@ async function suiteDocs() {
   });
 }
 
+/* 1.13.1（审查 P0-1）：回收站过期清理的真执行测试。
+   pruneRecycler 每次扫描成功都会跑（library.js 里 fire-and-forget），它删的是用户文件，
+   所以判据必须用「给定目录名 → 删还是留」的表格钉住，不能只靠源码里有这行字。 */
+async function suitePruneRecycler() {
+  const tools = require("../archive-tools.js");
+  const pad = (value) => String(value).padStart(2, "0");
+  const stampOf = (ms) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  };
+  const DAY = 24 * 60 * 60 * 1000;
+  const makeBucket = (names) => {
+    const entries = names.map((name) => ({ kind: "directory", name }));
+    const removed = [];
+    const bucket = {
+      removed,
+      survivorNames: () => entries.map((entry) => entry.name).filter((name) => !removed.includes(name)),
+      async *values() { for (const entry of entries) yield entry; },
+      async removeEntry(name) { removed.push(name); }
+    };
+    return bucket;
+  };
+  const rootOf = (bucket) => ({
+    async getDirectoryHandle(name) {
+      if (bucket && name === tools.RECYCLE_DIR_NAME) return bucket;
+      const error = new Error(`${name} 不存在`);
+      error.name = "NotFoundError";
+      throw error;
+    }
+  });
+
+  await test("pruneRecycler：只删「时间戳能解析、且真的超过 30 天」的目录", async () => {
+    const expired = stampOf(Date.now() - 31 * DAY);
+    const justOver = stampOf(Date.now() - 30 * DAY - 60 * 1000);
+    const dayAgo = stampOf(Date.now() - 1 * DAY);
+    const bucket = makeBucket([expired, justOver, dayAgo, "别删-重要", "2026-10-25", "20261025", "", "temp"]);
+    const removedCount = await tools.pruneRecycler(rootOf(bucket));
+    assert.deepEqual(bucket.removed.sort(), [expired, justOver].sort(), "只有过期的时间戳目录该被删");
+    assert.equal(removedCount, 2, "返回值要等于实际删掉的条数");
+    assert.deepEqual(bucket.survivorNames().sort(), [dayAgo, "", "20261025", "2026-10-25", "temp", "别删-重要"].sort(),
+      "改名过的、格式不对的、没到 30 天的都必须留下");
+  });
+
+  await test("pruneRecycler：没有 005回收站 时返回 0，不抛错", async () => {
+    assert.equal(await tools.pruneRecycler(rootOf(null)), 0);
+  });
+
+  await test("stampTime：只认 YYYYMMDD-HHMMSS，其余一律 0（且 0 表示「不知道」，不是「过期」）", async () => {
+    const table = [
+      ["20261025-101500", true],
+      ["20261025-1015", false],
+      ["2026-10-25", false],
+      ["20261025", false],
+      ["20261025-101500-2", false],
+      ["别删-重要", false],
+      ["", false]
+    ];
+    for (const [name, parseable] of table) {
+      const at = tools.stampTime(name);
+      if (parseable) assert.ok(at > 0, `${name} 应该解析成时间戳`);
+      else assert.equal(at, 0, `${name} 应该解析不出来（返回 0）`);
+    }
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
@@ -2528,6 +2593,7 @@ async function suite() {
   await suiteStats();
   await suiteA11y();
   await suiteDocs();
+  await suitePruneRecycler();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

@@ -338,7 +338,10 @@
     for await (const entry of bucket.values()) {
       if (entry.kind !== "directory") continue;
       const at = stampTime(entry.name);
-      if (at && now - at < RECYCLE_RETENTION_MS) continue;
+      // 1.13.1（审查 P0-1）：stampTime 对认不出的名字返回 0 —— 那是「页面上显示成时间未知」的兜底值，
+      //   不是「已经过期」。以前写的是 `if (at && …)`，于是改名过的目录 at=0 → 判据为假 → 直接递归删除，
+      //   下一次扫描（打开收藏库/刷新）就没了，而且不进系统回收站。这里必须是反向判断：认不出就留下。
+      if (!at || now - at < RECYCLE_RETENTION_MS) continue;
       try {
         await bucket.removeEntry(entry.name, { recursive: true });
         removed += 1;
