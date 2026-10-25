@@ -8564,6 +8564,59 @@ test("1.12.3：缩略图缓存能跨会话留下来，且键里带着封面的 s
   assert.match(library, /void clearThumbnailStore\(\);/, "换目录时要清掉持久化的缩略图");
 });
 
+test("1.12.5：扫描缓存能跨会话留下来，冷启动不再逐条重读 视频信息.txt（审查 P2-4）", () => {
+  const library = readProjectFile("library.js");
+  const tools = readProjectFile("archive-tools.js");
+  // 持久层三件套
+  assert.match(library, /const SCAN_CACHE_DB_NAME = "bca-scan-cache";/);
+  assert.match(library, /const SCAN_CACHE_STORE = "records";/);
+  assert.match(library, /async function loadScanCacheInto\(cache\) \{/);
+  assert.match(library, /async function saveScanCacheFrom\(cache\) \{/);
+  assert.match(library, /async function pruneScanCacheStore\(\) \{/);
+  // 扫描前灌回、扫描后写回、换根目录清掉
+  // library.js 是 CRLF，正则里必须写 \r?\n
+  assert.match(library, /if \(!forceFullScan\) \{\r?\n    await loadScanCacheInto\(cache\)/, "扫描前要先灌回上一轮");
+  assert.match(library, /void saveScanCacheFrom\(cache\)\.catch\(/, "扫描完要写回去");
+  assert.match(library, /void clearScanCacheStore\(\);/, "换根目录要作废");
+  // 封面句柄不能塞进 IndexedDB（恢复后要重新申请权限），必须显式置空
+  assert.match(library, /const record = Object\.assign\(\{\}, entry\.record, \{ coverEntry: null \}\);/);
+  // 命中判据仍然只有 archive-tools 那一处
+  assert.match(tools, /function cacheEntryFor\(store, name, size, lastModified\) \{/);
+  assert.match(tools, /if \(!entry \|\| entry\.size !== size \|\| entry\.lastModified !== lastModified\) return null;/);
+});
+
+test("1.12.5：断点续跑在收藏库顶栏也有入口，弹窗不再是唯一出路（审查 P2-7）", () => {
+  const library = readProjectFile("library.js");
+  const html = readProjectFile("library.html");
+  const popup = readProjectFile("popup.js");
+  for (const id of ["resumeImportNotice", "resumeImportText", "startResumeImport", "dismissResumeImport"]) {
+    assert.ok(html.includes(`id="${id}"`), `library.html 缺 #${id}`);
+  }
+  assert.match(library, /async function restoreResumeImportNotice\(\) \{/);
+  assert.match(library, /async function startResumeImport\(\) \{/);
+  assert.match(library, /resume: \{ folder: String\(resumeImport\.folder\), page: Math\.max\(1, Number\(resumeImport\.page\) \|\| 1\) \}/);
+  assert.match(library, /restoreResumeImportNotice\(\)\.catch\(\(\) => \{\}\)/, "启动链里要调一次");
+  assert.match(library, /if \(changes\.bcaImportResume \|\| changes\.bcaResumeNoticeDismissedAt\) \{/, "记录变了要同步");
+  assert.ok(popup.includes("上次导入停在"), "弹窗那条提示不能删（两处入口并存）");
+  // 续跑参数里必须有 uid，没有就说清楚，别发注定失败的导入
+  assert.match(library, /还不知道你的 B 站 UID，先去弹窗里导入一次再续跑。/);
+});
+
+test("1.12.5：复制按钮的每次调用都有看得见的失败退路（审查 P2-3）", () => {
+  const library = readProjectFile("library.js");
+  const settings = readProjectFile("settings.js");
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  // 我们仍然要这份权限（复制路径 / 诊断信息必须一击即中），但四处调用都得有退路
+  assert.ok((manifest.permissions || []).includes("clipboardWrite"), "权限是决定保留的，别悄悄删");
+  assert.match(library, /async function copyToClipboard\(text, successMessage\) \{/);
+  assert.match(library, /showToast\(BcaI18n\.t\("复制失败：\{message\}"/);
+  assert.match(library, /setDownloadPathNote\(BcaI18n\.t\("复制失败，请手动记录：\{path\}"/);
+  assert.match(settings, /window\.prompt\(BcaI18n\.t\("复制失败，请手动选中下面的文字："/);
+  const privacy = readProjectFile("docs/PRIVACY.md");
+  assert.match(privacy, /复制视频目录路径/, "隐私文档要写清权限用途");
+  assert.match(privacy, /复制诊断信息/);
+});
+
 test("1.12.4：报告打码要认得用户自己选的下载根，而且不许误伤兄弟目录（审查 P2-2）", () => {
   const background = readProjectFile("background.js");
   // 这个文件里既没有裸的 carveFunction，也没有 harness（它只在别处 require）——按源码断言就够了。

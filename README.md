@@ -137,18 +137,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.4：报告里的路径认得「你自己选的备份文件夹」了，收藏夹页面桥第一次有测试
+## V1.12.5：冷启动不再重读全部 视频信息.txt，断点续跑也有顶栏入口了
 
-- **报告打码的第二道口子**：以前只盖系统用户目录（`C:\Users\<名>`），而插件其实还知道一个
-  用户自己选的绝对路径 —— 下载根（`chrome.storage.local.downloadRootPath`，形如
-  `D:\我的备份\000视频下载`）。打开目录失败时它会被写进错误文案与报告，落点在哪个盘、
-  叫什么名字完全由用户决定，靠目录形状永远匹配不到。1.12.4 起多记一份「已知本地根」，
-  命中整段换成 `<本地文件夹>`；判定还要求路径边界，`D:\归档` 不会把兄弟目录 `D:\归档案` 一起吃掉。
-- **macOS / Linux 的用户目录也盖**：`/Users/<名>`、`/home/<名>` 同样换成 `<用户>`（以前只认 Windows 两种）。
-- **`favorites-import.js` 第一次有真执行测试**：它是 B 站收藏夹页面上唯一的桥 —— 三条消息
-  分支、15 秒兜底、只放行 `https://api.bilibili.com`、只接受本扩展发来的消息。以前只有静态
-  断言，现在 `test/pages.test.cjs` 用 `dom-harness` 真跑它（`suiteFavoritesImport`，6 条）。
-- **测试项数**：`stability` 404 → 406，`pages` 78 → 84；后台套件 30 → 33。
+- **扫描结果跨会话留存**：以前那份解析缓存是页面级 Map，每次打开收藏库都从空开始 —— 700 条库
+  在机械盘上就是首屏那 1~3 秒。现在把「解析好的 record + 它的 size / lastModified」存进 IndexedDB
+  （`bca-scan-cache/records`），下次扫描前先灌回内存缓存。命中判据一个字没改（还是比 size 与
+  lastModified），只是「上一轮的结果」留下来了；封面句柄不入库，命中时用这次枚举到的新句柄补上。
+- **断点续跑有了顶栏入口**：`bcaImportResume` 以前只有弹窗读，从不点扩展图标的人永远看不到
+  「还能接着跑」。现在收藏库顶栏挂一条同款提示，点「继续上次导入」按同一套消息把续跑参数发下去
+  （uid 取记住的那个，没有就明说）；关掉之后同一条断点不再反复冒出来，新的一轮中断才会重新出现。
+- **复制的权限留着，退路写实**：审查建议去掉 `clipboardWrite`。四处复制（视频目录路径、诊断信息、
+  清理命令）都必须一击即中，所以保留权限；隐私文档已把用途写全，`stability` 也钉着「四处都有看得见
+  的失败退路」。
+- **测试项数**：`stability` 406 → 409，`pages` 84 → 86。
 
 **遗留** - 无。
 
@@ -156,11 +157,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1120 条**<!-- i18n-count:1120 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1124 条**<!-- i18n-count:1124 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:406 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:409 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

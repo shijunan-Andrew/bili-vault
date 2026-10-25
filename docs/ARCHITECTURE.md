@@ -635,3 +635,14 @@ UP主主页：https://space.bilibili.com/……
 - **缩略图缓存（1.12.3）**：两层，内存 `thumbnailUrls`（`blob:` URL，随页面）＋ IndexedDB `bca-thumbnail-cache/thumbs`（存 `blob`）。键由 `${collection}/${directory}@${size}-${lastModified}` 组成，所以「封面换了」不需要额外的失效逻辑；字节预算 `THUMBNAIL_CACHE_BYTES = 8 MB`，`pruneThumbnailStore()` 按 `usedAt` 从旧到新淘汰。拿不到 IndexedDB 时退回「只在内存」—— 缩略图是纯优化，任何失败都不许影响卡片显示。`test/stability.test.cjs` 钉着这些写法。
 
 - **报告打码的边界（1.12.4）**：错误报告写进 `chrome.storage.local` 与 `001错误报告` 之前都过 `maskLocalUserPaths()`（`background.js`，全项目唯一一份）。它盖三类静态形状 —— `X:\Users\<名>`、`X:\Documents and Settings\<名>`、`/Users|/home/<名>` —— 外加**登记过的本地根**：下载根（`chrome.storage.local.downloadRootPath`）在 `onInstalled` / `onStartup` / `storage.onChanged` 三处登记进 `knownLocalRoots`，命中整段换 `<本地文件夹>`，且要求路径边界（`D:\归档` 不吃 `D:\归档案`）。**盖不住的部分**：归档根的绝对路径拿不到（文件系统访问 API 只给句柄），所以备份文件夹如果既不在用户目录下、也不在下载根里，它的盘符与上级目录仍会出现在报告里 —— 这条写在 `docs/PRIVACY.md` 的「打码的边界」，改代码前先读那段，别把「能盖的全部」当成「全部都盖住」。`test/background.test.cjs` 有三条真执行用例钉着，`test/stability.test.cjs` 钉着三条登记入口。
+
+- **扫描缓存的第二个落点（1.12.5）**：内存 Map（`library.js` 的 `archiveCache`，按根目录分桶）之外多了
+  IndexedDB `bca-scan-cache/records`，键是 `${收藏夹}/${目录名}`，值是 `{key, usedAt, size, lastModified, record}`。
+  `scanRoot()` 开头 `loadScanCacheInto()` 灌回、收尾 `saveScanCacheFrom()` 写回，`dropRootCaches()` 时整表作废
+  （换根目录 / 点「刷新」都会走到）。**命中判据仍然只有 `archive-tools.js` 的 `cacheEntryFor()` 一处**（比
+  `size + lastModified`），缓存本身不参与判断；`record.coverEntry` 落库前被置空（句柄恢复要重新申请权限），
+  命中时用这次枚举到的新句柄补上。
+- **断点续跑的两个入口（1.12.5）**：弹窗（`popup.js` 的 `refreshImportResume`）与收藏库顶栏
+  （`#resumeImportNotice`）读的是同一条 `chrome.storage.local.bcaImportResume`，发的也是同一种
+  `import-bili-favorites` + `resume: {folder, page}`。收藏库这边多存一个 `bcaResumeNoticeDismissedAt`，
+  与断点记录的 `at` 比新旧 —— 关掉的只是「这一条」，新的一轮中断仍会重新提示。

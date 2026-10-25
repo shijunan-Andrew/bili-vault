@@ -63,6 +63,11 @@ const recentResultNotice = document.getElementById("recentResultNotice");
 const recentResultText = document.getElementById("recentResultText");
 const openRecentResultButton = document.getElementById("openRecentResult");
 const dismissRecentResultButton = document.getElementById("dismissRecentResult");
+// 1.12.5（审查 P2-7）：断点续跑的常驻入口（与弹窗里那颗按钮同一套消息）
+const resumeImportNotice = document.getElementById("resumeImportNotice");
+const resumeImportText = document.getElementById("resumeImportText");
+const startResumeImportButton = document.getElementById("startResumeImport");
+const dismissResumeImportButton = document.getElementById("dismissResumeImport");
 // 1.8.21（P2-6）：扫描提示条上的「清理这些没写完的目录」。只在真有半截目录时出现。
 const cleanupUnfinishedButton = document.getElementById("cleanupUnfinished");
 const importHint = document.getElementById("importHint");
@@ -823,6 +828,8 @@ function dropRootCaches(rootKey) {
   clearThumbnailUrls();
   // 1.12.3：换目录 / 首次扫描时把持久化的缩略图一起清掉（键里带 size/mtime，本来也不会串）。
   void clearThumbnailStore();
+  // 1.12.5：扫描结果同样按根目录记，换根目录就整个作废，别让旧库的条目占着存储。
+  void clearScanCacheStore();
   const at = archiveCacheOrder.indexOf(rootKey);
   if (at >= 0) archiveCacheOrder.splice(at, 1);
 }
@@ -927,6 +934,148 @@ async function hydrateCover(video) {
    - 走 `blob`，不存 `blob:` URL（URL 的生命周期只跟着页面走，存下来下次就是死链）。
    - 有一份字节预算 `THUMBNAIL_CACHE_BYTES`，超了按「最久没被用到」整条删掉。
    - 拿不到 IndexedDB、或写入失败，一律退回「只在内存」——缩略图是纯优化，不许因此出错。 */
+/* 1.12.5（审查 P2-4）：扫描结果的持久化副本。
+
+   1.8.5 起扫 `视频信息.txt` 有内存缓存（`archive-tools.js` 的 `cacheEntryFor`，按
+   `size + lastModified` 命中），但那是一个**页面级的 Map** —— 每次打开收藏库都从空开始，
+   冷启动仍然把每条 `视频信息.txt` 读一遍再解析。700 条库在机械盘上就是首屏那 1~3 秒。
+
+   这里把「解析好的 record + 它对应的 size/lastModified」存进 IndexedDB，下次扫描前先灌回
+   那个 Map：命中判据一点没变（还是比 size 与 lastModified），只是「上一轮的结果」跨会话留下来了。
+   封面句柄**不存**（FileSystemFileHandle 存下来要重新申请权限，得不偿失）：命中路径本来就会
+   用这次枚举到的新句柄补上去，所以封面照常显示。 */
+
+const SCAN_CACHE_DB_NAME = "bca-scan-cache";
+const SCAN_CACHE_STORE = "records";
+const SCAN_CACHE_DB_VERSION = 1;
+const SCAN_CACHE_MAX_ENTRIES = 4000;
+
+let scanCacheDbPromise = null;
+
+function openScanCacheDb() {
+  if (scanCacheDbPromise) return scanCacheDbPromise;
+  scanCacheDbPromise = new Promise((resolve) => {
+    let request;
+    try {
+      request = indexedDB.open(SCAN_CACHE_DB_NAME, SCAN_CACHE_DB_VERSION);
+    } catch (_) {
+      resolve(null);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SCAN_CACHE_STORE)) {
+        const store = db.createObjectStore(SCAN_CACHE_STORE, { keyPath: "key" });
+        store.createIndex("usedAt", "usedAt");
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+  return scanCacheDbPromise;
+}
+
+/** 把上一轮扫描留下的记录灌回内存 Map（key 与 archive-tools 的 `${收藏夹}/${目录名}` 一致）。 */
+async function loadScanCacheInto(cache) {
+  if (!cache) return 0;
+  const db = await openScanCacheDb();
+  if (!db) return 0;
+  const rows = await new Promise((resolve) => {
+    let request;
+    try {
+      request = db.transaction(SCAN_CACHE_STORE, "readonly").objectStore(SCAN_CACHE_STORE).getAll();
+    } catch (_) {
+      resolve([]);
+      return;
+    }
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => resolve([]);
+  });
+  let seeded = 0;
+  for (const row of rows) {
+    if (!row || !row.key || !row.record) continue;
+    if (typeof row.size !== "number" || typeof row.lastModified !== "number") continue;
+    // 内存里的形状就是 { size, lastModified, record }（见 archive-tools 的 storeCacheEntry）
+    cache.set(String(row.key), { size: row.size, lastModified: row.lastModified, record: row.record });
+    seeded += 1;
+  }
+  return seeded;
+}
+
+/** 扫描结束后把整张 Map 写回去（覆盖旧的同名条目，顺手淘汰长期没用的）。 */
+async function saveScanCacheFrom(cache) {
+  if (!cache || !cache.size) return 0;
+  const db = await openScanCacheDb();
+  if (!db) return 0;
+  const now = Date.now();
+  const rows = [];
+  for (const [key, entry] of cache) {
+    if (!entry || !entry.record) continue;
+    /* 封面句柄不能存（恢复后要重新申请权限），命中路径会用新句柄补上；
+       封面字节数保留，报告里的体积统计不受影响。 */
+    const record = Object.assign({}, entry.record, { coverEntry: null });
+    rows.push({ key, usedAt: now, size: entry.size, lastModified: entry.lastModified, record });
+  }
+  return new Promise((resolve) => {
+    let store;
+    try {
+      store = db.transaction(SCAN_CACHE_STORE, "readwrite").objectStore(SCAN_CACHE_STORE);
+    } catch (_) {
+      resolve(0);
+      return;
+    }
+    for (const row of rows) store.put(row);
+    store.transaction.oncomplete = () => {
+      void pruneScanCacheStore();
+      resolve(rows.length);
+    };
+    store.transaction.onerror = () => resolve(0);
+    store.transaction.onabort = () => resolve(0);
+  });
+}
+
+/** 按 usedAt 从旧到新淘汰，把条目数压到上限以内（冷启动只需要最近用过的那些）。 */
+async function pruneScanCacheStore() {
+  const db = await openScanCacheDb();
+  if (!db) return;
+  const count = await new Promise((resolve) => {
+    try {
+      const request = db.transaction(SCAN_CACHE_STORE, "readonly").objectStore(SCAN_CACHE_STORE).count();
+      request.onsuccess = () => resolve(request.result || 0);
+      request.onerror = () => resolve(0);
+    } catch (_) {
+      resolve(0);
+    }
+  });
+  if (count <= SCAN_CACHE_MAX_ENTRIES) return;
+  let drop = count - SCAN_CACHE_MAX_ENTRIES;
+  try {
+    const tx = db.transaction(SCAN_CACHE_STORE, "readwrite");
+    const index = tx.objectStore(SCAN_CACHE_STORE).index("usedAt");
+    const request = index.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor || drop <= 0) return;
+      cursor.delete();
+      drop -= 1;
+      cursor.continue();
+    };
+  } catch (_) {
+    /* 淘汰失败不影响正确性：条目多只是多占几 MB 存储 */
+  }
+}
+
+async function clearScanCacheStore() {
+  const db = await openScanCacheDb();
+  if (!db) return;
+  try {
+    db.transaction(SCAN_CACHE_STORE, "readwrite").objectStore(SCAN_CACHE_STORE).clear();
+  } catch (_) {
+    /* 清不掉也不影响：键里带 size/mtime，下次扫描照样会命中或覆盖 */
+  }
+}
+
 const THUMBNAIL_DB_NAME = "bca-thumbnail-cache";
 const THUMBNAIL_STORE = "thumbs";
 const THUMBNAIL_DB_VERSION = 1;
@@ -1247,6 +1396,105 @@ function applyRecentResultNotice(result) {
   recentResultNotice.hidden = !shown;
 }
 
+/* 1.12.5（审查 P2-7）：把「上次导入停在第几页」搬到收藏库顶栏。
+
+   `bcaImportResume` 以前只有弹窗读（popup.js 的 refreshImportResume），从不点扩展图标的人
+   永远看不到它。这里只做两件事：把那条记录读出来显示、点按钮时按同一套消息把续跑参数发下去；
+   真正的续跑逻辑、限速、断点推进全在后台，一行都没搬。 */
+
+const RESUME_DISMISSED_KEY = "bcaResumeNoticeDismissedAt";
+let resumeDismissedAt = 0;
+let resumeImport = null;
+
+function resumeImportUsable() {
+  if (!resumeImport || !resumeImport.folder) return false;
+  /* 关过一次就别再冒出来 —— 但只针对「这一条」断点：用户关掉之后又中断了一轮，
+     新记录的 at 会更大，提示该重新出现。 */
+  const recordAt = Number(resumeImport.at) || 0;
+  if (resumeDismissedAt && resumeDismissedAt >= recordAt) return false;
+  return true;
+}
+
+function resumeImportMessage() {
+  if (!resumeImport) return "";
+  return BcaI18n.t("上次导入停在「{folder}」第 {page} 页（已写入 {saved} 条），可以接着往下跑。", {
+    folder: String(resumeImport.folder || ""),
+    page: Math.max(1, Number(resumeImport.page) || 1),
+    saved: Math.max(0, Number(resumeImport.saved) || 0)
+  });
+}
+
+function renderResumeImportNotice() {
+  if (!resumeImportNotice) return;
+  const usable = resumeImportUsable();
+  resumeImportNotice.hidden = !usable;
+  if (!usable) return;
+  if (resumeImportText) resumeImportText.textContent = resumeImportMessage();
+}
+
+/** @returns {Promise<boolean>} 这一轮有没有读到可续跑的记录 */
+async function restoreResumeImportNotice() {
+  try {
+    const stored = await chrome.storage.local.get(["bcaImportResume", "bcaResumeNoticeDismissedAt"]);
+    resumeDismissedAt = Math.max(0, Number(stored?.bcaResumeNoticeDismissedAt) || 0);
+    resumeImport = stored?.bcaImportResume || null;
+    renderResumeImportNotice();
+    return resumeImportUsable();
+  } catch (error) {
+    console.warn("上次导入的断点记录没读出来（顶栏那条「继续上次导入」本次不显示）", error);
+    return false;
+  }
+}
+
+async function startResumeImport() {
+  if (!resumeImport || !resumeImport.folder) return;
+  /* uid 不在断点记录里（那是「导入参数」，不是断点），用记过的 UID 补；
+     没有就明确说一句，别发一条注定失败的导入。 */
+  let uid = "";
+  try {
+    const stored = await chrome.storage.local.get("lastImportUid");
+    uid = String(stored?.lastImportUid || "").trim();
+  } catch (_) {
+    uid = "";
+  }
+  if (!uid) {
+    showToast(BcaI18n.t("还不知道你的 B 站 UID，先去弹窗里导入一次再续跑。"));
+    return;
+  }
+  const folderIds = Array.isArray(resumeImport.folderIds) ? resumeImport.folderIds.map(String).filter(Boolean) : [];
+  resumeImportNotice.hidden = true;
+  try {
+    const response = await sendMessageWatched(
+      {
+        type: "import-bili-favorites",
+        uid,
+        folderIds,
+        resume: { folder: String(resumeImport.folder), page: Math.max(1, Number(resumeImport.page) || 1) }
+      },
+      IMPORT_START_TIMEOUT_MS
+    );
+    if (!response?.ok) {
+      showToast(response?.message || BcaI18n.t("继续导入失败。"));
+      await restoreResumeImportNotice();
+      return;
+    }
+    showToast(BcaI18n.t("已接着上次的位置往下跑，进度看左上角那条提示。"));
+  } catch (error) {
+    showToast(BcaI18n.t("继续导入失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
+    await restoreResumeImportNotice();
+  }
+}
+
+async function dismissResumeImport() {
+  resumeDismissedAt = Date.now();
+  resumeImportNotice.hidden = true;
+  try {
+    await chrome.storage.local.set({ [RESUME_DISMISSED_KEY]: resumeDismissedAt });
+  } catch (error) {
+    console.warn("「继续上次导入」的关闭状态没记住（下次打开还会出现）", error);
+  }
+}
+
 async function restoreRecentResultNotice() {
   if (!recentResultNotice) return;
   try {
@@ -1328,6 +1576,11 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   const cacheKey = rootCacheKey(handle);
   if (forceFullScan) clearArchiveCache(handle);
   const cache = archiveCacheFor(cacheKey);
+  // 1.12.5（审查 P2-4）：先把上一轮存下来的解析结果灌回来 —— 命中判据不变（size + lastModified），
+  // 冷启动就不再逐条读 视频信息.txt 了。强制全量扫描时跳过（那是用户明确要求的「重读一遍」）。
+  if (!forceFullScan) {
+    await loadScanCacheInto(cache).catch(() => {});
+  }
   // 1.8.4：第一次扫一个库时还不知道有多少条，容量会先卡在下限（600）。这时候一边读
   // 一边把上限接到「已读条数 + 余量」上，别在半路上淘汰掉下一条马上要读的条目。
   cache.growing = true;
@@ -1406,6 +1659,9 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   rememberArchiveCacheLimit(cacheKey, stats.total);
   // 1.9.3：把「收藏夹 → BV → 目录名」发布给后台，收藏时就不会再建一份重复目录
   publishBvIndex(scanned);
+  // 1.12.5（审查 P2-4）：把这一轮解析好的记录存进 IndexedDB，下次冷启动直接灌回内存缓存。
+  // 失败只留一条 warn —— 缓存是纯优化，不许影响打开。
+  void saveScanCacheFrom(cache).catch((error) => console.warn("扫描缓存没写成（下次冷启动会重读一遍）", error));
   // hits/reads/total 挂在返回值上，界面用它显示「本次命中缓存多少条」
   return { collections: scanned, issues, unfinished, longNames, diagnostics, forced, stats: { hits: stats.hits, reads: stats.reads, total: stats.total, bytes: stats.bytes } };
 }
@@ -5693,6 +5949,8 @@ dismissScanNoticeButton?.addEventListener("click", () => {
 });
 // 1.10.0（TODO P0-4）：跳过 / 失败提示条的两个按钮。关掉只记这一条的时间戳，
 // 下一条新的收藏结果照常会出来（和扫描提示同一个「关掉不烦人、新信息不丢」的口径）。
+startResumeImportButton?.addEventListener("click", () => { startResumeImport(); });
+dismissResumeImportButton?.addEventListener("click", () => { dismissResumeImport(); });
 dismissRecentResultButton?.addEventListener("click", () => {
   dismissedRecentResultAt = Number(recentResultRecord?.createdAt) || 0;
   applyRecentResultNotice(recentResultRecord);
@@ -5840,7 +6098,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 // 1.10.0（TODO P0-4）：收藏库开着的时候又在 B 站点了一次收藏，后台写完 lastResult
 // 这里就能立刻挂出提示 —— 用户不用关掉再打开。
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local" || !changes.lastResult) return;
+  if (areaName !== "local") return;
+  // 1.12.5（审查 P2-7）：断点记录一变（中断留下 / 续跑清掉）就同步那条提示
+  if (changes.bcaImportResume || changes.bcaResumeNoticeDismissedAt) {
+    restoreResumeImportNotice().catch(() => {});
+  }
+  if (!changes.lastResult) return;
   applyRecentResultNotice(changes.lastResult.newValue || null);
 });
 closeDetailButton.addEventListener("click", closeDetail);
@@ -6015,7 +6278,9 @@ BcaI18n.init().catch(() => {}).then(() => Promise.all([
   clearLegacySafetyDismissed(),
   restoreGithubBanner(),
   // 1.10.0（TODO P0-4）：最近一次收藏里的跳过 / 失败，开机就挂出来（24 小时内的才算）
-  restoreRecentResultNotice()
+  restoreRecentResultNotice(),
+  // 1.12.5（审查 P2-7）：断点续跑的入口也搬到顶栏，别只在弹窗里
+  restoreResumeImportNotice().catch(() => {})
 ])).finally(() => {
   applyViewMode();
   restoreLastRoot();

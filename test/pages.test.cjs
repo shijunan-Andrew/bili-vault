@@ -843,6 +843,32 @@ async function suiteLibrary() {
     assert.equal(doc.documentElement.classList.contains("banner-visible"), true,
       "横幅出现时页面要靠 banner-visible 让出高度");
   });
+
+  await test("顶栏会挂出「继续上次导入」，点关闭就不再出现（1.12.5）", async () => {
+    const page = await openLibrary({
+      localData: {
+        bcaImportResume: { folder: "蜻蜓小新", page: 3, saved: 42, folderIds: ["11", "22"], at: Date.now() }
+      }
+    });
+    await settle(12);
+    const notice = page.document.getElementById("resumeImportNotice");
+    const text = page.document.getElementById("resumeImportText");
+    assert.ok(notice, "library.html 里要有 #resumeImportNotice");
+    assert.equal(notice.hidden, false, "有断点记录就该挂出来");
+    assert.match(textOf(text), /蜻蜓小新/);
+    assert.match(textOf(text), /第 3 页/);
+    dom.fireUserEvent(page.document.getElementById("dismissResumeImport"), "click");
+    await settle(4);
+    assert.equal(notice.hidden, true);
+    const stored = await page.__chrome.storage.local.get("bcaResumeNoticeDismissedAt");
+    assert.ok(Number(stored.bcaResumeNoticeDismissedAt) > 0, "关闭状态要记住");
+  });
+
+  await test("没有断点记录时，那条提示不出现（1.12.5）", async () => {
+    const page = await openLibrary({ localData: {} });
+    await settle(12);
+    assert.equal(page.document.getElementById("resumeImportNotice").hidden, true);
+  });
 }
 
 
