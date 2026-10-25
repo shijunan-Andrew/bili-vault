@@ -137,15 +137,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.11.6：标题与内容分开，按钮改名，收藏夹能置顶
+## V1.11.7：底部提示不再被毛玻璃吃掉（同批还有设置页分层与收藏夹置顶）
 
-- **设置页的标题搬到页面底色上**：每栏的标题与那句引言留在外面，只有「行」包在白色卡片里。一栏一块的边界更清楚，长引言也不再和行挤在同一块白里。
-- **开源横幅的文字居中**：原来靠左、宽屏上右边空一大条，看着像没画完。
-- **「本机数据」去掉「归档会记录收藏时间」那一行**（收藏时间仍写在 `视频信息.txt` 里，只是不再单独占一行说明）。
-- **详情页那个按钮改名为「标记为已下载」**：原名叫「将下载到本地的视频放入收藏夹中」，功能没变。
-- **左侧收藏夹能置顶**：鼠标移到收藏夹名上会露出两个小按钮 —— 绿色图钉（置顶）和红色叉（删除，原来就有）。点图钉就把这个收藏夹排到最前面，顺序和其它排序一样存进 `collectionOrder`。
+- 设置页：每栏的标题与引言回到页面底色，行收进白色圆角卡片；「检查更新」自成一栏（1.11.5）。
+- 收藏库：开源横幅文字居中；左侧收藏夹悬停出绿色图钉（置顶）与红色叉（删除）。
+- 设置页删掉「归档会记录收藏时间」那一行；详情页按钮改名「标记为已下载」。
+- **1.11.7**：开了毛玻璃之后，底部提示条变成「半透明底 + 同色字」，夜晚主题几乎读不出来 —— 原因是它自己也在 `html.bca-glass` 的清单里。现在提示条不参与毛玻璃，底色是不透明的反相色，两种主题都一眼能读。
+- 测试：pages 71 → 74、stability 394 → 396。
 
-**遗留** - 无。
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
@@ -154,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:395 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:396 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

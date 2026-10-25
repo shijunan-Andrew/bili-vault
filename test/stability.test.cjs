@@ -8367,6 +8367,25 @@ test("1.11.5：使用说明里不再有「左下角两个浮标」（主题与�
   assert.match(guide, /怎么知道有没有新版本？/, "要把检查更新写进 FAQ");
 });
 
+test("1.11.7：底部提示条不吃毛玻璃，底色是不透明的反相色", () => {
+  const theme = readProjectFile("theme.css");
+  const libraryCss = readProjectFile("library.css");
+
+  // ① 三处 html.bca-glass 清单里都不许再出现 .toast（出现一次，提示条就半透明一次）
+  const glassBlocks = theme.match(/html\.bca-glass[^{]*\{[^}]*\}/g) || [];
+  const offending = glassBlocks.filter((block) => /\.toast\b/.test(block.split("{")[0]));
+  assert.deepEqual(offending, [], "毛玻璃清单里不该有 .toast —— 它要的是能读，不是和背景融在一起");
+  assert.match(theme, /1\.11\.7：底部提示（\.toast）不在这份清单里/, "theme.css 里要留一句说明，别让后来人加回去");
+
+  // ② 提示条底色必须是实色：color-mix(... transparent) 会在玻璃底下变成半透明
+  const toastBlock = /(?:^|\n)\.toast \{([\s\S]*?)\n\}/.exec(libraryCss);
+  assert.ok(toastBlock, "library.css 里应该有 .toast 规则");
+  assert.match(toastBlock[1], /background: var\(--ink\);/, ".toast 的底色要写成 var(--ink) 实色");
+  assert.doesNotMatch(toastBlock[1], /background: color-mix\(/, ".toast 的底色不许再掺 transparent");
+  // 字色与底色是一对反相：字用 --surface、底用 --ink，换主题时两边一起翻
+  assert.match(toastBlock[1], /color: var\(--surface\);/, ".toast 的字色要写成 var(--surface)");
+});
+
 test("1.11.6：标题与行分成两层，收藏夹能置顶，旧按钮名不再出现", () => {
   const html = readProjectFile("settings.html");
   const css = readProjectFile("settings.css");

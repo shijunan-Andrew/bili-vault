@@ -1197,7 +1197,11 @@ a.detail-tag:hover { border-color: var(--brand-line); color: var(--brand-deep); 
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-sm);
   color: var(--surface);
-  background: color-mix(in srgb, var(--ink) 92%, transparent);
+  /* 1.11.7：这里必须是实色。以前写的是 color-mix(ink 92%, transparent)，
+     剩下那 8% 在纯色底上无所谓，但一旦毛玻璃把背景糊成半透明，
+     提示条就跟着背景变、字压在杂色上；改成 --ink 实色后与背后彻底无关。
+     反过来也别让 .toast 进 theme.css 的毛玻璃清单（见那边的注释）。 */
+  background: var(--ink);
   box-shadow: var(--shadow-md);
   font-size: var(--fs-base);
   line-height: 1.6;

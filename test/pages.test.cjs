@@ -205,6 +205,37 @@ async function suiteLibrary() {
     assert.deepEqual(stored.slice(0, 2), ["小鲸鱼测试", "另一个夹"], "顺序写进了 collectionOrder");
   });
 
+  await test("点已经排在最前的收藏夹图钉，底部提示条会亮起来说「已经在最上面了」（1.11.7 真执行）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    await settle(6);
+    const doc = page.document;
+    const toast = doc.getElementById("toast");
+    assert.ok(toast, "收藏库要有 #toast 这个提示条");
+
+    const row = [...doc.querySelectorAll("#collectionList .collection-row")]
+      .find((item) => textOf(item.querySelector(".collection-name")) === "小鲸鱼测试");
+    row.querySelector(".collection-pin").click();
+    await settle(6);
+    assert.ok(toast.classList.contains("show"), "置顶后要给回执");
+    assert.equal(
+      textOf(toast),
+      BcaT(page, "已把「{name}」置顶", { name: "小鲸鱼测试" }),
+      "置顶的文案与词典一致",
+    );
+    // 已经排到最前了，再点一次只会给一句提示，不动顺序
+    const again = [...doc.querySelectorAll("#collectionList .collection-row")]
+      .find((item) => textOf(item.querySelector(".collection-name")) === "小鲸鱼测试");
+    again.querySelector(".collection-pin").click();
+    await settle(4);
+
+    assert.ok(toast.classList.contains("show"), "提示条要真的亮起来（用户的抱怨正是它亮了却看不清）");
+    assert.equal(
+      textOf(toast),
+      BcaT(page, "「{name}」已经在最上面了", { name: "小鲸鱼测试" }),
+      "文案与词典一致",
+    );
+  });
+
   await test("侧栏过滤框：输不中的词只剩「没有匹配的收藏夹」，清空后全部回来（1.7.23）", async () => {
     const page = await openLibrary({ tree: sampleTree() });
     const doc = page.document;

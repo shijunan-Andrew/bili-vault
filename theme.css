@@ -395,9 +395,15 @@ html[data-appearance="custom"][data-wallpaper="on"]:not([data-wallpaper-scope="p
 
 /* 毛玻璃。只给「收藏库 / 设置页」这几类面开：插件弹窗与文档页不参与
    （正文页要的是可读性，弹窗小、糊起来没有意义还费性能）。
-   color-mix 让底色保持半透明 —— 不透明的话 backdrop-filter 没有东西可模糊。 */
+   color-mix 让底色保持半透明 —— 不透明的话 backdrop-filter 没有东西可模糊。
+
+   1.11.7：底部提示（.toast）不在这份清单里，别再加回来。它原本也吃这层玻璃，
+   结果是「半透明的 surface 底 + surface 色的字」——浅色主题下白字压白底，
+   深色主题下深字压深底，开着毛玻璃时几乎读不出来（夜晚主题最糟）。
+   提示条要的是「一眼能读」，不是「和背景融在一起」：它的底色是反相的实色
+   （--ink），字是 --surface，与毛玻璃无关。test/stability.test.cjs 有守卫盯着。 */
 html.bca-glass :is(.sidebar, .video-card, .detail-panel, .batch-toolbar,
-  .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast) {
+  .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav) {
   background: var(--bca-glass-surface);
   border-color: var(--bca-glass-line);
   backdrop-filter: blur(var(--bca-glass-blur)) saturate(170%);
@@ -446,7 +452,7 @@ html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
     scroll-behavior: auto !important;
   }
   html.bca-glass :is(.video-card, .detail-panel, .batch-toolbar,
-    .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast,
+    .confirm-dialog, .editor-dialog, .diff-dialog, .settings-card, .settings-nav,
     .stats-card, .stats-foot, .stats-tile, .stats-top-row, .stats-picker-menu),
   html.bca-glass :is(.topbar, .stats-topbar) {
     backdrop-filter: none !important;
@@ -467,7 +473,7 @@ html.bca-glass :is(.video-card, .settings-card, .detail-panel) {
    颜色一律用系统关键字（Canvas / CanvasText / LinkText），不是写死的色值。 */
 @media (forced-colors: active) {
   html.bca-glass :is(.sidebar, .video-card, .detail-panel, .batch-toolbar, .confirm-dialog,
-    .editor-dialog, .diff-dialog, .settings-card, .settings-nav, .toast,
+    .editor-dialog, .diff-dialog, .settings-card, .settings-nav,
     .stats-card, .stats-foot, .stats-tile, .stats-top-row, .stats-picker-menu),
   html.bca-glass :is(.topbar, .stats-topbar) {
     backdrop-filter: none !important;
