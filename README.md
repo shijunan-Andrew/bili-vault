@@ -137,11 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.12.9：2015 彩蛋页有了视觉基线，改图会被拦住
+## V1.12.10：本机预览站能造出以前只能真机撞出来的几种状态
 
-- **基线**：新增 `bili-old-2015/egg-baseline.json`（203 个文件的 sha256：`index.html` + `egg-2015.js` + `assets/` 下全部图片），由 `scripts/check-egg-baseline.cjs` 生成与比对。
-- **进检查**：`node scripts/check-all.cjs` 多了一项「彩蛋页视觉基线」，CI 与发版第 4 步都会跑；改图之后不重记基线就红，提示跑 `--write`。
-- **不进发行包**：基线是开发期产物，`pack.ps1` 的 `$excludePaths` 排除了它（包仍是 252 个文件 / 5,883.8 KB）。
+- **预览站的三个新开关**（本机调试用，不进发行包）：`?stats=empty`（统计库在、但一条都没有）、`?resume=1`（收藏库顶栏的「继续上次导入」）、`?leftover=1`（设置页的「上次导入没有收尾」）。这几个界面以前只能在真机上等它出现。
+- **`?forceview=1` 修好了**：它以前只把 `#library` 的 `hidden` 扒掉，`library.js` 初始化时又藏回去，顶栏那几条提示永远看不见；现在会延时重显并同时藏掉欢迎态。
+- **能力边界写清楚了**：`docs/ARCHITECTURE.md` 新增一节「预览站能造哪些状态、造不出哪些」——参数表 12 项 + 「造不出来的」（真实文件系统句柄、IndexedDB、原生助手、通知、写死的版本号、760px 以下会隐藏的按钮）。
 
 **遗留** - 无。
 
@@ -153,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:413 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:414 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

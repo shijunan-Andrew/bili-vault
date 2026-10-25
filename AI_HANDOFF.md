@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 413 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
+| 测试基线 | stability 414 · archive-core 93 · stats-core 69 · background 33 · pages 87（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-22 重写的 14 条待办（P0 3 · P1 4 · P2 4 · P3 3）均未开始，明细在交接方的 `TODO.md`（不进仓库） |
-| 生成 | 2026-10-25 22:19，当时 HEAD `2d13d0d`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-25 22:25，当时 HEAD `7a55c80`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -235,6 +235,8 @@ pwsh -NoProfile -File .\release.ps1 <版本> "一句话说明" -Yes
 3. 真有多台浏览器 / 多个 Chrome 配置时，标签必须先验证过；拿不准就问用户当前用的是哪一个，别猜。
 4. 连接失败和「预览站没起」是两回事：`curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8798/__settings.html` 返回 `000` 是服务没起（重新 `job_kill` + 起一个新的），跟扩展能不能连无关。
 5. 实在连不上就走下面的 headless Chrome 兜底，别在这里卡住：静态布局核对用不上会话。
+
+**预览站能造哪些异常态**：`_appearance-preview.cjs` 支持 `?stats=empty`（统计库空态）、`?resume=1`（顶栏「继续上次导入」）、`?leftover=1`（设置页「上次导入没有收尾」）、`?nohandle=1`（回收站没选文件夹）、`?forceview=1`（卸掉 `#library` 的 hidden）、`?toast=1`、`?open=1`、`?bad=1`、`?fixture=cards`；完整清单与「造不出来的状态」见 `docs/ARCHITECTURE.md` 的「预览站能造哪些状态、造不出哪些」。
 
 #### headless Chrome 兜底（bsk 不可用，或只想看静态布局）
 
@@ -479,7 +481,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:413 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:414 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

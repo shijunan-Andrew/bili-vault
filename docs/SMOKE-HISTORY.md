@@ -6,6 +6,17 @@
 
 ---
 
+## V1.12.9 新增的几条
+
+- `node scripts/check-all.cjs` 应当多出「彩蛋页视觉基线」一项，输出 `[egg] 与基线一致：203 个文件、3.63 MB`。
+- 顺手改一张彩蛋页图片（或换掉 `index.html` 里任意一个字节）再跑一次：应当红，并提示跑 `node scripts/check-egg-baseline.cjs --write`；改回来再跑，恢复绿。
+- 打出来的 zip 里不该有 `bili-old-2015/egg-baseline.json`（`pack.ps1` 已把它排除）。
+
+---
+
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.12.8 及以前）。
+> 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。
+
 ## V1.12.8 新增的几条
 
 - 打开 `SMOKE_TEST.md`：从标题到「当前全量验收清单」一屏之内能看完（约 60 行），中间没有成片的旧版本章节。

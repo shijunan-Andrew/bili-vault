@@ -8703,6 +8703,26 @@ test("1.12.2：导入期间的保活接线不能悄悄消失（审查 P1-4 的�
   assert.match(background, /function withKeepAlive\(task, reason\)/);
 });
 
+test("1.12.10：预览站支持哪些异常态、造不出什么，文档里写清楚了（审查 P3-8）", () => {
+  const architecture = readProjectFile("docs/ARCHITECTURE.md");
+  const handoff = readProjectFile("AI_HANDOFF.md");
+
+  assert.match(architecture, /## 预览站能造哪些状态、造不出哪些（1\.12\.10）/);
+  for (const knob of ["stats=empty", "resume=1", "leftover=1", "nohandle=1", "forceview=1", "fixture=cards", "nostats=1", "bad=1"]) {
+    assert.ok(architecture.includes(knob), `ARCHITECTURE 的预览参数表里缺 ${knob}`);
+  }
+
+  // 「造不出来」的那一节必须点明 IndexedDB / 真实句柄这一层，否则接手的人会以为预览能看到一切
+  const limits = architecture.slice(architecture.indexOf("**造不出来的**"));
+  assert.match(limits, /FileSystem|文件系统句柄/, "要写清真实句柄相关验证不了");
+  assert.match(limits, /IndexedDB/, "要写清 IndexedDB 相关验证不了");
+  assert.match(limits, /760px/, "要写清窄窗口会隐藏拖动/删除/图钉");
+
+  // 入口文档也要指一下，不然没人知道该去看那一节
+  assert.match(handoff, /docs\/ARCHITECTURE\.md/, "AI_HANDOFF 要指向那一节");
+  assert.match(handoff, /stats=empty/, "AI_HANDOFF 里要点名几个常用开关");
+});
+
 test("1.12.9：彩蛋页有视觉基线，改图必须显式重记（审查 P3-7）", () => {
   const script = readProjectFile("scripts/check-egg-baseline.cjs");
   const checkAll = readProjectFile("scripts/check-all.cjs");

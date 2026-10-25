@@ -659,3 +659,35 @@ UP主主页：https://space.bilibili.com/……
 改图的正确顺序：换文件 → 用 httpserver 或 `chrome --headless --screenshot` 目测一次 →
 `node scripts/check-egg-baseline.cjs --write` → 把这次改动写进 `docs/HISTORY.md`。
 基线文件本身不进发行包（`pack.ps1` 的 `$excludePaths` 排除了它）。
+
+## 预览站能造哪些状态、造不出哪些（1.12.10）
+
+`C:\Users\Maxwell\Desktop\bili_vault_ref\_appearance-preview.cjs` 是本机目测界面用的桩服务器
+（`PREVIEW_PORT=8798 node _appearance-preview.cjs`，路由 `/__<页面名>.html`，不进仓库、不进发行包）。
+它把 `chrome.storage` / `runtime.getManifest` 换成了内存桩，所以**只该相信它看到的东西**：
+
+| 参数 | 能造出什么 |
+| --- | --- |
+| `locale=zh-CN\|zh-TW\|en`、`theme=light\|dark` | 三档语言与两套主题（`data-locale` / `data-theme` 直接写死） |
+| `glass=1`、`wallpaper=1&veiled=1` | 毛玻璃开关、铺背景图 + 遮罩浓度 |
+| `nostats=1` | 连 `bcaStats` 快照都没有 → 统计页走「还没构建统计库」那条 |
+| `stats=empty` | 快照在、但一条都没有（`videos:0`）→ 统计页的「还没有数据」空态 |
+| `bad=1` | `lastResult`（跳过 2 / 失败 1）+ `importDone` 失败 + 三条 `recentFailures` |
+| `fixture=cards` | 注入一个假根目录，让收藏库显示卡片网格（否则停在欢迎态） |
+| `forceview=1` | 卸掉 `#library` 的 hidden 并延时重显、同时藏掉欢迎态 —— 否则顶栏那几条提示永远看不见 |
+| `toast=1` | 直接点亮底部提示条（量毛玻璃下的对比度用） |
+| `open=1` | 设置页「更多导出」默认展开 |
+| `nohandle=1` | `BcaArchiveTools.loadRootHandle()` 返回 null → 回收站「还没选文件夹」空态 |
+| `resume=1` | 造一条 `bcaImportResume`（`folder` / `page` / `saved`）→ 收藏库顶栏「继续上次导入」 |
+| `leftover=1` | 造一条 `bcaImportLeftover` → 设置页「上次导入没有收尾」那一行 |
+
+**造不出来的**（这些只能真机验证）：
+
+- 真实 FileSystem 句柄相关的一切 —— 扫描、写盘、封面解码、缩略图缓存、扫描缓存（IndexedDB 在桩里没有实现）。
+- 分类/统计的真实数值（预置的是固定 fixture，不是真库）。
+- 原生目录助手（`native/`）、通知、`chrome://extensions` 的错误页。
+- 版本号是写死的（`getManifest().version` 桩里固定），别拿它核对发版结果。
+- `@media (max-width: 760px)` 会隐藏拖动/删除/图钉，窄窗口截图容易误判成「功能没了」。
+
+改预览桩时记住：它读的是仓库里的真 HTML/CSS/JS（所以能验证真实排版与真实 i18n），
+但所有「需要浏览器特权」的行为都是假的。

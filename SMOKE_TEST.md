@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **413** 项里<!-- test-count:413 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **414** 项里<!-- test-count:414 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,13 +54,12 @@
 
 ---
 
-## V1.12.9 新增的几条
+## V1.12.10 新增的几条
 
-- `node scripts/check-all.cjs` 应当多出「彩蛋页视觉基线」一项，输出 `[egg] 与基线一致：203 个文件、3.63 MB`。
-- 顺手改一张彩蛋页图片（或换掉 `index.html` 里任意一个字节）再跑一次：应当红，并提示跑 `node scripts/check-egg-baseline.cjs --write`；改回来再跑，恢复绿。
-- 打出来的 zip 里不该有 `bili-old-2015/egg-baseline.json`（`pack.ps1` 已把它排除）。
+- 本机起预览站（`PREVIEW_PORT=8798 node _appearance-preview.cjs`），分别打开 `?stats=empty`、`?resume=1&forceview=1`、`?leftover=1`：三处应当分别显示「还没有数据」空态、顶栏「上次导入停在「…」第 N 页（已写入 M 条）」、设置页「上次导入没有收尾」那一行。
+- 关掉预览站，真机上确认这三处行为没变（这一版没动页面代码，只是让它们更容易造出来）。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.12.8 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.12.9 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。
