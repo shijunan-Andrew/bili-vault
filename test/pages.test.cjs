@@ -2275,6 +2275,84 @@ async function suiteRecycle() {
       BcaT(page, "已彻底删除 {count} 项。", { count: "1" }));
   });
 
+  await test("清空回收站之前必须问一次不可逆确认，取消就一个都不删（1.15.4 真执行 · 审查 T-3）", async () => {
+    const page = await openRecycle();
+    const { tools, state } = makeRecycleTools({
+      entries: [recycleEntry("2026年05月10日01时19分50秒"), recycleEntry("2026年05月11日01时19分50秒")]
+    });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const asked = [];
+    page.window.confirm = (text) => {
+      asked.push(text);
+      return false;
+    };
+    dom.fireUserEvent(doc.getElementById("recyclePurge"), "click");
+    await settle();
+
+    assert.equal(asked.length, 1, "清空整份回收站之前必须问一次");
+    assert.equal(asked[0],
+      BcaT(page, "这次操作不可逆：会把回收站里的 {count} 项全部彻底删掉，不会进系统回收站，也找不回来。确定吗？", { count: "2" }),
+      "确认文案要说清不可逆、不进系统回收站、还有几项");
+    assert.equal(state.purged, 0, "点了取消就一个都不许删");
+    assert.equal(doc.getElementById("recycleGrid").children.length, 2, "取消之后列表要原样");
+    assert.equal(doc.getElementById("recycleStatus").hidden, true, "没开始删，别留状态行");
+  });
+
+  await test("确认之后才真调 purgeRecycler，清完要报清掉了几项（1.15.4 真执行 · 审查 T-3）", async () => {
+    const page = await openRecycle();
+    const { tools, state } = makeRecycleTools({
+      entries: [recycleEntry("2026年05月10日01时19分50秒"), recycleEntry("2026年05月11日01时19分50秒")]
+    });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    page.window.confirm = () => true;
+    dom.fireUserEvent(doc.getElementById("recyclePurge"), "click");
+    await settle();
+
+    assert.equal(state.purged, 1, "确认之后要调一次 purgeRecycler");
+    assert.equal(state.entries.length, 0, "回收站要被清空");
+    assert.equal(doc.getElementById("recycleGrid").children.length, 0, "清完列表要空");
+    assert.equal(doc.getElementById("recycleEmpty").hidden, false, "清完要回到空态");
+    assert.equal(doc.getElementById("recycleStatus").textContent.trim(),
+      BcaT(page, "已清空回收站，彻底删掉 {count} 项。", { count: "2" }),
+      "成功文案要报清掉了几项");
+  });
+
+  await test("清空时有的条目删不掉，要把数字和原因都说出来（1.15.4 真执行 · 审查 T-3）", async () => {
+    const page = await openRecycle();
+    const { tools } = makeRecycleTools({
+      entries: [recycleEntry("2026年05月10日01时19分50秒"), recycleEntry("2026年05月11日01时19分50秒")]
+    });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    page.window.confirm = () => true;
+    /* 模拟「删到一半删不动了」：一条删掉、一条失败。 */
+    page.window.BcaArchiveTools.purgeRecycler = async () => ({
+      removed: 1,
+      failures: [{ message: "那条被别的程序占着" }]
+    });
+    dom.fireUserEvent(doc.getElementById("recyclePurge"), "click");
+    await settle();
+
+    const error = doc.getElementById("recycleError");
+    assert.equal(error.hidden, false, "删不掉要顶红字，不能只说「已清空」");
+    assert.ok(error.textContent.includes("1"),
+      "错误里要有删掉的数字");
+    assert.ok(error.textContent.includes("那条被别的程序占着"),
+      "错误里要带上具体原因");
+    assert.equal(doc.getElementById("recycleStatus").hidden, true, "报错时不要同时留状态行");
+  });
+
   await test("回收站恢复把条目放回原收藏夹，成功文案报条数（1.10.0 真执行）", async () => {
     const page = await openRecycle();
     const { tools, state } = makeRecycleTools({ entries: [recycleEntry("2026年05月10日01时19分50秒")] });

@@ -6,6 +6,12 @@
 
 ---
 
+## V1.15.3 新增的几条
+- [ ] `node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/pages.test.cjs` 107 项，三套都全绿。
+- [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。
+- [ ] 真机：随便挑一条已在库里的视频，在 B 站页面把简介临时改成带「视频链接：https://example.com」的样式再走一次更新视频数据，收藏库里点「在 B 站打开」仍跳 bilibili.com 的地址。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
 ## V1.15.2 新增的几条
 - [ ] `node test/pages.test.cjs` 输出 106 项且全绿（新增的六条是 `library.js` 纯函数的真执行用例）。
 - [ ] `node test/stability.test.cjs` 还是 425 项全绿，最后一条叫「stability 自己也不许再堆纯文本断言」。

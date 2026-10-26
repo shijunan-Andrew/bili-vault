@@ -65,13 +65,13 @@
 - [ ] **剪贴板**：详情页「复制路径」、设置页「复制原生助手清理命令」、诊断信息「复制」—— 三个按钮各自真的写进了剪贴板（粘到记事本里核对）。
 - [ ] **大收藏夹的速率与风控**：用一个 2000+ 条的收藏夹导入前 50 条 → 全程不出现 412 / 风控提示，进度条持续推进，取消后统计库回滚干净。
 
-## V1.15.3 新增的几条
-- [ ] `node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/pages.test.cjs` 107 项，三套都全绿。
+## V1.15.4 新增的几条
+- [ ] `node test/pages.test.cjs` 110 项全绿；`node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/stats-core.test.cjs` 69 项也全绿。
 - [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。
-- [ ] 真机：随便挑一条已在库里的视频，在 B 站页面把简介临时改成带「视频链接：https://example.com」的样式再走一次更新视频数据，收藏库里点「在 B 站打开」仍跳 bilibili.com 的地址。
+- [ ] 真机：回收站里留两条 → 点「清空回收站」→ 先点「取消」，两条必须还在 → 再点一次、点「确定」→ 状态行写「已清空回收站，彻底删掉 2 项。」且列表回到空态。
 - [ ] `node scripts/check-all.cjs` 全绿。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.2 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.3 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。
