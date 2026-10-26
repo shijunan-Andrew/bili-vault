@@ -2742,6 +2742,98 @@ async function suiteRecycleTools() {
   });
 }
 
+/* 1.15.2（审查 T-1 / T-3）：library.js 里那几个纯函数以前只有「源码里写着某行字」的
+   文本断言。文本断言证明不了「safeCover 真的挡住了 javascript:」，也证明不了
+   highlightMatches 不会把查询串里的尖括号原样塞进 DOM —— 这里把函数体从源码里抠出来真跑。 */
+async function suiteLibraryHelpers() {
+  const source = harness.readSource("library.js");
+  const core = require("../archive-core.js");
+  const locale = { current: "zh-CN" };
+  const i18n = {
+    locale: () => locale.current,
+    t: (key, vars) => String(key).replace(/\{(\w+)\}/g, (whole, name) => (vars && vars[name] !== undefined ? String(vars[name]) : whole))
+  };
+  const pick = (names) => harness.buildModule(
+    names.map((name) => harness.carveFunction(source, name)),
+    { BcaI18n: i18n, BcaArchiveCore: core }
+  );
+  const lib = pick(["escapeHtml", "safeCover", "highlightMatches", "formatCount", "statDisplay", "addField"]);
+  const clock = pick(["compactDate", "startOfDay", "relativeDayLabel", "relativeTime"]);
+
+  await test("library.js 的 escapeHtml 转义五个特殊字符（1.15.2 · T-1）", () => {
+    assert.equal(lib.escapeHtml("<img src=\"x\" onerror='y'>&"), "&lt;img src=&quot;x&quot; onerror=&#39;y&#39;&gt;&amp;");
+    assert.equal(lib.escapeHtml(1234), "1234", "非字符串要先 String() 一遍");
+    assert.equal(lib.escapeHtml("中文 🎉 原样"), "中文 🎉 原样", "不需要转义的字符一个都不许动");
+  });
+
+  await test("safeCover 只放行 blob: 与 data:image/（1.15.2 · T-1）", () => {
+    assert.match(lib.safeCover("blob:chrome-extension://abc/1.png"), /^<img src="blob:chrome-extension:\/\/abc\/1\.png" alt="" loading="lazy">$/);
+    assert.match(lib.safeCover("data:image/png;base64,AAAA"), /^<img src="data:image\/png;base64,AAAA"/);
+    for (const bad of ["javascript:alert(1)", "https://i0.hdslb.com/a.jpg", "DATA:text/html,<b>x</b>", "blob"]) {
+      const html = lib.safeCover(bad);
+      assert.ok(!html.includes("<img"), bad + " 不该被当成封面渲染");
+      assert.ok(html.includes("cover-fallback"), bad + " 应退回占位图");
+    }
+    const tricky = lib.safeCover("blob:x\" onerror=\"alert(1)");
+    assert.ok(!tricky.includes("onerror=\"alert(1)\""), "引号必须被转义，不能逃出 src 属性");
+    assert.ok(tricky.includes("&quot;"), "URL 里的引号要变成 &quot;");
+  });
+
+  await test("highlightMatches 先转义再包 mark，查询里的尖括号不注入（1.15.2 · T-1）", () => {
+    assert.equal(lib.highlightMatches("B站投稿", "投稿"), "B站<mark>投稿</mark>");
+    assert.equal(lib.highlightMatches("a<b>重点</b>", "重点"), "a&lt;b&gt;<mark>重点</mark>&lt;/b&gt;");
+    const angle = lib.highlightMatches("a<a>", "<");
+    assert.ok(angle.includes("<mark>&lt;</mark>"), "命中的尖括号要在 mark 里被转义");
+    assert.ok(!angle.includes("<a>"), "原文里的尖括号不能原样出现在 HTML 里");
+    assert.equal(lib.highlightMatches("abc", "<script>"), "abc", "没命中就是纯转义，绝不插入查询串");
+    assert.equal(lib.highlightMatches("aaa", "a"), "<mark>a</mark><mark>a</mark><mark>a</mark>", "多次命中全要包上");
+    assert.equal(lib.highlightMatches("abc", ""), "abc", "没有查询词时等同于转义");
+  });
+
+  await test("formatCount 按语言换算万/亿与 K/M/B（1.15.2 · T-1）", () => {
+    assert.equal(lib.formatCount("12345"), "1.2 万");
+    assert.equal(lib.formatCount("99999999"), "1.0 亿");
+    assert.equal(lib.formatCount("1,234"), "1,234", "一万以下原样返回（千分位保留）");
+    assert.equal(lib.formatCount("abc"), "abc");
+    assert.equal(lib.formatCount(""), "");
+    locale.current = "zh-TW";
+    assert.equal(lib.formatCount("12345"), "1.2 萬", "繁体要用「萬」不是「万」");
+    locale.current = "en";
+    assert.equal(lib.formatCount("1234"), "1.2K");
+    assert.equal(lib.formatCount("2500000"), "2.5M");
+    assert.equal(lib.formatCount("1500000000"), "1.5B");
+    locale.current = "zh-CN";
+  });
+
+  await test("statDisplay 与 addField 对占位值和空值的处理（1.15.2 · T-1）", () => {
+    assert.equal(lib.statDisplay("未知"), "N/A");
+    assert.equal(lib.statDisplay(""), "N/A");
+    assert.equal(lib.statDisplay("1234"), "1234");
+    const rows = [];
+    lib.addField(rows, "UP 主", "<b>某人</b>");
+    lib.addField(rows, "粉丝数", "");
+    lib.addField(rows, "分区", "未知");
+    assert.equal(rows.length, 1, "空值与「未知」都不该生成一行");
+    assert.equal(rows[0], "<dt>UP 主</dt><dd>&lt;b&gt;某人&lt;/b&gt;</dd>", "label 与 value 都要转义");
+  });
+
+  await test("relativeTime 今天/昨天/N 天前，一年以上退回 YYYY.MM（1.15.2 · T-1）", () => {
+    const stamp = (dayOffset) => {
+      const date = new Date();
+      date.setDate(date.getDate() + dayOffset);
+      return date.getFullYear() + "年" + (date.getMonth() + 1) + "月" + date.getDate() + "日12时0分0秒";
+    };
+    assert.equal(clock.relativeTime(stamp(0)), "今天");
+    assert.equal(clock.relativeTime(stamp(-1)), "昨天");
+    assert.equal(clock.relativeTime(stamp(-5)), "5 天前");
+    const old = new Date();
+    old.setFullYear(old.getFullYear() - 2);
+    const oldText = old.getFullYear() + "年" + (old.getMonth() + 1) + "月" + old.getDate() + "日12时0分0秒";
+    assert.equal(clock.relativeTime(oldText), old.getFullYear() + "." + String(old.getMonth() + 1).padStart(2, "0"));
+    assert.equal(clock.relativeTime("不是时间"), "不是时间", "解析不出就退回 compactDate，不显示空白");
+  });
+}
+
 /* 1.13.1（审查 P0-1）：回收站过期清理的真执行测试。
    pruneRecycler 每次扫描成功都会跑（library.js 里 fire-and-forget），它删的是用户文件，
    所以判据必须用「给定目录名 → 删还是留」的表格钉住，不能只靠源码里有这行字。 */
@@ -2817,6 +2909,7 @@ async function suite() {
   await suiteStats();
   await suiteA11y();
   await suiteDocs();
+  await suiteLibraryHelpers();
   await suiteRecycleTools();
   await suitePruneRecycler();
 }

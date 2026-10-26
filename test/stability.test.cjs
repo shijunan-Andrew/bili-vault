@@ -380,11 +380,10 @@ test("extension pages refuse to run inside a frame (shared guard)", () => {
   assert.ok(guardIndex > 0 && restoreIndex > guardIndex, "防嵌套检查必须早于目录读取");
 });
 
-test("cover images are restricted to blob and inline image URLs", () => {
-  const library = readProjectFile("library.js");
-  assert.ok(library.includes("blob:|data:image"), "safeCover 应有协议白名单");
-  assert.ok(library.includes('return `<img src="${escapeHtml(url)}"'), "safeCover 应转义 URL");
-});
+// 1.15.2（审查 T-1）：「封面只允许 blob: / data:image/」原来是读源码的文本断言，
+// 现在由 test/pages.test.cjs 里「safeCover 只放行 blob: 与 data:image/」真执行同一判据，
+// 而且那条用例还会拿 javascript: / http(s): / 引号逃逸三种写法去撞它。
+
 
 test("error reports warn that they contain local paths", () => {
   const background = readProjectFile("background.js");
@@ -9125,5 +9124,36 @@ test("每个 bca- 消息都写进了 ARCHITECTURE.md 的消息表（1.14.5 · �
   assert.ok(sent.size >= 15, "至少应该扫到十几条消息，扫到 " + sent.size + " 条说明正则或文件清单不对");
   const missing = [...sent].filter((type) => !doc.includes("`" + type + "`"));
   assert.deepEqual(missing, [], "docs/ARCHITECTURE.md 的消息表缺这些消息：" + missing.join("、"));
+});
+
+
+test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(path.join(__dirname, "stability.test.cjs"), "utf8");
+  const lines = source.split("\n");
+  const starts = [];
+  lines.forEach((line, index) => {
+    if (/^test\(/.test(line)) starts.push(index);
+  });
+  // 标记串拼出来，免得这条断言自己被算成「读文件但不执行」。
+  const readingMarker = "readProjectFile" + "(";
+  const executingMarkers = [
+    "loadBackgroundFunctions(", "new Function(", "require(", "loadPage(",
+    "carveFunction(", "carveConst(", "vm.", "assert.rejects(", "core."
+  ];
+  const textOnly = [];
+  starts.forEach((start, index) => {
+    const next = starts[index + 1] === undefined ? lines.length : starts[index + 1];
+    const body = lines.slice(start, next).join("\n");
+    if (!body.includes(readingMarker)) return;
+    if (executingMarkers.some((marker) => body.includes(marker))) return;
+    textOnly.push(start + 1);
+  });
+  // 1.15.2 的底数是 311 条（占 73.2%）。本批把「封面只允许 blob / data:image」
+  // 换成了 test/pages.test.cjs 里的真执行用例，于是降到 310。
+  // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
+  assert.ok(textOnly.length <= 310,
+    "纯文本断言 " + textOnly.length + " 条，超过 310 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 

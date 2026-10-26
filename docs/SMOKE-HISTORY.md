@@ -6,6 +6,12 @@
 
 ---
 
+## V1.15.1 新增的几条
+- [ ] `node test/background.test.cjs` 输出 45 项且全绿（这一版把后台的删数据 / 建目录 / 留档轮转补成了真执行用例）。
+- [ ] 打开 `test/background.test.cjs`：`suite()` 里能找到「导入日记」「回滚导入」「半截目录」这几条用例，文件末尾没有漂在套件外面的 `test(...)`。
+- [ ] `node test/pages.test.cjs` 还是 100 项全绿（两条设置页用例这次是第一次被真正 await）。
+- [ ] `node scripts/check-all.cjs` 全绿，输出里能看到 425 项 —— 新守卫「套件外面不许有 test(...)」。
+
 ## V1.14.5 新增的几条
 - [ ] 设置页或 `chrome://extensions` 里的版本号已经是最新那版，扩展正常工作（这一版只动文档与检查脚本，功能没变）。
 - [ ] `node scripts/check-all.cjs` 的输出里能看到「延迟预算」那一行，且打印的是毫秒数（不是 `[warn]`）。
