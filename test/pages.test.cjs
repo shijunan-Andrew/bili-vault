@@ -3139,7 +3139,6 @@ async function suiteSoundSettings() {
           volume: 0.8,
           effects: {
             bubblepop: { enabled: false, volume: 0.25 },
-            notification: { enabled: true, volume: 0.5 },
             meow: { enabled: true, volume: 0.5 },
             purring: { enabled: true, volume: 0.5 },
             error: { enabled: true, volume: 0.5 }
@@ -3162,6 +3161,8 @@ async function suiteSoundSettings() {
     assert.equal(doc.getElementById("soundBubblepopValue").textContent, "25%");
     assert.ok(doc.getElementById("soundBubblepopVolume").disabled, "总开关关掉时单项滑块也置灰");
     assert.equal(doc.getElementById("soundMeowToggle").getAttribute("aria-pressed"), "true", "没关掉的项保持开着");
+    /* 1.16.4：「导入完成音」这一项已经去掉（改用 Windows 默认提示音）。 */
+    assert.equal(doc.getElementById("soundNotificationToggle"), null, "导入完成音的开关应该已经移除");
   });
 
   await test("点开关、拖滑块会把整份设置写回 storage（1.16.0）", async () => {

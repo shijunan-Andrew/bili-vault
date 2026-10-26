@@ -163,6 +163,8 @@
           </div>
           <p id="importControlHint" class="import-control-hint" data-i18n="取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地归档里的内容不会被删除。" hidden>取消会删除本次新建的视频目录，并还原本次更新过的记录；导入前就在本地归档里的内容不会被删除。</p>
           <div id="importStatus" class="import-status" role="status"></div>
+          <!-- 1.16.4：导入进行中提醒不要切到后台（真机上切后台会让页面被冻结，导入会断）。 -->
+          <p id="importWarn" class="import-warn" role="note" hidden data-i18n="导入正在进行中，你可以切换到别的页面继续浏览，但尽量不要把浏览器切到后台，以免导入中断">导入正在进行中，你可以切换到别的页面继续浏览，但尽量不要把浏览器切到后台，以免导入中断</p>
         </div>
       </div>
     </details>

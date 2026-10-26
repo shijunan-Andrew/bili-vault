@@ -2348,7 +2348,11 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
   assert.match(busy, /async function importRunLooksAlive\(/, "要能判断「这一轮真的还在跑吗」");
   assert.match(busy, /importRun\.active && !\(await importRunLooksAlive\(\)\)/, "入口处要能清掉尸体态的 active");
   /* 1.16.2：系统通知自己静音，否则会同时听到 Windows 提示音和我们的音效。 */
-  assert.match(stripComments(readProjectFile("background.js")), /silent: true/, "系统通知要静音");
+  /* 1.16.4：导入成功改用 Windows 默认提示音 —— 通知必须出声（silent: false），
+     插件自己的成功音 meanwhile 必须不存在。 */
+  assert.match(stripComments(readProjectFile("background.js")), /silent: false/, "导入提示音交回系统默认");
+  assert.doesNotMatch(sound, /new-notification\.mp3/, "new-notification.mp3 已经从项目里移除");
+  assert.doesNotMatch(sound, /notification:/, "音效表里不该再有 notification");
   const settingsHtml = readProjectFile("settings.html");
   assert.match(settingsHtml, /class="nav-item" data-group="sound"/, "音量控制要在左侧导航里有一栏");
   assert.match(settingsHtml, /id="group-sound" data-group="sound"/, "音量控制卡要挂同一个 data-group");

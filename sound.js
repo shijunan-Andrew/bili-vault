@@ -19,15 +19,15 @@
   const STORAGE_KEY = "soundSettings";
 
   // 名称 → 文件。名称是英文短名（存进设置里，不许改；改了老用户的选择就丢了）。
+  /* 1.16.4：导入成功那一声改回 Windows 默认提示音，所以这里不再有 notification。 */
   const SOUND_FILES = Object.freeze({
     bubblepop: "audio/bubblepop.mp3",
-    notification: "audio/new-notification.mp3",
     meow: "audio/cat-meow.mp3",
     purring: "audio/purring.mp3",
     error: "audio/error.mp3"
   });
 
-  const SOUND_KEYS = Object.freeze(["bubblepop", "notification", "meow", "purring", "error"]);
+  const SOUND_KEYS = Object.freeze(["bubblepop", "meow", "purring", "error"]);
 
   const DEFAULT_VOLUME = 0.5;
 
@@ -199,9 +199,11 @@
 
   function playImportResult(state) {
     /* 兼容老口径：传布尔值时按「是不是失败」处理（不再区分取消）。 */
-    if (typeof state === "boolean") return play(state ? "error" : "notification");
+    if (typeof state === "boolean") return state ? play("error") : null;
+    /* 1.16.4：成功不放插件音效 —— 那一声交给系统通知（Windows 默认提示音）。
+       取消照旧完全安静，失败仍然放 error。 */
     if (importCancelled(state)) return null;
-    return play(importFailed(state) ? "error" : "notification");
+    return importFailed(state) ? play("error") : null;
   }
 
   function currentSettings() {

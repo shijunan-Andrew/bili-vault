@@ -62,6 +62,7 @@ const recoverInvalidCheckbox = document.getElementById("recoverInvalid");
 const importFolderList = document.getElementById("importFolderList");
 const importCard = document.getElementById("importCard");
 const importStatus = document.getElementById("importStatus");
+const importWarn = document.getElementById("importWarn");
 const startImportButton = document.getElementById("startImport");
 /* P1-7：上次导入中断时后台会留一条「停在哪」的小记录（local: bcaImportResume），
    这里把它显示成一行提示 + 一个「继续上次导入」按钮。 */
@@ -128,7 +129,13 @@ function operationTitle(operation, paused) {
   return BcaI18n.t("正在导入收藏夹");
 }
 
+/* 1.16.4：只有真的在导入时才提示「别切后台」—— 平时一直挂着会被当噪声。 */
+function renderImportWarn(running) {
+  if (importWarn) importWarn.hidden = !running;
+}
+
 function renderImportControl() {
+  renderImportWarn(Boolean(importBusy && activeOperation === "import"));
   const isDiff = activeOperation === "diff";
   // 对比是只读的短任务，没有暂停/取消的概念 —— 按钮整个不显示
   importControl.hidden = !importBusy || isDiff;

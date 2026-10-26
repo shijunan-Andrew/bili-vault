@@ -1553,7 +1553,8 @@ async function sendImportNotification(title, message) {
     message: String(message || "").slice(0, 300),
     /* 1.16.2：系统提示音交给 BcaSound 各自的音效，这里静音。
        真机反馈：不静音的话用户会同时听到 Windows 自己的提示音和 new-notification.mp3。 */
-    silent: true
+    /* 1.16.4：导入成功/失败的提示音交回系统默认（插件自己的成功音已移除）。 */
+    silent: false
   });
   // create() 在旧版 Chrome 上返回 Promise，新版可能返回 undefined —— 两样都认
   if (pending && typeof pending.catch === "function") pending.catch(() => {});
@@ -3056,6 +3057,14 @@ async function importReconcileState() {
       importState = { ...importState, running: false, paused: false, updatedAt: Date.now() };
       await chrome.storage.local.set({ importState }).catch(() => {});
     }
+    return { active: false, reset: false };
+  }
+  if (storedState?.running !== true) {
+    /* 1.16.4（真机反馈）：50 条全导完了，回来却显示「导入被中断」。
+       实际情况是最后一刻 service worker 被回收 —— 收尾的「结束」已经写进 local，
+       只剩 session 快照没来得及删。这时状态本身是权威证据：它不是中断，别写断点、别改文案，
+       把快照清掉就完事。真正的半路死亡（状态还停在 running:true）下面照旧宣告。 */
+    await clearImportRunSnapshot();
     return { active: false, reset: false };
   }
   await importAnnounceInterruption(leftover);
@@ -5250,8 +5259,11 @@ async function importBiliFavoritesInner(data, tabId = null) {
       + `${rollback.removedCollections ? `、${rollback.removedCollections} 个新建收藏夹` : ""}`
       + `${rollback.restoredFiles ? `，并还原了 ${rollback.restoredFiles} 个被更新的视频信息.txt` : ""}。`
       + statsNote + rollbackNote;
-    await finishImportRunSnapshot();
+    /* 1.16.4（真机反馈）：先落「结束」再清快照。反过来的话，service worker 只要在
+       「已清到一半」那一刻被回收，下次启动就会看到「快照还是 active + 状态说在跑」，
+       把一整轮**已经跑完**的导入宣告成中断，还留一条假断点。 */
     publishImportState({ running: false, paused: false, finishedAt, text: summary, summary }, true);
+    await finishImportRunSnapshot();
     // 有还原失败就带上 failed 标记：弹窗打开时会把「最近状态」展开，不让人漏看
     await chrome.storage.local.set({
       lastResult: { message: summary, createdAt: finishedAt, failed: rollbackFailures.length > 0 }
@@ -5330,8 +5342,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
     statsPendingSince = 0;
   }
   await chrome.storage.local.set({ lastResult: { message, path: pathText, createdAt: Date.now() }, ...(failed || hasIssues ? {} : { lastError: null }) });
-  await finishImportRunSnapshot();
+  /* 1.16.4：同上 —— 「结束」先落盘，再清快照。 */
   publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);
+  await finishImportRunSnapshot();
   return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "", limitReached, limitedCount };
 }
 

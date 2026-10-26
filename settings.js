@@ -1892,9 +1892,10 @@ async function boot() {
   const sound = globalThis.BcaSound;
   if (!sound || typeof document === "undefined") return;
 
-  const EFFECTS = ["bubblepop", "notification", "meow", "purring", "error"];
-  const SUFFIX = { bubblepop: "Bubblepop", notification: "Notification", meow: "Meow", purring: "Purring", error: "Error" };
-  const PREVIEW = { bubblepop: "bubblepop", notification: "notification", meow: "meow", purring: "purring", error: "error" };
+  /* 1.16.4：导入成功改用 Windows 默认提示音，「导入完成音」这一项连同它的控件一起去掉。 */
+  const EFFECTS = ["bubblepop", "meow", "purring", "error"];
+  const SUFFIX = { bubblepop: "Bubblepop", meow: "Meow", purring: "Purring", error: "Error" };
+  const PREVIEW = { bubblepop: "bubblepop", meow: "meow", purring: "purring", error: "error" };
 
   function $(id) { return document.getElementById(id); }
 

@@ -99,7 +99,6 @@ function main() {
     "audio/bubblepop.mp3",
     "audio/cat-meow.mp3",
     "audio/error.mp3",
-    "audio/new-notification.mp3",
     "audio/purring.mp3"]) {
     if (!expected.includes(required)) fail(`运行期文件 ${required} 不在发布清单里`);
   }
@@ -110,7 +109,7 @@ function main() {
   const containers = {
     locales: ["locales/en.json", "locales/zh-TW.json"],
     native: ["native/folder-opener-host.ps1", "native/folder-opener-launcher.cs"],
-    audio: ["audio/bubblepop.mp3", "audio/cat-meow.mp3", "audio/error.mp3", "audio/new-notification.mp3", "audio/purring.mp3"]
+    audio: ["audio/bubblepop.mp3", "audio/cat-meow.mp3", "audio/error.mp3", "audio/purring.mp3"]
   };
   for (const [dir, wanted] of Object.entries(containers)) {
     const actualFiles = expected.filter((rel) => rel.startsWith(`${dir}/`)).sort();

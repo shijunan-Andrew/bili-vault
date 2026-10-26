@@ -100,7 +100,6 @@ try {
     "audio/bubblepop.mp3",
     "audio/cat-meow.mp3",
     "audio/error.mp3",
-    "audio/new-notification.mp3",
     "audio/purring.mp3"
   )) {
     if (-not ($actual -contains $required)) { throw "运行期文件 $required 不在打包结果里" }
@@ -115,8 +114,8 @@ try {
   }
   # 1.16.0：音效是五个 mp3，多一个少一个都说明打包清单或素材变了。
   $audioFiles = @($actual | Where-Object { $_ -like "audio/*" })
-  if ($audioFiles.Count -ne 5 -or -not ($audioFiles -contains "audio/bubblepop.mp3")) {
-    throw "audio/ 里应该恰好五个音效，实际：$($audioFiles -join ', ')"
+  if ($audioFiles.Count -ne 4 -or -not ($audioFiles -contains "audio/bubblepop.mp3")) {
+    throw "audio/ 里应该恰好四个音效，实际：$($audioFiles -join ', ')"
   }
   foreach ($dev in @("test", "scripts", ".github", "README.md", "AI_HANDOFF.md", "SMOKE_TEST.md", "release.ps1", "_ref", "docs")) {
     if ($actual | Where-Object { $_ -eq $dev -or $_ -like "$dev/*" }) { throw "开发文件 $dev 混进打包结果了" }
