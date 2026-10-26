@@ -2358,9 +2358,14 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
   assert.match(busy, /async function importRunLooksAlive\(/, "要能判断「这一轮真的还在跑吗」");
   assert.match(busy, /importRun\.active && !\(await importRunLooksAlive\(\)\)/, "入口处要能清掉尸体态的 active");
   /* 1.16.2：系统通知自己静音，否则会同时听到 Windows 提示音和我们的音效。 */
-  /* 1.16.6：导入成功那一声改由插件合成（Windows 上系统通知的声音会被「应用通知声音」
-     与专注助手吞掉，通知却照样弹出），所以通知本身必须静音，免得两处同时响。 */
-  assert.match(stripComments(readProjectFile("background.js")), /silent: true/, "系统通知静音，声音只由 BcaSound 发");
+  /* 1.16.6：导入成功那一声交回 Windows 提示音（插件自己那声默认关掉），
+     所以通知必须出声，且要有「默认关」的默认值兜底。 */
+  assert.match(stripComments(readProjectFile("background.js")), /silent: false/, "导入提示音交回系统默认");
+  assert.match(
+    stripComments(readProjectFile("sound.js")),
+    /DEFAULT_OFF_KEYS = Object\.freeze\(\["importDone"\]\)/,
+    "导入完成音要默认关掉"
+  );
   assert.ok(
     stripComments(readProjectFile("sound.js")).includes("importDone"),
     "导入完成音要有自己的键（合成音，不读文件）"

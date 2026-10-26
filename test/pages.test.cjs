@@ -3241,6 +3241,10 @@ async function suiteSoundSettings() {
     /* 1.16.6：合成音（importDone）与文件音效共用同一份音量算法。 */
     assert.equal(sound.effectiveSoundVolume({ enabled: true, volume: 0.5, effects: { importDone: { enabled: true, volume: 0.5 } } }, "importDone"), 0.25);
     assert.equal(sound.effectiveSoundVolume({ enabled: false, volume: 0.5, effects: { importDone: { enabled: true, volume: 0.5 } } }, "importDone"), 0);
+    /* 1.16.6：默认设置里导入完成音是关的，其余四个是开的。 */
+    const defaults = sound.currentSettings();
+    assert.equal(defaults.effects.importDone.enabled, false, "导入完成音默认关掉");
+    assert.equal(defaults.effects.bubblepop.enabled, true, "别的音效默认开着");
   });
 }
 

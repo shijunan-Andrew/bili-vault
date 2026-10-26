@@ -27,6 +27,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 ├── i18n.js                       # 4.5：以中文原文为 key 的翻译层
 ├── icons.js                      # 4.0：线性 SVG 图标，替代字符图标
 ├── sound.js                      # 1.16.0：音效。BcaSound 管四个音效的加载、音量与播放；
+│                                 # 1.16.6：还合成一声「导入完成」（默认关）。
 │                                 #   effectiveSoundVolume() 是「总音量 × 单项音量」唯一实现，
 │                                 #   importFailed() 是「导入算不算失败」唯一判据
 ├── audio/                        # 1.16.4：四个 mp3（约 130KB）随包发；只有 bubblepop 与 error

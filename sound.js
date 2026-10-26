@@ -32,6 +32,9 @@
      而通知本身照样弹出 —— 所以不能把「一定听得到」押在系统通知上。
      合成音不需要新的音频文件、不联网、也不涉及版权。 */
   const SYNTH_KEYS = Object.freeze(["importDone"]);
+  /* 1.16.6：合成音默认关掉 —— 用户更习惯 Windows 自己那声提示，
+     插件这声要人主动开才响，免得一装上就多出一声。 */
+  const DEFAULT_OFF_KEYS = Object.freeze(["importDone"]);
   const SOUND_KEYS = Object.freeze(["bubblepop", "importDone", "meow", "purring", "error"]);
 
   const DEFAULT_VOLUME = 0.5;
@@ -44,9 +47,15 @@
     return Math.round(number * 100) / 100;
   }
 
+  function defaultEffectEnabled(key) {
+    return !DEFAULT_OFF_KEYS.includes(key);
+  }
+
   function defaultSettings() {
     const effects = {};
-    for (const key of SOUND_KEYS) effects[key] = { enabled: true, volume: DEFAULT_VOLUME };
+    for (const key of SOUND_KEYS) {
+      effects[key] = { enabled: defaultEffectEnabled(key), volume: DEFAULT_VOLUME };
+    }
     return { enabled: true, volume: DEFAULT_VOLUME, effects };
   }
 
@@ -61,7 +70,8 @@
     for (const key of SOUND_KEYS) {
       const item = sourceEffects[key];
       effects[key] = {
-        enabled: item && item.enabled === false ? false : true,
+        /* 没有存过这个键时要按它自己的默认值来（importDone 默认关）。 */
+        enabled: item ? item.enabled !== false : defaultEffectEnabled(key),
         volume: item && item.volume !== undefined ? clampVolume(item.volume) : DEFAULT_VOLUME
       };
     }
