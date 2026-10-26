@@ -141,13 +141,14 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.15.10：空标签不再抢简介的位置，筛选谓词也真跑了一遍
+## V1.15.11：下载路径、播放量徽标、失效视频的出口，都真跑了一遍
 
-- **空标签占位挪到真页面里验**（审查 T-1）：删掉那条「读 `library.js` 源码、正则找 `class="detail-empty"`」的用例，改成在 `library.html` 里真打开一条「有简介但没标签」的记录 —— 断言详情里恰好只有一个 `.detail-description`、简介文字没被占位符抢走、占位符上确实写着「这个归档没有记录标签」。
-- **筛选谓词真跑一遍**（审查 T-1）：`matchesBaseFilters()` / `legacySearchIndex()` 抠出来执行，验「失效」「已下载」两档筛选、`searchIndex` 命中与「老对象没有 searchIndex 时现拼」。
-- **测试**：`stability` 423（删掉一条文本用例）、`pages` 111 全绿；纯文本断言 307 → **305**，棘轮上限同步下调到 305。
+- **下载路径三档真跑**（审查 T-1）：`resolveDownloadPath()` 抠出来执行，验「装了本地助手 → 助手给的真实路径」「助手不可用 + 手填过下载根目录 → 拼绝对路径」「都没有 → 相对路径」以及「没有下载目录 → 空」。
+- **播放量徽标真渲染**（审查 T-1）：在 `library.html` 里真渲染一条播放量 12345 的归档，断言封面右下角显示「1.2 万 播放」且徽标可见。
+- **失效视频的站外出口真渲染**（审查 T-1）：详情面板打开一条「已失效视频」，断言 `.search-invalid` 存在、指向 Bing、标题经 `encodeURIComponent` 编码。
+- **测试**：`stability` 420（删掉三条文本用例）、`pages` 113 全绿；纯文本断言 305 → **302**，棘轮上限同步下调。
 
-**遗留** - 文本断言还剩 305 条，按批继续压。
+**遗留** - 文本断言还剩 302 条，按批继续压。
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
@@ -156,7 +157,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:423 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:420 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

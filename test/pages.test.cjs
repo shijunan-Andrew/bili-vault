@@ -58,7 +58,7 @@ const INFO = (title, extra = {}) => {
     `视频收藏时间：${extra.favoriteAt || "2026年10月09日 01时19分50秒.175"}`,
     `视频标题：${title}`,
     `视频链接：${extra.url || "https://www.bilibili.com/video/BV1xx411c7mD/"}`,
-    "视频状态：正常",
+    `视频状态：${extra.status === undefined ? "正常" : extra.status}`,
     "",
     "【UP主】",
     `UP主昵称：${extra.upName || "某人"}`,
@@ -325,7 +325,8 @@ async function suiteLibrary() {
         "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("真简介视频", { description: "真正的简介第一行\n真正的第二行" }), "封面.png": "PNG-1" },
         "2026年10月10日02时20分00秒": { "视频信息.txt": INFO("分享文案视频", { description: shareText }), "封面.png": "PNG-2" },
         "2026年10月11日03时30分00秒": { "视频信息.txt": INFO("标题当简介视频", { description: "标题当简介视频" }), "封面.png": "PNG-3" },
-        "2026年10月12日04时40分10秒": { "视频信息.txt": INFO("空标签视频", { description: "有简介但没标签", tags: "" }), "封面.png": "PNG-4" }
+        "2026年10月12日04时40分10秒": { "视频信息.txt": INFO("空标签视频", { description: "有简介但没标签", tags: "" }), "封面.png": "PNG-4" },
+        "2026年10月13日05时50分20秒": { "视频信息.txt": INFO("失效视频", { description: "失效视频的简介", status: "已失效视频" }), "封面.png": "PNG-5" }
       }
     };
     const page = await openLibrary({ tree });
@@ -353,6 +354,30 @@ async function suiteLibrary() {
     assert.match(textOf(emptyTagBox), /没有记录标签/, "占位符要说明为什么是空的");
     assert.equal(doc.querySelectorAll("#detailContent .detail-description").length, 1, "简介元素只该有一个");
     assert.equal(textOf(doc.querySelector("#detailContent .detail-description")), "有简介但没标签", "简介不许被占位符抢走");
+
+    // 1.15.11（审查 T-1）：失效视频要给站外搜索出口，标题必须编码进查询
+    assert.equal(await openByTitle("失效视频"), "失效视频的简介");
+    const escapeLink = doc.querySelector("#detailContent .search-invalid");
+    assert.ok(escapeLink, "失效视频要有站外搜索出口");
+    assert.equal(textOf(escapeLink), BcaT(page, "全网搜索该视频"));
+    assert.equal(escapeLink.getAttribute("target"), "_blank");
+    assert.ok(String(escapeLink.href).includes("https://www.bing.com/search?q="), "搜索要指到 Bing");
+    assert.ok(String(escapeLink.href).includes(encodeURIComponent("失效视频")), "标题要编码进查询");
+  });
+
+  await test("卡片右下角按「万」显示播放量（1.15.11 · T-1）", async () => {
+    const tree = {
+      "小鲸鱼测试": {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("有播放量的视频", { view: "12345" }), "封面.png": "PNG-1" }
+      }
+    };
+    const page = await openLibrary({ tree });
+    const doc = page.document;
+    const card = doc.querySelector("#videoGrid .video-card");
+    assert.ok(card, "应该有卡片");
+    const badge = card.querySelector(".cover-views");
+    assert.equal(badge.hidden, false, "有播放量时徽标要露出来");
+    assert.equal(textOf(badge), "1.2 万 播放", "播放量要按万缩写并带「播放」二字");
   });
 
   await test("没有互动数据的记录显示 N/A，并提示去「更新视频数据」（1.9.5）", async () => {
@@ -2914,6 +2939,30 @@ async function suiteLibraryHelpers() {
     lib.addField(rows, "分区", "未知");
     assert.equal(rows.length, 1, "空值与「未知」都不该生成一行");
     assert.equal(rows[0], "<dt>UP 主</dt><dd>&lt;b&gt;某人&lt;/b&gt;</dd>", "label 与 value 都要转义");
+  });
+
+  await test("resolveDownloadPath 三档来源：本地助手 > 手填根目录 > 相对路径（1.15.11 · T-1）", async () => {
+    let hostMode = "ok";
+    let manualRoot = "";
+    const dl = harness.buildModule(
+      [harness.carveFunction(source, "downloadPathParts"), harness.carveFunction(source, "resolveDownloadPath")],
+      {
+        BcaArchiveCore: core,
+        nativeHostRequest: async () => {
+          if (hostMode === "fail") throw new Error("没装本地目录打开助手");
+          return hostMode === "ok" ? { targetPath: "D:\\视频\\夹\\目录" } : {};
+        },
+        readDownloadRootPath: async () => manualRoot
+      }
+    );
+    const video = { downloadCollectionName: "夹", downloadDirectoryName: "目录" };
+    assert.deepEqual(await dl.resolveDownloadPath(video), { path: "D:\\视频\\夹\\目录", source: "host" }, "装助手时用助手反查的真实路径");
+    hostMode = "empty";
+    assert.deepEqual(await dl.resolveDownloadPath(video), { path: core.downloadPathLabel("夹", "目录"), source: "relative" }, "助手不可用又没有手填根目录时只给相对路径");
+    manualRoot = "E:\\下载根";
+    assert.deepEqual(await dl.resolveDownloadPath(video), { path: core.joinDownloadPath("E:\\下载根", "夹", "目录"), source: "manual" }, "手填过下载根目录时要拼成绝对路径");
+    hostMode = "fail";
+    assert.deepEqual(await dl.resolveDownloadPath({}), { path: "", source: "none" }, "没有下载目录时什么都不给");
   });
 
   await test("relativeTime 今天/昨天/N 天前，一年以上退回 YYYY.MM（1.15.2 · T-1）", () => {

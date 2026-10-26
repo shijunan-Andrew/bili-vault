@@ -1002,21 +1002,6 @@ test("the library can sort by view count", () => {
   }
 });
 
-test("the video card shows the view count at the bottom-right of the cover", () => {
-  const library = readProjectFile("library.js");
-  const css = readProjectFile("library.css");
-  assert.match(library, /<span class="cover-views tnum" hidden><\/span>/);
-  assert.match(library, /const viewsBadge = card\.querySelector\("\.cover-views"\)/);
-  assert.match(library, /const viewsText = formatCount\(statDisplay\(video\.stats\?\.view\)\)/);
-  // 右下角定位
-  const rule = (css.match(/\.cover-views \{[^}]*\}/) || [""])[0];
-  assert.match(rule, /right:/, "播放量徽标应贴右边");
-  assert.match(rule, /bottom:/, "播放量徽标应贴底边");
-  assert.match(rule, /position: absolute/);
-});
-
-/* ------------------------- 4.5 主题与多语言 ------------------------- */
-
 test("the dark theme only redefines tokens, and both triggers agree", () => {
   const css = readProjectFile("theme.css");
   const tokensOf = (block) => [...block.matchAll(/(--[a-z0-9-]+):/g)].map((match) => match[1]).sort();
@@ -1063,19 +1048,6 @@ test("the collection list scrolls instead of pushing the footer out", () => {
   assert.match(block, /align-content: start/);
   // 底部信息靠 margin-top:auto 定位，前提是列表能收缩
   assert.match(css, /\.sidebar-bottom \{ margin-top: auto;/);
-});
-
-test("copying a download path prefers an absolute path", () => {
-  const library = readProjectFile("library.js");
-  // 三档来源：原生助手 > 手填根目录 > 相对路径。
-  // 「手填」那个入口在下载页上（download.html 的 #downloadRootPath），1.3.0 连页面一起删了；
-  // 读取端（chrome.storage 里的 downloadRootPath）与相对路径兜底仍然保留，所以这里继续守着。
-  assert.match(library, /source: "manual"/);
-  assert.match(library, /BcaArchiveCore\.joinDownloadPath\(manualRoot, collection, directory\)/);
-  assert.match(library, /async function readDownloadRootPath\(\)/);
-  // 只有真的拿不到绝对路径时才提示相对路径
-  assert.match(library, /resolved\.source === "relative"/);
-  assert.match(library, /已复制完整路径：\{path\}/);
 });
 
 test("every shipped script actually parses", () => {
@@ -1611,17 +1583,6 @@ test("the mark-as-downloaded flow is wired end to end", () => {
   assert.match(library, /video\.hasDownloadFiles = true;/);
   // 说明做不到的事要说清楚：不能声称会下载视频
   assert.equal(/markVideoDownloaded[\s\S]{0,600}fetch\(/.test(library), false, "标记过程不该发起任何网络请求");
-});
-
-test("invalid videos get an off-site search escape hatch", () => {
-  const library = readProjectFile("library.js");
-  const css = readProjectFile("library.css");
-  assert.match(library, /video\.isInvalid \? `<a class="button button-quiet search-invalid"/);
-  assert.match(library, /https:\/\/www\.bing\.com\/search\?q=\$\{encodeURIComponent\(video\.title \|\| ""\)\}/);
-  assert.match(library, /target="_blank" rel="noopener noreferrer" href=""[^>]*>\$\{BcaIcons\.svg\("search"\)\}/);
-  assert.match(css, /\.search-invalid \{/);
-  // 搜索的是标题，且必须转义，不能拼接原始字符串
-  assert.equal(/bing\.com\/search\?q=" \+ video\.title/.test(library), false, "标题必须经过 encodeURIComponent");
 });
 
 test("detail cover and title link out, and fall back to a Bing search for invalid videos", () => {
@@ -9193,7 +9154,7 @@ test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）",
   // 底数 311（73.2%）→ 1.15.2 换成 safeCover 的真执行用例降到 310 →
   // 1.15.3 又把「换行注入」那条拆成三组真执行用例，降到 309。
   // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
-  assert.ok(textOnly.length <= 305,
-    "纯文本断言 " + textOnly.length + " 条，超过 305 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
+  assert.ok(textOnly.length <= 302,
+    "纯文本断言 " + textOnly.length + " 条，超过 302 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 
