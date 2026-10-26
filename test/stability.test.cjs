@@ -9092,6 +9092,20 @@ test("对比进行中被回收，弹窗不会永久锁死（1.13.5 · 审查 P1-
 // 1.14.5（审查 D-2）：ARCHITECTURE.md 的消息表曾经漏了 11 条真实消息 —— 一张「看起来完整」
 // 的表比没有表更糟：接手的人会照着它判断哪条消息没人用。所以这里从源码反向生成清单，
 // 发送端出现的每个 bca- 消息都必须能在文档表里找到一行。
+// 1.15.1（P2 T-1）：pages / background 两套是自己写的 suite()，写在 suite 外面的 test(...)
+// 不会被 await —— 它可能还没跑完就先把「ℹ tests / pass」打出去了，失败也可能悄无声息。
+// 这条守一次，防止以后再把用例漂到 suite 外面。
+test("self-made 套件里没有写在 suite() 外面的用例（1.15.1 · P2 T-1）", () => {
+  for (const file of ["test/pages.test.cjs", "test/background.test.cjs"]) {
+    const source = readProjectFile(file);
+    const stray = [];
+    source.split(/\r?\n/).forEach((line, index) => {
+      if (/^(?:await\s+)?test\(/.test(line)) stray.push(index + 1);
+    });
+    assert.deepEqual(stray, [], file + " 里有写在 suite() 外面的 test(...)：第 " + stray.join("、") + " 行");
+  }
+});
+
 test("每个 bca- 消息都写进了 ARCHITECTURE.md 的消息表（1.14.5 · 审查 D-2）", () => {
   const doc = readProjectFile("docs/ARCHITECTURE.md");
   const senders = [

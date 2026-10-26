@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **424** 项里<!-- test-count:424 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **425** 项里<!-- test-count:425 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -65,12 +65,13 @@
 - [ ] **剪贴板**：详情页「复制路径」、设置页「复制原生助手清理命令」、诊断信息「复制」—— 三个按钮各自真的写进了剪贴板（粘到记事本里核对）。
 - [ ] **大收藏夹的速率与风控**：用一个 2000+ 条的收藏夹导入前 50 条 → 全程不出现 412 / 风控提示，进度条持续推进，取消后统计库回滚干净。
 
-## V1.14.5 新增的几条
-- [ ] 设置页或 `chrome://extensions` 里的版本号已经是最新那版，扩展正常工作（这一版只动文档与检查脚本，功能没变）。
-- [ ] `node scripts/check-all.cjs` 的输出里能看到「延迟预算」那一行，且打印的是毫秒数（不是 `[warn]`）。
-- [ ] 打开 `docs/ARCHITECTURE.md`：目录树里能找到 `LICENSE`、`bili-old-2015/`、`pack.ps1`，消息表里能找到 `bca-import-probe`。
+## V1.15.1 新增的几条
+- [ ] `node test/background.test.cjs` 输出 45 项且全绿（这一版把后台的删数据 / 建目录 / 留档轮转补成了真执行用例）。
+- [ ] 打开 `test/background.test.cjs`：`suite()` 里能找到「导入日记」「回滚导入」「半截目录」这几条用例，文件末尾没有漂在套件外面的 `test(...)`。
+- [ ] `node test/pages.test.cjs` 还是 100 项全绿（两条设置页用例这次是第一次被真正 await）。
+- [ ] `node scripts/check-all.cjs` 全绿，输出里能看到 425 项 —— 新守卫「套件外面不许有 test(...)」。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.14.4 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.14.5 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

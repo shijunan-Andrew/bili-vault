@@ -1861,86 +1861,81 @@ async function suiteSettings() {
     assert.ok(navGroups.includes("update"), "update 这一组要在名单里");
 
   });
-}
-
-/* ---------------- 回收站页（1.10.0） ----------------
-   1.9.0 起回收站是独立页，但 pages.test 一直只覆盖 library / settings / popup / content，
-   这一页的渲染、多选、确认文案全靠人眼看过。这里换成桩驱动真代码。 */
-
-test("「导入结束弹通知」开关默认开，点一下关掉并存下来（1.12.7）", async () => {
-  // 默认：没有存过任何值 → 开
-  const page = await openSettings();
-  const toggle = page.document.getElementById("notifyImportToggle");
-  assert.ok(toggle, "设置页应当有「导入结束弹通知」开关");
-  assert.equal(toggle.getAttribute("aria-pressed"), "true", "默认是开着的");
-  assert.equal(toggle.classList.contains("off"), false, "开着的时候不该有 off 类");
-
-  // 点一下：变成关，并且写进 storage
-  dom.fireUserEvent(toggle, "click");
-  await settle();
-  assert.equal(toggle.getAttribute("aria-pressed"), "false", "点一下应当变成关");
-  assert.equal(toggle.classList.contains("off"), true, "关掉时要有 off 类");
-  const dumped = page.__chrome.storage.local.dump();
-  assert.equal(dumped.notifyImportFinished, false, "关掉要存进 storage");
-  assert.equal(textOf(page.document.getElementById("transferStatus")), BcaT(page, "导入结束不再弹系统通知。"), "要给出回执");
-
-  // 存过 false 的页面：开起来就是关的
-  {
-    const off = await openSettings({ localData: { notifyImportFinished: false } });
-    const offToggle = off.document.getElementById("notifyImportToggle");
-    assert.equal(offToggle.getAttribute("aria-pressed"), "false", "存过 false 时应当是关着的");
-    assert.equal(offToggle.classList.contains("off"), true, "存过 false 时要有 off 类");
-  }
-});
-
-test("「上次导入没有收尾」这一行只在真有记录时出现，能清掉它建的目录（1.12.2）", async () => {
-  // 没有记录：整行藏起来
-  {
+  test("「导入结束弹通知」开关默认开，点一下关掉并存下来（1.12.7）", async () => {
+    // 默认：没有存过任何值 → 开
     const page = await openSettings();
-    assert.equal(textOf(page.document.getElementById("leftoverDesc")), "", "没记录时说明栏是空的");
-    assert.ok(page.document.getElementById("leftoverRow").hidden, "没记录时这一行必须是 hidden");
-  }
-  // 有记录：显示件数，点按钮 → 确认 → 发消息 → 报结果
-  const state = { confirmed: 0, messages: [] };
-  const page = await openSettings({
-    localData: {
-      bcaImportLeftover: {
-        startedAt: Date.now() - 60000,
-        updatedAt: Date.now() - 60000,
-        interruptedAt: Date.now() - 30000,
-        summary: { collections: 1, records: 3, files: 2, rewritten: 0 },
-        journal: {
-          createdCollections: [{ name: "小鲸鱼测试" }],
-          createdRecords: [{ collection: "小鲸鱼测试", name: "a" }],
-          addedFiles: [],
-          modifiedFiles: []
-        }
-      }
+    const toggle = page.document.getElementById("notifyImportToggle");
+    assert.ok(toggle, "设置页应当有「导入结束弹通知」开关");
+    assert.equal(toggle.getAttribute("aria-pressed"), "true", "默认是开着的");
+    assert.equal(toggle.classList.contains("off"), false, "开着的时候不该有 off 类");
+
+    // 点一下：变成关，并且写进 storage
+    dom.fireUserEvent(toggle, "click");
+    await settle();
+    assert.equal(toggle.getAttribute("aria-pressed"), "false", "点一下应当变成关");
+    assert.equal(toggle.classList.contains("off"), true, "关掉时要有 off 类");
+    const dumped = page.__chrome.storage.local.dump();
+    assert.equal(dumped.notifyImportFinished, false, "关掉要存进 storage");
+    assert.equal(textOf(page.document.getElementById("transferStatus")), BcaT(page, "导入结束不再弹系统通知。"), "要给出回执");
+
+    // 存过 false 的页面：开起来就是关的
+    {
+      const off = await openSettings({ localData: { notifyImportFinished: false } });
+      const offToggle = off.document.getElementById("notifyImportToggle");
+      assert.equal(offToggle.getAttribute("aria-pressed"), "false", "存过 false 时应当是关着的");
+      assert.equal(offToggle.classList.contains("off"), true, "存过 false 时要有 off 类");
     }
   });
-  // 页面加载完之后再换 sendMessage：settings.js 调用时读的是当时的 chrome 全局
-  page.window.chrome.runtime.sendMessage = (message, callback) => {
-    state.messages.push(message);
-    if (typeof callback === "function") {
-      callback({ ok: true, removedRecords: 3, removedCollections: 1, removedFiles: 2, failed: 0 });
+
+  test("「上次导入没有收尾」这一行只在真有记录时出现，能清掉它建的目录（1.12.2）", async () => {
+    // 没有记录：整行藏起来
+    {
+      const page = await openSettings();
+      assert.equal(textOf(page.document.getElementById("leftoverDesc")), "", "没记录时说明栏是空的");
+      assert.ok(page.document.getElementById("leftoverRow").hidden, "没记录时这一行必须是 hidden");
     }
-  };
-  page.window.confirm = () => {
-    state.confirmed += 1;
-    return true;
-  };
-  await settle(10);
-  const row = page.document.getElementById("leftoverRow");
-  assert.equal(row.hidden, false, "有记录时这一行要出来");
-  const desc = textOf(page.document.getElementById("leftoverDesc"));
-  assert.match(desc, /3/, "说明里要写出这一轮建了几个视频目录");
-  dom.fireUserEvent(page.document.getElementById("cleanupLeftover"), "click");
-  await settle(12);
-  assert.equal(state.confirmed, 1, "清理前必须先问一句");
-  assert.ok(state.messages.some((message) => message?.type === "bca-import-cleanup-leftover"), "要真的发清理消息");
-  const status = textOf(page.document.getElementById("leftoverStatus"));
-  assert.match(status, /清掉了/, "成功之后要给出回执，实际：" + status);
-});
+    // 有记录：显示件数，点按钮 → 确认 → 发消息 → 报结果
+    const state = { confirmed: 0, messages: [] };
+    const page = await openSettings({
+      localData: {
+        bcaImportLeftover: {
+          startedAt: Date.now() - 60000,
+          updatedAt: Date.now() - 60000,
+          interruptedAt: Date.now() - 30000,
+          summary: { collections: 1, records: 3, files: 2, rewritten: 0 },
+          journal: {
+            createdCollections: [{ name: "小鲸鱼测试" }],
+            createdRecords: [{ collection: "小鲸鱼测试", name: "a" }],
+            addedFiles: [],
+            modifiedFiles: []
+          }
+        }
+      }
+    });
+    // 页面加载完之后再换 sendMessage：settings.js 调用时读的是当时的 chrome 全局
+    page.window.chrome.runtime.sendMessage = (message, callback) => {
+      state.messages.push(message);
+      if (typeof callback === "function") {
+        callback({ ok: true, removedRecords: 3, removedCollections: 1, removedFiles: 2, failed: 0 });
+      }
+    };
+    page.window.confirm = () => {
+      state.confirmed += 1;
+      return true;
+    };
+    await settle(10);
+    const row = page.document.getElementById("leftoverRow");
+    assert.equal(row.hidden, false, "有记录时这一行要出来");
+    const desc = textOf(page.document.getElementById("leftoverDesc"));
+    assert.match(desc, /3/, "说明里要写出这一轮建了几个视频目录");
+    dom.fireUserEvent(page.document.getElementById("cleanupLeftover"), "click");
+    await settle(12);
+    assert.equal(state.confirmed, 1, "清理前必须先问一句");
+    assert.ok(state.messages.some((message) => message?.type === "bca-import-cleanup-leftover"), "要真的发清理消息");
+    const status = textOf(page.document.getElementById("leftoverStatus"));
+    assert.match(status, /清掉了/, "成功之后要给出回执，实际：" + status);
+  });
+}
 
 /* ---- 收藏夹页面桥（favorites-import.js） ----
    1.12.4（审查 P2-6）：这个文件以前一行真执行测试都没有，而它是「导入」唯一的入口 ——
@@ -2086,6 +2081,9 @@ async function suiteFavoritesImport() {
   });
 }
 
+/* ---------------- 回收站页（1.10.0） ----------------
+   1.9.0 起回收站是独立页，但 pages.test 一直只覆盖 library / settings / popup / content，
+   这一页的渲染、多选、确认文案全靠人眼看过。这里换成桩驱动真代码。 */
 async function suiteRecycle() {
   await test("侧栏底部把版本号和两个链接收进同一块（1.10.14）", async () => {
     const page = await openLibrary();

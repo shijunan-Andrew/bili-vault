@@ -682,39 +682,178 @@ async function suite() {
     assert.equal(chrome.storage.local.dump().diffState, undefined, "没有残影就不许凭空造一份");
   });
 
+  test("路径太长时给一句人话，而不是把 NotFoundError 冒出去（1.7.24）", async () => {
+    const background = loadBackground();
+    const tree = await makeDirectoryTree({ "本地备份": {} });
+    const root = await tree.getDirectoryHandle("本地备份");
+    const longName = "标题".repeat(60) + " - BV1xx411c7mD";
+    const error = new Error("目录不存在");
+    error.name = "NotFoundError";
+    root.__failCreate = error;
+    try {
+      await background.__test.createDirectoryOrExplain(root, longName);
+      assert.fail("应当抛错");
+    } catch (caught) {
+      assert.match(caught.message, /建不出/, "不许把 NotFoundError 原样冒出去");
+      assert.match(caught.message, /260/, "要点出 Windows 的路径上限");
+      assert.match(caught.message, /挪到更浅/, "要给可执行的下一步");
+    }
+    // 其它错误不许被改写成路径问题
+    const typeError = new Error("不是目录");
+    typeError.name = "TypeMismatchError";
+    root.__failCreate = typeError;
+    try {
+      await background.__test.createDirectoryOrExplain(root, "x");
+      assert.fail("应当抛错");
+    } catch (caught) {
+      assert.equal(caught.name, "TypeMismatchError", "非 NotFoundError 要原样抛");
+    }
+  });
+
+  await test("导入日记一开始是四个空篮子，回滚时分别记账（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const journal = bg.__test.createImportJournal();
+    assert.deepEqual(journal, {
+      createdCollections: [],
+      createdRecords: [],
+      modifiedFiles: [],
+      addedFiles: []
+    });
+  });
+
+  await test("回滚导入：删新建记录、还原被改写的文件、删新增文件、清空新建收藏夹（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const root = makeDirectoryTree({
+      收藏夹: {
+        "2026年10月25日21时15分00秒": { "视频信息.txt": "本次新建" },
+        "保留": { "视频信息.txt": "别动我" },
+        "新增.txt": "本次新增",
+        "视频信息.txt": "被改写过"
+      },
+      "空收藏夹": {}
+    });
+    const collection = await root.getDirectoryHandle("收藏夹");
+    const empty = await root.getDirectoryHandle("空收藏夹");
+    const journal = bg.__test.createImportJournal();
+    journal.createdRecords.push({ collectionHandle: collection, name: "2026年10月25日21时15分00秒" });
+    journal.modifiedFiles.push({ directoryHandle: collection, name: "视频信息.txt", text: "还原后的内容" });
+    journal.addedFiles.push({ directoryHandle: collection, name: "新增.txt" });
+    journal.createdCollections.push({ handle: empty, parentHandle: root, name: "空收藏夹" });
+
+    const result = await bg.__test.rollbackImport(journal);
+    assert.equal(result.removedRecords, 1);
+    assert.equal(result.restoredFiles, 1);
+    assert.equal(result.removedFiles, 1);
+    assert.equal(result.removedCollections, 1);
+    assert.deepEqual(result.failures, []);
+
+    const dump = root.__dump();
+    assert.equal(dump["收藏夹"]["2026年10月25日21时15分00秒"], undefined, "本次新建的记录目录要删掉");
+    assert.equal(dump["收藏夹"]["保留"]["视频信息.txt"], "别动我", "不是本次写的东西一律不碰");
+    assert.equal(dump["收藏夹"]["新增.txt"], undefined, "本次新增的文件要删掉");
+    assert.equal(dump["收藏夹"]["视频信息.txt"], "还原后的内容", "被改写的文件要还原成原文");
+    assert.equal(dump["空收藏夹"], undefined, "本次新建的空收藏夹要清掉");
+  });
+
+  await test("回滚导入：非空的新建收藏夹留着，失败项要报出来（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const root = makeDirectoryTree({
+      "新收藏夹": { "有条目": { "视频信息.txt": "x" } },
+      "要报错的": { "a": {} }
+    });
+    const broken = await root.getDirectoryHandle("要报错的");
+    broken.removeEntry = async () => { throw new Error("磁盘只读"); };
+    const created = await root.getDirectoryHandle("新收藏夹");
+    const journal = bg.__test.createImportJournal();
+    journal.createdRecords.push({ collectionHandle: broken, name: "a" });
+    journal.createdCollections.push({ handle: created, parentHandle: root, name: "新收藏夹" });
+
+    const result = await bg.__test.rollbackImport(journal);
+    assert.equal(result.removedRecords, 0, "删失败就不能记成功");
+    assert.equal(result.removedCollections, 0, "里面有东西，收藏夹不许删");
+    assert.equal(result.failures.length, 1, "失败项必须报出来");
+    assert.match(result.failures[0], /撤回新建的 a/);
+    assert.match(result.failures[0], /磁盘只读/);
+    assert.ok(root.__has("新收藏夹"), "非空收藏夹要留着");
+  });
+
+  await test("写失败留下的半截目录：空的删掉，有内容的留着并说明（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const root = makeDirectoryTree({ "空目录": {}, "有内容": { "封面.jpg": "x" } });
+
+    const emptyError = new Error("保存失败");
+    assert.equal(await bg.__test.discardFailedRecord(root, "空目录", emptyError), false);
+    assert.equal(root.__has("空目录"), false, "空目录没有信息量，应当删掉");
+
+    const contentError = new Error("保存失败");
+    assert.equal(await bg.__test.discardFailedRecord(root, "有内容", contentError), true);
+    assert.equal(root.__has("有内容"), true, "已经写进去的内容要留着");
+    assert.match(contentError.message, /没有删/, "错误消息要说明东西还在");
+
+    const missingError = new Error("保存失败");
+    assert.equal(await bg.__test.discardFailedRecord(root, "根本没有", missingError), false);
+    assert.equal(missingError.message, "保存失败", "目录根本不存在时不要瞎改写错误消息");
+  });
+
+  await test("换名失败的签名：带错误名、消息截到 200 码点（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const note = bg.__test.renameFailureNote({ name: "NotAllowedError", message: "x".repeat(500) });
+    assert.match(note, /^NotAllowedError：/);
+    assert.ok(note.length <= "NotAllowedError：".length + 200, "消息要截断，实际长度 " + note.length);
+    assert.equal(bg.__test.renameFailureNote({}), "未知错误：");
+  });
+
+  await test("统计留档只留最近几份，别的文件一律不碰（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const names = ["20260101-000001", "20260102-000002", "20260103-000003", "20260104-000004",
+      "20260105-000005", "20260106-000006", "20260107-000007"];
+    const tree = { "database.json": "现在这份", "别的说明.txt": "别动" };
+    for (const name of names) tree["database.bad." + name + ".json"] = name;
+    const root = makeDirectoryTree(tree);
+
+    assert.equal(await bg.__test.trimStatsBackups(root, 5), 2, "7 份留 5 份");
+    const left = root.__list().filter((name) => name.startsWith("database.bad.")).sort();
+    assert.deepEqual(left, names.slice(2).map((name) => "database.bad." + name + ".json"));
+    assert.equal(root.__has("database.json"), true, "正在用的库不许动");
+    assert.equal(root.__has("别的说明.txt"), true, "不是留档的文件不许动");
+    assert.equal(await bg.__test.trimStatsBackups(root, 5), 0, "没超配额就不删");
+  });
+
+  await test("留档时间戳是定长的本地时间 YYYYMMDD-HHMMSS（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    assert.equal(bg.__test.statsBackupTimestamp(new Date(2026, 9, 25, 21, 5, 7)), "20261025-210507");
+  });
+
+  await test("保存导入条目：命中风控一个目录都不建，封面没准备好就照原样抛（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const root = makeDirectoryTree({});
+    await assert.rejects(
+      () => bg.__test.saveImportedItem(root, { title: "收藏夹" }, { rateLimited: true, coverCandidates: [] }),
+      /风控/
+    );
+    assert.deepEqual(root.__list(), [], "被风控拒绝时不许建目录");
+    await assert.rejects(
+      () => bg.__test.saveImportedItem(root, { title: "收藏夹" }, {
+        coverCandidates: [],
+        coverPreparationError: new Error("封面没准备好")
+      }),
+      /封面没准备好/
+    );
+  });
+
+  await test("目录建不出来的解释只对「查无此目录」生效（1.15.1 · P2 T-3）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const notFound = Object.assign(new Error("x"), { name: "NotFoundError" });
+    assert.match(bg.__test.describeDirectoryCreateError(notFound, "收藏夹"), /建不出「收藏夹」/);
+    const other = Object.assign(new Error("x"), { name: "NotAllowedError" });
+    assert.equal(bg.__test.describeDirectoryCreateError(other, "收藏夹"), "", "别的错误不要瞎解释");
+  });
+
 }
 
 /* ---------------- 跑 ---------------- */
 
 module.exports = { get results() { return { passed, failed, failures }; } };
-
-test("路径太长时给一句人话，而不是把 NotFoundError 冒出去（1.7.24）", async () => {
-  const background = loadBackground();
-  const tree = await makeDirectoryTree({ "本地备份": {} });
-  const root = await tree.getDirectoryHandle("本地备份");
-  const longName = "标题".repeat(60) + " - BV1xx411c7mD";
-  const error = new Error("目录不存在");
-  error.name = "NotFoundError";
-  root.__failCreate = error;
-  try {
-    await background.__test.createDirectoryOrExplain(root, longName);
-    assert.fail("应当抛错");
-  } catch (caught) {
-    assert.match(caught.message, /建不出/, "不许把 NotFoundError 原样冒出去");
-    assert.match(caught.message, /260/, "要点出 Windows 的路径上限");
-    assert.match(caught.message, /挪到更浅/, "要给可执行的下一步");
-  }
-  // 其它错误不许被改写成路径问题
-  const typeError = new Error("不是目录");
-  typeError.name = "TypeMismatchError";
-  root.__failCreate = typeError;
-  try {
-    await background.__test.createDirectoryOrExplain(root, "x");
-    assert.fail("应当抛错");
-  } catch (caught) {
-    assert.equal(caught.name, "TypeMismatchError", "非 NotFoundError 要原样抛");
-  }
-});
 
 if (isMain) {
   suite().then(() => {

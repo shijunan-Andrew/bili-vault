@@ -6,6 +6,12 @@
 
 ---
 
+## V1.14.5 新增的几条
+- [ ] 设置页或 `chrome://extensions` 里的版本号已经是最新那版，扩展正常工作（这一版只动文档与检查脚本，功能没变）。
+- [ ] `node scripts/check-all.cjs` 的输出里能看到「延迟预算」那一行，且打印的是毫秒数（不是 `[warn]`）。
+- [ ] 打开 `docs/ARCHITECTURE.md`：目录树里能找到 `LICENSE`、`bili-old-2015/`、`pack.ps1`，消息表里能找到 `bca-import-probe`。
+
+
 ## V1.14.4 新增的几条
 
 - [ ] 在设置页或 `chrome://extensions` 里看版本号已经是最新那版，扩展正常工作（这一版只动发版链路，功能没变）。

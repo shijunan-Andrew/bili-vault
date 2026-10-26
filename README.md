@@ -139,15 +139,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.14.5：文档跟上了代码，性能回归也有人看
+## V1.15.1：测试自己也会说谎
 
-- **目录树补全**（审查 D-1）：`docs/ARCHITECTURE.md` 的目录结构以前漏了 17 项（`client-errors.js`、`version.json`、`pack.ps1`、`LICENSE`、`bili-old-2015/` 等），新人照它读会以为这些文件不存在；现在一次补齐。
-- **消息表补全 + 守卫**（审查 D-2）：漏掉的 9 条 `bca-` 消息（`bca-import-probe`、`bca-check-update`、`bca-client-error` 等）全部进表，并新增一条守卫 —— 源码里发出的每个 `bca-` 消息都必须能在文档表里找到，以后加消息漏写文档会当场红。
-- **隐私说明与实现对齐**（审查 S-3）：补上 `localStorage` / `chrome.storage.session` / 5 个 IndexedDB 的名字；请求频率不再笼统写「每秒不超过 2 次」，而是四档毫秒数 + 详情 800 毫秒下限；错误报告改成「纯文本 `.txt`」；掩码规则从 2 类补成 4 类（含你自己选的备份目录）。
-- **原生助手的说明改对了**（审查 D-3）：以前 README 说它「只注册了 Chrome 那一套键」，实际安装脚本会按 `BLBeacon` 探测并注册最多 8 个 Chromium 浏览器（Chrome 必装，另含 Beta / Dev / Canary / Edge / Brave / Vivaldi / Chromium）。
-- **性能回归有了宽预算**（审查 T-5）：`check-all` 里加一项「200 条记录整份重建统计库」的耗时检查，超过 2000 ms 只打印 `[warn]`、绝不让 CI 红（本机实测约 4 ms）。真正的基准仍然手动跑，不进门禁。
-- **只能真机验的 6 条单独列出来**（审查 T-6）：`SMOKE_TEST.md` 新增「发 Release 前额外手工验」一节（目录授权失效、导入中挂起、通知、检查更新、剪贴板、2000+ 条的速率与风控）。
-- **测试**：`stability` 423 → 424 项。
+- **三条用例从「套件外面」搬进来了**（审查 T-1）：`test/pages.test.cjs` 与 `test/background.test.cjs` 都是自己写的 `suite()`，以前有 3 条用例写在套件外面 —— 它们**不会被 `await`**，可能还没跑完就把「ℹ tests / pass」打出去了，失败也可能悄无声息。现在全部归位，并加了一条守卫：以后再有谁漂到套件外面，`check-all` 当场红。
+- **后台真执行用例从 36 条加到 45 条**（审查 T-3）：导入日记与回滚（删本次新建的记录、还原被改写的文件、删本次新增的文件、清空本次新建的空收藏夹，失败项必须报出来）、写失败留下的半截目录（空的删掉、有内容的留着并在错误里说明）、换名失败的签名、统计留档只留最近几份、保存入口的两道护栏（命中风控一个目录都不建、封面没准备好就原样抛）、目录建不出来的解释只对「查无此目录」生效。
+- **测试**：`background` 36 → 45 项，`stability` 424 → 425 项（新守卫）。
 
 **遗留** - 无。
 
@@ -159,7 +155,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:424 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:425 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
