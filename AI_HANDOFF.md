@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 419 · archive-core 96 · stats-core 69 · background 36 · pages 97（后四套是真执行） |
+| 测试基线 | stability 421 · archive-core 98 · stats-core 69 · background 36 · pages 97（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-26 00:31，当时 HEAD `19f578f`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-26 19:28，当时 HEAD `5d99d88`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -438,7 +438,10 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | `STAT_KEYS` / `STAT_LABELS`（互动数据六键与中文标签） | `archive-core.js`（并导出） | `background.js` 一份字面量；`library.js` 只做别名，不写字面量 | 「互动数据的六键与六个标签全仓只有一份（V1.7.8）」 |
 | `FILE_SYSTEM_ERROR_HINTS` / `describeFileSystemError` | `archive-core.js` | `background.js` 逐字一份 | 「文件系统错误的分类表与处理函数，两份必须逐字相同（V1.7.15）」 |
 | 路径预算常量 / `describeDirectoryCreateError` | `archive-core.js` | `background.js` 逐字一份；`library.js` 只调用 | 「路径预算的常量与报错文案两份逐字相同（V1.7.24）」 |
-| 保留目录名（错误报告 / 同步报告 / `000视频下载` / `003database`） | `archive-core.js` 的 `RESERVED_COLLECTION_NAMES` | `background.js` 复制一份 Set；`library.js` 调 `isReservedCollectionName` | 「保留目录名只有一份权威名单（V1.7.11）」 |
+| 保留目录名（错误报告 / 同步报告 / `000视频下载` / `003database` / `004导出` / `005回收站` / `006报告`） | `archive-core.js` 的 `RESERVED_COLLECTION_NAMES` | `background.js` 复制一份 Set（模块早期就要用，**这一个是必须的**）；`archive-tools.js` 的 `RESERVED_DIRS` 与 `library.js` 的拦截 **1.14.1 起直接引用**，不再抄数组 | 「保留目录名只有一份权威名单（V1.7.11）」+「保留目录名、失效标题、BV 换码表都只留一处权威（1.14.1）」 |
+| 失效占位标题（`已失效视频` / `该视频已失效`） | `archive-core.js` 的 `INVALID_TITLE_VALUES` + `isInvalidVideoTitle()` | `background.js` 的 `new Set(BcaArchiveCore.INVALID_TITLE_VALUES)`；`archive-tools.js` 调 `isInvalidVideoTitle` | 同上的 1.14.1 守卫 |
+| BV 号 ↔ av 号换码表（58 字符） | `archive-core.js` 的 `BV_DECODE_TABLE` | `background.js` 的 `IMPORT_BV_TABLE` 与 `archive-tools.js` 的 `LIBRARY_BV_TABLE` 都只是别名 | 同上的 1.14.1 守卫（抄错一个字符会让某些视频号解析成别的 av 号，且不会报错） |
+| 消息来源判据（只信扩展自己人） | `archive-core.js` 的 `isTrustedMessageSender(sender, runtimeId)` | 后台 `onMessage` 用 `sender, chrome.runtime.id`；另外三个监听点仍是同一条 `sender.id` 判据 | 「后台的消息入口先验 sender（1.14.1）」 |
 | 原生宿主的协议号 | `library.js` 的 `NATIVE_PROTOCOL_VERSION` | `native/folder-opener-host.ps1` 的 `$protocolVersion`；`native/folder-opener-launcher.cs` 的 `LauncherProtocolVersion`；自检脚本按 3 校验 | 「原生宿主的协议号三处一致（V1.7.13）」 |
 | 原生宿主注册的浏览器清单 | `install-native-folder-opener.ps1` | 卸载脚本、自检脚本、`settings.js` 的清理命令 | 「原生宿主的浏览器清单三处一致（V1.7.17）」 |
 | `视频信息.txt` / `封面.webp` / `000视频下载` / `003database` 这些字面量 | **没有单一权威** | 多处硬编码 | 无守卫 —— 改名要全仓 grep，别只改一处 |
@@ -517,7 +520,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:419 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:421 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。
@@ -803,7 +806,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     2. **判据只放「别人设的」标记**：这里真正要挡的是三个写入标记（`videoAddInProgress` / `deleteInProgress` / `collectionCreateInProgress`），它们由写入路径自己置位，扫描入口从不碰。`busyNow` 只该用在「别人忙的时候别插队」的地方（比如 `syncRootFromStorage`），**不能用来判断「我自己该不该干活」**。
     3. **静态测试看不出自锁**：191 条断言全都盯着「守卫在不在」，没有一条能发现「守卫把它自己的调用者也挡住了」。补的测试直接断言 `displayRoot` 的那段守卫里**不许出现 `busyNow`**，并且三个写入标记都在。**凡是「加了守卫」的改动，都要手动过一遍所有调用者是不是也被它挡住了。**
     4. **本地预览也要认边界**：预览页能验版式和渲染，但 `showDirectoryPicker` 这类需要用户手势的 API 在预览里根本走不到 —— 选目录 / 授权这两条路只能真机点，**或者至少读一遍调用链**。
-    5. **「插件的固定目录」也是同一份名单散在多处**（承 25.1）：`background.js` 的 `RESERVED_COLLECTION_NAMES`、`library.js` 扫描时跳过的内联名单（两份）、`popup.js` 与 `library.js` 的 `ROOT_STRUCTURE_DIRECTORIES`。**改名字时四处一起改**；测试里钉住了「名单只允许两种形状」（5 个的保留目录 / 3 个的固定目录），多出一份新形状就会红。
+    5. **「插件的固定目录」也是同一份名单散在多处**（承 25.1）：`background.js` 的 `RESERVED_COLLECTION_NAMES`、`library.js` 扫描时跳过的内联名单（两份）、`popup.js` 与 `library.js` 的 `ROOT_STRUCTURE_DIRECTORIES`。**改名字时四处一起改**；测试里钉住了「名单只允许两种形状」（5 个的保留目录 / 3 个的固定目录），多出一份新形状就会红。**1.14.1（审查 C-1 / C-4）把能共享的三处收敛掉了**：扫描端与收藏库改成直接引用 `archive-core.js` 的权威名单 / 判据，失效标题名单与 BV 换码表也只剩一份；只有 `background.js` 那份 Set 副本还要留着（模块求值早期就要用）。守卫的方向也换了 —— 从「两份副本逐字相同」改成「谁也不许再抄，只能引用」。
     6. **选完目录就把结构建出来**：不管是弹窗还是收藏库，选目录后都调用建目录的逻辑（收藏库现在是 `ensureRootStructure(handle)`，因此要按 `mode: "readwrite"` 要权限，与弹窗一致）。空文件夹选进来时，用户能在文件管理器里立刻看到 `000视频下载` / `001错误报告` / `002同步报告` —— 「什么都没发生」是最容易让人以为插件坏了的反馈。
 
 27. **白名单要连「协议」一起想 —— B 站接口回的是明文 `http`，而 manifest 只授权了 `https`；另外注释里不许出现块注释开始符。**（V1.4.5 修 V1.4.3 带进来的封面事故。）

@@ -120,6 +120,28 @@
     return RESERVED_COLLECTION_NAMES.includes(safeCollectionName(name));
   }
 
+  /* 1.14.1（审查 C-4）：B 站「失效视频」占位标题只有这一份名单。
+     background.js 导入时用它判「接口是不是只回了占位」，archive-tools.js 扫描时用它判
+     「这条记录是不是失效的」—— 原来两处各写一份数组，加一个占位词要改两个地方，
+     而改漏的那一处不会有任何报错。 */
+  const INVALID_TITLE_VALUES = Object.freeze(["已失效视频", "该视频已失效"]);
+
+  function isInvalidVideoTitle(title) {
+    return INVALID_TITLE_VALUES.includes(String(title || "").trim());
+  }
+
+  /* 1.14.1（审查 C-4）：BV 号 ↔ av 号的换码表也只有这一份。
+     background.js 的 IMPORT_BV_TABLE 与 archive-tools.js 的 LIBRARY_BV_TABLE
+     各自抄过一遍同样的 58 个字符 —— 抄错一个字符，某些视频号就会解析成别的 av 号。 */
+  const BV_DECODE_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
+
+  /* 1.14.1（审查 S-2）：只有扩展自己人能发消息进来。
+     四个 onMessage 监听点里，后台这一处能力最大（整份覆盖统计库、写归档、启动导入），
+     却是唯一一个没有判据的。判据只认 sender.id：为空一律不信。 */
+  function isTrustedMessageSender(sender, runtimeId) {
+    return Boolean(runtimeId) && sender?.id === runtimeId;
+  }
+
   function withSourceCollection(parsedVideo, sourceItem = {}) {
     const video = parsedVideo && typeof parsedVideo === "object" ? parsedVideo : {};
     return {
@@ -1275,6 +1297,11 @@
     // 1.11.10：选好本地备份文件夹时要建出来的那几本辅助目录（顺序即编号顺序）
     AUXILIARY_DIR_NAMES,
     RESERVED_COLLECTION_NAMES,
+    // 1.14.1（审查 C-4 / S-2）：失效标题名单、BV 换码表、消息来源判据
+    INVALID_TITLE_VALUES,
+    isInvalidVideoTitle,
+    BV_DECODE_TABLE,
+    isTrustedMessageSender,
     withSourceCollection,
     isMissingError,
     identifiersFromDirectoryName,

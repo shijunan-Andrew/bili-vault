@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **419** 项里<!-- test-count:419 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **421** 项里<!-- test-count:421 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,13 +54,14 @@
 
 ---
 
-## V1.13.5 新增的几条
+## V1.14.1 新增的几条
 
-- [ ] 收藏库页点「与 B 站对比」→ 读到一半时去 `chrome://extensions` 点「重新加载」（或直接关掉浏览器再开）→ 再打开插件：**不该**显示「对比中」，三个按钮都能点。
-- [ ] 上一条之后再点一次「与 B 站对比」，能正常跑完并出结果（说明是真复位，不是假锁）。
-- [ ] 对比跑完之后再打开插件：结果面板还在（复位只清残影，不能把已完成的结果清掉）。
+- [ ] 收藏库页新建收藏夹时输入 `005回收站`（或 `001错误报告`）→ 应被拒绝并提示是插件保留目录（名单换成引用权威实现后行为不变）。
+- [ ] 收藏库页点「刷新」→ 列表里**不该**出现 `004导出` / `005回收站` / `006报告` 这些目录。
+- [ ] 归档里有一条失效视频（`视频状态：已失效视频`）→ 卡片上仍标「已失效」（失效标题名单换了实现，判定结果不变）。
+- [ ] 统计页点「刷新统计」→ 数字正常更新（`bca-stats-republish` 走的是刚加了身份校验的那条消息入口，不该被自己人拒掉）。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.13.4 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.13.5 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

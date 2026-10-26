@@ -3310,12 +3310,13 @@ test("导出归档元数据：格式身份、校验和、保留目录名与写�
   const backgroundList = (background.match(/const RESERVED_COLLECTION_NAMES = new Set\(\[[\s\S]*?\]\);/) || [""])[0];
   assert.ok(backgroundList.includes('"004导出"'), "后台那份逐字副本也要含 004导出");
   // 1.9.0：扫描时跳过的名单搬进 archive-tools.js 的共享常量（收藏库与设置页共用一份）
+  // 1.14.1（审查 C-1）：共享常量不再抄一份数组，直接引用 archive-core 的权威名单
   assert.match(readProjectFile("archive-tools.js"),
-    /const RESERVED_DIRS = \["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出", "005回收站", "006报告"\];/);
-  assert.ok(readProjectFile("archive-tools.js").includes('"004导出"'),
-    "扫描时要跳过 004导出，否则它会被当成一个收藏夹");
-  assert.ok(library.includes('["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database", "004导出", "005回收站", "006报告"].includes(name)'),
-    "新建收藏夹时也要拦 004导出");
+    /const RESERVED_DIRS = BcaArchiveCore\.RESERVED_COLLECTION_NAMES;/);
+  assert.ok(archiveList.includes('"004导出"'),
+    "扫描时要跳过 004导出，否则它会被当成一个收藏夹（权威名单在 archive-core）");
+  assert.ok(library.includes("if (BcaArchiveCore.isReservedCollectionName(name))"),
+    "新建收藏夹时也要拦 004导出（走权威判据，别再抄一份数组）");
   // ⑤ 接线：按钮、处理函数、写盘用的是 core 给的目录名（1.9.0 搬去设置页）
   assert.match(html, /id="settingsExportArchive"/);
   assert.match(settings, /\$\("settingsExportArchive"\)\?\.addEventListener\("click", \(\) => \{ exportArchiveMetadata\(\); \}\);/);
@@ -4340,9 +4341,11 @@ test("同步差异绝不抓详情（否则就从 2 分钟变成 39 分钟）", (
   const block = source.slice(start, end);
   assert.equal(/fetchVideoDetail|fetchImportDetails|enrichImportedInvalidVideos/.test(block), false,
     "差异引擎里出现了详情请求 —— 那会让它从 1~2 分钟变成 39 分钟");
-  for (const file of ["library.js", "background.js"]) {
-    assert.match(readProjectFile(file), /"002同步报告"/, `${file} 里没有 002同步报告`);
-  }
+  // 1.14.1（审查 C-1）：library.js 不再抄名单，改为核「权威名单含 002同步报告 + 它走的是权威判据」
+  assert.match(readProjectFile("archive-core.js"), /"002同步报告"/, "权威保留名单里没有 002同步报告");
+  assert.match(readProjectFile("library.js"), /BcaArchiveCore\.isReservedCollectionName\(name\)/,
+    "library.js 没有走权威判据，002同步报告 会被当成收藏夹");
+  assert.match(readProjectFile("background.js"), /"002同步报告"/, "background.js 里没有 002同步报告");
 });
 
 /* ------------------------- archive-core 的真执行单元测试 -------------------------
@@ -5457,25 +5460,20 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
   // 这里钉住它们必须和 background.js 的完全一致 —— 防以后改一处漏一处。
   // V1.4.4 起多了一份三名字的「固定目录」名单（选完目录就建出来），所以放行两种形状。
   // 1.9.0：archive-tools.js 是新的公共层，保留目录名单在那儿也有一份，两处一起核
+  // 1.14.1（审查 C-1）：这一条原来是「library.js 里两份副本必须逐字相同」。
+  // 现在两份副本都删了，改成更硬的判据：谁也不许再抄数组，全部走 archive-core 的权威名单；
+  // 而「后台那份逐字副本」仍然是允许的（服务 worker 载不进经典脚本），由上面第 ④ 段单独核。
   const libraryForNames = stripComments(readProjectFile("library.js") + "\n" + readProjectFile("archive-tools.js"));
   const reservedLists = [...libraryForNames.matchAll(/\[("(?:错误报告|001错误报告|002同步报告|003database|000视频下载|视频下载)"(?:,\s*"[^"]+")*)\]/g)];
-  const namesOf = (literal) => [...literal.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
-  // 保留目录名（扫描时要跳过的一整份名单）与固定目录名（选完目录就建出来的那几个）
-  // 是两种形状：1.5.0 起 003database 同时属于两者。
-  // 1.7.30：多了 004导出（归档元数据导出目录）
-  const shapeReserved = ["000视频下载", "001错误报告", "002同步报告", "003database", "004导出", "005回收站", "006报告", "视频下载", "错误报告"].join("|");
-  // 1.11.10：「选完目录就建出来」的那份名单不再手写在 library.js 里，
-  // 改成引用 archive-core.js 的 AUXILIARY_DIR_NAMES —— 所以这里只核对保留目录那一种形状。
-
-  const shapes = reservedLists.map(([literal]) => namesOf(literal).join("|"));
-  assert.ok(shapes.filter((shape) => shape === shapeReserved).length >= 2,
-    `library.js 里应该有两份「扫描时跳过的保留目录名」，实际 ${JSON.stringify(shapes)}`);
+  assert.equal(reservedLists.length, 0,
+    `收藏库与扫描端都不许再抄保留目录名，实际还有 ${JSON.stringify(reservedLists.map((m) => m[1]))}`);
+  assert.ok(readProjectFile("library.js").includes("if (BcaArchiveCore.isReservedCollectionName(name))"),
+    "收藏库新建收藏夹时要走权威判据");
+  assert.ok(readProjectFile("archive-tools.js").includes("const RESERVED_DIRS = BcaArchiveCore.RESERVED_COLLECTION_NAMES;"),
+    "扫描端要直接引用权威名单");
+  assert.match(readProjectFile("archive-core.js"), /"002同步报告"/, "权威名单里必须有 002同步报告");
   assert.ok(readProjectFile("library.js").includes("const ROOT_STRUCTURE_DIRECTORIES = BcaArchiveCore.AUXILIARY_DIR_NAMES;"),
     "收藏库要引用 archive-core.js 里那份唯一的辅助目录名单");
-  for (const shape of shapes) {
-    assert.ok(shape === shapeReserved,
-      `library.js 里的目录名名单只允许「扫描时跳过的保留目录」这一种形状，实际 ${shape}`);
-  }
 });
 
 test("上线前审查第二批（收藏库侧）：导入提示、单飞对比、风险确认与体积统计都钉住了（V1.4.3）", () => {
@@ -8938,6 +8936,39 @@ test("1.12.6：文档里的数字能一键对齐，.ps1 也不用等人工才验
   assert.ok(!status.includes('throw new Error(name + " 有 "'), "有失败项不许直接抛，要照实写进状态块");
   assert.ok(status.includes("状态块已按实际结果刷新"), "写完之后再报红");
   assert.ok(status.includes("process.exitCode = 1"), "红要带退出码");
+});
+
+// ---- V1.14.1（审查 P2 批次 1）：名单与换码表只留一处权威 ----
+test("保留目录名、失效标题、BV 换码表都只留一处权威（1.14.1 · 审查 C-1 / C-4）", () => {
+  const archiveTools = readProjectFile("archive-tools.js");
+  const library = readProjectFile("library.js");
+  const background = readProjectFile("background.js");
+  const core = readProjectFile("archive-core.js");
+
+  assert.ok(core.includes("const RESERVED_COLLECTION_NAMES = ["), "权威保留目录名还在 archive-core");
+  assert.ok(archiveTools.includes("const RESERVED_DIRS = BcaArchiveCore.RESERVED_COLLECTION_NAMES;"),
+    "扫描端直接引用权威名单");
+  assert.equal(/const RESERVED_DIRS = \["错误报告"/.test(archiveTools), false, "扫描端不许再抄一份名单");
+  assert.ok(library.includes("if (BcaArchiveCore.isReservedCollectionName(name))"), "收藏库改用权威判据");
+  assert.equal(/\["错误报告", "001错误报告"/.test(library), false, "收藏库不许再抄一份名单");
+
+  assert.ok(core.includes('const BV_DECODE_TABLE = "'), "换码表在 archive-core");
+  assert.ok(archiveTools.includes("const LIBRARY_BV_TABLE = BcaArchiveCore.BV_DECODE_TABLE;"), "archive-tools 引用权威换码表");
+  assert.ok(background.includes("const IMPORT_BV_TABLE = BcaArchiveCore.BV_DECODE_TABLE;"), "background 引用权威换码表");
+  assert.equal(archiveTools.includes("FcwAPNKTMug3"), false, "archive-tools 里不许再有表字面量");
+  assert.equal(background.includes("FcwAPNKTMug3"), false, "background 里不许再有表字面量");
+
+  assert.ok(core.includes("const INVALID_TITLE_VALUES = Object.freeze("), "失效标题名单在 archive-core");
+  assert.ok(archiveTools.includes("BcaArchiveCore.isInvalidVideoTitle(title)"), "扫描端用权威判据");
+  assert.ok(background.includes("new Set(BcaArchiveCore.INVALID_TITLE_VALUES)"), "导入端用权威名单");
+});
+
+test("后台的消息入口先验 sender（1.14.1 · 审查 S-2）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background,
+    /chrome\.runtime\.onMessage\.addListener\(\(message, sender, sendResponse\) => \{\r?\n(?:\s*\/\/[^\r\n]*\r?\n){2}\s*if \(!BcaArchiveCore\.isTrustedMessageSender\(sender, chrome\.runtime\.id\)\) return;/,
+    "能力最大的这条监听线必须先验 sender");
+  assert.ok(background.includes("function isTrustedMessageSender") === false, "判据只有 archive-core 一份");
 });
 
 // ---- V1.13.5（审查 P1-6）：对比残影要有复位入口 ----

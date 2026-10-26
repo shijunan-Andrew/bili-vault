@@ -4838,7 +4838,8 @@ function validateCollectionName(rawName) {
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
     throw new Error(BcaI18n.t("这个名称是 Windows 保留名称，请换一个名称。"));
   }
-  if (["错误报告", "001错误报告", "002同步报告", "000视频下载", "视频下载", "003database", "004导出", "005回收站", "006报告"].includes(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
+  // 1.14.1（审查 C-1）：保留目录名查 archive-core 的权威判据，别在这里再抄一份数组
+  if (BcaArchiveCore.isReservedCollectionName(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
   return name;
 }
 

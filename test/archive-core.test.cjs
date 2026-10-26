@@ -1124,6 +1124,26 @@ test("favoriteTimeTextOf / favoriteTimeLineOf：这一行只有一种读法（1.
   assert.equal(core.favoriteTimeLineOf("视频标题：x"), "");
 });
 
+test("失效标题名单与 BV 换码表各只有一份（1.14.1 · 审查 C-4）", () => {
+  assert.deepEqual([...core.INVALID_TITLE_VALUES], ["已失效视频", "该视频已失效"]);
+  for (const title of ["已失效视频", "该视频已失效", " 已失效视频 "]) {
+    assert.equal(core.isInvalidVideoTitle(title), true, title + " 应当算失效");
+  }
+  for (const title of ["已失效视频但还能看", "某视频", "", null, undefined]) {
+    assert.equal(core.isInvalidVideoTitle(title), false, String(title) + " 不该算失效");
+  }
+  assert.equal(core.BV_DECODE_TABLE.length, 58, "换码表是 58 个字符");
+  assert.equal(new Set(core.BV_DECODE_TABLE).size, 58, "换码表不许有重复字符");
+});
+
+test("只有扩展自己人发的消息才可信（1.14.1 · 审查 S-2）", () => {
+  assert.equal(core.isTrustedMessageSender({ id: "abc" }, "abc"), true);
+  assert.equal(core.isTrustedMessageSender({ id: "other" }, "abc"), false);
+  assert.equal(core.isTrustedMessageSender({}, "abc"), false, "sender.id 为空一律不信");
+  assert.equal(core.isTrustedMessageSender({ id: "abc" }, ""), false, "拿不到自己的 id 时不放行");
+  assert.equal(core.isTrustedMessageSender(null, "abc"), false);
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

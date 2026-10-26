@@ -1591,8 +1591,9 @@ async function runInSaveQueueWithDeadline(handle, label) {
     throw new Error(error?.message || `${label}失败。`);
   }
 }
-const IMPORT_INVALID_TITLES = new Set(["已失效视频", "该视频已失效"]);
-const IMPORT_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
+// 1.14.1（审查 C-4）：名单与换码表不再各抄一份，直接用 archive-core 的权威实现
+const IMPORT_INVALID_TITLES = new Set(BcaArchiveCore.INVALID_TITLE_VALUES);
+const IMPORT_BV_TABLE = BcaArchiveCore.BV_DECODE_TABLE;
 // attr → 「失效原因」文案。0 是「有效」，不在表里（importAttrReason 返回空串，调用方据此不写这一行）。
 // 表外的取值**不猜成「其他」**——「其他」是 attr=1 的确切含义，把「版权原因」显示成「其他」
 // 等于撒谎；宁可原样写出枚举值，至少还留着线索。
@@ -5876,6 +5877,9 @@ async function diffBiliFavoritesInner(data, tabId = null) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // 1.14.1（审查 S-2）：这条监听线挂着 bca-stats-commit / save-favorite / import-bili-favorites，
+  // 能力最大，判据要最先过 —— 只信扩展自己人（sender.id 为空一律不信）。
+  if (!BcaArchiveCore.isTrustedMessageSender(sender, chrome.runtime.id)) return;
   if (message?.type === "bca-client-error") {
     // 1.8.23（TODO P2-9）：扩展页的异常也进「001错误报告」（后台负责去重与落盘）
     logClientError(message.payload).then(sendResponse).catch(() => sendResponse({ ok: false }));

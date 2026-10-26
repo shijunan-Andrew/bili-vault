@@ -11,10 +11,10 @@
 (function (global) {
   const BcaArchiveCore = global.BcaArchiveCore;
 
-  /* 固定目录：收藏库不把它们当收藏夹，体检也不进去数记录。名单与 archive-core 的
-     RESERVED_COLLECTION_NAMES 同源 —— 那边管「新建收藏夹时不许占用」，这里管扫描，
-     两边都要能认出同一批名字。 */
-  const RESERVED_DIRS = ["错误报告", "001错误报告", "002同步报告", "视频下载", "000视频下载", "003database", "004导出", "005回收站", "006报告"];
+  /* 固定目录：收藏库不把它们当收藏夹，体检也不进去数记录。
+     1.14.1（审查 C-1）：名单不再各写一份，直接引用 archive-core 的权威数组 ——
+     那边管「新建收藏夹时不许占用」，这里管扫描，两边必须认同一批名字。 */
+  const RESERVED_DIRS = BcaArchiveCore.RESERVED_COLLECTION_NAMES;
 
   /* 记录目录名的唯一判据：扫描、删除前清点、回收站页都要认同一批目录名。 */
   const RECORD_DIRECTORY_PATTERN = /^\d{4}年\d{1,2}月\d{1,2}日\d{1,2}时\d{1,2}分\d{1,2}秒(?:_\d+)?$/;
@@ -594,7 +594,8 @@
     return fallbackMatch ? new Date(+fallbackMatch[1], +fallbackMatch[2] - 1, +fallbackMatch[3], +(fallbackMatch[4] || 0), +(fallbackMatch[5] || 0), +(fallbackMatch[6] || 0)).getTime() : 0;
   }
 
-  const LIBRARY_BV_TABLE = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
+  // 1.14.1（审查 C-4）：换码表只有 archive-core 那一份
+  const LIBRARY_BV_TABLE = BcaArchiveCore.BV_DECODE_TABLE;
   function libraryBvidToAid(bvid) {
     const text = String(bvid || "").trim();
     if (!/^BV[0-9A-Za-z]{10}$/.test(text)) return "";
@@ -646,7 +647,8 @@
       downloadDirectoryName: downloadState.name,
       downloadCollectionName: downloadState.collectionName,
       downloadDirectoryHandle: downloadState.handle,
-      isInvalid: /失效/.test(field(info, "视频状态")) || ["已失效视频", "该视频已失效"].includes(title),
+      // 1.14.1（审查 C-4）：失效占位标题名单在 archive-core 里，别在这里再列一遍
+      isInvalid: /失效/.test(field(info, "视频状态")) || BcaArchiveCore.isInvalidVideoTitle(title),
       // 老存档没有「失效原因」这一行，读回来是空串，不是「未知」
       invalidReason: invalidReasonText(field(info, "失效原因")),
       upName,

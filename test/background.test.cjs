@@ -284,7 +284,8 @@ async function suite() {
 
     const response = await new Promise((resolve) => {
 
-      const ret = listener({ type: "bca-stats-republish" }, { id: "test" }, resolve);
+      // 1.14.1（审查 S-2）：后台的 onMessage 现在只信扩展自己人，sender.id 必须是真的
+      const ret = listener({ type: "bca-stats-republish" }, { id: bg.chrome.runtime.id }, resolve);
 
       if (ret !== true) resolve({ ok: false, reason: "sync" });
 
