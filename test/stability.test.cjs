@@ -7300,15 +7300,6 @@ test("两处「刻意不修」在代码里留了说明（V1.8.22 / old-p3 perf P
 
 // ---- 1.8.22：old-p3 批次 4（白名单渲染、反嵌入收口、发送方校验、UNC 拒绝、报告打码、横幅地址） ----
 
-test("data-i18n-html renders through a whitelist, never raw innerHTML (old-p3 security P3-1)", () => {
-  const i18n = readProjectFile("i18n.js");
-  assert.equal(/\.innerHTML = t\(/.test(i18n), false, "data-i18n-html 不应再直接写 innerHTML");
-  assert.match(i18n, /function sanitizeI18nHtml\(markup\)/);
-  assert.match(i18n, /element\.replaceChildren\(\.\.\.sanitizeI18nHtml\(t\(element\.dataset\.i18nHtml\)\)\)/);
-  assert.match(i18n, /const I18N_HTML_TAGS = new Set\(\["A", "SPAN", "B", "STRONG", "EM", "BR", "CODE"\]\)/);
-  assert.match(i18n, /const I18N_HTML_LINK_PROTOCOLS = new Set\(\["http:", "https:"\]\)/);
-});
-
 test("extension pages all call the one shared anti-embed guard (old-p3 security P3-2)", () => {
   const i18n = readProjectFile("i18n.js");
   assert.match(i18n, /function guardTopFrame\(message, errorMessage\)/);
@@ -7801,24 +7792,6 @@ test("收藏库扫描后把「收藏夹 → BV → 目录名」发布给后台�
 /* --------------------------------------------------------------------------- */
 /* ---- 1.9.4：简介读写、收藏前判重、粉丝数 ---- */
 /* --------------------------------------------------------------------------- */
-test("简介读写都走【视频简介】：分享文案和「简介就是标题」按没有简介处理（1.9.4）", () => {
-  const tools = stripComments(readProjectFile("archive-tools.js"));
-  const split = functionBodyOf(tools, "function splitDescription(info) {");
-  assert.match(split, /BcaArchiveCore\.descriptionFromInfo\(info\)/, "简介要从 info.sections 读");
-  assert.match(split, /BcaArchiveCore\.splitShareText\(raw\)/);
-  assert.match(split, /split\.isShareText \|\| \(title && split\.description === title\) \? ""/, "分享文案与「简介就是标题」都按没有简介处理");
-
-  const content = stripComments(readProjectFile("content.js"));
-  assert.match(content, /description: video\.desc \|\| video\.description \|\| ""/, "内容脚本只取视频自己的简介");
-  assert.doesNotMatch(content, /meta\[name="description"\]/, "B 站 meta 是自动生成的分享文案，不能当简介");
-
-  const background = stripComments(readProjectFile("background.js"));
-  const build = functionBodyOf(background, "function buildInfo(data, folderName, savedAt) {");
-  assert.match(build, /descriptionSplit\.isShareText \|\| rawDescription === title \? "无"/, "分享文案与标题都不写进档案");
-  assert.match(build, /!rawDescription\s*\?\s*"未知"/, "没有简介写「未知」");
-  assert.match(build, /所属收藏夹：\$\{infoLineValue\(folderName\)\}/, "所属收藏夹要写收藏夹名");
-});
-
 test("「所属收藏夹」四处写入都传收藏夹名，不再传时间戳目录名（1.9.4）", () => {
   const background = stripComments(readProjectFile("background.js"));
   const calls = background.match(/buildInfo\(\{/g) || [];
@@ -9154,7 +9127,7 @@ test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）",
   // 底数 311（73.2%）→ 1.15.2 换成 safeCover 的真执行用例降到 310 →
   // 1.15.3 又把「换行注入」那条拆成三组真执行用例，降到 309。
   // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
-  assert.ok(textOnly.length <= 302,
-    "纯文本断言 " + textOnly.length + " 条，超过 302 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
+  assert.ok(textOnly.length <= 300,
+    "纯文本断言 " + textOnly.length + " 条，超过 300 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 

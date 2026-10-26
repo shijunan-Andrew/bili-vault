@@ -1204,6 +1204,24 @@ test("parseInfoFile 挡得住简介里的换行注入（1.15.3 · 审查 T-1）"
   assert.ok(parsed.sections["视频简介"].join("\n").includes("视频状态：已失效视频"), "简介原文要原样留在内容段里，不能被删");
 });
 
+test("分享统计文案不算简介：按「视频播放量…弹幕量…」切开（1.15.12 · T-1）", () => {
+  const shared = core.splitShareText("这个视频讲得真好。视频播放量 123456、弹幕量 789");
+  assert.equal(shared.isShareText, true, "带分享统计的文案要认出来");
+  assert.equal(shared.description, "这个视频讲得真好。", "统计文案之前的正文才是简介");
+  assert.deepEqual(shared.stats, { view: "123456", danmaku: "789" }, "顺手把播放量与弹幕量摘出来");
+
+  const onlyStats = core.splitShareText("视频播放量 99、弹幕量 8");
+  assert.equal(onlyStats.isShareText, true);
+  assert.equal(onlyStats.description, "", "整段都是分享统计时简介为空");
+
+  const normal = core.splitShareText("普通简介，没有分享统计");
+  assert.equal(normal.isShareText, false, "普通简介不能被误判");
+  assert.equal(normal.description, "普通简介，没有分享统计");
+
+  assert.equal(core.descriptionFromInfo({ sections: { 视频简介: ["正文"] } }), "正文", "简介从 sections 读");
+  assert.equal(core.descriptionFromInfo({ sections: { 视频简介: ["-"] } }), "", "占位值按没有简介处理");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

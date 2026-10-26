@@ -3056,6 +3056,36 @@ async function suitePruneRecycler() {
   });
 }
 
+/* 1.15.12（审查 T-1）：data-i18n-html 的白名单以前只有「读源码」的断言，
+   现在用真页面 + 真 i18n.js 走一遍：坏链接与事件属性必须被拆掉。 */
+async function suiteI18nWhitelist() {
+  await test("data-i18n-html 只留白名单标签，坏链接与事件属性会被拆掉（1.15.12 · T-1）", async () => {
+    const page = dom.loadPage({ htmlFile: "guide.html" });
+    const doc = page.document;
+    const probe = doc.createElement("div");
+    probe.setAttribute(
+      "data-i18n-html",
+      '<strong>粗</strong><script>alert(1)</script><img src="x" onerror="boom()"><a href="javascript:alert(1)" title="提示" onclick="x()">坏链接</a><a href="https://example.com/a">好链接</a><code>代码</code>'
+    );
+    doc.body.appendChild(probe);
+    page.window.BcaI18n.apply(doc);
+
+    const html = probe.innerHTML;
+    assert.equal(/<script|<img/i.test(html), false, "脚本与图片标签必须被拆掉");
+    assert.ok(html.includes("<strong>粗</strong>") && html.includes("<code>代码</code>"), "白名单标签要留下");
+
+    const links = probe.querySelectorAll("a");
+    const bad = links[0];
+    const good = links[1];
+    assert.equal(bad.getAttribute("href"), null, "javascript: 的 href 要被清掉");
+    assert.equal(bad.getAttribute("onclick"), null, "事件属性一律清掉");
+    assert.equal(bad.getAttribute("title"), "提示", "title 是链接自己的白名单属性");
+    assert.equal(bad.getAttribute("target"), "_blank", "站外链接统一新标签打开");
+    assert.equal(bad.getAttribute("rel"), "noopener noreferrer", "外链要带 rel 保护");
+    assert.equal(good.getAttribute("href"), "https://example.com/a", "https 链接要保住");
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
@@ -3066,6 +3096,7 @@ async function suite() {
   await suiteStats();
   await suiteA11y();
   await suiteDocs();
+  await suiteI18nWhitelist();
   await suiteLibraryHelpers();
   await suiteRecycleTools();
   await suitePruneRecycler();

@@ -147,8 +147,10 @@
           continue;
         }
         const isLink = node.tagName === "A";
-        // 真浏览器是 NamedNodeMap，测试用小 dom 是 Map —— 两种都取得到名字
-        const attributeNames = node.attributes instanceof Map
+        // 真浏览器是 NamedNodeMap，测试用小 dom 是 Map —— 两种都取得到名字。
+        // 1.15.12：不能写 `instanceof Map` —— vm 沙箱里的 Map 是另一个 realm 的构造器，
+        // 判不出来就会一路 removeAttribute(undefined)，白名单等于没生效。按能力判。
+        const attributeNames = typeof node.attributes?.keys === "function"
           ? [...node.attributes.keys()]
           : [...node.attributes].map((attribute) => attribute.name);
         for (const attributeName of attributeNames) {
