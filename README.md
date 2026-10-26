@@ -137,12 +137,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.14.1：一份名单不再抄四遍，后台也不再谁喊都应
+## V1.14.2：时间解析和收藏夹名不再各写四份
 
-- **保留目录名只剩一处**（审查 C-1）：`archive-core.js` 的那个数组是唯一权威，扫描端、收藏库全部改成引用它，不再各抄一份 —— 以前改一个名字要同时改 4 个地方，漏改的那一处不会有任何报错。
-- **失效标题名单与 BV 换码表也是同一份**（审查 C-4）：`已失效视频` / `该视频已失效` 这几个字和那张 58 个字符的换码表各只有一份，抄错一个字符会让某些视频号解析成别的 av 号。
-- **后台的那条消息入口先验身份**（审查 S-2）：`bca-stats-commit`（整份覆盖统计库）、`save-favorite`、`import-bili-favorites` 都走这条线，现在只认扩展自己人发的消息，`sender.id` 为空一律不信。
-- **补了六条测试**：两条真执行（名单与换码表、消息来源判据）+ 两条源码守卫；`archive-core` 96 → 98 项，`stability` 419 → 421 项。另有三条老守卫原本钉的是「两份副本逐字相同」，改成钉「谁都不许再抄」。
+- **中文时间只剩一份实现**（审查 C-2）：`archive-core.js` 的 `parseChineseDateTime(text, { requireSeconds })` 同时提供「严格」和「宽松」两种口径 —— 写回档案用严格（认不出就保留原文），看页面、算统计用宽松。以前四份各写一遍，同一个用户改写的时间「统计页认、更新链路不认」。
+- **顺手修掉一个静默 bug**：备用时间的日期戳解析只认连字符，`2025-06-13 00:15:40` 这类串的时分秒从来没解析成功过、一直被当成 0 点。
+- **收藏夹名只剩一份规矩**（审查 C-5）：`normalizeCollectionName()` 是唯一实现，新建、导入、重命名、安全路径四个入口都走它；`CON.txt` 这类带扩展名的 Windows 保留名也补上了（以前只拦光秃秃的 `CON`）。
+- **失效判据也共享了**（审查 C-4 尾巴）：扫描端与回收站页现在用同一个 `isInvalidRecord()`，不再一个看「状态」、一个看「状态或标题占位」。
+- **测试**：`archive-core` 98 → 100 项、`stability` 421 → 422 项；另修了四条原本钉着「谁在实现」的守卫（实现搬家，断言跟着搬）。
 
 **遗留** - 无。
 
@@ -154,7 +155,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:421 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:422 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

@@ -1184,6 +1184,13 @@ function makeRecycleTools(options = {}) {
       return state.entries.map((entry) => ({ ...entry }));
     },
     field: (info, name) => String((info && info[name]) || ""),
+    // 1.14.2（审查 C-4）：失效徽标改走 archive-tools 的共享判据，桩要跟真实现同一个口径
+    isInvalidRecord: (record) => {
+      const info = record && record.info;
+      if (!info) return false;
+      const title = String(info["视频标题"] || "").trim();
+      return /失效/.test(String(info["视频状态"] || "")) || ["已失效视频", "该视频已失效"].includes(title);
+    },
     formatMegabytes: (bytes) => `${Math.round((Number(bytes) || 0) / (1024 * 1024))} MB`,
     reportListLine: (failures) => (failures || []).map((failure) => String((failure && failure.message) || failure)),
     restoreRecycled: async (handle, chosen) => {

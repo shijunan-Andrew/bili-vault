@@ -1136,6 +1136,44 @@ test("失效标题名单与 BV 换码表各只有一份（1.14.1 · 审查 C-4�
   assert.equal(new Set(core.BV_DECODE_TABLE).size, 58, "换码表不许有重复字符");
 });
 
+test("中文时间解析只有一份，两种口径都从它出来（1.14.2 · 审查 C-2）", () => {
+  const full = "视频收藏时间：2025年06月13日00时15分40秒";
+  const strict = core.parseChineseDateTime(full);
+  assert.equal(strict.getTime(), new Date(2025, 5, 13, 0, 15, 40).getTime());
+  assert.equal(core.parseChineseDateTime("视频收藏时间：2025年06月13日"), null, "默认口径缺秒就不认");
+  const loose = core.parseChineseDateTime("视频收藏时间：2025年06月13日", { requireSeconds: false });
+  assert.equal(loose.getTime(), new Date(2025, 5, 13, 0, 0, 0).getTime());
+  assert.equal(core.parseChineseDateTime("随便写写", { requireSeconds: false }), null);
+
+  // 三个读入口对同一串必须给同一个时间
+  const ms = new Date(2025, 5, 13, 0, 15, 40).getTime();
+  assert.equal(core.parseArchiveDateTime(full, "20250613-001540"), ms);
+  assert.equal(core.parseFavoriteTimeMs(full), ms);
+  assert.equal(core.parseArchiveDateTime("", "2025-06-13 00:15:40"), ms, "没有收藏时间时用目录备用时间兜底");
+  assert.ok(Number.isNaN(core.parseFavoriteTimeMs("随便写写")), "认不出就 NaN，不猜一个时间");
+  assert.equal(core.parseFavoriteTimeMs("2025-06-13T00:15:40"), ms, "ISO 兜底");
+});
+
+test("收藏夹名的合法化与拦阻理由只有一份（1.14.2 · 审查 C-5）", () => {
+  assert.equal(core.safeCollectionName("CON.txt"), "_CON.txt", "Windows 保留名带扩展名也要躲");
+  assert.equal(core.safeCollectionName("a/b:c"), "a_b_c");
+  assert.equal(core.safeCollectionName("   "), "未分类收藏");
+  assert.equal(core.safeCollectionName("名字..."), "名字", "尾部点号要剪掉");
+  assert.equal(core.normalizeCollectionName("正常名字"), "正常名字");
+
+  assert.equal(core.collectionNameProblem(""), "empty");
+  assert.equal(core.collectionNameProblem("正常名字"), "");
+  assert.equal(core.collectionNameProblem("a".repeat(120)), "", "正好 120 个字符还行");
+  assert.equal(core.collectionNameProblem("a".repeat(121)), "too-long");
+  assert.equal(core.collectionNameProblem("😀".repeat(120)), "", "emoji 按码点算，120 个也行");
+  assert.equal(core.collectionNameProblem("😀".repeat(121)), "too-long");
+  assert.equal(core.collectionNameProblem("a/b"), "illegal-char");
+  assert.equal(core.collectionNameProblem("a."), "illegal-char");
+  assert.equal(core.collectionNameProblem("nul"), "windows-reserved");
+  assert.equal(core.collectionNameProblem("CON.txt"), "windows-reserved");
+  assert.equal(core.collectionNameProblem("005回收站"), "plugin-reserved");
+});
+
 test("只有扩展自己人发的消息才可信（1.14.1 · 审查 S-2）", () => {
   assert.equal(core.isTrustedMessageSender({ id: "abc" }, "abc"), true);
   assert.equal(core.isTrustedMessageSender({ id: "other" }, "abc"), false);

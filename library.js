@@ -3183,12 +3183,12 @@ function relativeDayLabel(date) {
 function relativeTime(value) {
   const text = String(value ?? "").trim();
   if (!text) return "";
-  const match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒)?/);
+  // 1.14.2（审查 C-2）：中文时间解析只有 archive-core.js 那一份（读链路＝允许缺时分秒）
+  const date = BcaArchiveCore.parseChineseDateTime(text, { requireSeconds: false });
   // 不是归档里的中文时间格式（异常值）就退回 2026.10.09，至少不显示空白
-  if (!match) return compactDate(text);
-  const date = new Date(+match[1], +match[2] - 1, +match[3], +(match[4] || 0), +(match[5] || 0), +(match[6] || 0));
+  if (!date) return compactDate(text);
   const days = Math.round((startOfDay(new Date()).getTime() - startOfDay(date).getTime()) / 86400000);
-  if (days >= 365) return `${match[1]}.${String(match[2]).padStart(2, "0")}`;
+  if (days >= 365) return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}`;
   return relativeDayLabel(date);
 }
 
@@ -4828,18 +4828,19 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 3000);
 }
 
+// 1.14.2（审查 C-5）：判据只有 archive-core.js 那一份，这里只负责把原因码翻成人话
 function validateCollectionName(rawName) {
   const name = String(rawName || "").trim();
-  if (!name) throw new Error(BcaI18n.t("请输入收藏夹名称。"));
-  if (name.length > 120) throw new Error(BcaI18n.t("收藏夹名称不能超过 120 个字符。"));
-  if (/[<>:"/\\|?*\u0000-\u001f]/.test(name) || /[. ]$/.test(name)) {
+  const problem = BcaArchiveCore.collectionNameProblem(name);
+  if (problem === "empty") throw new Error(BcaI18n.t("请输入收藏夹名称。"));
+  if (problem === "too-long") throw new Error(BcaI18n.t("收藏夹名称不能超过 120 个字符。"));
+  if (problem === "illegal-char") {
     throw new Error(BcaI18n.t("名称包含本地文件夹不支持的字符，或以点号、空格结尾。"));
   }
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
+  if (problem === "windows-reserved") {
     throw new Error(BcaI18n.t("这个名称是 Windows 保留名称，请换一个名称。"));
   }
-  // 1.14.1（审查 C-1）：保留目录名查 archive-core 的权威判据，别在这里再抄一份数组
-  if (BcaArchiveCore.isReservedCollectionName(name)) throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
+  if (problem === "plugin-reserved") throw new Error(BcaI18n.t("这是插件保留目录，请换一个名称。"));
   return name;
 }
 

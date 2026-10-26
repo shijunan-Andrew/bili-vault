@@ -586,12 +586,19 @@
     return BILIBILI_LINK_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ? text : "";
   }
 
+  // 1.14.2（审查 C-2）：中文时间解析只有 archive-core.js 那一份，这里只做转发
   function parseDate(value, fallback) {
-    const text = `${value} ${fallback}`;
-    const match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒)?/);
-    if (match) return new Date(+match[1], +match[2] - 1, +match[3], +(match[4] || 0), +(match[5] || 0), +(match[6] || 0)).getTime();
-    const fallbackMatch = fallback.match(/(\d{4})-(\d{2})-(\d{2})[T_ ]?(\d{2})?-?(\d{2})?-?(\d{2})?/);
-    return fallbackMatch ? new Date(+fallbackMatch[1], +fallbackMatch[2] - 1, +fallbackMatch[3], +(fallbackMatch[4] || 0), +(fallbackMatch[5] || 0), +(fallbackMatch[6] || 0)).getTime() : 0;
+    return BcaArchiveCore.parseArchiveDateTime(value, fallback);
+  }
+
+  /* 1.14.2（审查 C-4 尾巴）：一条记录是不是失效视频，判据也只有一处。
+     回收站页原来自己写了一份「视频状态里有『失效』」的判断，与扫描这边的
+     「状态有『失效』**或**标题是已知占位」并不等价 —— 同一张卡片在两个页面可能一个显示
+     失效徽标、一个不显示。 */
+  function isInvalidRecord(record) {
+    const info = record?.info;
+    if (!info) return false;
+    return /失效/.test(field(info, "视频状态")) || BcaArchiveCore.isInvalidVideoTitle(field(info, "视频标题"));
   }
 
   // 1.14.1（审查 C-4）：换码表只有 archive-core 那一份
@@ -648,7 +655,7 @@
       downloadCollectionName: downloadState.collectionName,
       downloadDirectoryHandle: downloadState.handle,
       // 1.14.1（审查 C-4）：失效占位标题名单在 archive-core 里，别在这里再列一遍
-      isInvalid: /失效/.test(field(info, "视频状态")) || BcaArchiveCore.isInvalidVideoTitle(title),
+      isInvalid: isInvalidRecord(record),
       // 老存档没有「失效原因」这一行，读回来是空串，不是「未知」
       invalidReason: invalidReasonText(field(info, "失效原因")),
       upName,
@@ -678,6 +685,7 @@
     HEALTH_DIR_NAME,
     HEALTH_REPORT_LIST_LIMIT,
     isRecordDirectoryName,
+    isInvalidRecord,
     recycleStamp,
     stampTime,
     formatMegabytes,

@@ -131,7 +131,7 @@ function buildCard(entry) {
   card.className = "video-card";
   card.setAttribute("role", "listitem");
   card.dataset.entryKey = entry.path;
-  card.innerHTML = `<div class="card-cover">${coverMarkup("")}${record?.info && /失效/.test(BcaArchiveTools.field(record.info, "视频状态") || "") ? `<span class="invalid-badge">${escapeHtml(BcaI18n.t("已失效"))}</span>` : ""}<span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="${escapeHtml(BcaI18n.t("选择这条记录"))}"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date tnum"></span></div><div class="card-deleted"></div></div>`;
+  card.innerHTML = `<div class="card-cover">${coverMarkup("")}${record?.info && BcaArchiveTools.isInvalidRecord(record) ? `<span class="invalid-badge">${escapeHtml(BcaI18n.t("已失效"))}</span>` : ""}<span class="cover-badge"></span><input class="card-select" type="checkbox" aria-label="${escapeHtml(BcaI18n.t("选择这条记录"))}"></div><div class="card-body"><div class="card-title"></div><div class="card-meta"><span class="card-up"></span><span class="card-date tnum"></span></div><div class="card-deleted"></div></div>`;
   card.querySelector(".cover-badge").textContent = entry.collection;
   card.querySelector(".card-title").textContent = title;
   card.querySelector(".card-up").textContent = upName || BcaI18n.t("UP 主未知");

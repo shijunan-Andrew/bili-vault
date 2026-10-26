@@ -2542,7 +2542,8 @@ test("归档目录名的 200 字节闸、坏库留档、半截目录都钉住（
   assert.match(core, /function truncateToBytes\(text, maxBytes\) \{/);
   assert.match(background, /function truncateToBytes\(text, maxBytes\) \{/);
   assert.match(core, /truncateToBytes\(sliceCodePoints\(name, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\) \|\| fallback/);
-  assert.match(background, /return truncateToBytes\(sliceCodePoints\(value, COLLECTION_NAME_MAX_CHARS\), MAX_SEGMENT_BYTES\);/);
+  // 1.14.2（审查 C-5）：后台的收藏夹名合法化改成引用 archive-core 的唯一实现
+  assert.match(background, /function safeSegment\(input, fallback = "未命名收藏夹"\) \{\r?\n\s*return BcaArchiveCore\.normalizeCollectionName\(input, fallback\);/);
   // 坏库改带时间戳，且只留最近几份
   assert.equal(/STATS_DATABASE_BACKUP_NAME/.test(background), false, "固定的 database.bad.json 会被第二次损坏覆盖");
   assert.match(background, /const STATS_DATABASE_BACKUP_PREFIX = "database\.bad\.";/);
@@ -3267,7 +3268,7 @@ test("按字符截断的地方一律按码点截，不许把代理对劈开（V1
   assert.match(core, /truncateToBytes\(sliceCodePoints\(name, maxLength\)/);
   assert.match(core, /truncateToBytes\(sliceCodePoints\(fallback, maxLength\)/);
   assert.match(core, /sliceCodePoints\(safeName\(video\?\.title/);
-  assert.match(bg, /truncateToBytes\(sliceCodePoints\(value, COLLECTION_NAME_MAX_CHARS\)/);
+  assert.match(bg, /BcaArchiveCore\.normalizeCollectionName\(input, fallback\)/, "后台不再自己截断，转给 archive-core");
   // 配置里的收藏夹名 / 筛选词、以及会显示给用户的错误摘要
   // 1.9.0：配置导出/导入搬到设置页，截断只认 archive-core 的码点实现
   const settings = readProjectFile("settings.js");
@@ -3315,7 +3316,7 @@ test("导出归档元数据：格式身份、校验和、保留目录名与写�
     /const RESERVED_DIRS = BcaArchiveCore\.RESERVED_COLLECTION_NAMES;/);
   assert.ok(archiveList.includes('"004导出"'),
     "扫描时要跳过 004导出，否则它会被当成一个收藏夹（权威名单在 archive-core）");
-  assert.ok(library.includes("if (BcaArchiveCore.isReservedCollectionName(name))"),
+  assert.ok(library.includes("BcaArchiveCore.collectionNameProblem(name)"),
     "新建收藏夹时也要拦 004导出（走权威判据，别再抄一份数组）");
   // ⑤ 接线：按钮、处理函数、写盘用的是 core 给的目录名（1.9.0 搬去设置页）
   assert.match(html, /id="settingsExportArchive"/);
@@ -4343,7 +4344,7 @@ test("同步差异绝不抓详情（否则就从 2 分钟变成 39 分钟）", (
     "差异引擎里出现了详情请求 —— 那会让它从 1~2 分钟变成 39 分钟");
   // 1.14.1（审查 C-1）：library.js 不再抄名单，改为核「权威名单含 002同步报告 + 它走的是权威判据」
   assert.match(readProjectFile("archive-core.js"), /"002同步报告"/, "权威保留名单里没有 002同步报告");
-  assert.match(readProjectFile("library.js"), /BcaArchiveCore\.isReservedCollectionName\(name\)/,
+  assert.match(readProjectFile("library.js"), /BcaArchiveCore\.collectionNameProblem\(name\)/,
     "library.js 没有走权威判据，002同步报告 会被当成收藏夹");
   assert.match(readProjectFile("background.js"), /"002同步报告"/, "background.js 里没有 002同步报告");
 });
@@ -5467,7 +5468,7 @@ test("上线前审查第二批：保留目录名、导入残影、队列文案�
   const reservedLists = [...libraryForNames.matchAll(/\[("(?:错误报告|001错误报告|002同步报告|003database|000视频下载|视频下载)"(?:,\s*"[^"]+")*)\]/g)];
   assert.equal(reservedLists.length, 0,
     `收藏库与扫描端都不许再抄保留目录名，实际还有 ${JSON.stringify(reservedLists.map((m) => m[1]))}`);
-  assert.ok(readProjectFile("library.js").includes("if (BcaArchiveCore.isReservedCollectionName(name))"),
+  assert.ok(readProjectFile("library.js").includes("BcaArchiveCore.collectionNameProblem(name)"),
     "收藏库新建收藏夹时要走权威判据");
   assert.ok(readProjectFile("archive-tools.js").includes("const RESERVED_DIRS = BcaArchiveCore.RESERVED_COLLECTION_NAMES;"),
     "扫描端要直接引用权威名单");
@@ -7258,9 +7259,12 @@ test("统计快照发布失败不能把「库已写成功」报成失败（V1.8.
 });
 
 test("无时区 ISO 串按本地字段构造，不再让 Date.parse 猜（V1.8.22 / old-p3 compat 理论）", () => {
+  // 1.14.2（审查 C-2）：解析搬进 archive-core.js 的 parseFavoriteTimeMs，统计端只转发
+  const core = readProjectFile("archive-core.js");
   const statsCore = readProjectFile("stats-core.js");
-  assert.ok(statsCore.includes("if (/Z$|[+-]\\d{2}:?\\d{2}$/.test(text)) {"), "带偏移才交给 Date.parse");
-  assert.ok(statsCore.includes("Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]),"), "不带的按本地字段构造");
+  assert.ok(core.includes("if (/Z$|[+-]\\d{2}:?\\d{2}$/.test(text2)) {"), "带偏移才交给 Date.parse");
+  assert.ok(core.includes("Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]),"), "不带的按本地字段构造");
+  assert.ok(statsCore.includes("core.parseFavoriteTimeMs(text)"), "统计端只转发，别再自己解析");
 });
 
 test("配置导出的撤销定时器能在 pagehide 提前收尾（V1.8.22 / old-p3 perf PF-8）", () => {
@@ -8949,7 +8953,7 @@ test("保留目录名、失效标题、BV 换码表都只留一处权威（1.14.
   assert.ok(archiveTools.includes("const RESERVED_DIRS = BcaArchiveCore.RESERVED_COLLECTION_NAMES;"),
     "扫描端直接引用权威名单");
   assert.equal(/const RESERVED_DIRS = \["错误报告"/.test(archiveTools), false, "扫描端不许再抄一份名单");
-  assert.ok(library.includes("if (BcaArchiveCore.isReservedCollectionName(name))"), "收藏库改用权威判据");
+  assert.ok(library.includes("BcaArchiveCore.collectionNameProblem(name)"), "收藏库改用权威判据");
   assert.equal(/\["错误报告", "001错误报告"/.test(library), false, "收藏库不许再抄一份名单");
 
   assert.ok(core.includes('const BV_DECODE_TABLE = "'), "换码表在 archive-core");
@@ -8959,8 +8963,36 @@ test("保留目录名、失效标题、BV 换码表都只留一处权威（1.14.
   assert.equal(background.includes("FcwAPNKTMug3"), false, "background 里不许再有表字面量");
 
   assert.ok(core.includes("const INVALID_TITLE_VALUES = Object.freeze("), "失效标题名单在 archive-core");
-  assert.ok(archiveTools.includes("BcaArchiveCore.isInvalidVideoTitle(title)"), "扫描端用权威判据");
+  assert.ok(archiveTools.includes("BcaArchiveCore.isInvalidVideoTitle(field(info, \"视频标题\"))"), "扫描端用权威判据");
   assert.ok(background.includes("new Set(BcaArchiveCore.INVALID_TITLE_VALUES)"), "导入端用权威名单");
+});
+
+// ---- V1.14.2（审查 P2 批次 2）：时间解析与收藏夹名都只留一处权威 ----
+test("时间解析与收藏夹名判据都只有一处权威（1.14.2 · 审查 C-2 / C-5）", () => {
+  const core = readProjectFile("archive-core.js");
+  const statsCore = readProjectFile("stats-core.js");
+  const archiveTools = readProjectFile("archive-tools.js");
+  const library = readProjectFile("library.js");
+  const background = readProjectFile("background.js");
+
+  assert.ok(core.includes("function parseChineseDateTime(text, options)"), "中文时间解析在 archive-core");
+  assert.ok(statsCore.includes("core.parseFavoriteTimeMs(text)"), "stats-core 不许再自己解析中文时间");
+  assert.equal(/\\d\{4\}\s\*年/.test(statsCore), false, "stats-core 里不许再有中文时间正则");
+  assert.ok(archiveTools.includes("BcaArchiveCore.parseArchiveDateTime(value, fallback)"),
+    "归档扫描要转发给权威解析");
+  assert.equal(/\\d\{4\}年\\(\\d\{1,2\}\\)月/.test(archiveTools), false, "archive-tools 不许再抄正则");
+  assert.ok(library.includes("BcaArchiveCore.parseChineseDateTime(text, { requireSeconds: false })"),
+    "收藏库的相对时间要用权威解析");
+  assert.ok(library.includes("BcaArchiveCore.collectionNameProblem(name)"), "收藏夹名校验走权威判据");
+  assert.equal(/con\|prn\|aux\|nul/.test(library), false, "收藏库不许再抄 Windows 保留名正则");
+  assert.ok(background.includes("BcaArchiveCore.normalizeCollectionName(input, fallback)"),
+    "后台 safeSegment 走权威实现");
+  assert.equal(/con\|prn\|aux\|nul/.test(background), false, "后台不许再抄 Windows 保留名正则");
+  assert.ok(readProjectFile("recycle.js").includes("BcaArchiveTools.isInvalidRecord(record)"),
+    "回收站的失效徽标要用共享判据");
+  assert.match(stripComments(readProjectFile("stats.html")),
+    /<script src="archive-core\.js"><\/script>\s*<script src="stats-core\.js"><\/script>/,
+    "统计页必须先加载 archive-core.js，stats-core 才拿得到解析器");
 });
 
 test("后台的消息入口先验 sender（1.14.1 · 审查 S-2）", () => {

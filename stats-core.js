@@ -89,43 +89,22 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
   // 视频信息.txt 里的「视频收藏时间」写作 2025年06月13日00时15分40秒
   // （有的带 .000，有的年月日与时分秒之间有空格），归档目录名也是这个形状。
   // 解析不出来就返回 NaN —— 调用方自己决定怎么回退，不要在这里瞎猜一个时间。
+  // 1.14.2（审查 C-2）：中文时间解析只有 archive-core.js 那一份。
+  // 这个文件在页面里、在 service worker 里、在 node 里都要能跑，所以解析器是**延迟**取的：
+  // 页面按 stats.html 的 script 顺序、SW 按 ES module 的求值顺序，真正调用时 archive-core 一定已经在。
+  function archiveCoreForDates() {
+    if (global.BcaArchiveCore && typeof global.BcaArchiveCore.parseFavoriteTimeMs === "function") return global.BcaArchiveCore;
+    if (typeof require === "function") {
+      // node（单元测试 / 基准脚本）：直接 require 同目录的 archive-core.js。
+      // 拿不到就返回 null（比如被别的东西塞了个假 require），由调用方回退成 NaN —— 控制流降级，不算吞错。
+      try { return require("./archive-core.js"); } catch (_) { return null; }
+    }
+    return null;
+  }
+
   function parseFavoriteTime(text) {
-    const raw = String(text || "");
-    const match = raw.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*(\d{1,2})\s*时\s*(\d{1,2})\s*分\s*(\d{1,2})\s*秒)?/);
-    if (match) {
-      const date = new Date(
-        Number(match[1]),
-        Number(match[2]) - 1,
-        Number(match[3]),
-        Number(match[4] || 0),
-        Number(match[5] || 0),
-        Number(match[6] || 0)
-      );
-      const time = date.getTime();
-      if (Number.isFinite(time)) return time;
-    }
-    const iso = raw.match(/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
-    if (iso) {
-      /* 1.8.22（old-p3 compat 理论）：带时区后缀才交给 Date.parse；不带的按**本地**字段构造。
-         ES 规范里「date-time 不带偏移」按本地解释，但 date-only 按 UTC —— 这套差异加上
-         各实现的边角行为，会让「同一条档案在两个时区算出不同的天」。归档里的时间本来就是
-         用户墙上的时间，统一按本地构造，口径与上面那段中文格式完全一致。 */
-      const text = iso[0];
-      if (/Z$|[+-]\d{2}:?\d{2}$/.test(text)) {
-        const parsed = Date.parse(text);
-        if (Number.isFinite(parsed)) return parsed;
-      } else {
-        const parts = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-        if (parts) {
-          const time = new Date(
-            Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]),
-            Number(parts[4]), Number(parts[5]), Number(parts[6] || 0)
-          ).getTime();
-          if (Number.isFinite(time)) return time;
-        }
-      }
-    }
-    return NaN;
+    const core = archiveCoreForDates();
+    return core ? core.parseFavoriteTimeMs(text) : NaN;
   }
 
   // 一条记录的身份：优先 BV 号，其次 av 号；两者都没有就用「收藏夹 + 标题」兜底。

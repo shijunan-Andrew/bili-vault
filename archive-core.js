@@ -80,11 +80,26 @@
     return chars.length <= limit ? source : chars.slice(0, Math.floor(limit)).join("");
   }
 
-  function safeCollectionName(value, fallback = "未分类收藏") {
+  /* 1.14.2（审查 C-5）：Windows 保留名的判据只有这一份。
+     与旧写法相比多了 `(?:\..*)?` —— `CON.txt` 在 Windows 上一样建不出来，
+     而旧正则只认光秃秃的 `CON`，于是「CON.txt」这种名字会一路通过，
+     直到 createDirectory 时才在真机上失败（页面上还看不出原因）。 */
+  const WINDOWS_RESERVED_NAME_PATTERN = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
+  /* 1.14.2（审查 C-5）：收藏夹名的合法化只有这一处。
+     原来有四份口径不同的实现（`safeCollectionName` / `safeName` / background.js 的
+     `safeSegment` / library.js 的 `validateCollectionName`）：码元 vs 码点计长、
+     保留名正则写法不同、截断位置不同 —— 同一个名字在不同入口会得到不同的目录名，
+     最坏的情况是**同一个收藏夹出现两个目录**。 */
+  function normalizeCollectionName(value, fallback = "未分类收藏") {
     let name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
     if (!name || name === "." || name === "..") name = fallback;
-    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) name = `_${name}`;
+    if (WINDOWS_RESERVED_NAME_PATTERN.test(name)) name = `_${name}`;
     return truncateToBytes(sliceCodePoints(name, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES) || fallback;
+  }
+
+  function safeCollectionName(value, fallback = "未分类收藏") {
+    return normalizeCollectionName(value, fallback);
   }
 
   /* 1.7.11（facet-security P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
@@ -118,6 +133,28 @@
 
   function isReservedCollectionName(name) {
     return RESERVED_COLLECTION_NAMES.includes(safeCollectionName(name));
+  }
+
+  /* 1.14.2（审查 C-5）：新建收藏夹时「为什么不行」也只有一个判据 —— 返回原因码，文案由调用方翻。
+     原来是 library.js 里一段自己写的校验（码元计长 120、保留名正则与别处不同），
+     与导入 / 后台两条链路的合法化口径并不同步。 */
+  const COLLECTION_NAME_PROBLEMS = Object.freeze({
+    EMPTY: "empty",
+    TOO_LONG: "too-long",
+    ILLEGAL_CHAR: "illegal-char",
+    WINDOWS_RESERVED: "windows-reserved",
+    PLUGIN_RESERVED: "plugin-reserved"
+  });
+
+  function collectionNameProblem(rawName) {
+    const name = String(rawName || "").trim();
+    if (!name) return COLLECTION_NAME_PROBLEMS.EMPTY;
+    // 按**码点**计长（emoji 算 1 个），与切片用的 sliceCodePoints 同一口径
+    if (Array.from(name).length > COLLECTION_NAME_MAX_CHARS) return COLLECTION_NAME_PROBLEMS.TOO_LONG;
+    if (/[<>:"/\\|?*\u0000-\u001f]/.test(name) || /[. ]$/.test(name)) return COLLECTION_NAME_PROBLEMS.ILLEGAL_CHAR;
+    if (WINDOWS_RESERVED_NAME_PATTERN.test(name)) return COLLECTION_NAME_PROBLEMS.WINDOWS_RESERVED;
+    if (isReservedCollectionName(name)) return COLLECTION_NAME_PROBLEMS.PLUGIN_RESERVED;
+    return "";
   }
 
   /* 1.14.1（审查 C-4）：B 站「失效视频」占位标题只有这一份名单。
@@ -156,7 +193,7 @@
   function safeName(value, fallback = "未知", maxLength = RECORD_NAME_MAX_CHARS) {
     const name = String(value || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
     if (!name || name === "." || name === "..") return truncateToBytes(sliceCodePoints(fallback, maxLength), MAX_SEGMENT_BYTES);
-    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return truncateToBytes(sliceCodePoints(`_${name}`, maxLength), MAX_SEGMENT_BYTES);
+    if (WINDOWS_RESERVED_NAME_PATTERN.test(name)) return truncateToBytes(sliceCodePoints(`_${name}`, maxLength), MAX_SEGMENT_BYTES);
     return truncateToBytes(sliceCodePoints(name, maxLength), MAX_SEGMENT_BYTES);
   }
 
@@ -359,12 +396,59 @@
     return match ? match[0] : "";
   }
 
-  // 只认插件自己写的格式：YYYY年M月D日H时M分S秒（六个字段齐全）。
-  // 秒不许省 —— 省了就说明不是插件写的，宁可留着原文也别猜。
-  function parseChineseDateTime(text) {
-    const match = String(text).match(/(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒/);
+  /* 1.14.2（审查 C-2）：中文时间解析全仓只有这一份，口径由 options.requireSeconds 决定：
+       true （默认，写回链路用）：六个字段齐全才算数 —— 秒被删掉就说明不是插件写的，宁可留着原文；
+       false（读链路用）：允许缺时分秒，缺的按 0 补 —— 统计页、相对时间、归档扫描都用这一档。
+     原来 background / archive-tools / library / stats-core 各写一份，最宽的那份允许缺秒、
+     最严的那份必须齐全，于是「同一个用户改写的时间，统计页认、更新链路不认」。 */
+  function parseChineseDateTime(text, options) {
+    const requireSeconds = options?.requireSeconds !== false;
+    const pattern = requireSeconds
+      ? /(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})时(\d{1,2})分(\d{1,2})秒/
+      : /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*(\d{1,2})\s*时\s*(\d{1,2})\s*分\s*(\d{1,2})\s*秒)?/;
+    const match = String(text == null ? "" : text).match(pattern);
     if (!match) return null;
-    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
+    return new Date(
+      Number(match[1]), Number(match[2]) - 1, Number(match[3]),
+      Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)
+    );
+  }
+
+  /* 1.14.2（审查 C-2）：归档扫描用的一行时间 —— 收藏时间优先，其次目录名里的时间戳。
+     解析不出返回 0（页面显示「时间未知」），**不猜当前时间**。 */
+  function parseArchiveDateTime(value, fallback) {
+    const text = `${value || ""} ${fallback || ""}`;
+    const exact = parseChineseDateTime(text, { requireSeconds: false });
+    if (exact) return exact.getTime();
+    // 1.14.2：分隔符既可能是连字符也可能是冒号（老写法只认连字符，「2025-06-13 00:15:40」这种
+    // 备用时间从来没解析成功过，时分秒一直被悄悄当成 0）
+    const stamp = String(fallback || "").match(/(\d{4})-(\d{2})-(\d{2})(?:[T_ ](\d{2})[-:]?(\d{2})?(?:[-:]?(\d{2}))?)?/);
+    return stamp
+      ? new Date(Number(stamp[1]), Number(stamp[2]) - 1, Number(stamp[3]), Number(stamp[4] || 0), Number(stamp[5] || 0), Number(stamp[6] || 0)).getTime()
+      : 0;
+  }
+
+  /* 1.14.2（审查 C-2）：统计页用的「视频收藏时间」—— 中文格式（可缺秒）+ ISO 兜底，
+     解析不出返回 NaN，由调用方决定怎么回退。 */
+  function parseFavoriteTimeMs(text) {
+    const raw = String(text == null ? "" : text);
+    const chinese = parseChineseDateTime(raw, { requireSeconds: false });
+    if (chinese) {
+      const time = chinese.getTime();
+      if (Number.isFinite(time)) return time;
+    }
+    const iso = raw.match(/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/);
+    if (!iso) return NaN;
+    const text2 = iso[0];
+    if (/Z$|[+-]\d{2}:?\d{2}$/.test(text2)) {
+      const parsed = Date.parse(text2);
+      return Number.isFinite(parsed) ? parsed : NaN;
+    }
+    // 不带时区的按**本地**字段构造：归档里的时间是用户墙上的时间
+    const parts = text2.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!parts) return NaN;
+    const time = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), Number(parts[4]), Number(parts[5]), Number(parts[6] || 0)).getTime();
+    return Number.isFinite(time) ? time : NaN;
   }
 
   // 原文那一行「读不出来、又不是占位值」→ 把重建结果里的那一行换回原文（原本丢了就补回去）。
@@ -1302,6 +1386,13 @@
     isInvalidVideoTitle,
     BV_DECODE_TABLE,
     isTrustedMessageSender,
+    // 1.14.2（审查 C-2 / C-5）：时间解析、收藏夹名合法化与问题码
+    parseArchiveDateTime,
+    parseFavoriteTimeMs,
+    normalizeCollectionName,
+    collectionNameProblem,
+    COLLECTION_NAME_PROBLEMS,
+    WINDOWS_RESERVED_NAME_PATTERN,
     withSourceCollection,
     isMissingError,
     identifiersFromDirectoryName,

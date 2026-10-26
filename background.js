@@ -343,11 +343,9 @@ function sliceCodePoints(value, maxChars) {
   return chars.length <= limit ? source : chars.slice(0, Math.floor(limit)).join("");
 }
 
+// 1.14.2（审查 C-5）：收藏夹名合法化只有 archive-core.js 那一份，这里不再抄一遍
 function safeSegment(input, fallback = "未命名收藏夹") {
-  let value = String(input || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
-  if (!value || value === "." || value === "..") value = fallback;
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(value)) value = `_${value}`;
-  return truncateToBytes(sliceCodePoints(value, COLLECTION_NAME_MAX_CHARS), MAX_SEGMENT_BYTES);
+  return BcaArchiveCore.normalizeCollectionName(input, fallback);
 }
 
 /* V1.4.3（P2-3）：这几个目录名保留给插件自己用，收藏夹不许占用。
