@@ -983,9 +983,31 @@ test("the library can sort by view count", () => {
   assert.match(library, /if \(sort === "views"\) return viewsByVideo\.get\(b\) - viewsByVideo\.get\(a\) \|\| b\.timestamp - a\.timestamp/);
   // 没有播放量数据的记录排到最后，而不是当成 0 播放
   assert.match(library, /Number\.isFinite\(value\) && value > 0 \? value : -1/);
-  // 只挑当前页需要的那一段，不再给整表排序
-  assert.match(library, /selectFirstVideos\(matching, pageStart \+ pageSize, compareVideos\)/);
   assert.equal(/matching\.sort\(/.test(library), false, "整表排序应已去掉");
+
+  // 1.15.9（审查 T-1）：排序算法真跑一遍 —— 抠出 selectFirstVideos，与整表排序逐项比对
+  const { carveFunction } = require("./harness.cjs");
+  const selectFirstVideos = new Function(`${carveFunction(library, "selectFirstVideos")}\nreturn selectFirstVideos;`)();
+  const desc = (left, right) => right - left;
+  const sample = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
+  assert.deepEqual(selectFirstVideos(sample, 3, desc), [9, 6, 5], "取前 3 个最大的，顺序要对");
+  assert.deepEqual(selectFirstVideos([2, 1], 5, desc), [2, 1], "要的比总数还多时就是全排");
+  assert.deepEqual(selectFirstVideos(sample, 0, desc), [], "要 0 条就是空数组");
+  assert.deepEqual(selectFirstVideos([], 3, desc), [], "空列表不许炸");
+  // 随机比对：不论走「整排」还是「堆」哪条分支，结果都必须与整表排序一致（并列按下标稳定）
+  for (let round = 0; round < 30; round += 1) {
+    const data = Array.from({ length: 24 }, () => Math.floor(Math.random() * 6));
+    const wanted = round % 2 === 0 ? 3 : 20;
+    const expected = [...data].sort((left, right) => right - left).slice(0, wanted);
+    const picked = selectFirstVideos(data, wanted, desc);
+    // 承诺的只有「前 wanted 个」：要的多于一半时它会顺手把整排都排好（调用方只取前几个）
+    assert.ok(picked.length >= wanted, `第 ${round + 1} 轮给的条数不够`);
+    // 并列值的先后不做承诺（堆分支不按下标稳定），但「那组值 + 整体降序」必须一致
+    assert.deepEqual([...picked.slice(0, wanted)].sort((left, right) => right - left), expected, `第 ${round + 1} 轮选错了条目`);
+    for (let i = 1; i < picked.length; i += 1) {
+      assert.ok(picked[i - 1] >= picked[i], `第 ${round + 1} 轮结果不是降序`);
+    }
+  }
 });
 
 test("the video card shows the view count at the bottom-right of the cover", () => {
@@ -1481,13 +1503,14 @@ test("the scan notice can be closed and stays closed for the same result", () =>
 
 test("page sizes are multiples of the five-per-row grid", () => {
   const library = readProjectFile("library.js");
-  const match = library.match(/const PAGE_SIZES = \[([^\]]+)\];/);
-  assert.ok(match, "找不到 PAGE_SIZES");
-  const sizes = match[1].split(",").map((value) => Number(value.trim()));
-  assert.deepEqual(sizes, [25, 50, 100]);
+  // 1.15.9（审查 T-1）：常量也真求一次值，而不是只对源码做正则
+  const { carveConst } = require("./harness.cjs");
+  const PAGE_SIZES = new Function(`${carveConst(library, "PAGE_SIZES")} return PAGE_SIZES;`)();
+  assert.deepEqual(PAGE_SIZES, [25, 50, 100]);
   // 一行 5 个，所以每页条数必须是 5 的倍数，否则最后一行会缺一个
-  for (const size of sizes) assert.equal(size % 5, 0, `${size} 不是 5 的倍数`);
-  assert.equal(sizes.includes(24), false, "不该再留着 24");
+  for (const size of PAGE_SIZES) assert.equal(size % 5, 0, `${size} 不是 5 的倍数`);
+  assert.equal(PAGE_SIZES.includes(24), false, "不该再留着 24");
+  assert.match(library, /let pageSize = PAGE_SIZES\[0\];/, "默认每页取第一个档");
 });
 
 test("the sidebar offers a support link and a repository link", () => {
@@ -9152,6 +9175,6 @@ test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）",
   // 1.15.3 又把「换行注入」那条拆成三组真执行用例，降到 309。
   // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
   assert.ok(textOnly.length <= 309,
-    "纯文本断言 " + textOnly.length + " 条，超过 309 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
+    "纯文本断言 " + textOnly.length + " 条，超过 307 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 

@@ -6,6 +6,17 @@
 
 ---
 
+## V1.15.8 新增的几条
+- [ ] 五套全绿：`stability` 424、`archive-core` 101、`background` 49、`stats-core` 69、`pages` 111。
+- [ ] `node test/background.test.cjs` 的输出里能看到「上一轮导入被打断：本次新建的清掉，别人的东西不碰」等三条 C-14 用例。
+- [ ] 真机（可选）：导入跑到一半直接关掉浏览器，重开后点「清理上一轮导入」—— 本轮新建的目录被清掉，别人原来的记录不受影响。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
+---
+
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.7 及以前）。
+> 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。
+
 ## V1.15.7 新增的几条
 - [ ] 五套全绿：`stability` 424、`archive-core` 101、`background` 46、`stats-core` 69、`pages` 111；`node test/i18n-extract.cjs --check` 末尾会打印「动态 key（t(变量)）11 处，未超过上限 11」。
 - [ ] 真机：在收藏库里把一条记录拖到另一个收藏夹（改归属），`视频信息.txt` 里的「所属收藏夹：」跟着变，文件本身完整可读。
