@@ -73,10 +73,10 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 <!-- status:begin -->
 | 项 | 值 |
 |---|---|
-| 词典 | 1129 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 422 · archive-core 100 · stats-core 69 · background 36 · pages 97（后四套是真执行） |
+| 词典 | 1130 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
+| 测试基线 | stability 422 · archive-core 100 · stats-core 69 · background 36 · pages 100（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-26 19:37，当时 HEAD `cefcbaa`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-26 19:46，当时 HEAD `1ec29e0`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -465,7 +465,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | 改了什么 | 至少要跑 |
 |---|---|
 | 界面文案、词典键 | `node test/i18n-extract.cjs --check`（**缺一条、多一条都算失败**：多余必须是 0）+ `node test/stability.test.cjs` |
-| 加 / 改一处静默降级（`catch (_) {}`） | 先从三级分类里选一档（见 `docs/ARCHITECTURE.md`「已知限制」）：二档要留 `console.warn(原因, error)`；`node test/stability.test.cjs` 给四个文件留着上界 |
+| 加 / 改一处静默降级（`catch (_) {}` 或 `.catch(() => {})`） | 先从三级分类里选一档（见 `docs/ARCHITECTURE.md`「已知限制」）：二档要留 `console.warn(原因, error)`；`node test/stability.test.cjs` 给十个文件都留着上界（1.14.3 起两种写法都数） |
 | 数据层改动想量一下（`stats-core.js` / `archive-core.js` 里的循环） | `node test/bench.cjs`（默认 3 次中位数，`--quick` 只跑 1000 条）；它不进门禁 |
 | 怀疑「慢了一倍」但说不清哪里 | `node test/bench.cjs --strict`（默认 3 次中位数；超过 `SOFT_LIMITS_MS` 才以退出码 1 结束）。它不进 CI，只在发版前或 review 时手动跑 |
 | `library.js` / `popup.js` / `content.js` 的 DOM 行为 | 上面 + `node test/pages.test.cjs` |
@@ -825,7 +825,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
     2. **判据**：任何「降级返回一个兜底值」的函数，都要把**为什么降级**带出去（至少：候选数量 + 每个候选的地址与失败原因）。V1.4.6 的做法是 `loadImportCover()` 回传 `failures` 与 `candidateCount`，`noteCoverOutcome()` 累积，一个收藏夹收尾时 `importCoverFailureLine()` 往报告里写一行，同时在后台控制台 `console.warn` 一条。
     3. **顺带**：报告里要能区分「压根没有候选地址」和「有候选但全失败」，这两种的处理方向完全相反（前者是上游没给数据，后者是我这边的请求出了问题）。
     4. **别用「读代码推演」代替证据**：这一次我把 URL、协议、CDN（curl 200 + `ACAO: *`）、`host_permissions`（Chrome 的 `Secure Preferences` 里确实有 `https://*.hdslb.com/*`）、函数顺序全部核过一遍，每一项都"应该没问题"，但真机就是不行 —— 缺的正是运行时的那一句失败原因。**核对清单全绿而现象依旧时，下一步是装眼睛，不是继续推演。**
-    5. **1.7.34 起按三级分类判**：一档＝用户主动发起、失败必须说出来（throw / 弹窗 / 错误报告）；二档＝尽力而为的降级，行为不变但**必须留一条 `console.warn("原因（影响面）", error)`**；三档＝**是控制流或清理、不是吞掉失败**（探测文件是否存在、`writable.abort()` 之后重新抛、focus 释放、`chrome.runtime.lastError` 没有接收方、角标 best-effort、锁清理），保持 `catch (_) {}` 但补一行注释说明为什么可以静默。现数用 `grep -c "catch (_) {}" *.js`，**别把处数写进文档正文**；`test/stability.test.cjs` 给四个文件留着上界，涨了就先判档、再改上界。完整标准见 `docs/ARCHITECTURE.md`「已知限制」。
+    5. **1.7.34 起按三级分类判**：一档＝用户主动发起、失败必须说出来（throw / 弹窗 / 错误报告）；二档＝尽力而为的降级，行为不变但**必须留一条 `console.warn("原因（影响面）", error)`**；三档＝**是控制流或清理、不是吞掉失败**（探测文件是否存在、`writable.abort()` 之后重新抛、focus 释放、`chrome.runtime.lastError` 没有接收方、角标 best-effort、锁清理），保持 `catch (_) {}` 但补一行注释说明为什么可以静默。现数用 `grep -c "catch (_) {}" *.js` 和 `grep -c "\.catch(() => {})" *.js`，**别把处数写进文档正文**；1.14.3 起 `test/stability.test.cjs` 对**两种写法**都给十个文件留上界（以前只数前者，`.catch(() => {})` 是三处「用户能感觉到的开关」被吞掉的元凶），涨了就先判档、再改上界。完整标准见 `docs/ARCHITECTURE.md`「已知限制」。
     6. **扩展上下文失效（`chrome.runtime` 变回 `undefined`）也属一档，必须说出来。**（1.8.1）重新加载 / 更新 / 停用扩展之后，已打开的标签页里那份**旧**内容脚本还活着 —— Chrome 不会给已打开的页面重新注入 —— 任何 `chrome.runtime.sendMessage` 都会抛 `Cannot read properties of undefined (reading 'sendMessage')`，界面却一片安静。判据是 `extensionAlive()`（`typeof chrome !== "undefined" && Boolean(chrome.runtime?.id)`），出口是「扩展刚更新过 / 刷新一下（F5）」那张卡。注意这种状态下 `archiveEnabled` 也是 `false`，所以**别把「读不到设置」当成「用户关了归档」而静默返回**。
     7. **刷新已有记录也不许把已知降级成占位。**（1.8.3）「更新」用的是这次抓到的资料整篇重建，而资料接口失败只记 `detail.errors`、不中止 —— 所以重建结果可能全是「未知」（简介、标签、发布时间、粉丝数、互动数据一起丢）。写盘前必须过 `BcaArchiveCore.mergeInfoText(original, candidate)`（单行字段、`【标签】`、`【视频简介】`、`【互动数据】` 逐块合并，新值是占位就保留原值），互动数据只改接口真返回了的键（`patchStatsLines()`）。`test/stability.test.cjs` 有两条守卫盯着「写盘前有没有过合并」。
 

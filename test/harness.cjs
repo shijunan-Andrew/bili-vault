@@ -58,9 +58,12 @@ function makeStorageArea(name, bus, initial = {}) {
   const area = {
     __name: name,
     __map: map,
+    /* 1.14.3：测试把这里设成一个 Error，写入就会失败 —— 用来验证「写不进去」的界面退路。 */
+    __failSet: null,
     dump: () => Object.fromEntries([...map].map(([k, v]) => [k, clone(v)])),
     async get(keys) { return pickKeys(map, keys); },
     async set(items) {
+      if (area.__failSet) throw area.__failSet;
       const changes = {};
       for (const [key, value] of Object.entries(items || {})) {
         changes[key] = { oldValue: clone(map.get(key)), newValue: clone(value) };

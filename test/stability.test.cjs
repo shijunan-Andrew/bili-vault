@@ -418,7 +418,11 @@ test("invalid-video recovery through the APP API is on by default but still swit
   assert.match(html, /<input id="recoverInvalid" type="checkbox" checked>/);
   // 界面文字要能区分这两种概念，别写成"恢复失效视频"
   assert.match(html, /尝试找回失效视频的部分信息/, "开关名字要避免和「恢复成正常状态」混淆");
-  assert.match(popup, /recoverInvalidVideos: recoverInvalidCheckbox\.checked/);
+  // 1.14.3（审查 C-3）：写的是先取下来的快照（const wanted = …checked），
+  // 失败要退回并把改动撤销，别让界面替存储撒谎。
+  assert.match(popup, /const wanted = recoverInvalidCheckbox\.checked;/);
+  assert.match(popup, /chrome\.storage\.local\.set\(\{ recoverInvalidVideos: wanted \}\)/);
+  assert.match(popup, /recoverInvalidCheckbox\.checked = !wanted;/);
   // 恢复流程仍然必须被开关包住，用户能关掉
   const gateIndex = background.indexOf("if (recoverInvalidVideos) {");
   const callIndex = background.indexOf("await enrichImportedInvalidVideos(pendingItems, folder, tabId)");
@@ -6054,18 +6058,41 @@ test("静默吞错按三级分档：二档必须留原因，三档要写明为�
   // 三档是控制流与清理（探测文件是否存在、abort 之后重新抛、focus 释放、
   // chrome.runtime.lastError 没有接收方、角标 best-effort），保持空 catch 是对的。
   // 所以这里只给上界（棘轮）：数字涨了说明新写了一处，先判档、再决定要不要改这个上界。
-  for (const [file, limit] of [
-    ["background.js", 7],
-    ["library.js", 10],
-    ["popup.js", 3],
-    ["content.js", 1]
+  // 1.14.3（审查 C-3）：棘轮原来只统计 `catch (_) {}`，而 `.catch(() => {})` 这种写法
+  // 一处都没数 —— 三个「用户能感知的开关」正是被后面这种吞掉的。现在两种都数。
+  for (const [file, catchLimit, thenLimit] of [
+    ["background.js", 7, 27],
+    ["library.js", 10, 19],
+    ["popup.js", 3, 16],
+    ["content.js", 1, 3],
+    ["settings.js", 0, 9],
+    ["pet.js", 7, 1],
+    ["stats.js", 0, 1],
+    ["theme.js", 11, 4],
+    ["tutorial.js", 0, 1],
+    ["archive-tools.js", 0, 4]
   ]) {
-    const count = (readProjectFile(file).match(/catch \(_\) \{\}/g) || []).length;
+    const source = readProjectFile(file);
+    const count = (source.match(/catch \(_\) \{\}/g) || []).length;
     assert.ok(
-      count <= limit,
-      `${file} 里裸 catch (_) {} 多了（${count} > ${limit}）：新的那一处先从三档里选一档，再改这个上界`
+      count <= catchLimit,
+      `${file} 里裸 catch (_) {} 多了（${count} > ${catchLimit}）：新的那一处先从三档里选一档，再改这个上界`
+    );
+    const thenCount = (source.match(/\.catch\(\(\) => \{\}\)/g) || []).length;
+    assert.ok(
+      thenCount <= thenLimit,
+      `${file} 里 .catch(() => {}) 多了（${thenCount} > ${thenLimit}）：先判档，再决定要不要改上界`
     );
   }
+
+  // 1.14.3（审查 C-3）：这三处原来是白名单（被静默吞掉），现在必须明说失败
+  const popupSource = readProjectFile("popup.js");
+  assert.ok(popupSource.includes("合规开关没写进去（这一次的改动不会生效）"), "合规开关写失败要说出来");
+  assert.ok(popupSource.includes("限速档没写进去（这一次的切换不会生效）"), "限速档写失败要说出来");
+  assert.ok(popupSource.includes("function showSpeedSaveError()"), "要有一个能给用户看的失败提示");
+  assert.ok(readProjectFile("settings.js").includes("宠物设置没写进去（这一次的改动不会生效）"),
+    "宠物设置写失败要说出来");
+  assert.ok(popupSource.includes("设置没能保存，请再试一次。"), "失败提示要复用词典里的句子");
 
   const architecture = readProjectFile("docs/ARCHITECTURE.md");
   for (const tier of ["一档", "二档", "三档"]) {

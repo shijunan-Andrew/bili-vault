@@ -137,13 +137,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.14.2：时间解析和收藏夹名不再各写四份
+## V1.14.3：设置没存上时，弹窗会当场说一句
 
-- **中文时间只剩一份实现**（审查 C-2）：`archive-core.js` 的 `parseChineseDateTime(text, { requireSeconds })` 同时提供「严格」和「宽松」两种口径 —— 写回档案用严格（认不出就保留原文），看页面、算统计用宽松。以前四份各写一遍，同一个用户改写的时间「统计页认、更新链路不认」。
-- **顺手修掉一个静默 bug**：备用时间的日期戳解析只认连字符，`2025-06-13 00:15:40` 这类串的时分秒从来没解析成功过、一直被当成 0 点。
-- **收藏夹名只剩一份规矩**（审查 C-5）：`normalizeCollectionName()` 是唯一实现，新建、导入、重命名、安全路径四个入口都走它；`CON.txt` 这类带扩展名的 Windows 保留名也补上了（以前只拦光秃秃的 `CON`）。
-- **失效判据也共享了**（审查 C-4 尾巴）：扫描端与回收站页现在用同一个 `isInvalidRecord()`，不再一个看「状态」、一个看「状态或标题占位」。
-- **测试**：`archive-core` 98 → 100 项、`stability` 421 → 422 项；另修了四条原本钉着「谁在实现」的守卫（实现搬家，断言跟着搬）。
+- **两种「吞掉错误」的写法都开始计数**（审查 C-3）：以前只有 `catch (_) {}` 被守住，`.catch(() => {})` 一处都没数过。现在两种都数，九个文件各留一个上界，涨了就说明有人又吞了一处。
+- **三个「用户能感觉到的开关」不再静默失败**：弹窗里的限速档、弹窗里的「尝试找回失效视频」、设置页的宠物开关 —— 写不进去时会当场说「设置没能保存，请再试一次。」并把界面退回到真正生效的状态，不再让你以为改了。
+- **「有没有导入在跑」的预检真的问到了后台**（审查 T-7）：以前发的消息名后台根本没有，这段预检形同虚设；现在走 `bca-import-probe`，导入在跑时手动收藏会直接收手。
+- **测试**：`pages` 98 → 100 项、`stability` 422 → 422 项（守卫加严在用例内部），词典 1129 → 1130 条。
 
 **遗留** - 无。
 
@@ -151,7 +150,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1129 条**<!-- i18n-count:1129 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1130 条**<!-- i18n-count:1130 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。

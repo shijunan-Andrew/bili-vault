@@ -416,6 +416,7 @@
   "上次收藏有 {failed} 个收藏夹没存上。": "Last save left {failed} folders unsaved.",
   "上次收藏有需要看一眼的地方。": "Something in the last save deserves a look.",
   "上次中断留下的文件没能删掉，稍后再试。": "The files the interrupted import left could not be deleted; try again later.",
+  "设置没能保存，请再试一次。": "That setting could not be saved. Please try again.",
   "生成时间": "Generated at",
   "时间：{time}": "Time: {time}",
   "视频信息.txt 缺【基本信息】或标题（{count}）": "视频信息.txt missing [Basic info] or title ({count})",

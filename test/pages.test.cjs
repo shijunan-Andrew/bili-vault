@@ -950,6 +950,44 @@ async function suitePopup() {
     assert.match(summarize({}), /没有成功完成/);
   });
 
+  await test("限速档没写进去时，弹窗当场说出来并把档位退回去（1.14.3 · 审查 C-3）", async () => {
+    const chrome = makeChrome({ localData: {} });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle();
+    const doc = page.document;
+    const standard = doc.querySelector('#speedGroup button[data-speed-value="standard"]');
+    const lower = doc.querySelector('#speedGroup button[data-speed-value="lower"]');
+    assert.ok(standard && lower, "四个限速档位按钮都要在");
+    chrome.storage.session.__failSet = new Error("模拟写入失败");
+    standard.click();
+    await settle(8);
+    const hint = doc.getElementById("speedHint");
+    assert.equal(textOf(hint), BcaT(page, "设置没能保存，请再试一次。"), "写失败要当场说一句人话");
+    assert.equal(hint.classList.contains("danger"), true, "失败提示要用警示色");
+    assert.equal(standard.getAttribute("aria-pressed"), "false", "没生效的档位不许显示成选中");
+    assert.equal(lower.getAttribute("aria-pressed"), "true", "要退回真正生效的那一档");
+    chrome.storage.session.__failSet = null;
+    assert.equal((await chrome.storage.session.get("requestSpeed")).requestSpeed, undefined, "失败时不许偷偷写进去");
+  });
+
+  await test("合规开关写不进去时，勾选退回去并说出来（1.14.3 · 审查 C-3）", async () => {
+    const chrome = makeChrome({ localData: {} });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle();
+    const doc = page.document;
+    const checkbox = doc.getElementById("recoverInvalid");
+    assert.equal(checkbox.checked, true, "默认是开的");
+    chrome.storage.local.__failSet = new Error("模拟写入失败");
+    // 复选框的 "click()" 在 harness 里只派发 click、不会改 checked 也不会发 change，
+    // 这里按真浏览器的顺序手动改状态再派发 change。
+    checkbox.checked = false;
+    dom.fireUserEvent(checkbox, "change");
+    await settle(8);
+    assert.equal(checkbox.checked, true, "写不进去就要把勾选退回去，别让界面替存储撒谎");
+    assert.equal(textOf(doc.getElementById("speedHint")), BcaT(page, "设置没能保存，请再试一次。"));
+    chrome.storage.local.__failSet = null;
+  });
+
   await test("导入条数上限：下拉的五个档位都能读成数字，默认「全部」是 0（1.8.8）", async () => {
     const chrome = makeChrome({ version: "1.8.8", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
@@ -1038,12 +1076,28 @@ async function suiteContent() {
     await closeDialog(page2);
     const sent = page2.chrome.__messages;
     assert.equal(sent.length, 2, `真点击 + 弹层关上要发两条消息，实际 ${JSON.stringify(sent)}`);
-    assert.equal(sent[0].type, "bca-import-status", "先问后台有没有导入在跑");
+    assert.equal(sent[0].type, "bca-import-probe", "先问后台有没有导入在跑（后台真有的那条分支）");
     assert.equal(sent[1].type, "save-favorite", "再发归档请求");
     assert.deepEqual(sent[1].data.folders.map((folder) => folder.name), ["默认收藏夹"]);
     assert.equal(sent[1].data.metadata.bvid, "BV1xx411c7mD");
     assert.ok(Number.isFinite(sent[1].data.favoriteAt), "收藏时间要用点击当下取的真实时间戳");
     assert.deepEqual(dom.takeObserverErrors().map((error) => String(error && error.message)), [], "影子 DOM 里的提示卡不许抛错");
+  });
+
+  await test("探到导入在跑时，手动归档当场收手（1.14.3 · 审查 T-7）", async () => {
+    const page = await openVideo(VIDEO_PAGE, {
+      localData: { enabled: true },
+      // 后台对探活回「真的在导入」：content.js 不许再发 save-favorite
+      onRuntimeMessage: (message) => (message.type === "bca-import-probe" ? { ok: true, active: true } : undefined)
+    });
+    const confirm = page.document.querySelector(".bili-dialog .confirm");
+    dom.fireUserEvent(confirm, "click");
+    await settle(4);
+    await closeDialog(page);
+    const sent = page.chrome.__messages;
+    assert.equal(sent.length, 1, `探到导入在跑就只该发那一条探活，实际 ${JSON.stringify(sent)}`);
+    assert.equal(sent[0].type, "bca-import-probe");
+    assert.equal(sent.some((message) => message.type === "save-favorite"), false, "导入在跑时不许再发归档请求");
   });
 
   await test("窗口状态读不到就认账：content.js 里不许再有活的 __INITIAL_STATE__ 读取（1.7.23）", async () => {

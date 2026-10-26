@@ -33,6 +33,8 @@ const updateRecentDialog = document.getElementById("updateRecentDialog");
 const updateRecentDetail = document.getElementById("updateRecentDetail");
 const speedGroup = document.getElementById("speedGroup");
 const speedHint = document.getElementById("speedHint");
+// 1.14.3（审查 C-3）：写失败时临时借速度提示行说一句，6 秒后回到正常文案。
+let speedHintTimer = 0;
 const speedWarnDialog = document.getElementById("speedWarnDialog");
 const riskyWarnDialog = document.getElementById("riskyWarnDialog");
 const riskyWarnText = document.getElementById("riskyWarnText");
@@ -167,7 +169,13 @@ async function restoreRecoverInvalid() {
 }
 
 recoverInvalidCheckbox.addEventListener("change", () => {
-  chrome.storage.local.set({ recoverInvalidVideos: recoverInvalidCheckbox.checked }).catch(() => {});
+  // 1.14.3（审查 C-3）：写失败就把勾选退回去并说一句，别让界面替存储撒谎
+  const wanted = recoverInvalidCheckbox.checked;
+  chrome.storage.local.set({ recoverInvalidVideos: wanted }).catch((error) => {
+    console.warn("合规开关没写进去（这一次的改动不会生效）", error);
+    recoverInvalidCheckbox.checked = !wanted;
+    showSpeedSaveError();
+  });
 });
 
 function queryCurrentTab() {
@@ -289,6 +297,7 @@ let currentSpeed = "lower";   // 与 background.js 的 DEFAULT_REQUEST_SPEED 一
 let pendingSpeed = "";
 
 function renderSpeed() {
+  clearTimeout(speedHintTimer);
   speedGroup.querySelectorAll("button").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.speedValue === currentSpeed));
   });
@@ -296,12 +305,30 @@ function renderSpeed() {
   speedHint.classList.toggle("danger", REQUEST_SPEED_RISKY.has(currentSpeed));
 }
 
+// 1.14.3（审查 C-3）：设置没写进去时必须**当场说出来** —— 否则用户以为改了、其实没改，
+// 这正是 AI_HANDOFF 原则 25 说的「给用户看假状态」。提示只借用 6 秒，之后回到正常文案。
+function showSpeedSaveError() {
+  clearTimeout(speedHintTimer);
+  speedHint.textContent = BcaI18n.t("设置没能保存，请再试一次。");
+  speedHint.classList.add("danger");
+  speedHintTimer = setTimeout(renderSpeed, 6000);
+}
+
 function applySpeed(value) {
   if (!REQUEST_SPEED_ORDER.includes(value)) return;
+  if (value === currentSpeed) return;
+  const previousSpeed = currentSpeed;
   currentSpeed = value;
   renderSpeed();
   // 写 session：关掉浏览器就失效，下次打开回到默认的「较低」
-  chrome.storage.session.set({ requestSpeed: value }).catch(() => {});
+  // 1.14.3（审查 C-3）：写失败要把界面退回去并说一句 —— 运行时用的是后台记的档位，
+  // 这一份没写进去，界面显示的就不是真正生效的速度。
+  chrome.storage.session.set({ requestSpeed: value }).catch((error) => {
+    console.warn("限速档没写进去（这一次的切换不会生效）", error);
+    currentSpeed = previousSpeed;
+    renderSpeed();
+    showSpeedSaveError();
+  });
 }
 
 speedGroup.querySelectorAll("button").forEach((button) => {

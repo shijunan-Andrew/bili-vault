@@ -426,7 +426,10 @@
     showNotice(BcaI18n.t("正在归档视频…"), BcaI18n.t("B站已完成收藏，正在保存视频信息和封面。"), "", false);
     // 1.7.4：先问一句后台有没有导入在跑。有就**当场取消这次手动归档**并说清楚，
     // 不让用户看着「正在归档视频…」等下去（真机上等过几分钟，最长那次提示都没回来）。
-    chrome.runtime.sendMessage({ type: "bca-import-status" }, (status) => {
+    // 1.14.3（审查 T-7）：这里原先把消息名写成 bca-import-status —— 后台没有这个分支，
+    // 回调永远拿到 undefined，于是这段预检从来没起过作用（每次都要等 save-favorite
+    // 那边回 busyImport 才知道）。现在改成真的探活分支 bca-import-probe。
+    chrome.runtime.sendMessage({ type: "bca-import-probe" }, (status) => {
       void chrome.runtime.lastError;
       if (status?.active) {
         showNotice(BcaI18n.t("导入进行中"), BcaI18n.t("目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。"), "", true);

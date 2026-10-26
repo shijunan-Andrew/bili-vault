@@ -1767,7 +1767,10 @@ async function boot() {
         const current = stored && typeof stored.interfacePet === "object" ? stored.interfacePet : {};
         return updater(current);
       })
-      .catch(() => {});
+      // 1.14.3（审查 C-3）：宠物设置写失败原来被整段吞掉，用户以为改好了、刷新就变回去。
+      .catch((error) => {
+        console.warn("宠物设置没写进去（这一次的改动不会生效）", error);
+      });
   }
 
   chrome.storage.local.get("interfacePet")
