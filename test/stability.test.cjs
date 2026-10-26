@@ -353,11 +353,13 @@ test("the extension never exposes its pages to web origins", () => {
     "只允许放行两个音效文件给 B 站页面"
   );
   for (const entry of manifest.web_accessible_resources || []) {
-    assert.deepEqual(entry.matches.slice().sort(), [
-      "https://bilibili.com/video/*",
-      "https://m.bilibili.com/video/*",
-      "https://www.bilibili.com/video/*"
-    ]);
+    assert.deepEqual(entry.matches.slice().sort(), ["https://*.bilibili.com/*"], "只开 B 站自己的域名");
+    // 1.16.1：WAR 的 match pattern 与 content_scripts 的规则**不一样** ——
+    // Chrome 2023 起要求 WAR 的路径恰好是 /*，写成 /video/* 会直接
+    // "Invalid match pattern"、扩展装不上（1.16.0 就这么发布过一次）。
+    for (const pattern of entry.matches) {
+      assert.match(pattern, /^https?:\/\/[^/]+\/\*$/, `WAR 的 match pattern 不能带路径：${pattern}`);
+    }
   }
   // notifications 是 1.7.3 加的：导入要跑几分钟，用户多半已经关掉弹窗，只把结果写进
   // storage 等于没有终态提示（store 审核与真机反馈都指向这一点）。

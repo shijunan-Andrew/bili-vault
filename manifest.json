@@ -68,9 +68,7 @@
         "audio/error.mp3"
       ],
       "matches": [
-        "https://www.bilibili.com/video/*",
-        "https://bilibili.com/video/*",
-        "https://m.bilibili.com/video/*"
+        "https://*.bilibili.com/*"
       ]
     }
   ]

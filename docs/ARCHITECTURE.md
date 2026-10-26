@@ -30,7 +30,8 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 │                                 #   effectiveSoundVolume() 是「总音量 × 单项音量」唯一实现，
 │                                 #   importFailed() 是「导入算不算失败」唯一判据
 ├── audio/                        # 1.16.0：五个 mp3（约 200KB）随包发；只有 bubblepop 与 error
-│                                 #   放进了 web_accessible_resources（内容脚本在 B 站页面里要用）
+│                                 #   放进了 web_accessible_resources（内容脚本在 B 站页面里要用）；
+│                                 #   那里的 matches 只能写 scheme://host/*，带路径会被 Chrome 判非法
 ├── locales/
 │   ├── zh-TW.json                # 繁体词典（简体中文不需要词典，查不到就原样返回）
 │   └── en.json                   # 英文词典
