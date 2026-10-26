@@ -2950,6 +2950,12 @@ async function finishImportRunSnapshot() {
   // 1.7.10（P2-5）：这一轮结束了，把跨上下文闸门放掉。放在最前面，保证任何一条返回路径
   // 都会经过它（下面第一行就可能提前 return）。
   await clearArchiveWriteLock("import");
+  /* 1.16.3：不管是成功、取消、被风控还是出错，这一轮都已经结束了 ——
+     断点记录只对「中断之后继续」有意义，跑完就该收起来。
+     以前只在「真是继续」那条分支里清，于是跑完之后弹窗还挂着「继续上次导入」。 */
+  await clearImportResume().catch((error) => {
+    console.warn("断点记录没能清理（弹窗里可能还挂着「继续上次导入」）", error);
+  });
   if (!importRunSnapshot) return clearImportRunSnapshot();
   importRunSnapshot = {
     ...importRunSnapshot, active: false, paused: false, finished: true, finishedAt: Date.now()
@@ -2994,7 +3000,9 @@ async function importAnnounceInterruption(snapshot) {
   await markImportLeftoverInterrupted(snapshot, text);
   const stored = await chrome.storage.local.get("lastResult").catch(() => ({}));
   if ((Number(stored?.lastResult?.createdAt) || 0) <= activityAt) {
-    await chrome.storage.local.set({ lastResult: { message: text, createdAt: Date.now() } }).catch(() => {});
+    /* 1.16.3：中断也是「没跑完」—— 标成 failed，弹窗才会按错误展开，
+     否则用户看到的是一条「上次导入已中断」的正常状态，还伴着一声「导入成功」的音效。 */
+  await chrome.storage.local.set({ lastResult: { message: text, createdAt: Date.now(), failed: true } }).catch(() => {});
   }
   return { text, detail, activityAt };
 }
@@ -3006,6 +3014,21 @@ async function importAnnounceInterruption(snapshot) {
 //   1. session 里还有 active 的断点 → 铁证，导入进程死在半路；
 //   2. 只有 local 的 running=true 时，看这份状态是不是已经很久没更新过
 //      （浏览器重开后 chrome.storage.session 会被清空，只剩 local 里的残影）。
+/* 1.16.3：「这一轮真的还在跑吗」的第二个判据。
+   内存里的 importRun.active 可能是一具尸体（后台被回收、页面被冻结后 promise 永不 settle），
+   而真在跑的一轮一定会把 running:true 写进 local.importState（开跑时与每次进度都会写），
+   session 里也留着 active 快照。两个证据都没有，就说明它已经不在跑了。 */
+async function importRunLooksAlive() {
+  try {
+    const stored = await chrome.storage.local.get("importState");
+    if (stored?.importState?.running === true) return true;
+  } catch (_) {
+    return true;   // 读不出来就按「还活着」处理，宁可多拒一次也别打断真的导入
+  }
+  const snapshot = await readImportRunSnapshot();
+  return snapshot?.active === true;
+}
+
 async function importReconcileState() {
   if (importRun.active) return { active: true, reset: false };
   const stored = await chrome.storage.local.get("importState").catch(() => ({}));
@@ -6064,6 +6087,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "import-bili-favorites") {
+    /* 1.16.3：这一支要先读一次 storage 才能判断「上一轮是不是已经死了」，
+       所以整段包进 async；监听器本身仍然同步 return true，消息通道不会断。 */
+    void (async () => {
     const reportImportFailure = async (error) => {
       const folders = Array.isArray(message.folderIds) ? message.folderIds.map((id) => ({ id, name: id })) : [];
       const saved = await logError(error, { operation: "导入收藏", folders });
@@ -6085,7 +6111,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 那段等待期里 importRun.active 还是 false，只看它挡不住第二次；但放进来排队也不行 ——
     // 后一轮出队时会把前一轮判成「已经有一轮正在进行」（见 importBiliFavoritesInOrder
     // 的注释）。所以先查「有排队或有在跑」，被拒就直接回，什么都不入队。
-    if (importPending > 0 || importRun.active) {
+    if (importPending > 0) {
+      reportImportFailure(new Error("已经有一轮导入正在进行，请先等它结束或取消它。"));
+      return true;
+    }
+    if (importRun.active && !(await importRunLooksAlive())) {
+      /* 1.16.3：内存里还挂着 active，但既没有 running 状态的导入、也没有 session 快照 ——
+         上一轮的进程其实已经没了（后台被回收 / 页面被冻结后 promise 永远不 settle）。
+         以前这种情况会让之后**每一次**导入都被拒成「已经有一轮导入正在进行」，
+         用户只能重载扩展；现在当场把这笔账清掉，再继续这一轮。 */
+      console.warn("上一轮导入其实已经不在跑了（后台被回收过），这次的请求照常处理");
+      importRun = { active: false, paused: false, cancelled: false, waiters: [] };
+      await clearImportRunSnapshot().catch((error) => {
+        console.warn("上一轮留下的「正在导入」快照没能清掉", error);
+      });
+    } else if (importRun.active) {
       reportImportFailure(new Error("已经有一轮导入正在进行，请先等它结束或取消它。"));
       return true;
     }
@@ -6119,6 +6159,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       sendResponse(result);
     }).catch(reportImportFailure);
+    })();
     return true;
   }
   if (message?.type === "save-favorite") {

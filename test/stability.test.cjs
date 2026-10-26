@@ -2338,6 +2338,15 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
     assert.match(stripComments(readProjectFile(file)), /playImportResult\(state\)/, `${file} 要把状态交给 playImportResult`);
   }
   assert.match(sound, /function importCancelled\(/, "取消与失败要分开判：取消不放任何声音");
+  /* 1.16.3：中断也不许当成功（真机反馈：导入其实被中断了，却响了一声「导入成功」）。 */
+  assert.match(sound, /state\.interrupted === true/, "中断要算失败");
+  /* 1.16.3：跑完这一轮就把断点收起来，别让弹窗一直挂着「继续上次导入」。 */
+  const finish = stripComments(readProjectFile("background.js")).match(/async function finishImportRunSnapshot\(\)[\s\S]{0,400}?clearImportResume\(\)/);
+  assert.ok(finish, "收尾要顺手清掉断点记录");
+  /* 1.16.3：内存里的 active 可能是一具尸体，入口处要能自愈。 */
+  const busy = stripComments(readProjectFile("background.js"));
+  assert.match(busy, /async function importRunLooksAlive\(/, "要能判断「这一轮真的还在跑吗」");
+  assert.match(busy, /importRun\.active && !\(await importRunLooksAlive\(\)\)/, "入口处要能清掉尸体态的 active");
   /* 1.16.2：系统通知自己静音，否则会同时听到 Windows 提示音和我们的音效。 */
   assert.match(stripComments(readProjectFile("background.js")), /silent: true/, "系统通知要静音");
   const settingsHtml = readProjectFile("settings.html");
@@ -4928,10 +4937,14 @@ test("导入占位：一轮导入不会把自己判成「已经有一轮在进�
   const branch = sliceBlock(background, branchStart);
 
   // 静态：先查「有排队或有在跑」，再记账，最后才入队。三行的顺序不能换。
-  const guardAt = branch.search(/\n\s*if \(importPending > 0 \|\| importRun\.active\) \{/);
+  /* 1.16.3：判据拆成两步 —— 先看有没有排队（同步挡连点），再看 importRun.active；
+     后者可能是「尸体」，要先用 importRunLooksAlive() 问一句再决定。 */
+  const guardAt = branch.search(/\n\s*if \(importPending > 0\) \{/);
   const addAt = branch.search(/\n\s*importPending \+= 1;/);
   const enqueueAt = branch.search(/\n\s*importBiliFavoritesInOrder\(/);
-  assert.ok(guardAt !== -1, "第二次点击要先查队列和在跑的那一轮");
+  assert.ok(guardAt !== -1, "第二次点击要先查队列");
+  assert.match(branch, /importRun\.active && !\(await importRunLooksAlive\(\)\)/, "内存里的 active 可能是一具尸体，要能自愈");
+  assert.match(background, /async function importRunLooksAlive\(/, "自愈要真的去问「还在不在跑」");
   assert.ok(guardAt < addAt && addAt < enqueueAt, "顺序必须是：先查 → 再记账 → 再入队");
 
   // 出队时就要把那笔账放掉：记到任务结束的话，任务自己会看到它。
@@ -4947,6 +4960,11 @@ test("导入占位：一轮导入不会把自己判成「已经有一轮在进�
     let importPending = 0;
     let saveQueue = Promise.resolve();
     let hold = null;
+    // 1.16.3：这两样现在由入口调用 —— 真在跑的导入会把 running:true 写进 storage，
+    // session 里也留着快照；两个证据都没有就算「已经不在跑了」。
+    let alive = false;
+    async function importRunLooksAlive() { return alive; }
+    async function clearImportRunSnapshot() { return true; }
     ${grabFunction("notifyImportOutcome")}
     ${grabFunction("claimImportRun")}
     ${grabFunction("importBiliFavoritesInOrder")}
@@ -4967,7 +4985,10 @@ test("导入占位：一轮导入不会把自己判成「已经有一轮在进�
       handle,
       pending: () => importPending,
       active: () => importRun.active,
-      holdNext() { let release; hold = new Promise((resolve) => { release = resolve; }); return () => release(); }
+      holdNext() { let release; hold = new Promise((resolve) => { release = resolve; }); return () => release(); },
+      // 1.16.3：造「内存里挂着 active，但其实早就不在跑了」这一帧。
+      corpse() { importRun = { active: true, paused: false, cancelled: false, waiters: [] }; alive = false; },
+      revive() { alive = true; }
     };
   `)({ tab: { id: 1 } }, { storage: { local: { set: async () => {} } } }, async () => ({ reportPath: "" }));
 
@@ -4982,6 +5003,7 @@ test("导入占位：一轮导入不会把自己判成「已经有一轮在进�
   const slow = makeHarness();
   const release = slow.holdNext();
   const running = slow.handle({ type: "import-bili-favorites", folderIds: ["4088934635"] });
+  slow.revive();   // 1.16.3：这一轮是真的在跑（storage 里 running:true）
   const refused = await slow.handle({ type: "import-bili-favorites", folderIds: ["4088934635"] });
   assert.equal(refused?.ok, false, "连点第二次要被挡掉");
   assert.match(refused?.message || "", /已经有一轮导入正在进行/, "拒绝的话要说清原因");
@@ -4989,6 +5011,16 @@ test("导入占位：一轮导入不会把自己判成「已经有一轮在进�
   assert.equal((await running)?.ok, true, "第一轮不能被第二次点击带崩");
   assert.equal(slow.pending(), 0, "被拒的那一次不该留下没放掉的账");
   assert.equal(slow.active(), false, "跑完之后占位要放掉");
+
+  /* 1.16.3（真机反馈）：后台被回收 / 页面被冻结之后，内存里的 importRun.active 会变成一具尸体，
+     以前之后每一次导入都会被拒成「已经有一轮导入正在进行」，用户只能重载扩展。
+     现在入口要能自己把尸体清掉，把这一轮照常跑完。 */
+  const corpse = makeHarness();
+  corpse.corpse();
+  const afterCorpse = await corpse.handle({ type: "import-bili-favorites", folderIds: ["4088934635"] });
+  assert.equal(afterCorpse?.ok, true, `尸体态的 active 不该把后面的导入全锁死（实际回了 ${JSON.stringify(afterCorpse)}）`);
+  assert.equal(corpse.pending(), 0, "自愈之后也要把账归零");
+  assert.equal(corpse.active(), false, "自愈之后占位要放掉");
 });
 
 test("导入流程的 root 句柄要在函数作用域里声明，不能锁进 try 块（静态回归）", () => {

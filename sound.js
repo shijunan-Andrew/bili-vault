@@ -191,7 +191,10 @@
     if (!state || typeof state !== "object") return false;
     if (importCancelled(state)) return false;
     if (state.failed === true) return true;
-    return /失败|错误/.test(String(state.summary || state.text || ""));
+    /* 1.16.3：被中断（浏览器被关、扩展被重载、后台被回收）也是「没跑完」——
+       以前只认「失败 / 错误」，中断的收尾文案里没有这两个词，于是响了一声「导入成功」。 */
+    if (state.interrupted === true) return true;
+    return /失败|错误|中断/.test(String(state.summary || state.text || ""));
   }
 
   function playImportResult(state) {

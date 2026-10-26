@@ -610,7 +610,14 @@ async function startImport(options = {}) {
   const folderIds = resume
     ? resumeIds
     : [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
-  if (!folderIds.length) return;
+  if (!folderIds.length) {
+    /* 1.16.3：以前这里直接 return —— 点了「继续上次导入」什么都不会发生（真机反馈「没反应」）。 */
+    importStatus.textContent = resume
+      ? BcaI18n.t("这条断点里没有记下收藏夹，请在下面重新勾选后再导入。")
+      : BcaI18n.t("请先勾选要导入的收藏夹。");
+    importStatus.classList.add("error");
+    return;
+  }
   if (!rootHandle) {
     importStatus.textContent = BcaI18n.t("请先选择本地备份文件夹。");
     importStatus.classList.add("error");
@@ -656,6 +663,8 @@ async function startImport(options = {}) {
     } else {
       importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("导入失败。");
       importStatus.classList.add("error");
+      /* 1.16.3：这一轮根本没跑起来（多半是当前标签页不是收藏夹页），也要响一声出错音。 */
+      playImportSound({ failed: true, summary: String(error?.message || "") });
     }
   } finally {
     importBusy = false;

@@ -3213,6 +3213,10 @@ async function suiteSoundSettings() {
     assert.equal(sound.importFailed({ summary: "导入已取消。" }), false, "取消不算失败");
     assert.equal(sound.importFailed({ failed: true }), true);
     assert.equal(sound.importFailed({ summary: "导入失败：接口返回 412。" }), true);
+    /* 1.16.3：中断也是「没跑完」，不许再响成功音。 */
+    assert.equal(sound.importFailed({ interrupted: true, summary: "上次导入已中断（浏览器被关闭）。" }), true);
+    assert.equal(sound.importFailed({ summary: "上次导入已中断（后台被回收）" }), true);
+    assert.equal(sound.importCancelled({ interrupted: true }), false, "中断不是取消");
     assert.equal(sound.importFailed({ summary: "导入完成，共 12 条。" }), false);
     assert.equal(sound.importFailed(null), false);
   });
