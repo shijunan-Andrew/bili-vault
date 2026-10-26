@@ -234,7 +234,7 @@ const FUTURE_DAY_SLACK_MS = 24 * 60 * 60 * 1000;
       Number.isFinite(firstSeenAt) ? firstSeenAt : (Number.isFinite(createdTime) ? createdTime : time)
     ).toISOString();
     // 累计保存数只增不减：字段缺失（老库升级上来）时拿现有条数当起点，
-    // 免得刚升级就让用户看到「帮你保存了 0 个视频」。
+    // 免得刚升级就让用户看到「一共帮你保存了 0 个视频」。
     const savedTotal = numberOr(raw.totals && raw.totals.savedTotal, NaN);
     const known = Object.keys(database.videos).length;
     database.totals = { savedTotal: Number.isFinite(savedTotal) ? Math.max(known, Math.floor(savedTotal)) : known };

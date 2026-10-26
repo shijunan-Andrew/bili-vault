@@ -346,8 +346,9 @@
     const top = data.topCollection || null;
     return [
       translate("已陪伴你 {days} 天", { days: Number(firstSeen.days) || 1 }),
-      // 累计保存数：只增不减的 totals.savedTotal，不是当前条数（删一条也不会掉）
-      translate("帮你保存了 {count} 个视频", { count: Number(data.savedTotal) || Number(data.videos) || 0 }),
+      // 1.16.7（用户要求）：这里报的是**当前本地归档里一共有多少个视频**，
+      // 与收藏库左侧「全部收藏」的数字一致；不再是只增不减的累计保存数。
+      translate("一共帮你保存了 {count} 个视频", { count: Number(data.videos) || 0 }),
       translate("今日新增收藏视频 {count} 个", { count: Number(data.savedToday) || 0 }),
       translate("你近期保存最多的收藏夹是 {name}", { name: top && top.name ? String(top.name) : "—" })
     ];

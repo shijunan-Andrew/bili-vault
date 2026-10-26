@@ -3162,9 +3162,8 @@ async function suiteSoundSettings() {
     assert.equal(doc.getElementById("soundBubblepopValue").textContent, "25%");
     assert.ok(doc.getElementById("soundBubblepopVolume").disabled, "总开关关掉时单项滑块也置灰");
     assert.equal(doc.getElementById("soundMeowToggle").getAttribute("aria-pressed"), "true", "没关掉的项保持开着");
-    /* 1.16.6：导入完成音又回来了 —— 这次是插件自己合成的音，排在收藏成功音之后。 */
-    assert.ok(doc.getElementById("soundImportDoneToggle"), "导入完成音的开关要在");
-    assert.ok(doc.getElementById("soundImportDoneVolume"), "导入完成音也要能调音量");
+    /* 1.16.7（用户要求）：导入完成只听 Windows 的，设置里不再有这一行。 */
+    assert.equal(doc.getElementById("soundImportDoneToggle"), null, "「导入完成音」这一行已经移除");
   });
 
   await test("点开关、拖滑块会把整份设置写回 storage（1.16.0）", async () => {
@@ -3238,12 +3237,10 @@ async function suiteSoundSettings() {
       "被忙碌拒掉也要响一声"
     );
     assert.equal(sound.importFailed(null), false);
-    /* 1.16.6：合成音（importDone）与文件音效共用同一份音量算法。 */
-    assert.equal(sound.effectiveSoundVolume({ enabled: true, volume: 0.5, effects: { importDone: { enabled: true, volume: 0.5 } } }, "importDone"), 0.25);
-    assert.equal(sound.effectiveSoundVolume({ enabled: false, volume: 0.5, effects: { importDone: { enabled: true, volume: 0.5 } } }, "importDone"), 0);
-    /* 1.16.6：默认设置里导入完成音是关的，其余四个是开的。 */
+    /* 1.16.7：导入完成音这一项整项移除，默认设置里只剩四个。 */
     const defaults = sound.currentSettings();
-    assert.equal(defaults.effects.importDone.enabled, false, "导入完成音默认关掉");
+    assert.equal(defaults.effects.importDone, undefined, "不该再有 importDone 这一项");
+    assert.equal(sound.effectiveSoundVolume(defaults, "importDone"), 0, "没有文件也没有键 → 一声不响");
     assert.equal(defaults.effects.bubblepop.enabled, true, "别的音效默认开着");
   });
 }

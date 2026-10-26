@@ -1892,11 +1892,10 @@ async function boot() {
   const sound = globalThis.BcaSound;
   if (!sound || typeof document === "undefined") return;
 
-  /* 1.16.4：导入成功改用 Windows 默认提示音，「导入完成音」这一项连同它的控件一起去掉。 */
-  /* 1.16.6：importDone 是插件自己合成的音（没有音频文件），照样有开关与音量。 */
-  const EFFECTS = ["bubblepop", "importDone", "meow", "purring", "error"];
-  const SUFFIX = { bubblepop: "Bubblepop", importDone: "ImportDone", meow: "Meow", purring: "Purring", error: "Error" };
-  const PREVIEW = { bubblepop: "bubblepop", importDone: "importDone", meow: "meow", purring: "purring", error: "error" };
+  /* 1.16.7：导入完成的提示音只由 Windows 发，插件不再有这一项（也别再加回来）。 */
+  const EFFECTS = ["bubblepop", "meow", "purring", "error"];
+  const SUFFIX = { bubblepop: "Bubblepop", meow: "Meow", purring: "Purring", error: "Error" };
+  const PREVIEW = { bubblepop: "bubblepop", meow: "meow", purring: "purring", error: "error" };
 
   function $(id) { return document.getElementById(id); }
 

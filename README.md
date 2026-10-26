@@ -141,18 +141,18 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.16.6：导入成功那一声，交回 Windows 自己发
+## V1.16.7：猫咪报的是「一共保存了多少」，导入完成只听 Windows
 
-- 导入成功的提示音改回 **Windows 默认通知音**，插件不再自己合成；同时把通知重新设为「出声」。
-- 设置里的「导入完成音」**默认关掉**：想听插件这声再单独打开，两边不会同时响。
-- 出错音、收藏成功音、猫咪叫声、睡觉呼噜声都不变。
+- 猫咪气泡第 2 句改成「**一共帮你保存了 N 个视频**」，N 是**当前本地归档里的视频总数**（与收藏库左侧「全部收藏」一致），删掉一条就会跟着减。
+- 设置里的「导入完成音」整行移除：导入完成的提示音**只由 Windows 通知发**，插件不再自己合成，以后也不会加回来。
+- 出错的提示音不变，仍然只在失败 / 中断 / 被忙碌拒掉时响。
 - **遗留** - 无。
 
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1150 条**<!-- i18n-count:1150 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1148 条**<!-- i18n-count:1148 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。

@@ -2358,17 +2358,14 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
   assert.match(busy, /async function importRunLooksAlive\(/, "要能判断「这一轮真的还在跑吗」");
   assert.match(busy, /importRun\.active && !\(await importRunLooksAlive\(\)\)/, "入口处要能清掉尸体态的 active");
   /* 1.16.2：系统通知自己静音，否则会同时听到 Windows 提示音和我们的音效。 */
-  /* 1.16.6：导入成功那一声交回 Windows 提示音（插件自己那声默认关掉），
-     所以通知必须出声，且要有「默认关」的默认值兜底。 */
+  /* 1.16.7（用户要求）：导入完成的提示音只由 Windows 发，插件不再合成、也不再留这一项。 */
   assert.match(stripComments(readProjectFile("background.js")), /silent: false/, "导入提示音交回系统默认");
-  assert.match(
-    stripComments(readProjectFile("sound.js")),
-    /DEFAULT_OFF_KEYS = Object\.freeze\(\["importDone"\]\)/,
-    "导入完成音要默认关掉"
-  );
-  assert.ok(
-    stripComments(readProjectFile("sound.js")).includes("importDone"),
-    "导入完成音要有自己的键（合成音，不读文件）"
+  assert.doesNotMatch(sound, /\bimportDone\b\s*:/, "音效表里不该再有 importDone 这一项");
+  assert.doesNotMatch(sound, /playChime|AudioContext/, "不该再有自己合成提示音的代码");
+  assert.doesNotMatch(
+    stripComments(readProjectFile("settings.html")),
+    /soundImportDoneToggle/,
+    "设置里不该再有「导入完成音」这一行"
   );
   assert.doesNotMatch(sound, /new-notification\.mp3/, "new-notification.mp3 已经从项目里移除");
   assert.doesNotMatch(sound, /notification:/, "音效表里不该再有 notification");

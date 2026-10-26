@@ -27,15 +27,9 @@
     error: "audio/error.mp3"
   });
 
-  /* 1.16.6：导入完成那一声改由插件自己合成（两个正弦音，约 0.25 秒）。
-     真机反馈：系统通知的提示音在 Windows 上会被「应用通知声音」与专注助手整体吞掉，
-     而通知本身照样弹出 —— 所以不能把「一定听得到」押在系统通知上。
-     合成音不需要新的音频文件、不联网、也不涉及版权。 */
-  const SYNTH_KEYS = Object.freeze(["importDone"]);
-  /* 1.16.6：合成音默认关掉 —— 用户更习惯 Windows 自己那声提示，
-     插件这声要人主动开才响，免得一装上就多出一声。 */
-  const DEFAULT_OFF_KEYS = Object.freeze(["importDone"]);
-  const SOUND_KEYS = Object.freeze(["bubblepop", "importDone", "meow", "purring", "error"]);
+  /* 1.16.7：导入完成的提示音**只由 Windows 发** —— 插件不再自己合成，
+     连这个键一起删掉，免得以后有人又把它接回来跟系统音打架。 */
+  const SOUND_KEYS = Object.freeze(["bubblepop", "meow", "purring", "error"]);
 
   const DEFAULT_VOLUME = 0.5;
 
@@ -47,15 +41,9 @@
     return Math.round(number * 100) / 100;
   }
 
-  function defaultEffectEnabled(key) {
-    return !DEFAULT_OFF_KEYS.includes(key);
-  }
-
   function defaultSettings() {
     const effects = {};
-    for (const key of SOUND_KEYS) {
-      effects[key] = { enabled: defaultEffectEnabled(key), volume: DEFAULT_VOLUME };
-    }
+    for (const key of SOUND_KEYS) effects[key] = { enabled: true, volume: DEFAULT_VOLUME };
     return { enabled: true, volume: DEFAULT_VOLUME, effects };
   }
 
@@ -70,8 +58,7 @@
     for (const key of SOUND_KEYS) {
       const item = sourceEffects[key];
       effects[key] = {
-        /* 没有存过这个键时要按它自己的默认值来（importDone 默认关）。 */
-        enabled: item ? item.enabled !== false : defaultEffectEnabled(key),
+        enabled: item && item.enabled === false ? false : true,
         volume: item && item.volume !== undefined ? clampVolume(item.volume) : DEFAULT_VOLUME
       };
     }
@@ -87,7 +74,7 @@
   function effectiveSoundVolume(settings, name) {
     const normalized = normalizeSoundSettings(settings);
     /* 1.16.6：合成音没有音频文件，同样要有音量。 */
-    if (!Object.prototype.hasOwnProperty.call(SOUND_FILES, name) && !SYNTH_KEYS.includes(name)) return 0;
+    if (!Object.prototype.hasOwnProperty.call(SOUND_FILES, name)) return 0;
     if (!normalized.enabled) return 0;
     const effect = normalized.effects[name];
     if (!effect || !effect.enabled) return 0;
@@ -154,39 +141,9 @@
 
   /* play(name, { loop }) → 当前的 Audio 或 null。
      音量由设置算出来；算出 0 就什么都不放（连实例都不建）。 */
-  /* 1.16.6：合成音 —— 只有「导入完成音」用，不读文件。 */
-  let synthContext = null;
-  function playChime(volume) {
-    const Ctx = global.AudioContext || global.webkitAudioContext;
-    if (typeof Ctx !== "function") return null;
-    try {
-      if (!synthContext) synthContext = new Ctx();
-      const context = synthContext;
-      if (context.state === "suspended") context.resume().catch(() => {});
-      const start = context.currentTime;
-      for (const [frequency, delay] of [[1046.5, 0], [1318.5, 0.11]]) {
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        oscillator.type = "sine";
-        oscillator.frequency.value = frequency;
-        gain.gain.setValueAtTime(0.0001, start + delay);
-        gain.gain.linearRampToValueAtTime(volume, start + delay + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + delay + 0.24);
-        oscillator.connect(gain);
-        gain.connect(context.destination);
-        oscillator.start(start + delay);
-        oscillator.stop(start + delay + 0.26);
-      }
-    } catch (error) {
-      console.warn("提示音没能播放", error);
-    }
-    return null;
-  }
-
   function play(name, options) {
     const volume = effectiveSoundVolume(settings, name);
     if (volume <= 0) return null;
-    if (SYNTH_KEYS.includes(name)) return playChime(volume);
     const audio = audioFor(name);
     if (!audio) return null;
     const loop = options?.loop === true;
@@ -258,9 +215,9 @@
     /* 1.16.4：成功不放插件音效 —— 那一声交给系统通知（Windows 默认提示音）。
        取消照旧完全安静，失败仍然放 error。 */
     if (importCancelled(state)) return null;
-    /* 1.16.6：成功那一声由插件自己发（合成音），不再依赖系统通知 —— Windows 上
-       通知会弹但提示音可能被系统设置吞掉，用户反应「导入完成没有声音」就是这个。 */
-    return importFailed(state) ? play("error") : play("importDone");
+    /* 1.16.7：成功那一声只听 Windows 的（通知出声），插件这边保持安静 ——
+       不再自己合成提示音，免得两边同时响、也免得被系统设置吞掉时误以为插件坏了。 */
+    return importFailed(state) ? play("error") : null;
   }
 
   function currentSettings() {
