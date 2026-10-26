@@ -2832,6 +2832,15 @@ async function suiteLibraryHelpers() {
     assert.equal(clock.relativeTime(oldText), old.getFullYear() + "." + String(old.getMonth() + 1).padStart(2, "0"));
     assert.equal(clock.relativeTime("不是时间"), "不是时间", "解析不出就退回 compactDate，不显示空白");
   });
+  await test("bilibiliLink 只放行 B 站自己的域名（1.15.3 · 审查 T-1）", () => {
+    const tools = require("../archive-tools.js");
+    assert.equal(tools.bilibiliLink("https://www.bilibili.com/video/BV1aa411c7mD"), "https://www.bilibili.com/video/BV1aa411c7mD");
+    assert.equal(tools.bilibiliLink("https://space.bilibili.com/123"), "https://space.bilibili.com/123");
+    assert.equal(tools.bilibiliLink("https://b23.tv/abcdef"), "https://b23.tv/abcdef");
+    for (const bad of ["javascript:alert(1)", "https://evil.com/bilibili.com", "https://bilibili.com.evil.com/x", "ftp://bilibili.com/x", "不是链接", ""]) {
+      assert.equal(tools.bilibiliLink(bad), "", bad + " 不该被当成 B 站链接");
+    }
+  });
 }
 
 /* 1.13.1（审查 P0-1）：回收站过期清理的真执行测试。

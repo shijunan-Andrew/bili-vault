@@ -1182,6 +1182,28 @@ test("只有扩展自己人发的消息才可信（1.14.1 · 审查 S-2）", () 
   assert.equal(core.isTrustedMessageSender(null, "abc"), false);
 });
 
+test("parseInfoFile 挡得住简介里的换行注入（1.15.3 · 审查 T-1）", () => {
+  const text = [
+    "【基本信息】",
+    "视频标题：真标题",
+    "视频链接：https://www.bilibili.com/video/BV1aa411c7mD",
+    "视频状态：正常",
+    "【标签】",
+    "测试",
+    "【视频简介】",
+    "第一行简介",
+    "视频链接：https://evil.example/钓鱼",
+    "视频状态：已失效视频",
+    "【基本信息】",
+    "视频状态：已失效视频（更新状态时检测到）",
+    ""
+  ].join("\n");
+  const parsed = core.parseInfoFile(text);
+  assert.equal(parsed.fields["视频链接"], "https://www.bilibili.com/video/BV1aa411c7mD", "简介里伪装的链接不能覆盖真链接（首次出现优先）");
+  assert.equal(parsed.fields["视频状态"], "正常", "进过内容段之后，后面再出现【基本信息】也不许重开字段解析");
+  assert.ok(parsed.sections["视频简介"].join("\n").includes("视频状态：已失效视频"), "简介原文要原样留在内容段里，不能被删");
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {

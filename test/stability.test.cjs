@@ -2615,32 +2615,10 @@ test("缓存的 B 站 UID 有清除入口，剪贴板提示说了实话（V1.7.1
   assert.match(library, /剪贴板不会被自动清空，贴完记得覆盖掉。/);
 });
 
-test("归档文本的字段解析关得住简介里的换行注入（V1.7.11）", () => {
-  const archive = readProjectFile("archive-core.js");
-  const background = readProjectFile("background.js");
+// 1.15.3（审查 T-1）：这条原来读三份源码、正则断言「字段解析关得住换行注入」。
+// 现在同一判据由真执行用例盯着：test/archive-core.test.cjs 的 parseInfoFile 注入用例（读侧）、
+// test/background.test.cjs 的 infoLineValue（写侧）、test/pages.test.cjs 的 bilibiliLink（渲染侧）。
 
-  // 读侧：只认已知段、同键首次出现优先、进过内容段就不再重开字段段
-  assert.match(archive, /const FIELD_SECTIONS = new Set\(\["基本信息", "UP主", "互动数据"\]\);/);
-  assert.match(archive, /const CONTENT_SECTIONS = new Set\(\["标签", "视频简介"\]\);/);
-  assert.match(archive, /if \(key && !\(key in fields\)\) fields\[key\] = value;/,
-    "同一个键要首次出现优先，否则后面的行能覆盖真实值");
-  assert.match(archive, /if \(divider > 0 && !fieldsClosed && FIELD_SECTIONS\.has\(section\)\)/,
-    "进过内容段之后不许再认字段");
-
-  // 写侧：单行字段一律走 infoLineValue，把换行/控制符压成空格
-  assert.match(background, /function infoLineValue\(value, fallback = "未知"\) \{/);
-  assert.match(background, /const title = infoLineValue\(metadata\.title\);/);
-  assert.match(background, /const videoUrl = infoLineValue\(metadata\.url\);/);
-  assert.match(background, /const upName = infoLineValue\(metadata\.upName\);/);
-  assert.match(background, /所属收藏夹：\$\{infoLineValue\(folderName\)\}/);
-
-  // 渲染侧：链接只认 B 站自己的域名，注入成功也只会变成一行纯文本
-  // 1.9.0：记录→视频的映射搬到 archive-tools.js（收藏库与设置页共用）
-  const tools = readProjectFile("archive-tools.js");
-  assert.match(tools, /function bilibiliLink\(value\) \{/);
-  assert.match(tools, /url: bilibiliLink\(url\),/);
-  assert.match(tools, /upHome: bilibiliLink\(field\(info, "UP主主页"\)\),/);
-});
 
 test("保留目录名只有一份权威名单，收藏库那条链路也查（V1.7.11）", () => {
   const archive = readProjectFile("archive-core.js");
@@ -9150,10 +9128,10 @@ test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）",
     if (executingMarkers.some((marker) => body.includes(marker))) return;
     textOnly.push(start + 1);
   });
-  // 1.15.2 的底数是 311 条（占 73.2%）。本批把「封面只允许 blob / data:image」
-  // 换成了 test/pages.test.cjs 里的真执行用例，于是降到 310。
+  // 底数 311（73.2%）→ 1.15.2 换成 safeCover 的真执行用例降到 310 →
+  // 1.15.3 又把「换行注入」那条拆成三组真执行用例，降到 309。
   // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
-  assert.ok(textOnly.length <= 310,
-    "纯文本断言 " + textOnly.length + " 条，超过 310 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
+  assert.ok(textOnly.length <= 309,
+    "纯文本断言 " + textOnly.length + " 条，超过 309 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 

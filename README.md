@@ -139,13 +139,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.15.2：判封面、转义、相对时间这几段，现在真跑了
+## V1.15.3：换行注入、控制符、B 站链接这三处，改成真跑了
 
-- **`library.js` 的几个纯函数有了真执行用例**（审查 T-1 / T-3）：`escapeHtml`、`safeCover`、`highlightMatches`、`formatCount`、`statDisplay` / `addField`、`relativeTime`。以前只有「源码里写着这行字」的文本断言，现在会把函数体抠出来真喂输入 —— `javascript:` 与 `https://i0.hdslb.com` 都必须被 `safeCover` 挡掉、URL 里的引号必须转义、查询词里的尖括号不许原样进 DOM、中文/繁体/英文三档的单位换算、今天/昨天/N 天前与超过一年的回退。
-- **加了「纯文本断言只降不升」的棘轮**（审查 T-1）：`stability.test.cjs` 里还有 310 条用例只读源码、不执行项目代码（占 72.9%）。其中相当一部分是必须的合同钉（设计令牌、文档标记、限速常量），整批改写没有意义；棘轮的作用是**新用例不许再堆正则**，这个数只许往下走。
-- **测试**：`pages` 100 → 106 项，`stability` 仍 425 项（删掉一条被真执行用例顶掉的文本断言、加了一条棘轮）。
+- **简介里的换行注入拆成三条真执行用例**（审查 T-1）：读侧 `parseInfoFile` —— 简介里伪造 `视频链接：`、`视频状态：`，甚至再写一个 `【基本信息】` 想重开字段段，都不许覆盖真值；写侧 `infoLineValue` —— 换行、制表符、C0/C1 控制符一律压成空格，免得在 txt 里多出一行伪装字段；渲染侧 `bilibiliLink` —— 只放行 `bilibili.com` 与 `b23.tv`，`javascript:`、`https://bilibili.com.evil.com`、`ftp:` 全挡掉。原来那条「读三份源码 + 正则」的文本断言删掉了。
+- **棘轮上限又降一格**：310 → 309（现在 309 条文本断言，占 70.6%）。
+- **测试**：`archive-core` 100 → 101、`background` 45 → 46、`pages` 106 → 107，`stability` 425 → 424（删掉一条被真执行用例顶掉的文本断言）。
 
-**遗留** - `stability` 里剩下的 310 条文本断言按批继续往下压（下一批挑背后有纯函数可调的那些）。
+**遗留** - `stability` 里剩下的 309 条文本断言按批继续往下压。
 
 ## 测试与文档
 
@@ -155,7 +155,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:425 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:424 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

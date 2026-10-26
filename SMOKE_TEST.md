@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **425** 项里<!-- test-count:425 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **424** 项里<!-- test-count:424 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -65,14 +65,13 @@
 - [ ] **剪贴板**：详情页「复制路径」、设置页「复制原生助手清理命令」、诊断信息「复制」—— 三个按钮各自真的写进了剪贴板（粘到记事本里核对）。
 - [ ] **大收藏夹的速率与风控**：用一个 2000+ 条的收藏夹导入前 50 条 → 全程不出现 412 / 风控提示，进度条持续推进，取消后统计库回滚干净。
 
-## V1.15.2 新增的几条
-- [ ] `node test/pages.test.cjs` 输出 106 项且全绿（新增的六条是 `library.js` 纯函数的真执行用例）。
-- [ ] `node test/stability.test.cjs` 还是 425 项全绿，最后一条叫「stability 自己也不许再堆纯文本断言」。
-- [ ] 随便打开一条视频的详情：UP 主名字或标题里带 `<` `>` 时，页面显示的是字符本身，没有被当成标签解析。
-- [ ] 收藏库里播放量超过 1 万仍显示「1.2 万」，切英文变 `1.2K`、切繁体变「1.2 萬」；卡片上的时间是「今天 / 昨天 / N 天前」。
+## V1.15.3 新增的几条
+- [ ] `node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/pages.test.cjs` 107 项，三套都全绿。
+- [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。
+- [ ] 真机：随便挑一条已在库里的视频，在 B 站页面把简介临时改成带「视频链接：https://example.com」的样式再走一次更新视频数据，收藏库里点「在 B 站打开」仍跳 bilibili.com 的地址。
 - [ ] `node scripts/check-all.cjs` 全绿。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.1 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.2 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

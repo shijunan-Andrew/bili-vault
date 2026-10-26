@@ -109,6 +109,15 @@ function makeRootDb(rootHandle) {
 /* ---------------- 统计库：读 ---------------- */
 
 async function suite() {
+  await test("infoLineValue 把换行与控制符压成空格（1.15.3 · 审查 T-1）", () => {
+    const bg = loadBackground();
+    const line = bg.__test.infoLineValue;
+    assert.equal(line("标题\n第二行"), "标题 第二行", "换行必须压成空格，否则 txt 会多出一行伪装的字段");
+    assert.equal(line("a\tb\u0000c\u001fd\u007fe"), "a b c d e", "制表符与 C0/C1 控制符都要压掉");
+    assert.equal(line("  两边空白  "), "两边空白");
+    assert.equal(line(""), "未知", "空值退回默认占位");
+    assert.equal(line(null, "N/A"), "N/A", "自定义兜底也要生效");
+  });
   /* ---------------- 1.9.3：收藏时的补资料与去重 ---------------- */
 
   await test("收藏前按「收藏夹 + BV」索引找已有目录，BV 对得上才复用（1.9.3）", async () => {
