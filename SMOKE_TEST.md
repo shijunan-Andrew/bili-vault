@@ -65,13 +65,12 @@
 - [ ] **剪贴板**：详情页「复制路径」、设置页「复制原生助手清理命令」、诊断信息「复制」—— 三个按钮各自真的写进了剪贴板（粘到记事本里核对）。
 - [ ] **大收藏夹的速率与风控**：用一个 2000+ 条的收藏夹导入前 50 条 → 全程不出现 412 / 风控提示，进度条持续推进，取消后统计库回滚干净。
 
-## V1.15.5 新增的几条
-- [ ] `node test/pages.test.cjs` 111 项全绿；`node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/stats-core.test.cjs` 69 项也全绿。
-- [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。
-- [ ] 真机：挑一条归档，把它的 `视频信息.txt` 里 `视频链接` 临时改成 `javascript:alert(1)`，重开收藏库点它 —— 详情里不该出现能点的「在 B 站打开」，封面和标题也点不动（改完记得改回来）。
+## V1.15.6 新增的几条
+- [ ] 五套全绿：`pages` 111、`archive-core` 101、`background` 46、`stats-core` 69、`stability` 424（棘轮上限仍是 309）。
+- [ ] 点开扩展图标 —— 弹窗照常出现（这条以前是「词典取不到就空白」，现在没空白了）。
+- [ ] 真机：随便挑一个归档目录，收藏库照常能记住它（`openDb()` 加了 `contains` 守卫，正常路径不该有任何变化）。
 - [ ] `node scripts/check-all.cjs` 全绿。
-
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.4 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.5 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

@@ -5985,12 +5985,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ ok: true, active: importRun.active, reset: false, importState }));
     return true;
   }
-  if (message?.type === "bca-import-state") {
-    importReconcileState()
-      .then(() => { importState = { ...importState, active: importRun.active }; sendResponse({ ok: true, importState }); })
-      .catch(() => sendResponse({ ok: true, importState }));
-    return true;
-  }
   if (message?.type === "bca-fav-counts") {
     // 只取收藏夹列表的条数，不读任何视频 —— 让界面在动手前能准确判断风险
     (async () => {

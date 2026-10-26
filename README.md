@@ -141,15 +141,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.15.5：链接与消息的判据收紧，文档不再跟代码打架
+## V1.15.6：删掉两段没人用的代码，补上两个兜底
 
-- **详情页链接只放行 `http` / `https`**（审查 S-4）：归档里的 URL 最终会进 `href`，`escapeHtml` 只挡得住属性闭合、挡不住 `javascript:` 前缀。现在统一过 `safeVideoHref()`，白名单之外的地址降级成纯文本，连「在 B 站打开」按钮都不渲染。
-- **三个页面脚本的消息入口统一成严格判据**（审查 S-7）：`favorites-import.js` / `library.js` / `popup.js` 原来写的是「`sender.id` 为空就放行」，现在一律「不是自己人就不接」。
-- **文档与代码对齐**（审查 S-8 / D-5 / D-6 / D-7 / D-8）：原生宿主协议号在 `ARCHITECTURE.md` 里三处从 3 改成 4；`AI_HANDOFF` 的不可逆操作表改成「先移进 005回收站」；`library.js` 那段 1.8.21 注释写清了 1.8.23 的变化；README 不再说「拒绝 iframe 嵌套」（实际是「不在顶层就直接不工作」）、自检命令改用 `pwsh`；冒烟清单不再说「三张图都能点」；`release.ps1` 文件头不再说「改 3 处版本号」。
-- **测试**：`pages` 110 → 111（新增 `safeVideoHref` 的真执行用例），其余四套不动（`stability` 424，棘轮上限仍是 309）。
+- **删掉一段死代码**（审查 C-6）：`library.js` 里那个老的同步版选项池已经没有任何调用方，留着只会让人以为它还有用。
+- **删掉一条没人发的消息**（审查 C-7）：后台还挂着一个 `bca-import-state` 分支，但全项目没有任何地方发它 —— 真正的探活走 `bca-import-probe`。分支和文档里那一行一起删了。
+- **开库前先看一眼**（审查 C-10）：目录设置用的 IndexedDB 打开时原来是直接建 object store，现在和另外三个库一样先判存在，避免同一个库被两处代码用不同版本打开时抛 `ConstraintError`。
+- **词典没载入不该让弹窗打不开**（审查 C-12）：`popup.js` 的 `BcaI18n.init()` 原来裸调，取不到词典就整个 `boot()` 抛掉、界面一片空白。现在失败只记一条 `console.warn`，`t()` 退回中文原文，界面照常出来。
+- **测试**：五套全部绿（`stability` 424 / `archive-core` 101 / `stats-core` 69 / `background` 46 / `pages` 111），棘轮上限仍是 309 —— 这批新增的断言都折进了已有用例，没有多出一条文本断言。
 
 **遗留** - `stability` 里剩下的 309 条文本断言按批继续往下压。
-
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。

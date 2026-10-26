@@ -289,7 +289,11 @@ const focusTraps = [];
 function openDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE);
+    // 1.15.6（审查 C-10）：另外三个库都先判存在，这里原来直接建 —— 同一个库被两处代码
+    // 用不同版本打开时，onupgradeneeded 会被再叫一次，直接 createObjectStore 会抛 ConstraintError。
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(DB_STORE)) request.result.createObjectStore(DB_STORE);
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error(BcaI18n.t("无法读取已保存的目录设置。")));
   });
@@ -2088,11 +2092,6 @@ function populateSelectOptions(select, options, allLabel, currentValue) {
   select.dataset.poolSignature = signature;
   select.value = options.some((item) => item.value === previous) ? previous : "all";
   return select.value;
-}
-
-function syncVideoFilterOptions(videosForOptions) {
-  if (upFilterSelect) upFilter = populateSelectOptions(upFilterSelect, countByFrequency(videosForOptions.map((video) => video.upName)), BcaI18n.t("全部 UP 主"), upFilter);
-  if (tagFilterSelect) tagFilter = populateSelectOptions(tagFilterSelect, countByFrequency(videosForOptions.flatMap((video) => video.tags)), BcaI18n.t("全部标签"), tagFilter);
 }
 
 // 4.9：选项池**只在数据源或筛选条件变化时**重算，不再挂在 renderVideos 上。

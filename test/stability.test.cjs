@@ -1190,6 +1190,8 @@ test("filter options are rebuilt on demand, not on every keystroke", () => {
   const body = library.slice(start, nextFn > 0 ? nextFn : library.length);
   assert.equal(/syncVideoFilterOptions/.test(body), false, "选项池不该在 renderVideos 里重建");
   assert.match(library, /function refreshVideoFilterOptions\(/);
+  // 1.15.6（审查 C-6）：那个老的同步版已经没有调用方，删掉以免以后有人又接回去
+  assert.equal(/function syncVideoFilterOptions/.test(library), false, "死掉的同步版选项池要删干净");
   // 搜索防抖
   assert.match(library, /const SEARCH_DEBOUNCE_MS = \d+;/);
   assert.match(library, /clearTimeout\(searchDebounceTimer\)/);
@@ -1240,6 +1242,8 @@ test("the import pipeline keeps the service worker alive explicitly", () => {
   // 内存态才算"真的在跑"；importState.running 只是残影，必须能复位
   assert.match(background, /importRun\.active/);
   assert.match(background, /bca-import-probe/);
+  // 1.15.6（审查 C-7）：曾经有一个没人发的 bca-import-state 分支，已删
+  assert.equal(/bca-import-state/.test(background), false, "没人发的消息分支不许留着");
   // 中断状态要说清楚，而不是留个转不动的界面
   assert.match(background, /上次导入已中断/);
 });
@@ -5645,6 +5649,8 @@ test("角标要等结果真的呈现出来才清，不许一打开弹窗就灭�
   assert.ok(popup.includes("if (done && !done.acknowledged && done.text) return;"),
     "有未读结果时必须留着角标");
   assert.ok(popup.indexOf("clearBadgeIfSeen();", bootAt) > bootAt, "boot 末尾要按未读结果决定");
+  // 1.15.6（审查 C-12）：词典初始化失败不能让 boot 整个抛掉，弹窗起不来
+  assert.match(popup, /try \{\r?\n\s*await BcaI18n\.init\(\);/, "词典初始化要有兜底");
   const dismissAt = popup.indexOf("function dismissDoneDialog()");
   const dismissBody = popup.slice(dismissAt, popup.indexOf("\n}", dismissAt));
   assert.match(dismissBody, /clearBadge\(\);/, "用户真的读掉并关掉对话框之后才清角标");
@@ -6384,6 +6390,8 @@ test("先按上次的快照渲染，再 8 路并发整库校准（V1.8.5）", ()
   const library = readProjectFile("library.js");
   assert.match(library, /const SNAPSHOT_DB_NAME = "bca-archive-snapshot";/, "快照库名");
   assert.match(library, /indexedDB\.open\(SNAPSHOT_DB_NAME, SNAPSHOT_VERSION\)/, "要真的开 IndexedDB");
+  // 1.15.6（审查 C-10）：四个库都要先判 object store 在不在，别直接建
+  assert.match(library, /if \(!request\.result\.objectStoreNames\.contains\(DB_STORE\)\)/, "目录设置库开库前也要先判存在");
   assert.match(library, /async function snapshotLoad\(rootKey\)/, "读快照");
   assert.match(library, /async function snapshotSave\(rootKey, entries\)/, "写快照");
   // 快照里绝不能存 blob: URL —— 那个 URL 的生命周期只到这次页面关闭

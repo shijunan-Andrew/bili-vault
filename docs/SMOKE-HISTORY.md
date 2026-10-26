@@ -6,6 +6,12 @@
 
 ---
 
+## V1.15.5 新增的几条
+- [ ] `node test/pages.test.cjs` 111 项全绿；`node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/stats-core.test.cjs` 69 项也全绿。
+- [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。
+- [ ] 真机：挑一条归档，把它的 `视频信息.txt` 里 `视频链接` 临时改成 `javascript:alert(1)`，重开收藏库点它 —— 详情里不该出现能点的「在 B 站打开」，封面和标题也点不动（改完记得改回来）。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
 ## V1.15.4 新增的几条
 - [ ] `node test/pages.test.cjs` 110 项全绿；`node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/stats-core.test.cjs` 69 项也全绿。
 - [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。

@@ -575,7 +575,6 @@ UP主主页：https://space.bilibili.com/……
 | `retry-pending-favorite` | `popup.js` → `background.js` | 恢复授权后重试暂存的收藏 |
 | `get-status` | `popup.js` → `background.js` | 读取最近状态和错误（4.2 起附带 `importState`） |
 | `bca-import-control` | `popup.js` → `background.js` | 4.2：暂停 / 继续 / 取消正在进行的导入 |
-| `bca-import-state` | 任意页面 → `background.js` | 4.2：单独查询导入运行状态 |
 | `bca-locale` | 内容脚本 `i18n.js` → `background.js` | 4.5：内容脚本请后台代取词典。**不能自己 fetch**——从网页上下文读扩展资源必须声明 `web_accessible_resources`，而 4.3 起刻意不开放任何扩展资源给网页；直接 fetch 会被拦、被 `try/catch` 吞成空词典，表现为提示卡永远中文且不报错 |
 | `bca-open-library` | `content.js` → `background.js` | 4.3：由后台 `chrome.tabs.create` 打开本地收藏库，扩展页因此不必暴露给网页 |
 | `bca-refresh-video-stats` | `library.js` → `background.js` | 4.4：重新解析并更新互动数据与粉丝数；失效只打标记 |
