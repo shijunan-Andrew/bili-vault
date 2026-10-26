@@ -10,14 +10,18 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 ├── .git/                         # 完整版本历史（tag: beta1.0 … beta4.9、V1.0.0 一路到当前版本；数量随发布增长，别写死）
 ├── .gitignore / .gitattributes   # 忽略本地归档；换行策略（.bat/.ps1/.cs 钉死 CRLF）
 ├── .node-path                    # 本机 node.exe 的路径（各人机器不同，已被 .gitignore，不进仓库）
+├── version.json                  # 公开版元数据（released / zipName / sha256）；用户宣布「可以发 release」之后才手工维护
 ├── manifest.json                 # MV3 权限、后台 worker、内容脚本注册
 ├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡
+├── content-i18n-keys.js          # 4.5：内容脚本要用的词条白名单（必须在 i18n.js 之前加载，只列 content.js 真用到的那些）
+├── client-errors.js              # 1.7.31：扩展页的 error / unhandledrejection 收集器（认 <html data-bca-page>）
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
 ├── archive-core.js               # 可复用的纯逻辑：安全名称、下载目录匹配、下载路径、视频信息解析、页码序列
 ├── archive-tools.js              # 1.9.0：归档读盘与回收站原语（scanArchive / readRecord / recordToVideo / recycle* / listRecycled / restoreRecycled / deleteRecycled / pruneRecycler）。library.js 与 settings.js 共用这一份
 ├── stats-core.js                 # 1.5.0：本地数据库的纯逻辑（明细读写、按本地日分天、快照与排行、宠物亲密度）。浏览器挂 globalThis，node 里能 require
 ├── pet.js / pet.css              # 1.5.0：宠物挂件（自绘内联 SVG + 气泡轮播 + 点击互动），只读 chrome.storage 里的快照
+├── pet-cat.png                   # 1.5.0：宠物本体的位图帧表（6 列 × 5 行），CSS 只负责露哪一格
 ├── stats.html/js/css             # 1.5.0：数据统计页（数字卡 + 最近 14 天柱状图 + 收藏夹排行），入口在设置页
 ├── theme.css / theme.js          # 4.0 / 4.5：唯一的设计令牌来源；theme.js 在 <head> 同步应用主题。1.4.0 起 theme.js 还管自定义外观（背景图层 + 毛玻璃变量，图片存 IndexedDB）
 ├── i18n.js                       # 4.5：以中文原文为 key 的翻译层
@@ -38,6 +42,8 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 │   └── folder-opener-host.ps1    # 原生消息主机工作脚本
 ├── install-native-folder-opener.bat / .ps1
 ├── uninstall-native-folder-opener.ps1
+├── pack.ps1                      # 打发行 zip：白名单 + 体积阈值 + 容器核对；只在宣布「可以发 release」之后跑
+├── release.ps1                   # 平时发版：改 manifest 版本 → check-all → 只提交 manifest → 打 tag → 推送
 ├── test-native-folder-opener.ps1 # 不依赖 Chrome 的安装自检脚本
 ├── test/
 │   ├── stability.test.cjs        # 静态回归断言为主（项数以实际输出为准，别写死）
@@ -48,16 +54,25 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 │   ├── dom-harness.cjs           # 1.7.23：最小 DOM（选择器引擎、事件冒泡、<dialog>、ShadowRoot、真 MutationObserver），让页面脚本能真跑
 │   ├── pages.test.cjs            # 1.7.23：真执行单元测试：在 dom-harness 里加载 library.html / popup.html / content.js
 │   ├── i18n-extract.cjs          # 提取界面词条、校验词典覆盖率（--check / --todo）
+│   ├── status.cjs                # 「当前状态」块的生成与核对（--write / --check）
+│   ├── bench.cjs                 # 数据层基准（不进门禁，手动跑；宽松预算由 check-all 里的那一项兜底）
 │   ├── _unmarked.cjs             # 反向检查：找出漏标记的界面文字
 │   ├── archive-audit.cjs         # 本地归档的标签/简介覆盖情况体检
 │   └── import-trial.cjs          # 只读预览导入会抓到什么，不改任何文件
 ├── scripts/
 │   ├── check-all.cjs             # 发版与 CI 共用的那一套检查（唯一真相）
 │   ├── check-package-size.cjs    # 1.10.1：按 pack.ps1 的清单与阈值核对发布体积
+│   ├── check-egg-baseline.cjs    # 1.12.9：彩蛋页运行期子集的 sha256 基线（--write 重记、--diff 只报告）
 │   └── history-index.cjs         # docs/HISTORY.md 顶部的「版本 → 行号」表
 ├── README.md                     # 面向使用者的安装与功能说明
 ├── docs/RELEASE-NOTES-TEMPLATE.md # 版本小节骨架（README 与 docs/HISTORY.md 共用，四节）
 ├── docs/PRIVACY.md               # 隐私说明：数据存哪、只请求哪些域名、每个权限干什么
+├── docs/ARCHITECTURE.md          # 本文件
+├── docs/HISTORY.md               # 逐版本历史（顶部是「版本 → 行号」索引，由 scripts/history-index.cjs 生成）
+├── docs/SMOKE-HISTORY.md         # 旧的冒烟清单归档（每版换新时把上一版剪过来）
+├── SMOKE_TEST.md                 # 当前这一版的手工冒烟清单（发版前照着点）
+├── LICENSE                       # MIT（bili-old-2015/ 里的原站素材不在授权范围内）
+├── bili-old-2015/                # 彩蛋页：2015 年 B 站首页复刻（随发行包发，运行期子集进视觉基线）
 └── AI_HANDOFF.md                 # 本文件
 ```
 
@@ -573,10 +588,21 @@ UP主主页：https://space.bilibili.com/……
 | `bca-page-api-get` | `background.js` → `favorites-import.js` | 通过已登录页面上下文发起收藏夹 API 请求 |
 | `bca-stats-commit` | `library.js` / `settings.js` → `background.js` | 提交一份新统计库 —— 整个项目**只有后台写库**（见下文「写库只有一个写者」）。1.10.0 起设置页的「重建统计库」也走这条消息，并带 `stampBackup: true` 要求后台先把当前库另存成带时间戳的副本 |
 | `bca-stats-republish` | `stats.js` → `background.js` | 只读：统计快照丢了时，让后台按现成的 `003database/database.json` 重发一份（不写库、不改指纹以外的状态） |
+| `bca-import-probe` | `content.js` → `background.js` | 归档前先问「导入是不是在跑」（1.14.3 起是真分支，回 `{ active, reset, importState }`） |
+| `bca-import-progress` | `background.js` → `popup.js` | 导入进度回报 |
+| `bca-diff-progress` | `background.js` → `library.js` | 与 B 站对比的进度回报 |
+| `bca-fav-diff` | `library.js` / `popup.js` → `background.js` | 与 B 站对比：只读清单、算差异，不抓详情 |
+| `bca-fav-counts` | `library.js` → `background.js` | 只取收藏夹条数 |
+| `bca-import-cleanup-leftover` | `settings.js` → `background.js` | 清掉上次中断留下的临时文件 |
+| `bca-check-update` | `settings.js` → `background.js` | 读仓库根的 `version.json`（**只有点「检查更新」时才发**） |
+| `bca-badge-clear` | `popup.js` → `background.js` | 清掉工具栏徽标 |
+| `bca-client-error` | 扩展页 `client-errors.js` → `background.js` | 页面侧异常进错误报告（1.7.31） |
 
 `bca-download-parse` / `bca-download-playurl` / `bca-download-subtitles` 三条消息 1.3.0 已随下载功能删除。
 
 后台还保留 `record-favorite-error` 消息处理器，但当前项目内没有找到活跃发送端。若要清理它，先确认外部/旧版页面没有依赖。
+这张表由 `stability` 的守卫核对：源码里出现的每个 `chrome.runtime.sendMessage({ type: "bca-…" })` 都必须能在上面找到一行，加消息时两边一起改。
+
 
 异步消息处理器需保持 `sendResponse` 和 `return true` 的配对。修改 API 时不要把 Cookie、CSRF 或用户授权数据写入日志/错误报告。
 

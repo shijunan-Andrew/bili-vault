@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1130 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 423 · archive-core 100 · stats-core 69 · background 36 · pages 100（后四套是真执行） |
+| 测试基线 | stability 424 · archive-core 100 · stats-core 69 · background 36 · pages 100（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-26 19:52，当时 HEAD `490db28`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-26 20:01，当时 HEAD `dd63d88`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -466,7 +466,7 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 |---|---|
 | 界面文案、词典键 | `node test/i18n-extract.cjs --check`（**缺一条、多一条都算失败**：多余必须是 0）+ `node test/stability.test.cjs` |
 | 加 / 改一处静默降级（`catch (_) {}` 或 `.catch(() => {})`） | 先从三级分类里选一档（见 `docs/ARCHITECTURE.md`「已知限制」）：二档要留 `console.warn(原因, error)`；`node test/stability.test.cjs` 给十个文件都留着上界（1.14.3 起两种写法都数） |
-| 数据层改动想量一下（`stats-core.js` / `archive-core.js` 里的循环） | `node test/bench.cjs`（默认 3 次中位数，`--quick` 只跑 1000 条）；它不进门禁 |
+| 数据层改动想量一下（`stats-core.js` / `archive-core.js` 里的循环） | `node test/bench.cjs`（默认 3 次中位数，`--quick` 只跑 1000 条）；它不进门禁。1.14.5 起 `check-all` 里另有一项 200 条记录的耗时预算（> 2000 ms 只 warn），挡明显的 O(n²) |
 | 怀疑「慢了一倍」但说不清哪里 | `node test/bench.cjs --strict`（默认 3 次中位数；超过 `SOFT_LIMITS_MS` 才以退出码 1 结束）。它不进 CI，只在发版前或 review 时手动跑 |
 | `library.js` / `popup.js` / `content.js` 的 DOM 行为 | 上面 + `node test/pages.test.cjs` |
 | `background.js`（消息、统计库、导入、写锁） | 上面 + `node test/background.test.cjs` |
@@ -523,7 +523,7 @@ node test/i18n-extract.cjs --check
 ```
 
 `test/stability.test.cjs` 的构成是**绝大多数静态回归断言**——读文件比对文本，能证明「约定没被违反」，不能证明「功能真的能跑」；真正会执行代码的是后四套。静态部分按功能代次分组，分组标题里的版本号就是它们守护的那一轮改动，
-可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:423 -->
+可以在 `test/stability.test.cjs` 里直接按 `/* ---- … ---- */` 跳转。<!-- test-count:424 -->
 
 - **归档与下载匹配**（开头）：BV/av 与旧版数字目录的识别、` - BV号` 后缀、媒体文件徽标判据、原生消息清单不带 `args`、宿主按 UTF-8 读设置。
 - **表现层静态回归**（4.0，9 项）：设计令牌与图标、`[hidden]` 兜底、11px 字号下限、不用字符图标、扩展页不暴露给网页。

@@ -459,6 +459,35 @@ function prewriteDocCounts() {
   refreshStatusBlock();
 }
 
+// 审查 T-5（1.14.5）：数据层基准脚本刻意不进门禁（它跑得慢、数字依赖机器），代价是
+// 性能回归没人拦。这里补一条**只警告、绝不失败**的宽预算：200 条记录整份重建统计库。
+// 本机实测约 4 ms，2 秒上限宽松到几乎不可能误报；真超了说明有人写出了 O(n²)。
+// 想量真实倍率还是手动跑 test 目录下那个基准脚本，那是另一件事（它刻意不进门禁）。
+function checkLatencyBudget() {
+  section("延迟预算（200 条记录，只警告不阻断）");
+  const started = Date.now();
+  try {
+    const core = require(path.join(root, "stats-core.js"));
+    const videos = [];
+    for (let i = 0; i < 200; i += 1) {
+      videos.push({
+        bvid: "BV1xx411c7m" + i,
+        title: "性能预算 " + i,
+        collection: "性能预算",
+        firstSeenAt: 1700000000000 + i * 1000,
+        favoriteTime: "2024年1月1日0时0分0秒"
+      });
+    }
+    core.databaseFromVideos(videos, {});
+  } catch (error) {
+    note(`跳过（${error.message}）`);
+    return;
+  }
+  const cost = Date.now() - started;
+  if (cost > 2000) note(`[warn] 200 条记录重建用了 ${cost} ms，超过 2000 ms 预算（查 O(n²)）`);
+  else ok(`200 条记录重建 ${cost} ms`);
+}
+
 function main() {
   if (WRITE) prewriteDocCounts();
   checkSyntax();
@@ -472,6 +501,7 @@ function main() {
   checkHistoryIndex();
   checkEggBaseline();
   checkPackageSize();
+  checkLatencyBudget();
   console.log("");
   if (failed) {
     console.log(`[FAIL] 检查未通过（${failures.length} 处），修好之后重新跑：node scripts/check-all.cjs`);

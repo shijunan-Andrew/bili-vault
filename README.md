@@ -23,7 +23,7 @@
 ### 运行环境
 
 - **Chrome 111 或更新的版本。** 这个数字的唯一出处是 `manifest.json` 的 `minimum_chrome_version`（文档里写的这处由测试核对，改一边不改另一边会让发布中止）。111 是硬底线，不是随手填的：整套毛玻璃外观靠 `color-mix()` 推底色（`theme.css` 里大量使用），而它进 Chrome 稳定版正是 111 —— 低于这个版本的浏览器会把卡片的半透明底色整片丢掉。
-- **Edge / Brave / Vivaldi 等 Chromium 浏览器能装**（它们报的 Chromium 版本号 ≥ 111），但**原生目录助手只注册了 Chrome 那一套注册表键**：点「打开本地目录」会走降级路径（把路径复制到剪贴板），要自己粘进资源管理器。想知道本机实际注册了哪些浏览器，重跑一次 `install-native-folder-opener.ps1`，它会打印出来。
+- **Edge / Brave / Vivaldi 等 Chromium 浏览器能装**（它们报的 Chromium 版本号 ≥ 111）。原生目录助手会把本机**装了的**那几个 Chromium 浏览器都注册一遍（Chrome 必装，另外按 `BLBeacon` 探测 Chrome Beta / Dev / Canary、Edge、Brave、Vivaldi、Chromium，最多 8 个），所以装完助手后它们都能点「打开本地目录」；只有**没装助手**或对应浏览器没装时，才会降级成「复制路径」。想知道本机实际注册了哪几个，重跑一次 `install-native-folder-opener.ps1`，它会打印出来。
 
 ### 保存结构
 
@@ -139,13 +139,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.14.4：打出来的包，换台机器也能一模一样
+## V1.14.5：文档跟上了代码，性能回归也有人看
 
-- **发行包里不再混进开发文件**（审查 R-2）：`locales/_todo.json` 那张待译清单以前会被一起打进 zip —— 它不在版本控制里，等于「换台机器 clone 下来打出来的包」比本地的少一个文件。现在 `pack.ps1` 显式排除它，CI 侧也钉住 `locales/` 与 `native/` 里到底是哪几个文件。
-- **少一本词典就打不出包**（审查 R-3）：`required` 从 8 个关键件扩到 18 个，两个容器内部的文件数与名单都钉死，`locales/` 只剩一本、`native/` 空了都会当场报错，而不是打出一个「能装但缺东西」的包。
-- **包打好就打印 SHA-256**（审查 R-1）：以前这一步靠手工算、等于没人算；以后写 `version.json` 直接抄屏幕上那串。
-- **发版链路三条收口**：tag 单独触发 CI（R-4，以前只靠那次 push main 顺带覆盖）；README 写清「没上架商店，只从本仓库 Release 下载」（R-5）；`release.ps1` 不再 `git add -A`，只提交 `manifest.json`，发版过程中落进别的文件就停下（R-6）。`tabs.query` 那条降级路径也在注释里写明是**故意不要权限**（R-7）。
-- **测试**：`stability` 422 → 423 项（新增一条把上述四件事都钉住的守卫）。
+- **目录树补全**（审查 D-1）：`docs/ARCHITECTURE.md` 的目录结构以前漏了 17 项（`client-errors.js`、`version.json`、`pack.ps1`、`LICENSE`、`bili-old-2015/` 等），新人照它读会以为这些文件不存在；现在一次补齐。
+- **消息表补全 + 守卫**（审查 D-2）：漏掉的 9 条 `bca-` 消息（`bca-import-probe`、`bca-check-update`、`bca-client-error` 等）全部进表，并新增一条守卫 —— 源码里发出的每个 `bca-` 消息都必须能在文档表里找到，以后加消息漏写文档会当场红。
+- **隐私说明与实现对齐**（审查 S-3）：补上 `localStorage` / `chrome.storage.session` / 5 个 IndexedDB 的名字；请求频率不再笼统写「每秒不超过 2 次」，而是四档毫秒数 + 详情 800 毫秒下限；错误报告改成「纯文本 `.txt`」；掩码规则从 2 类补成 4 类（含你自己选的备份目录）。
+- **原生助手的说明改对了**（审查 D-3）：以前 README 说它「只注册了 Chrome 那一套键」，实际安装脚本会按 `BLBeacon` 探测并注册最多 8 个 Chromium 浏览器（Chrome 必装，另含 Beta / Dev / Canary / Edge / Brave / Vivaldi / Chromium）。
+- **性能回归有了宽预算**（审查 T-5）：`check-all` 里加一项「200 条记录整份重建统计库」的耗时检查，超过 2000 ms 只打印 `[warn]`、绝不让 CI 红（本机实测约 4 ms）。真正的基准仍然手动跑，不进门禁。
+- **只能真机验的 6 条单独列出来**（审查 T-6）：`SMOKE_TEST.md` 新增「发 Release 前额外手工验」一节（目录授权失效、导入中挂起、通知、检查更新、剪贴板、2000+ 条的速率与风控）。
+- **测试**：`stability` 423 → 424 项。
 
 **遗留** - 无。
 
@@ -157,7 +159,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:423 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:424 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

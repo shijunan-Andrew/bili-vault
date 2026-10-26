@@ -2938,7 +2938,8 @@ test("最低 Chrome 版本的理由写清楚，且与 manifest 同源（V1.7.17�
   assert.match(section, /Chrome 111/, "要写明最低版本");
   assert.match(section, /color-mix\(\)/, "要写明为什么是 111");
   assert.match(section, /minimum_chrome_version/, "要指出数字的唯一出处，别让两边各写一个");
-  assert.match(section, /只注册了 Chrome/, "Edge / Brave 能装但原生助手用不了，这件事必须说出来");
+  // 1.14.5（审查 D-3）：旧文案说原生助手「只注册了 Chrome」，实际它按 BLBeacon 探测并注册最多 8 个浏览器。
+  assert.match(section, /最多 8 个/, "要写清原生助手注册的是「本机装了的」那几个浏览器（旧的「只注册了 Chrome」与实际不符）");
   assert.match(readProjectFile("AI_HANDOFF.md"), /color-mix\(\)/, "AI_HANDOFF 也要写同一个理由");
 });
 
@@ -9085,5 +9086,30 @@ test("对比进行中被回收，弹窗不会永久锁死（1.13.5 · 审查 P1-
   // 4) 弹窗读的就是这份状态：不能被悄悄改名
   const popup = readProjectFile("popup.js");
   assert.ok(popup.includes('chrome.storage.local.get("diffState")'), "弹窗仍然读 diffState");
+});
+
+
+// 1.14.5（审查 D-2）：ARCHITECTURE.md 的消息表曾经漏了 11 条真实消息 —— 一张「看起来完整」
+// 的表比没有表更糟：接手的人会照着它判断哪条消息没人用。所以这里从源码反向生成清单，
+// 发送端出现的每个 bca- 消息都必须能在文档表里找到一行。
+test("每个 bca- 消息都写进了 ARCHITECTURE.md 的消息表（1.14.5 · 审查 D-2）", () => {
+  const doc = readProjectFile("docs/ARCHITECTURE.md");
+  const senders = [
+    "background.js", "content.js", "popup.js", "library.js", "settings.js",
+    "stats.js", "pet.js", "recycle.js", "favorites-import.js", "client-errors.js", "theme.js"
+  ];
+  const sent = new Set();
+  for (const file of senders) {
+    const text = readProjectFile(file);
+    const pattern = /type:\s*"(bca-[a-z0-9-]+)"/g;
+    let match = pattern.exec(text);
+    while (match) {
+      sent.add(match[1]);
+      match = pattern.exec(text);
+    }
+  }
+  assert.ok(sent.size >= 15, "至少应该扫到十几条消息，扫到 " + sent.size + " 条说明正则或文件清单不对");
+  const missing = [...sent].filter((type) => !doc.includes("`" + type + "`"));
+  assert.deepEqual(missing, [], "docs/ARCHITECTURE.md 的消息表缺这些消息：" + missing.join("、"));
 });
 
