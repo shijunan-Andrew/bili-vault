@@ -3953,14 +3953,10 @@ async function updateSavedFolderName(directory, folderName) {
   // 归属没改成，但也不会去重写一个我们没看懂的文件，宁可什么都不做。
   const updated = text.replace(/^(?:保存文件夹|所属收藏夹)[：:].*$/m, `所属收藏夹：${folderName}`);
   if (updated === text) return;
-  const writable = await infoHandle.createWritable();
-  try {
-    await writable.write(updated);
-    await writable.close();
-  } catch (error) {
-    try { await writable.abort(); } catch (_) {}
-    throw error;
-  }
+  // 1.15.7（审查 C-9）：这是「覆盖写 视频信息.txt」的一种，必须走临时文件 + 换名。
+  // 原来直接 createWritable() 就地重写，中途被杀会留下半截文件；writeFileAtomically
+  // 已经处理了「陈年临时文件清扫 / 换名失败退回就地写 / 临时文件保留」这些细节。
+  await writeFileAtomically(directory, infoHandle, updated);
 }
 
 async function uniqueRecordFolderName(parent, originalName) {

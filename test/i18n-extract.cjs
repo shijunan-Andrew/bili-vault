@@ -43,6 +43,10 @@ const SOURCE_FILES = [
 ];
 // 这些是语言名与第三方工具名，任何语言下都保持原样，不需要进词典。
 // （品牌名「哔哩藏库」**要**翻译：繁中用「哔哩藏庫」、英文用 Bili Vault，所以不在此列。）
+// 1.15.7（审查 C-13）：`t(变量)` 这种调用静态提取不到 —— 词条会静默退回中文。
+// 这类调用只允许出现在「收 key 再翻译」的包装函数里，总数钉一个上限，新增就会被看到。
+const DYNAMIC_KEY_LIMIT = 11;
+
 const NEVER_TRANSLATE = new Set([
   "简体中文", "繁體中文", "English", "DownKyi",
   "本地收藏库", "LOCAL VIDEO LIBRARY"
@@ -89,14 +93,33 @@ function unescapeLiteral(raw) {
   return raw.replace(/\\(.)/g, (match, char) => ({ n: "\n", t: "\t", r: "", "\\": "\\", '"': '"', "'": "'", "`": "`" }[char] ?? char));
 }
 
-function extractFrom(file) {
-  const raw = fs.readFileSync(path.join(ROOT, file), "utf8");
+// 剥注释：两个函数（真提取与动态 key 检查）必须用同一套规则，否则数出来的不是一回事
+function stripComments(raw) {
   // 先剥掉注释：文档里举例写的 t("...") 会被当成真词条，产生查不到的“幽灵词条”
-  const source = raw
+  return raw
     .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, " "))
     // 反斜杠后面那两个斜杠是正则字面量的一部分（/^https?:\/\//i 这种写法不是注释），
     // 不排除的话整行后半截会被当成注释清空，那些词条就永远扫不到（P2 清理时踩到）。
     .replace(/(^|[^:\\])\/\/[^\n]*/g, (match, lead) => lead + " ".repeat(match.length - lead.length));
+}
+
+// 1.15.7（审查 C-13）：找 `t(变量)` 这类静态提取不到的调用，供 --check 报出来
+function findDynamicKeyCalls() {
+  const rows = [];
+  let total = 0;
+  for (const file of SOURCE_FILES) {
+    if (!file.endsWith(".js")) continue;
+    const source = stripComments(fs.readFileSync(path.join(ROOT, file), "utf8"));
+    const hits = [...source.matchAll(/(?:\bBcaI18n\.)?\b(?:t|translate)\(\s*([A-Za-z_$][\w$]*)\s*[,)]/g)];
+    if (hits.length) rows.push(`${file} ${hits.length} 处`);
+    total += hits.length;
+  }
+  return { total, rows };
+}
+
+function extractFrom(file) {
+  const raw = fs.readFileSync(path.join(ROOT, file), "utf8");
+  const source = stripComments(raw);
   const keys = new Map(); // key -> 出现次数
 
   const add = (raw, decoded) => {
@@ -194,6 +217,15 @@ function main() {
       for (const key of missing.slice(0, 10)) console.log(`   缺: ${key}`);
       for (const key of extra.slice(0, 10)) console.log(`   多: ${key}`);
       if (missing.length) failed = true;
+    }
+    // 1.15.7（审查 C-13）：动态 key 不能增长 —— 涨了就说明有人新写了 t(变量) 却没登记
+    const dynamic = findDynamicKeyCalls();
+    if (dynamic.total > DYNAMIC_KEY_LIMIT) {
+      console.log(`动态 key（t(变量)）${dynamic.total} 处，超过上限 ${DYNAMIC_KEY_LIMIT}：${dynamic.rows.join("、")}`);
+      console.log("   这些词条静态提取不到：要么改写成字面量，要么把它登记进 KEY_ARGUMENT_HELPERS。");
+      failed = true;
+    } else {
+      console.log(`动态 key（t(变量)）${dynamic.total} 处，未超过上限 ${DYNAMIC_KEY_LIMIT}：${dynamic.rows.join("、")}`);
     }
     if (failed) process.exitCode = 1;
     return;

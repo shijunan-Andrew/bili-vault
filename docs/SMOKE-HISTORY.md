@@ -6,6 +6,12 @@
 
 ---
 
+## V1.15.6 新增的几条
+- [ ] 五套全绿：`pages` 111、`archive-core` 101、`background` 46、`stats-core` 69、`stability` 424（棘轮上限仍是 309）。
+- [ ] 点开扩展图标 —— 弹窗照常出现（这条以前是「词典取不到就空白」，现在没空白了）。
+- [ ] 真机：随便挑一个归档目录，收藏库照常能记住它（`openDb()` 加了 `contains` 守卫，正常路径不该有任何变化）。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
 ## V1.15.5 新增的几条
 - [ ] `node test/pages.test.cjs` 111 项全绿；`node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/stats-core.test.cjs` 69 项也全绿。
 - [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。

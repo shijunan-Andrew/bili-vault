@@ -4012,6 +4012,10 @@ async function syncStatsMirror(database) {
 // 两个写入口共用：能写返回空串，不能写返回一句给用户看的话
 function statsDatabaseWriteBlocked(read) {
   if (read && read.canWrite) return "";
+  // 1.15.7（审查 C-11）：这一种不是「读不出来」，是「读得出来但比我们新」
+  if (read && read.reason === "future-schema") {
+    return "本地数据库是更新版本的插件写的（schemaVersion 更高），这次只读不写，免得把它覆盖成旧结构。";
+  }
   return `本地数据库这次读不出来（${BcaStatsCore.DATABASE_FOLDER_NAME}/${BcaStatsCore.DATABASE_FILE_NAME}），`
     + "已经跳过写入，避免覆盖你原来的记录；历史统计暂时按下限显示。";
 }
@@ -4086,7 +4090,16 @@ async function readStatsDatabase(root, options = {}) {
     return result(applyStatsMirror(BcaStatsCore.emptyDatabase(), mirror), true, "empty");
   }
   try {
-    const database = BcaStatsCore.normalizeDatabase(JSON.parse(text));
+    const parsed = JSON.parse(text);
+    // 1.15.7（审查 C-11）：文件是更高版本的插件写的时候，只看不写 ——
+    // 用旧结构整份重写会把它盖掉，而旧版本根本读不懂新版本多出来的字段。
+    const declaredSchema = Number(parsed?.schemaVersion);
+    if (Number.isFinite(declaredSchema) && declaredSchema > BcaStatsCore.DATABASE_SCHEMA_VERSION) {
+      const database = BcaStatsCore.normalizeDatabase(parsed);
+      await syncStatsMirror(database);
+      return result(database, false, "future-schema", text);
+    }
+    const database = BcaStatsCore.normalizeDatabase(parsed);
     await syncStatsMirror(database);
     return result(database, true, "ok", text);
   } catch (error) {

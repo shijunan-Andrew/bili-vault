@@ -5722,6 +5722,9 @@ test("1.5.0：本地数据库与宠物挂件的契约都钉住了", () => {
   // 每次成功写库之前把上一版原文轮转成 database.bak.json。
   assert.ok(background.includes("function statsDatabaseWriteBlocked("), "要有「读不到库就不许写」的守卫");
   assert.ok(background.includes("const blocked = statsDatabaseWriteBlocked(read);"), "两个写入口都要过这道守卫");
+  // 1.15.7（审查 C-11）：比当前代码新的库只读不写，不能拿旧结构整份盖掉
+  assert.match(background, /declaredSchema > BcaStatsCore\.DATABASE_SCHEMA_VERSION/, "更高的 schemaVersion 要拒绝写入");
+  assert.match(background, /reason === "future-schema"/, "拒绝写的理由要单独说清楚");
   assert.ok(background.includes("return { ok: false, blocked: true, lineIndex: null };"), "摸头读不到库时不许写");
   assert.ok(background.includes("STATS_MIRROR_KEY"), "三个不可恢复字段要有 storage 镜像");
   assert.ok(background.includes("STATS_PREVIOUS_DATABASE_NAME"), "写库前要把上一版留成 database.bak.json");
@@ -7702,7 +7705,8 @@ test("统计库有显式 schemaVersion 与迁移位，未来改结构不用再�
   assert.match(core, /\n {4}DATABASE_SCHEMA_VERSION,/);
   assert.match(core, /\n {4}migrateDatabase,/);
   // 后台读库仍然只走 normalizeDatabase（迁移只有一个入口）。
-  assert.match(readProjectFile("background.js"), /BcaStatsCore\.normalizeDatabase\(JSON\.parse\(text\)\)/);
+  assert.match(readProjectFile("background.js"), /const parsed = JSON\.parse\(text\);/);
+  assert.match(readProjectFile("background.js"), /BcaStatsCore\.normalizeDatabase\(parsed\)/);
 });
 
 test("基准脚本把趋势追到参考区，但不进 CI 门禁（P3-14）", () => {
