@@ -1320,7 +1320,7 @@ async function suiteSettings() {
     const page = await openSettings();
     const doc = page.document;
     const cards = [...doc.querySelectorAll(".settings-main .settings-card[data-group]")];
-    assert.equal(cards.length, 10, "十张卡（1.16.0 的音量控制不挂 data-group，不算导航分组）");
+    assert.equal(cards.length, 11, "十一张卡（1.16.2 起音量控制也进了左侧导航，每张卡都挂 data-group）");
     for (const card of cards) {
       const title = card.querySelector("h2");
       assert.ok(title, `${card.id} 要有标题`);
@@ -3205,8 +3205,14 @@ async function suiteSoundSettings() {
     assert.equal(normalized.effects.bubblepop.volume, 0.5, "没写的项补默认 50%");
     assert.equal(normalized.effects.error.enabled, true);
 
-    assert.equal(sound.importFailed({ summary: "导入已取消。" }), true, "取消算失败");
+    /* 1.16.2：取消既不是成功也不是失败 —— 一点声音都不该出。 */
+    assert.equal(sound.importCancelled({ summary: "导入已取消：已回滚本次新建的 3 个视频目录。" }), true);
+    assert.equal(sound.importCancelled({ cancelled: true }), true);
+    assert.equal(sound.importCancelled({ summary: "导入完成，共 12 条。" }), false);
+    assert.equal(sound.importCancelled(null), false);
+    assert.equal(sound.importFailed({ summary: "导入已取消。" }), false, "取消不算失败");
     assert.equal(sound.importFailed({ failed: true }), true);
+    assert.equal(sound.importFailed({ summary: "导入失败：接口返回 412。" }), true);
     assert.equal(sound.importFailed({ summary: "导入完成，共 12 条。" }), false);
     assert.equal(sound.importFailed(null), false);
   });

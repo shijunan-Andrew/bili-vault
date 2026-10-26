@@ -2334,7 +2334,15 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
   assert.match(stripComments(readProjectFile("pet.js")), /stopSound\("purring"\)/);
   for (const file of ["library.js", "popup.js"]) {
     assert.match(stripComments(readProjectFile(file)), /playImportSound\(/, `${file} 的导入收尾要响一声`);
+    /* 1.16.2：收尾只把状态对象传进去 —— 取消/失败/成功的判据全在 sound.js 里。 */
+    assert.match(stripComments(readProjectFile(file)), /playImportResult\(state\)/, `${file} 要把状态交给 playImportResult`);
   }
+  assert.match(sound, /function importCancelled\(/, "取消与失败要分开判：取消不放任何声音");
+  /* 1.16.2：系统通知自己静音，否则会同时听到 Windows 提示音和我们的音效。 */
+  assert.match(stripComments(readProjectFile("background.js")), /silent: true/, "系统通知要静音");
+  const settingsHtml = readProjectFile("settings.html");
+  assert.match(settingsHtml, /class="nav-item" data-group="sound"/, "音量控制要在左侧导航里有一栏");
+  assert.match(settingsHtml, /id="group-sound" data-group="sound"/, "音量控制卡要挂同一个 data-group");
 });
 
 test("content scripts never fetch extension resources directly", () => {

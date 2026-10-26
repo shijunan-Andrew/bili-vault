@@ -85,6 +85,8 @@ const popupVersion = document.getElementById("popupVersion");
 // 4.5.1：主题 / 语言改成分段控件，按钮直接写在 popup.html 里
 const localeButtons = [...document.querySelectorAll(".segmented button[data-locale]")];
 let errorReport = "";
+/* 1.16.2：上一次把焦点交给错误标题时用的报告内容（同一份报告不再反复抢焦点）。 */
+let lastFocusedReport = "";
 let rootHandle = null;
 let permissionNotice = "";
 let extensionEnabled = true;
@@ -813,10 +815,17 @@ async function refreshStatus() {
        tabindex="-1" 让标题可编程聚焦但不占 Tab 位；focus 失败（老 Chrome 不认
        options）也不能连累整个渲染，所以单独包一层。 */
     if (statusCard) statusCard.open = true;
-    try {
-      errorTitle?.focus({ preventScroll: false });
-    } catch {
-      errorTitle?.focus();
+    /* 1.16.2：只有「这一次是新报告」才把焦点交给错误标题，而且不许滚动。
+       原来每次 refreshStatus() 都抢焦点 + preventScroll:false，而任何 storage 变化
+       （暂停 / 继续 / 取消导入都会写 importState）都会调 refreshStatus()，
+       于是点一下按钮，弹窗就瞬间滚到最底部的错误卡。 */
+    if (errorReport !== lastFocusedReport) {
+      lastFocusedReport = errorReport;
+      try {
+        errorTitle?.focus({ preventScroll: true });
+      } catch {
+        errorTitle?.focus();
+      }
     }
   } else {
     lastError.hidden = true;
@@ -1081,7 +1090,7 @@ let awaitingBackgroundImport = 0;
 /* 1.16.0：导入收尾的音效。判据只住在 sound.js 的 importFailed() 里。 */
 function playImportSound(state) {
   try {
-    globalThis.BcaSound?.playImportResult(globalThis.BcaSound?.importFailed(state) === true);
+    globalThis.BcaSound?.playImportResult(state);
   } catch (error) {
     console.warn("导入结束的提示音没播出来（不影响导入结果）", error);
   }

@@ -3123,7 +3123,7 @@ let importIsRunning = false;
 /* 1.16.0：导入收尾的音效。成功 / 失败怎么判只在 sound.js 的 importFailed() 里写。 */
 function playImportSound(state) {
   try {
-    globalThis.BcaSound?.playImportResult(globalThis.BcaSound?.importFailed(state) === true);
+    globalThis.BcaSound?.playImportResult(state);
   } catch (error) {
     console.warn("导入结束的提示音没播出来（不影响导入结果）", error);
   }

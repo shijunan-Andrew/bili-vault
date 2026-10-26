@@ -82,6 +82,11 @@
           <span class="nav-icon" data-icon="user"></span>
           <span class="nav-text" data-i18n="宠物">宠物</span>
         </button>
+        <!-- 1.16.2：音量控制单独一栏（原本挂在宠物卡后面、左导航里找不到）。 -->
+        <button type="button" class="nav-item" data-group="sound">
+          <span class="nav-icon" data-icon="music"></span>
+          <span class="nav-text" data-i18n="音量控制">音量控制</span>
+        </button>
         <button type="button" class="nav-item" data-group="transfer">
           <span class="nav-icon" data-icon="download"></span>
           <span class="nav-text" data-i18n="导入与导出">导入与导出</span>
@@ -362,7 +367,7 @@
 
       <!-- 1.16.0：音量控制。总音量与单项音量相乘，这个乘法只住在 sound.js 的
            effectiveSoundVolume() 里（这里只负责读写与展示），默认总音量和每一项都是 50%。 -->
-      <section class="settings-card" id="group-sound">
+      <section class="settings-card" id="group-sound" data-group="sound">
         <h2 data-i18n="音量控制">音量控制</h2>
         <p class="card-lead" data-i18n="手动收藏、导入完成、点猫咪、猫咪睡觉、出错都会响一下。音效随扩展一起安装，不联网、也不上传任何东西。">手动收藏、导入完成、点猫咪、猫咪睡觉、出错都会响一下。音效随扩展一起安装，不联网、也不上传任何东西。</p>
 

@@ -177,16 +177,28 @@
     for (const name of players.keys()) stop(name);
   }
 
-  /* 导入收尾该响哪个：失败响 error、成功响 notification。
-     判据只这一处 —— summary 里出现「取消 / 失败 / 错误」，或者 state.failed 为真。 */
-  function importFailed(state) {
+  /* 1.16.2：取消既不是成功也不是失败 —— 用户点了「取消导入」，不该再听到任何声音。
+     判据只这一处，library.js / popup.js 的收尾都只调 playImportResult(state)。 */
+  function importCancelled(state) {
     if (!state || typeof state !== "object") return false;
-    if (state.failed === true) return true;
-    return /取消|失败|错误/.test(String(state.summary || ""));
+    if (state.cancelled === true) return true;
+    return /取消/.test(String(state.summary || state.text || ""));
   }
 
-  function playImportResult(failed) {
-    return play(failed ? "error" : "notification");
+  /* 导入收尾该响哪个：取消不响、失败响 error、成功响 notification。
+     判据只这一处 —— 失败看 state.failed，或 summary / text 里出现「失败 / 错误」。 */
+  function importFailed(state) {
+    if (!state || typeof state !== "object") return false;
+    if (importCancelled(state)) return false;
+    if (state.failed === true) return true;
+    return /失败|错误/.test(String(state.summary || state.text || ""));
+  }
+
+  function playImportResult(state) {
+    /* 兼容老口径：传布尔值时按「是不是失败」处理（不再区分取消）。 */
+    if (typeof state === "boolean") return play(state ? "error" : "notification");
+    if (importCancelled(state)) return null;
+    return play(importFailed(state) ? "error" : "notification");
   }
 
   function currentSettings() {
@@ -211,6 +223,7 @@
     stop,
     stopAll,
     reload,
+    importCancelled,
     importFailed,
     playImportResult,
     currentSettings
