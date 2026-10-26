@@ -27,7 +27,12 @@
     error: "audio/error.mp3"
   });
 
-  const SOUND_KEYS = Object.freeze(["bubblepop", "meow", "purring", "error"]);
+  /* 1.16.6：导入完成那一声改由插件自己合成（两个正弦音，约 0.25 秒）。
+     真机反馈：系统通知的提示音在 Windows 上会被「应用通知声音」与专注助手整体吞掉，
+     而通知本身照样弹出 —— 所以不能把「一定听得到」押在系统通知上。
+     合成音不需要新的音频文件、不联网、也不涉及版权。 */
+  const SYNTH_KEYS = Object.freeze(["importDone"]);
+  const SOUND_KEYS = Object.freeze(["bubblepop", "importDone", "meow", "purring", "error"]);
 
   const DEFAULT_VOLUME = 0.5;
 
@@ -71,7 +76,8 @@
      这是全项目唯一一处「总音量 × 单项音量」的乘法。 */
   function effectiveSoundVolume(settings, name) {
     const normalized = normalizeSoundSettings(settings);
-    if (!Object.prototype.hasOwnProperty.call(SOUND_FILES, name)) return 0;
+    /* 1.16.6：合成音没有音频文件，同样要有音量。 */
+    if (!Object.prototype.hasOwnProperty.call(SOUND_FILES, name) && !SYNTH_KEYS.includes(name)) return 0;
     if (!normalized.enabled) return 0;
     const effect = normalized.effects[name];
     if (!effect || !effect.enabled) return 0;
@@ -138,9 +144,39 @@
 
   /* play(name, { loop }) → 当前的 Audio 或 null。
      音量由设置算出来；算出 0 就什么都不放（连实例都不建）。 */
+  /* 1.16.6：合成音 —— 只有「导入完成音」用，不读文件。 */
+  let synthContext = null;
+  function playChime(volume) {
+    const Ctx = global.AudioContext || global.webkitAudioContext;
+    if (typeof Ctx !== "function") return null;
+    try {
+      if (!synthContext) synthContext = new Ctx();
+      const context = synthContext;
+      if (context.state === "suspended") context.resume().catch(() => {});
+      const start = context.currentTime;
+      for (const [frequency, delay] of [[1046.5, 0], [1318.5, 0.11]]) {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.0001, start + delay);
+        gain.gain.linearRampToValueAtTime(volume, start + delay + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + delay + 0.24);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(start + delay);
+        oscillator.stop(start + delay + 0.26);
+      }
+    } catch (error) {
+      console.warn("提示音没能播放", error);
+    }
+    return null;
+  }
+
   function play(name, options) {
     const volume = effectiveSoundVolume(settings, name);
     if (volume <= 0) return null;
+    if (SYNTH_KEYS.includes(name)) return playChime(volume);
     const audio = audioFor(name);
     if (!audio) return null;
     const loop = options?.loop === true;
@@ -212,7 +248,9 @@
     /* 1.16.4：成功不放插件音效 —— 那一声交给系统通知（Windows 默认提示音）。
        取消照旧完全安静，失败仍然放 error。 */
     if (importCancelled(state)) return null;
-    return importFailed(state) ? play("error") : null;
+    /* 1.16.6：成功那一声由插件自己发（合成音），不再依赖系统通知 —— Windows 上
+       通知会弹但提示音可能被系统设置吞掉，用户反应「导入完成没有声音」就是这个。 */
+    return importFailed(state) ? play("error") : play("importDone");
   }
 
   function currentSettings() {

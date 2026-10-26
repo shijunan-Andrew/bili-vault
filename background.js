@@ -1553,8 +1553,10 @@ async function sendImportNotification(title, message) {
     message: String(message || "").slice(0, 300),
     /* 1.16.2：系统提示音交给 BcaSound 各自的音效，这里静音。
        真机反馈：不静音的话用户会同时听到 Windows 自己的提示音和 new-notification.mp3。 */
-    /* 1.16.4：导入成功/失败的提示音交回系统默认（插件自己的成功音已移除）。 */
-    silent: false
+    /* 1.16.6：系统通知只负责「看得见」，声音交给 BcaSound（成功音 / 出错音各一处）。
+       Windows 的「应用通知声音」与专注助手会把提示音整体吞掉，通知却照样弹出，
+       所以不能把「听得到」押在系统通知上。 */
+    silent: true
   });
   // create() 在旧版 Chrome 上返回 Promise，新版可能返回 undefined —— 两样都认
   if (pending && typeof pending.catch === "function") pending.catch(() => {});
