@@ -1022,14 +1022,15 @@ async function suitePopup() {
     chrome.storage.local.__failSet = null;
   });
 
-  await test("导入条数上限：下拉的五个档位都能读成数字，默认「全部」是 0（1.8.8）", async () => {
+  await test("导入条数上限：下拉的六个档位都能读成数字，默认「全部」是 0（1.8.8 / 1.16.5）", async () => {
     const chrome = makeChrome({ version: "1.8.8", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
     await settle();
     const doc = page.document;
     const select = doc.getElementById("importLimit");
     assert.ok(select, "导入面板要有「每次最多导入多少条」");
-    assert.deepEqual([...doc.querySelectorAll("#importLimit option")].map((option) => option.value), ["50", "100", "300", "500", "0"]);
+    /* 1.16.5：新增 10 这一档（用户要的「每次最多导入 10 条」）。 */
+    assert.deepEqual([...doc.querySelectorAll("#importLimit option")].map((option) => option.value), ["10", "50", "100", "300", "500", "0"]);
     const selectedByDefault = doc.querySelector("#importLimit option[selected]");
     assert.equal(selectedByDefault && selectedByDefault.value, "0", "默认必须是「全部」，否则老用户会觉得导入被截断");
 
@@ -3219,6 +3220,22 @@ async function suiteSoundSettings() {
     assert.equal(sound.importFailed({ summary: "上次导入已中断（后台被回收）" }), true);
     assert.equal(sound.importCancelled({ interrupted: true }), false, "中断不是取消");
     assert.equal(sound.importFailed({ summary: "导入完成，共 12 条。" }), false);
+    /* 1.16.5（真机反馈）：成功的摘要里也有「失败 0 个」这几个字，不能按关键词判。 */
+    assert.equal(
+      sound.importFailed({ summary: "导入/更新完成：新导入 3 个，更新 0 个，已存在跳过 0 个，失败 0 个。" }),
+      false,
+      "成功摘要里的「失败 0 个」不算失败"
+    );
+    assert.equal(
+      sound.importFailed({ summary: "导入/更新完成：新导入 3 个，更新 1 个，已存在跳过 0 个，失败 2 个。" }),
+      true,
+      "摘要里有几条失败就得算失败"
+    );
+    assert.equal(
+      sound.importFailed({ summary: "已经有一轮导入正在进行，请先等它结束或取消它。" }),
+      true,
+      "被忙碌拒掉也要响一声"
+    );
     assert.equal(sound.importFailed(null), false);
   });
 }

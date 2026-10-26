@@ -2321,6 +2321,16 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
   const sound = readProjectFile("sound.js");
   assert.match(sound, /function effectiveSoundVolume\(/, "音量乘法只住在 sound.js 的 effectiveSoundVolume()");
   assert.match(sound, /function importFailed\(/, "导入算不算失败也只在 sound.js 里判");
+  /* 1.16.5：成功摘要里也有「失败 0 个」，判失败必须先看条数。 */
+  assert.ok(sound.includes("失败\\s*(\\d+)\\s*个"), "「失败 N 个」要按数字判，N=0 不算失败");
+  const petSource = readProjectFile("pet.js");
+  assert.ok(
+    (petSource.match(/stopSound\("purring"\)/g) || []).length >= 2,
+    "呼噜声停两处：醒来（standUp）与被藏起来（applyVisibility）"
+  );
+  const popupSource = readProjectFile("popup.js");
+  assert.match(popupSource, /IMPORT_LIMIT_KEY/, "导入上限要记住上次的选择");
+  assert.match(readProjectFile("popup.html"), /<option value="10">10<\/option>/, "导入上限要有 10 这一档");
 
   for (const file of ["content.js", "pet.js", "library.js", "popup.js", "settings.js"]) {
     const code = stripComments(readProjectFile(file));
@@ -6759,7 +6769,7 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
 
   // 下拉就是那五档，默认「全部」
   const selectBlock = popupHtml.slice(popupHtml.indexOf('id="importLimit"'), popupHtml.indexOf("</select>"));
-  assert.deepEqual([...selectBlock.matchAll(/<option value="(\d+)"/g)].map((m) => m[1]), ["50", "100", "300", "500", "0"]);
+  assert.deepEqual([...selectBlock.matchAll(/<option value="(\d+)"/g)].map((m) => m[1]), ["10", "50", "100", "300", "500", "0"]);
 
   // 名额只数「本地还没有的」：裁剪必须发生在 pendingItems 上，而不是 scopedItems
   assert.match(backgroundCode, /if \(pendingItems\.length > remaining\) \{/, "要按剩余名额裁剪新视频");

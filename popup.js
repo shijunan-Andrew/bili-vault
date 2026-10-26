@@ -29,6 +29,8 @@ const importConfirm = document.getElementById("importConfirm");
 const importConfirmDetail = document.getElementById("importConfirmDetail");
 const updateRecentButton = document.getElementById("updateRecent");
 const importLimitSelect = document.getElementById("importLimit");
+/* 1.16.5：记住上次选的「每次最多导入多少条」，下次打开原样选中（默认仍是「全部」）。 */
+const IMPORT_LIMIT_KEY = "importLimit";
 const updateRecentDialog = document.getElementById("updateRecentDialog");
 const updateRecentDetail = document.getElementById("updateRecentDetail");
 const speedGroup = document.getElementById("speedGroup");
@@ -1202,6 +1204,21 @@ async function clearBadgeIfSeen() {
   clearBadge();
 }
 
+/* 1.16.5：把上次的导入上限读回来，并在改动时记下 —— 只写 storage，不碰导入逻辑本身。 */
+function restoreImportLimit() {
+  chrome.storage.local.get(IMPORT_LIMIT_KEY).then((saved) => {
+    const value = saved?.[IMPORT_LIMIT_KEY];
+    if (value === undefined || value === null || !importLimitSelect) return;
+    const text = String(value);
+    const option = Array.from(importLimitSelect.options).find((item) => item.value === text);
+    if (option) importLimitSelect.value = text;
+  }).catch((error) => console.warn("导入上限没读出来（先按默认档）", error));
+  importLimitSelect?.addEventListener("change", () => {
+    chrome.storage.local.set({ [IMPORT_LIMIT_KEY]: selectedImportLimit() })
+      .catch((error) => console.warn("导入上限没记住（下次打开会回到默认档）", error));
+  });
+}
+
 async function boot() {
   // 1.7.20（facet-ux P1-2）：这里原来一打开弹窗就把角标灭掉，等于假定「打开了 = 看到了」。
   // 结果可能还没落地，也可能藏在默认收起的「最近状态」里 —— 灭掉之后用户既没提示、
@@ -1222,6 +1239,7 @@ async function boot() {
   }
   refreshEnabledState().catch(() => renderEnabledState(true));
   restoreRecoverInvalid().catch(() => {});
+  restoreImportLimit();
   loadImportFolders();
   refreshImportResume().catch(() => {});
   refreshStatus().catch((error) => {

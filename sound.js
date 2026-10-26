@@ -182,19 +182,28 @@
   function importCancelled(state) {
     if (!state || typeof state !== "object") return false;
     if (state.cancelled === true) return true;
-    return /取消/.test(String(state.summary || state.text || ""));
+    /* 1.16.5：不能只认「取消」两个字 —— 忙碌拒绝的文案是「…请先等它结束或取消它。」，
+       里面也带「取消」，会被误当成用户取消，于是该响的出错音被吞掉。 */
+    return /导入已取消|取消导入/.test(String(state.summary || state.text || ""));
   }
 
-  /* 导入收尾该响哪个：取消不响、失败响 error、成功响 notification。
-     判据只这一处 —— 失败看 state.failed，或 summary / text 里出现「失败 / 错误」。 */
+  /* 导入收尾该响哪个：取消不响、失败响 error、成功什么都不响（那一声交给系统通知）。
+     判据只这一处 —— 「失败」这个词在**成功**的摘要里也会出现（「…失败 0 个。」），
+     所以不能只按关键词判，带数字时必须看数字。 */
   function importFailed(state) {
     if (!state || typeof state !== "object") return false;
     if (importCancelled(state)) return false;
     if (state.failed === true) return true;
-    /* 1.16.3：被中断（浏览器被关、扩展被重载、后台被回收）也是「没跑完」——
-       以前只认「失败 / 错误」，中断的收尾文案里没有这两个词，于是响了一声「导入成功」。 */
+    /* 1.16.3：被中断（浏览器被关、扩展被重载、后台被回收）也是「没跑完」。 */
     if (state.interrupted === true) return true;
-    return /失败|错误|中断/.test(String(state.summary || state.text || ""));
+    const text = String(state.summary || state.text || "");
+    /* 1.16.5（真机反馈）：成功的摘要是「导入/更新完成：新导入 3 个，…，失败 0 个。」，
+       旧判据一看到「失败」两个字就响 error.mp3 —— 用户听到的「导入成功却响出错音」就是它。
+       只要摘要里有「失败 N 个」，就只信 N；N 全是 0 就是成功。 */
+    const failureCounts = text.match(/失败\s*(\d+)\s*个/g);
+    if (failureCounts) return failureCounts.some((line) => Number(line.replace(/\D+/g, "")) > 0);
+    /* 没有条数可看时才退回关键词（真失败的收尾文案长这样：「导入失败：…」「没想到…」）。 */
+    return /导入失败|没跑完|被中断|中断|风控|限流|已经有一轮导入/.test(text);
   }
 
   function playImportResult(state) {

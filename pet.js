@@ -1433,6 +1433,9 @@
       dragging = false;
       hideBubble();
       hideMenu();
+      /* 1.16.5：被藏起来（用户关掉宠物、或换了不显示宠物的设置）时要停掉呼噜声 ——
+         以前只停止循环链，音频元素还在响，睡着被藏起来就一直呼噜下去。 */
+      stopSound("purring");
       settle();
     } else {
       syncPosition();
