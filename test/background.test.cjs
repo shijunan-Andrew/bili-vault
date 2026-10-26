@@ -786,6 +786,73 @@ async function suite() {
     assert.ok(root.__has("新收藏夹"), "非空收藏夹要留着");
   });
 
+  await test("上一轮导入被打断：本次新建的清掉，别人的东西不碰（1.15.8 · 审查 C-14）", async () => {
+    const root = makeDirectoryTree({
+    "我的收藏": {
+      "2026年10月25日21时15分00秒": { "视频信息.txt": "本次新建" },
+      "老记录": { "视频信息.txt": "别动我" },
+      "子目录": { "新增.txt": "本次新增" }
+    },
+    "新建的空收藏夹": {},
+    "新建的非空收藏夹": { "有条目": {} }
+    });
+    const leftover = {
+      interruptedAt: Date.now(),
+      journal: {
+        createdRecords: [{ collection: "我的收藏", name: "2026年10月25日21时15分00秒" }],
+        addedFiles: [{ collection: "我的收藏", directory: "子目录", name: "新增.txt" }],
+        modifiedFiles: [],
+        createdCollections: [{ name: "新建的空收藏夹" }, { name: "新建的非空收藏夹" }]
+      }
+    };
+    const bg = loadBackground({
+      chrome: makeChrome({ localData: { bcaImportLeftover: leftover } }),
+      indexedDB: makeRootDb(root)
+    });
+
+    const result = await bg.__test.cleanupLeftoverImport();
+    assert.equal(result.ok, true, "全都清掉了才算成功");
+    assert.equal(result.removedRecords, 1);
+    assert.equal(result.removedFiles, 1);
+    assert.equal(result.removedCollections, 1, "只有空的那个新建收藏夹能删");
+    assert.deepEqual(result.failures, []);
+
+    const dump = root.__dump();
+    assert.equal(dump["我的收藏"]["2026年10月25日21时15分00秒"], undefined, "本轮新建的记录要删掉");
+    assert.equal(dump["我的收藏"]["老记录"]["视频信息.txt"], "别动我", "不是本轮写的东西一律不碰");
+    assert.equal(dump["我的收藏"]["子目录"]["新增.txt"], undefined, "本轮新增的文件要删掉");
+    assert.equal(dump["新建的空收藏夹"], undefined, "空的新建收藏夹要删掉");
+    assert.ok(root.__has("新建的非空收藏夹"), "非空的新建收藏夹必须留着");
+  });
+
+  await test("清理上一轮导入：删不掉的要说出来，一条都没删成就别把记录当成功（1.15.8 · 审查 C-14）", async () => {
+    const root = makeDirectoryTree({ "只读收藏": { "新建记录": {} } });
+    const broken = await root.getDirectoryHandle("只读收藏");
+    broken.removeEntry = async () => { throw new Error("磁盘只读"); };
+    const leftover = {
+      interruptedAt: Date.now(),
+      journal: { createdRecords: [{ collection: "只读收藏", name: "新建记录" }] }
+    };
+    const bg = loadBackground({
+      chrome: makeChrome({ localData: { bcaImportLeftover: leftover } }),
+      indexedDB: makeRootDb(root)
+    });
+
+    const result = await bg.__test.cleanupLeftoverImport();
+    assert.equal(result.ok, false, "一条都没删成不许报成功");
+    assert.equal(result.reason, "failed");
+    assert.equal(result.failures.length, 1, "失败项必须报出来");
+    assert.match(result.failures[0], /撤回新建的 新建记录/);
+    assert.match(result.failures[0], /磁盘只读/);
+    assert.ok(root.__has("只读收藏"), "删不掉就保持原样");
+  });
+
+  await test("没有留下任何导入记录时，清理直接说「无事可做」（1.15.8 · 审查 C-14）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
+    const result = await bg.__test.cleanupLeftoverImport();
+    assert.deepEqual(result, { ok: false, reason: "nothing" });
+  });
+
   await test("写失败留下的半截目录：空的删掉，有内容的留着并说明（1.15.1 · P2 T-3）", async () => {
     const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
     const root = makeDirectoryTree({ "空目录": {}, "有内容": { "封面.jpg": "x" } });

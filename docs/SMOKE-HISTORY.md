@@ -6,6 +6,12 @@
 
 ---
 
+## V1.15.7 新增的几条
+- [ ] 五套全绿：`stability` 424、`archive-core` 101、`background` 46、`stats-core` 69、`pages` 111；`node test/i18n-extract.cjs --check` 末尾会打印「动态 key（t(变量)）11 处，未超过上限 11」。
+- [ ] 真机：在收藏库里把一条记录拖到另一个收藏夹（改归属），`视频信息.txt` 里的「所属收藏夹：」跟着变，文件本身完整可读。
+- [ ] 真机（可跳过）：把 `003database/database.json` 里 `schemaVersion` 手工改成 `99`，重开扩展点一次「更新视频数据」—— 统计数字照常显示但不会被写坏，弹窗最近状态里提示「更新版本的插件写的」；验完记得改回 `1`。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
 ## V1.15.6 新增的几条
 - [ ] 五套全绿：`pages` 111、`archive-core` 101、`background` 46、`stats-core` 69、`stability` 424（棘轮上限仍是 309）。
 - [ ] 点开扩展图标 —— 弹窗照常出现（这条以前是「词典取不到就空白」，现在没空白了）。

@@ -359,7 +359,7 @@ const BACKGROUND_EXPORTS = [
   "archivePreviousStatsDatabase", "statsBackupTimestamp", "trimStatsBackups",
   "withStatsWriteSlot", "statsWriteChain",
   "setArchiveWriteLock", "clearArchiveWriteLock", "archiveWriteLockHeldBy",
-  "createImportJournal", "rollbackImport", "saveImportedItem", "importMetadata",
+  "createImportJournal", "rollbackImport", "cleanupLeftoverImport", "saveImportedItem", "importMetadata",
   "statsRecordForItem", "maskLocalUserPaths", "storageReportLabel",
   "discardFailedRecord", "renameFailureNote", "statsPendingRecords",
   "readStatsMirror", "applyStatsMirror", "syncStatsMirror", "publishStatsSnapshot",
