@@ -553,14 +553,6 @@ test("a description made of dashes is kept, only a lone placeholder is dropped",
 
 // 4.0 的 bug：空标签占位符复用了 .detail-description，querySelector 先取到占位符，
 // 简介被写进了“标签”区块，真正的简介区永远空白。
-test("the empty-tags placeholder no longer steals the description element", () => {
-  const library = readProjectFile("library.js");
-  assert.match(library, /class="detail-empty"/);
-  assert.equal(/class="detail-description">暂无标签/.test(library), false);
-  assert.equal((library.match(/class="detail-description"/g) || []).length, 1, "详情里只应存在一个 .detail-description");
-  assert.match(readProjectFile("library.css"), /\.detail-empty\s*\{/);
-});
-
 test("downloaded video titles turn green while invalid ones stay red", () => {
   const css = readProjectFile("library.css");
   assert.match(css, /\.video-card\.downloaded-video \.card-title\s*\{[^}]*--success-strong/);
@@ -1818,6 +1810,33 @@ test("the library filters by collection, uploader and tag", () => {
   // 选项池不能受自身选择影响，否则选中后其它选项会消失
   assert.match(library, /全部 UP 主/);
   assert.match(library, /全部标签/);
+
+  // 1.15.10（审查 T-1）：筛选谓词真跑一遍 —— 抠出 matchesBaseFilters / legacySearchIndex，注入 videoFilter
+  const { carveFunction } = require("./harness.cjs");
+  const filterApi = new Function(`
+    let videoFilter = "all";
+    ${carveFunction(library, "legacySearchIndex")}
+    ${carveFunction(library, "matchesBaseFilters")}
+    return {
+      setFilter(value) { videoFilter = value; },
+      matches(video, query) { return matchesBaseFilters(video, query); }
+    };
+  `)();
+  const normal = {
+    title: "普通视频", upName: "某人", bvid: "BV1normal", collection: "夹", description: "简介",
+    tags: ["标签一"], searchIndex: "普通视频 某人 bv1normal 夹 简介 标签一", isInvalid: false, downloaded: false
+  };
+  assert.equal(filterApi.matches(normal, ""), true, "不筛的时候都能过");
+  filterApi.setFilter("invalid");
+  assert.equal(filterApi.matches(normal, ""), false, "筛「失效」时正常视频要出去");
+  assert.equal(filterApi.matches({ ...normal, isInvalid: true }, ""), true);
+  filterApi.setFilter("downloaded");
+  assert.equal(filterApi.matches({ ...normal, downloaded: true }, ""), true);
+  assert.equal(filterApi.matches(normal, ""), false, "筛「已下载」时没下载的要出去");
+  filterApi.setFilter("all");
+  assert.equal(filterApi.matches(normal, "bv1normal"), true, "搜索走预拼的 searchIndex");
+  assert.equal(filterApi.matches(normal, "没有这个词"), false);
+  assert.equal(filterApi.matches({ ...normal, searchIndex: undefined }, "标签一"), true, "老对象没有 searchIndex 时要现拼");
 });
 
 test("the library is keyboard navigable and traps focus in overlays", () => {
@@ -9174,7 +9193,7 @@ test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）",
   // 底数 311（73.2%）→ 1.15.2 换成 safeCover 的真执行用例降到 310 →
   // 1.15.3 又把「换行注入」那条拆成三组真执行用例，降到 309。
   // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
-  assert.ok(textOnly.length <= 309,
-    "纯文本断言 " + textOnly.length + " 条，超过 307 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
+  assert.ok(textOnly.length <= 305,
+    "纯文本断言 " + textOnly.length + " 条，超过 305 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 

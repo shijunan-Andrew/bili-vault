@@ -71,7 +71,7 @@ const INFO = (title, extra = {}) => {
       ""
     ]),
     "【标签】",
-    "标签一、标签二",
+    extra.tags === undefined ? "标签一、标签二" : extra.tags,
     "",
     "【视频简介】",
     ...(description === null ? [] : [description])
@@ -324,7 +324,8 @@ async function suiteLibrary() {
       "小鲸鱼测试": {
         "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("真简介视频", { description: "真正的简介第一行\n真正的第二行" }), "封面.png": "PNG-1" },
         "2026年10月10日02时20分00秒": { "视频信息.txt": INFO("分享文案视频", { description: shareText }), "封面.png": "PNG-2" },
-        "2026年10月11日03时30分00秒": { "视频信息.txt": INFO("标题当简介视频", { description: "标题当简介视频" }), "封面.png": "PNG-3" }
+        "2026年10月11日03时30分00秒": { "视频信息.txt": INFO("标题当简介视频", { description: "标题当简介视频" }), "封面.png": "PNG-3" },
+        "2026年10月12日04时40分10秒": { "视频信息.txt": INFO("空标签视频", { description: "有简介但没标签", tags: "" }), "封面.png": "PNG-4" }
       }
     };
     const page = await openLibrary({ tree });
@@ -344,6 +345,14 @@ async function suiteLibrary() {
     assert.equal(await openByTitle("真简介视频"), "真正的简介第一行\n真正的第二行");
     assert.equal(await openByTitle("分享文案视频"), "", "分享文案不算简介");
     assert.equal(await openByTitle("标题当简介视频"), "", "简介就是标题时也不显示");
+
+    // 1.15.10（审查 T-1）：标签为空时只能有一个 .detail-description（占位符不许再同名抢位）
+    assert.equal(await openByTitle("空标签视频"), "有简介但没标签");
+    const emptyTagBox = doc.querySelector("#detailContent .detail-empty");
+    assert.ok(emptyTagBox, "标签为空时要有占位符");
+    assert.match(textOf(emptyTagBox), /没有记录标签/, "占位符要说明为什么是空的");
+    assert.equal(doc.querySelectorAll("#detailContent .detail-description").length, 1, "简介元素只该有一个");
+    assert.equal(textOf(doc.querySelector("#detailContent .detail-description")), "有简介但没标签", "简介不许被占位符抢走");
   });
 
   await test("没有互动数据的记录显示 N/A，并提示去「更新视频数据」（1.9.5）", async () => {

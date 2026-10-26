@@ -141,13 +141,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.15.9：排序和每页条数这两条断言，现在真的跑了
+## V1.15.10：空标签不再抢简介的位置，筛选谓词也真跑了一遍
 
-- **排序算法真跑一遍**（审查 T-1）：`selectFirstVideos()` 被抠出来单独执行，和「整表排序取前 N 个」做 30 轮随机比对 —— 顺带钉住了它真实的契约：要的条数超过一半时它会顺手把整排都排好，调用方只取前几个。
-- **每页条数的常量真求一次值**（审查 T-1）：`PAGE_SIZES` 不再只靠正则比对源码，而是求值后验证三个档都是 5 的倍数、默认取第一档。
-- **测试**：`stability` 424 全绿；纯文本断言 309 → **307**，棘轮上限同步下调到 307。
+- **空标签占位挪到真页面里验**（审查 T-1）：删掉那条「读 `library.js` 源码、正则找 `class="detail-empty"`」的用例，改成在 `library.html` 里真打开一条「有简介但没标签」的记录 —— 断言详情里恰好只有一个 `.detail-description`、简介文字没被占位符抢走、占位符上确实写着「这个归档没有记录标签」。
+- **筛选谓词真跑一遍**（审查 T-1）：`matchesBaseFilters()` / `legacySearchIndex()` 抠出来执行，验「失效」「已下载」两档筛选、`searchIndex` 命中与「老对象没有 searchIndex 时现拼」。
+- **测试**：`stability` 423（删掉一条文本用例）、`pages` 111 全绿；纯文本断言 307 → **305**，棘轮上限同步下调到 305。
 
-**遗留** - `stability` 里剩下的 307 条文本断言按批继续往下压。
+**遗留** - 文本断言还剩 305 条，按批继续压。
 ## 测试与文档
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
@@ -156,7 +156,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:424 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:423 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

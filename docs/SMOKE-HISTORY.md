@@ -6,6 +6,11 @@
 
 ---
 
+## V1.15.9 新增的几条
+- [ ] `node test/stability.test.cjs` 424 项全绿；末尾那条棘轮守卫说「307 条，未超过 307」。
+- [ ] 真机：收藏库里换几种排序（播放量 / 时间 / 标题）与每页条数（25 / 50 / 100）—— 首屏与翻页都正常，切档后页码回到第 1 页。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
 ## V1.15.8 新增的几条
 - [ ] 五套全绿：`stability` 424、`archive-core` 101、`background` 49、`stats-core` 69、`pages` 111。
 - [ ] `node test/background.test.cjs` 的输出里能看到「上一轮导入被打断：本次新建的清掉，别人的东西不碰」等三条 C-14 用例。
