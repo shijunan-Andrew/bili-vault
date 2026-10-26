@@ -1222,6 +1222,47 @@ test("分享统计文案不算简介：按「视频播放量…弹幕量…」�
   assert.equal(core.descriptionFromInfo({ sections: { 视频简介: ["-"] } }), "", "占位值按没有简介处理");
 });
 
+test("清单文件怎么生成：分组、标题回退、无链接记录只写目录名（1.15.14 · T-1）", () => {
+  const inv = core.buildMarkdownInventory(
+    [
+      {
+        name: "动画",
+        videos: [
+          { title: "标题一", url: "https://www.bilibili.com/video/BV1xx411c7mD", directory: "bv1", up: "某UP" },
+          { directory: "只有目录" }
+        ]
+      },
+      { videos: [] }
+    ],
+    { generatedAt: "2026-10-25 10:00" }
+  );
+  assert.equal(inv.collections, 2, "两个分组都要算上");
+  assert.equal(inv.records, 2, "空分组不加记录数");
+  assert.match(inv.text, /# 哔哩藏库 · 归档清单/);
+  assert.match(inv.text, /生成于 2026-10-25 10:00。/);
+  assert.match(inv.text, /## 动画（2 条）/);
+  assert.match(inv.text, /- \[标题一\]\(https:\/\/www\.bilibili\.com\/video\/BV1xx411c7mD\)/);
+  assert.match(inv.text, /- 只有目录/, "没有标题又没有链接时只写目录名，不许编一个标题出来");
+  assert.match(inv.text, /## 未命名收藏夹（0 条）/, "没有名字的分组要落到「未命名收藏夹」");
+  assert.match(inv.text, /（这个收藏夹里没有记录）/);
+  const empty = core.buildMarkdownInventory(null, null);
+  assert.equal(empty.collections, 0);
+  assert.equal(empty.records, 0);
+});
+
+test("清单文件名与导出文件名共用同一份时间戳（1.15.14 · T-1）", () => {
+  const at = new Date(2026, 9, 25, 21, 5, 7);
+  assert.equal(core.markdownFileName(at), "归档清单-20261025-210507.md");
+  assert.equal(core.exportFileName(at), "归档元数据-20261025-210507.json");
+  assert.match(core.markdownFileName(), /^归档清单-\d{8}-\d{6}\.md$/, "不给时间也要给出当前时刻的形状");
+});
+
+test("进度计数走同一套数字格式，别在界面里各写一遍（1.15.14 · T-1）", () => {
+  assert.equal(core.formatProgressCounter(12, 345), "12/345");
+  assert.equal(core.formatProgressCounter(0, 0), "0/0");
+  assert.equal(core.formatProgressCounter(12345, 67890), core.formatCountText(12345) + "/" + core.formatCountText(67890));
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {
