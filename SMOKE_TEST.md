@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **422** 项里<!-- test-count:422 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **423** 项里<!-- test-count:423 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -54,14 +54,13 @@
 
 ---
 
-## V1.14.3 新增的几条
+## V1.14.4 新增的几条
 
-- [ ] 弹窗里把「请求速度」从「较低」切到「标准」→ 关掉弹窗再打开，还是「标准」（正常路径没被这次改动弄坏）。
-- [ ] 弹窗里取消勾选「尝试找回失效视频」→ 关掉弹窗再打开，仍然是未勾选。
-- [ ] 设置页改一下宠物开关 → 刷新设置页，设的还在。
-- [ ] B 站视频页收藏一个视频 → 照旧出现「正在归档视频…」，归档成功；导入进行中时手动收藏，应直接提示「导入正在进行中」。
+- [ ] 在设置页或 `chrome://extensions` 里看版本号已经是最新那版，扩展正常工作（这一版只动发版链路，功能没变）。
+- [ ] 用 `pack.ps1` 打一次包：屏幕最后三行要能看到文件数、体积和 **SHA-256**；解开 zip 确认 `locales/` 里**只有两本词典**、没有 `_todo.json`。
+- [ ] 打开本仓库的 Release 页面地址（README 安装段里那个链接）能打开。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.14.2 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.14.3 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

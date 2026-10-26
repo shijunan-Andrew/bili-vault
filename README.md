@@ -18,6 +18,8 @@
 4. 点击工具栏中的“哔哩藏库”，选择本地备份文件夹。
 5. 打开 B 站视频页并收藏视频。保存结果会在视频页右下角弹出。
 
+> 本扩展**没有上架 Chrome 应用商店**，请只从[本仓库的 Release 页面](https://github.com/shijunan-Andrew/bili-vault/releases)下载 zip 后解压加载；从别处拿到的包不要装（仓库里没有任何第三方分发渠道）。
+
 ### 运行环境
 
 - **Chrome 111 或更新的版本。** 这个数字的唯一出处是 `manifest.json` 的 `minimum_chrome_version`（文档里写的这处由测试核对，改一边不改另一边会让发布中止）。111 是硬底线，不是随手填的：整套毛玻璃外观靠 `color-mix()` 推底色（`theme.css` 里大量使用），而它进 Chrome 稳定版正是 111 —— 低于这个版本的浏览器会把卡片的半透明底色整片丢掉。
@@ -137,12 +139,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.14.3：设置没存上时，弹窗会当场说一句
+## V1.14.4：打出来的包，换台机器也能一模一样
 
-- **两种「吞掉错误」的写法都开始计数**（审查 C-3）：以前只有 `catch (_) {}` 被守住，`.catch(() => {})` 一处都没数过。现在两种都数，九个文件各留一个上界，涨了就说明有人又吞了一处。
-- **三个「用户能感觉到的开关」不再静默失败**：弹窗里的限速档、弹窗里的「尝试找回失效视频」、设置页的宠物开关 —— 写不进去时会当场说「设置没能保存，请再试一次。」并把界面退回到真正生效的状态，不再让你以为改了。
-- **「有没有导入在跑」的预检真的问到了后台**（审查 T-7）：以前发的消息名后台根本没有，这段预检形同虚设；现在走 `bca-import-probe`，导入在跑时手动收藏会直接收手。
-- **测试**：`pages` 98 → 100 项、`stability` 422 → 422 项（守卫加严在用例内部），词典 1129 → 1130 条。
+- **发行包里不再混进开发文件**（审查 R-2）：`locales/_todo.json` 那张待译清单以前会被一起打进 zip —— 它不在版本控制里，等于「换台机器 clone 下来打出来的包」比本地的少一个文件。现在 `pack.ps1` 显式排除它，CI 侧也钉住 `locales/` 与 `native/` 里到底是哪几个文件。
+- **少一本词典就打不出包**（审查 R-3）：`required` 从 8 个关键件扩到 18 个，两个容器内部的文件数与名单都钉死，`locales/` 只剩一本、`native/` 空了都会当场报错，而不是打出一个「能装但缺东西」的包。
+- **包打好就打印 SHA-256**（审查 R-1）：以前这一步靠手工算、等于没人算；以后写 `version.json` 直接抄屏幕上那串。
+- **发版链路三条收口**：tag 单独触发 CI（R-4，以前只靠那次 push main 顺带覆盖）；README 写清「没上架商店，只从本仓库 Release 下载」（R-5）；`release.ps1` 不再 `git add -A`，只提交 `manifest.json`，发版过程中落进别的文件就停下（R-6）。`tabs.query` 那条降级路径也在注释里写明是**故意不要权限**（R-7）。
+- **测试**：`stability` 422 → 423 项（新增一条把上述四件事都钉住的守卫）。
 
 **遗留** - 无。
 
@@ -154,7 +157,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:422 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:423 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

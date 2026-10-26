@@ -264,7 +264,14 @@ if (-not $Yes) {
 Say "`n【6/6】提交与推送" $C_DIM
 $msgFile = Join-Path $env:TEMP 'bv-release-msg.txt'
 [System.IO.File]::WriteAllText($msgFile, $msg, $utf8NoBom)
-Invoke-Native $Git @('add', '-A') | Out-Null
+# 1.14.4（审查 R-6）：不再 add -A。步骤 1 已经要求工作区干净，这一步只该带上刚改的
+# manifest.json；发版要跑一两分钟，期间若有人往仓库里落了临时脚本/日志，宁可停下也不要推上去。
+$dirtyNow = @((& $Git status --porcelain) -split "`n" | Where-Object { $_.Trim() })
+$unexpected = @($dirtyNow | Where-Object { $_ -notmatch 'manifest\.json$' })
+if ($unexpected.Count) {
+  Die "工作区里出现了这次发版之外的文件（发版过程中落下的？）：$($unexpected -join ' | ')。请先清理再发。"
+}
+Invoke-Native $Git @('add', 'manifest.json') | Out-Null
 Invoke-Native $Git @('commit', '-q', '-F', $msgFile) | Out-Null
 if ($LASTEXITCODE -ne 0) {
   Remove-Item -LiteralPath $msgFile -Force -ErrorAction SilentlyContinue

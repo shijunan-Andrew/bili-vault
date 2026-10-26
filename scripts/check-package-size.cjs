@@ -99,6 +99,24 @@ function main() {
     if (!expected.includes(required)) fail(`运行期文件 ${required} 不在发布清单里`);
   }
 
+  // 1.14.4（审查 R-2 / R-3）：目录级白名单只认顶层名字，容器内部一律不校验 ——
+  // locales/_todo.json 就是这么混进发行包的（它还在 .gitignore 里，干净 clone 根本打不出来）。
+  // 这里把两个容器的内容钉死：名单要完全对得上，且不许出现 _ 开头的开发文件。
+  const containers = {
+    locales: ["locales/en.json", "locales/zh-TW.json"],
+    native: ["native/folder-opener-host.ps1", "native/folder-opener-launcher.cs"]
+  };
+  for (const [dir, wanted] of Object.entries(containers)) {
+    const actualFiles = expected.filter((rel) => rel.startsWith(`${dir}/`)).sort();
+    const wantSorted = [...wanted].sort();
+    if (actualFiles.join("|") !== wantSorted.join("|")) {
+      fail(`${dir}/ 里应该恰好是 ${wantSorted.join("、")}，实际：${actualFiles.join("、") || "（空）"}`);
+      continue;
+    }
+    const devFiles = actualFiles.filter((rel) => path.basename(rel).startsWith("_"));
+    if (devFiles.length) fail(`${dir}/ 里混进了开发文件：${devFiles.join("、")}`);
+  }
+
   let total = 0;
   for (const rel of expected) {
     const bytes = fs.statSync(path.join(ROOT, rel)).size;

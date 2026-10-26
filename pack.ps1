@@ -51,7 +51,11 @@ $excludePaths = @(
   "bili-old-2015/assets/INDEX.md", "bili-old-2015/assets/thumbs.json",
   # 1.11.2：检查更新读的是仓库（和 jsDelivr 镜像）上那份 version.json，本地这份只给发布流程用，
   # 装进包里反而让人以为要手改它。
-  "version.json"
+  "version.json",
+  # 1.14.4（审查 R-2）：locales/_todo.json 是开发用的待译清单（在 .gitignore 里、不在版本控制里），
+  # 以前被一起打进发行包 —— 于是另一台机器 clone 下来打出的 zip 会比本地少一个文件，发行包不可复现。
+  # locales/_delta* 同理（词典行级手术的中间产物）。这两类都不该出现在给用户的包里。
+  "locales/_todo.json", "locales/_delta"
 )
 
 $expected = New-Object System.Collections.Generic.List[string]
@@ -84,8 +88,24 @@ try {
   if ($missing.Count -or $extra.Count) {
     throw "打包内容与源目录不一致：缺失 $($missing.Count) 个（$($missing -join ", ")）；多出 $($extra.Count) 个（$($extra -join ", ")）"
   }
-  foreach ($required in @("manifest.json", "background.js", "content.js", "popup.html", "library.html", "settings.html", "locales/zh-TW.json", "locales/en.json")) {
+  # 1.14.4（审查 R-3）：目录级白名单只写目录名，容器内部一个文件都没钉 —— locales/ 少一本词典、
+  # native/ 整个空了，missing/extra 反查只比 $expected（由源目录 walk 得来）照样放行。这里补齐。
+  foreach ($required in @(
+    "manifest.json", "background.js", "content.js", "archive-core.js", "archive-tools.js", "stats-core.js",
+    "popup.html", "library.html", "settings.html", "recycle.html", "stats.html", "guide.html",
+    "locales/zh-TW.json", "locales/en.json",
+    "native/folder-opener-host.ps1", "native/folder-opener-launcher.cs",
+    "bili-old-2015/index.html", "bili-old-2015/egg-2015.js"
+  )) {
     if (-not ($actual -contains $required)) { throw "运行期文件 $required 不在打包结果里" }
+  }
+  $localesFiles = @($actual | Where-Object { $_ -like "locales/*" })
+  $nativeFiles = @($actual | Where-Object { $_ -like "native/*" })
+  if ($localesFiles.Count -ne 2 -or -not ($localesFiles -contains "locales/en.json") -or -not ($localesFiles -contains "locales/zh-TW.json")) {
+    throw "locales/ 里应该恰好是 zh-TW.json 与 en.json 两本词典，实际：$($localesFiles -join ', ')"
+  }
+  if ($nativeFiles.Count -ne 2) {
+    throw "native/ 里应该恰好两个文件（宿主脚本 + 启动器源码），实际：$($nativeFiles -join ', ')"
   }
   foreach ($dev in @("test", "scripts", ".github", "README.md", "AI_HANDOFF.md", "SMOKE_TEST.md", "release.ps1", "_ref", "docs")) {
     if ($actual | Where-Object { $_ -eq $dev -or $_ -like "$dev/*" }) { throw "开发文件 $dev 混进打包结果了" }
@@ -141,6 +161,9 @@ try {
   }
   $size = [math]::Round($zipBytes / 1KB, 1)
   "[OK] $zip"
+  # 1.14.4（审查 R-1）：把 SHA-256 打出来 —— 第二轨（写仓库根 version.json）时必须抄这个值，
+  # 以前这一步全靠手工算，等于没人算。
+  "[OK] SHA-256：$((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower())"
   "[OK] 版本 $version，文件 $($actual.Count) 个，源目录 $([math]::Round($stagedBytes / 1KB, 1)) KB，zip $size KB"
   "[OK] 发布清单：locales、native 两个目录 + $($allowedTopFiles.Count) 个文件，均在允许范围内"
   "[OK] 已排除（开发用）：$($excludeNames -join ", ")"

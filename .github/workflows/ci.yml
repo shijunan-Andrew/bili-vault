@@ -13,6 +13,9 @@ name: CI
 on:
   push:
     branches: [main]
+    # 1.14.4（审查 R-4）：发版 tag 也要单独跑一遍。以前只有那次 push main 顺带覆盖到它 ——
+    # main 那次 push 被 concurrency 取消、或者只推了 tag，这一版就一条 CI 记录都没有。
+    tags: ["V*"]
   pull_request:
   workflow_dispatch:
 

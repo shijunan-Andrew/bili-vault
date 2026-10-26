@@ -5786,6 +5786,8 @@ async function resolveDiffUid(uid, tabId) {
   }
   // manifest 里没有 tabs 权限，这个查询可能直接抛错或返回没有 url 的标签页；
   // 都当成"找不到"处理，退回下面用缓存 uid 走后台直连。
+  // 1.14.4（审查 R-7）：**这是故意的，不是遗漏** —— 为了不多要 tabs / space 权限，宁可让
+  // 「页面代取」这条路在上架配置下永远走不通（实际总走后台直连）。别为了救活这条分支去加权限。
   try {
     const tabs = await chrome.tabs.query({ url: "https://space.bilibili.com/*/favlist*" });
     for (const tab of tabs) {

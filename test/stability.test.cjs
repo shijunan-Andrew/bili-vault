@@ -7627,6 +7627,39 @@ test("商店上架三件套：homepage_url、隐私说明、文档里链得上�
   assert.deepEqual(manifest.host_permissions, ["https://*.hdslb.com/*", "https://api.bilibili.com/*"]);
 });
 
+test("发布链路的四道空子：容器内容、tag 触发、提交白名单、下载渠道（1.14.4 · 审查 R-1～R-7）", () => {
+  const packSource = readProjectFile("pack.ps1");
+  const sizeSource = readProjectFile("scripts/check-package-size.cjs");
+  const releaseSource = readProjectFile("release.ps1");
+  const ciSource = readProjectFile(".github/workflows/ci.yml");
+  const readmeSource = readProjectFile("README.md");
+
+  // R-2：locales 里的开发文件不许进包
+  assert.ok(packSource.includes('"locales/_todo.json"'), "pack.ps1 要排除 locales/_todo.json");
+  assert.ok(packSource.includes('"locales/_delta"'), "pack.ps1 要排除 locales/_delta*");
+  // R-3：容器内容要钉死（pack.ps1 与 CI 两侧都要有）
+  assert.ok(packSource.includes('"locales/en.json",') && packSource.includes('"native/folder-opener-launcher.cs"'),
+    "pack.ps1 的 required 要覆盖两本词典与 native 两个文件");
+  assert.match(packSource, /\$localesFiles\.Count -ne 2/, "pack.ps1 要钉住 locales 里恰好两本词典");
+  assert.match(packSource, /\$nativeFiles\.Count -ne 2/, "pack.ps1 要钉住 native 里恰好两个文件");
+  assert.match(sizeSource, /actualFiles\.join\("\|"\) !== wantSorted\.join\("\|"\)/, "CI 侧也要钉住容器内容");
+  // R-1：pack 要打出 SHA-256
+  assert.ok(packSource.includes("Get-FileHash -LiteralPath $zip -Algorithm SHA256"), "pack.ps1 要打印 SHA-256");
+  // R-4：tag 也要触发 CI
+  assert.match(ciSource, /tags:\s*\["V\*"\]/, "ci.yml 的 push 要监听 tag");
+  // R-5：README 要说清只从 Release 下载
+  assert.ok(readmeSource.includes("没有上架 Chrome 应用商店"), "README 要写明不上架商店");
+  assert.ok(readmeSource.includes("releases) 下载 zip") || readmeSource.includes("Release 页面"),
+    "README 要写明从哪里下载");
+  // R-6：提交只带 manifest.json
+  assert.ok(!/@\('add', '-A'\)/.test(releaseSource), "release.ps1 不许再 add -A");
+  assert.ok(releaseSource.includes("Invoke-Native $Git @('add', 'manifest.json')"), "release.ps1 要只 add manifest.json");
+  assert.ok(releaseSource.includes("工作区里出现了这次发版之外的文件"), "发版过程中落进别的文件要停下");
+  // R-7：tabs 权限那条要在注释里说明是故意的
+  assert.ok(readProjectFile("background.js").includes("这是故意的，不是遗漏"),
+    "background.js 要说明「不要 tabs 权限」是故意的");
+});
+
 test("发布包有白名单和体积上限，包里不再可能混进开发文件（P3-12b）", () => {
   const pack = readProjectFile("pack.ps1");
   assert.match(pack, /\$allowedTopFiles = @\(/);
