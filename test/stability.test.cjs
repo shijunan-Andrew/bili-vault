@@ -5706,8 +5706,12 @@ test("导入途中关掉收藏夹页面时，弹窗不许报假失败、也不�
   // 页面被关掉 ≠ 导入失败：catch 里先问一句后台还在不在跑
   assert.ok(popup.includes("async function importStillRunning()"), "要有「后台还在跑吗」的判断");
   assert.ok(popup.includes("if (await importStillRunning())"), "catch 里要用它分流");
-  assert.ok(popup.includes("页面已关闭，导入仍在后台继续；完成后这里会提示。"), "后台仍在跑时要说实话，不是报错");
+  assert.ok(popup.includes("导入仍在后台继续，完成后这里会提示。"), "后台仍在跑时要说实话，不是报错");
   assert.ok(popup.includes("awaitingBackgroundImport = startedAt;"), "要记下在等哪一次的结果");
+  // 1.16.8：消息断了但后台还在跑 —— 视图必须留在「导入中」，不许跳回选收藏夹
+  assert.ok(popup.includes("keepRunningView = true;"), "catch 里要记下「这一轮还在跑」");
+  assert.ok(popup.includes("settleImportView(keepRunningView)"), "复位必须走 settleImportView 这一处");
+  assert.match(popup, /function settleImportView\(stillRunning\) \{\r?\n  if \(stillRunning\) return;/, "后台还在跑时直接返回、不复位视图");
   assert.ok(popup.includes("const startedAt = Date.now();"), "开始时要记时间戳，免得收到上一轮的旧结果");
 
   // 后台自己跑完那一轮：结果只写在 importDone 里，storage 变更要接住
@@ -8825,6 +8829,8 @@ test("1.12.4：收藏夹页桥有真执行用例盯着（审查 P2-6）", () => 
     assert.ok(bridge.includes(`message?.type === "${type}"`), `三条消息分支都要在：${type}`);
   }
   assert.match(bridge, /const FAVORITES_MESSAGE_TIMEOUT_MS = 15000;/, "15 秒兜底是这条链路的护栏");
+  // 1.16.8：这条兜底只留给「读收藏夹列表」，导入那条路不许装 —— 导入要跑好几分钟
+  assert.ok(!/bca-import-selected-folders[\s\S]{0,1200}?FAVORITES_MESSAGE_TIMEOUT_MS/.test(bridge), "导入这条路不许有 15 秒兜底");
   assert.match(bridge, /url\.protocol !== "https:" \|\| url\.hostname !== "api\.bilibili\.com"/, "只放行 B 站官方接口");
 });
 

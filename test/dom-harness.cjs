@@ -574,12 +574,19 @@ class DomElement extends DomNode {
 /* ------------------------------------------------------------------ */
 
 function parseCompound(text) {
-  const compound = { tag: null, id: null, classes: [], attrs: [], nots: [] };
+  const compound = { tag: null, id: null, classes: [], attrs: [], nots: [], checked: false };
   /* :not(...) 先单独抠掉——library.js 的 FOCUSABLE_SELECTOR 就靠它
      （`button:not([disabled]), [tabindex]:not([tabindex="-1"])`），
      不认的话 trapFocus 一调用就炸。只支持一层、不含括号的 :not。 */
-  const rest = String(text).replace(/:not\(([^()]*)\)/g, (_all, inner) => {
+  const withoutNot = String(text).replace(/:not\(([^()]*)\)/g, (_all, inner) => {
     if (inner.trim()) compound.nots.push(inner.trim());
+    return "";
+  });
+  /* 1.16.8：`:checked` 也只有这一处在用（popup.js 挑「已勾选的收藏夹」靠它）。
+     不认的话「导入进行中」那条渲染路径一跑就抛「不认识的简单选择器」——
+     这也说明这条路径此前从没被页面级测试走到过。 */
+  const rest = withoutNot.replace(/:checked/g, () => {
+    compound.checked = true;
     return "";
   });
   const pattern = /([#.]?)([A-Za-z0-9_\-\u00a0-\uffff]+)|\[([^\]]+)\]/g;
@@ -630,6 +637,7 @@ function matchesCompound(element, compound) {
     if (attr.value !== null && element.getAttribute(attr.name) !== attr.value) return false;
   }
   for (const inner of compound.nots || []) if (matchesSelector(element, inner)) return false;
+  if (compound.checked && element.checked !== true) return false;
   return true;
 }
 

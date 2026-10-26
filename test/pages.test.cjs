@@ -973,6 +973,36 @@ async function suitePopup() {
     assert.equal(doc.getElementById("doneDialogText").classList.contains("error"), false);
   });
 
+  await test("导入中消息断了、但后台还在跑：视图留在进度页，不许跳回选收藏夹（1.16.8）", async () => {
+    const chrome = makeChrome({
+      localData: {},
+      onRuntimeMessage: async (message) => {
+        if (message?.type === "get-status") {
+          return { importState: { running: true, paused: false, text: "正在读取「默认收藏夹」的视频资料：12/50" } };
+        }
+        return undefined;
+      }
+    });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle(10);
+    const doc = page.document;
+    const progress = doc.getElementById("importProgressView");
+    const selection = doc.getElementById("importSelectionView");
+    assert.equal(progress.hidden, false, "后台在跑的时候要显示进度视图");
+    assert.equal(selection.hidden, true, "这时候不该看到选收藏夹");
+
+    assert.equal(typeof page.window.settleImportView, "function");
+    page.window.settleImportView(true);
+    await settle(2);
+    assert.equal(progress.hidden, false, "这一轮还在后台跑，进度视图不许被复位");
+    assert.equal(selection.hidden, true, "更不许跳回选收藏夹");
+
+    page.window.settleImportView(false);
+    await settle(2);
+    assert.equal(selection.hidden, false, "真的结束了才回到选收藏夹");
+    assert.equal(progress.hidden, true, "结束了就不该再显示进度");
+  });
+
   await test("错误摘要：读不出授权时给人话，读得出时取报告里第一行带「失败/中止」的（1.7.23）", async () => {
     const chrome = makeChrome({ version: "1.7.23", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
@@ -2113,6 +2143,33 @@ async function suiteFavoritesImport() {
     const answered = await reply;
     assert.equal(answered.ok, false);
     assert.match(answered.message, /后台没有回应（超过 15 秒）/);
+  });
+
+  await test("收藏夹页：导入这条路不装超时兜底，后台没回就一直等（1.16.8）", async () => {
+    const timers = [];
+    const { page, sent } = openFavoritesBridge({
+      // 后台「一直不回」：桩不会替它答话
+      reply: () => new Promise(() => {}),
+      globals: {
+        setTimeout: (fn) => {
+          timers.push(fn);
+          return timers.length;
+        },
+        clearTimeout: () => {}
+      }
+    });
+    const listener = bridgeListener(page);
+    let answered = null;
+    const handled = listener(
+      { type: "bca-import-selected-folders", folderIds: [11] },
+      { id: FAVORITES_EXT_ID },
+      (value) => { answered = value; }
+    );
+    await settle();
+    assert.equal(handled, true, "这条消息要自己占住通道");
+    assert.equal(sent.at(-1).type, "import-bili-favorites", "请求要原样转给后台");
+    assert.equal(timers.length, 0, "导入不许装兜底计时器（超时会让弹窗以为这一轮结束了）");
+    assert.equal(answered, null, "后台没回之前不许替它答话");
   });
 }
 

@@ -610,6 +610,16 @@ async function refreshImportResume() {
   renderResumeImport();
 }
 
+/* 1.16.8：这一轮的消息断了（消息通道先回了一句超时 / 页面走神），后台可能还在跑 ——
+   那种情况不许把「导入中」的视图复位，否则弹窗会跳回「选收藏夹」，用户以为导入被取消了。
+   只有真的结束了（或后台确认已经不在跑）才复位。 */
+function settleImportView(stillRunning) {
+  if (stillRunning) return;
+  importBusy = false;
+  importPaused = false;
+  updateImportSelection();
+}
+
 async function startImport(options = {}) {
   if (importBusy) return;
   // P1-7：继续上次导入时，用断点里记着的收藏夹 id，不必让用户重新勾选
@@ -640,6 +650,8 @@ async function startImport(options = {}) {
   importStatus.classList.remove("error");
   importProgressText.textContent = BcaI18n.t("正在请求本地备份文件夹权限…");
   const startedAt = Date.now();
+  // 1.16.8：这一轮还在后台跑的时候，finally 不许复位视图
+  let keepRunningView = false;
   try {
     const permission = await rootHandle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地备份文件夹的写入权限，请重新选择本地备份文件夹后重试。"));
@@ -667,8 +679,9 @@ async function startImport(options = {}) {
     // 页面被关掉 ≠ 导入失败：后台还在跑的话，等它把结果写进 importDone 再提示。
     if (await importStillRunning()) {
       awaitingBackgroundImport = startedAt;
+      keepRunningView = true;
       importStatus.classList.remove("error");
-      importStatus.textContent = BcaI18n.t("页面已关闭，导入仍在后台继续；完成后这里会提示。");
+      importStatus.textContent = BcaI18n.t("导入仍在后台继续，完成后这里会提示。");
     } else {
       importStatus.textContent = error?.message ? BcaI18n.t(error.message) : BcaI18n.t("导入失败。");
       importStatus.classList.add("error");
@@ -676,9 +689,7 @@ async function startImport(options = {}) {
       playImportSound({ failed: true, summary: String(error?.message || "") });
     }
   } finally {
-    importBusy = false;
-    importPaused = false;
-    updateImportSelection();
+    settleImportView(keepRunningView);
   }
 }
 

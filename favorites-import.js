@@ -58,14 +58,15 @@
       if (message.limit) payload.limit = message.limit;
       // P1-7：继续上次导入时把断点原样带下去（收藏夹名 + 页号）
       if (message.resume && typeof message.resume === "object") payload.resume = message.resume;
+      /* 1.16.8：这条路不许有 15 秒兜底。导入本来就要跑几分钟，超时会让弹窗以为这一轮
+         已经结束了，于是把「导入中」的视图切回选收藏夹（真机反馈「界面突然跳回去了」）。
+         真的断线由后台写 importDone / importState 落地，弹窗那边另有 importStillRunning() 接着。 */
       let answered = false;
       const answer = (payload) => {
         if (answered) return;
         answered = true;
-        clearTimeout(timer);
         try { sendResponse(payload); } catch (_) {}
       };
-      const timer = setTimeout(() => answer({ ok: false, message: "后台没有回应（超过 15 秒）。请重新加载 B 站页面或重启浏览器再试一次。" }), FAVORITES_MESSAGE_TIMEOUT_MS);
       chrome.runtime.sendMessage(payload, (response) => {
         const error = chrome.runtime.lastError;
         answer(error ? { ok: false, message: error.message } : response || { ok: false, message: "导入失败。" });
