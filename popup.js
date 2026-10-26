@@ -1068,7 +1068,7 @@ clearImportFoldersButton.addEventListener("click", () => {
 
 chrome.runtime.onMessage.addListener((message, sender) => {
   // 1.8.22（old-p3 security P3-3）：只接受本扩展自己发来的消息。
-  if (sender && sender.id && sender.id !== chrome.runtime.id) return;
+  if (!sender || sender.id !== chrome.runtime.id) return;
   if (message?.type === "bca-diff-progress") { importProgressText.textContent = message.text || ""; return; }
   if (message?.type !== "bca-import-progress") return;
   importProgressText.textContent = message.text ? BcaI18n.t(message.text) : BcaI18n.t("正在导入…");

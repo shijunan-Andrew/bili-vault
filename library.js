@@ -3197,6 +3197,20 @@ function relativeTime(value) {
 function addField(rows, label, value, extra = "") { if (value && value !== "未知") rows.push(`<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}${extra}</dd>`); }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
 
+/* 审查 S-4（1.15.5）：归档里的 URL 最终会被塞进 href。escapeHtml 挡得住属性闭合，
+   挡不住 `javascript:` 前缀（txt 被手工改过就会走到）。所以只放行 http/https，
+   其余一律当成「没有链接」——调用方据此降级成纯文本，而不是渲染一个能点的出口。 */
+function safeVideoHref(url) {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  try {
+    const protocol = new URL(text).protocol;
+    return protocol === "https:" || protocol === "http:" ? text : "";
+  } catch (error) {
+    return "";
+  }
+}
+
 // 带 data-i18n 的静态文案元素一旦被 JS 写上动态内容（目录名、按当时语言拼好的句子），
 // 必须先摘掉标记：否则切语言时 apply() 会把它们覆盖回占位文案。
 function setDynamicText(element, text) {
@@ -3527,7 +3541,7 @@ function openDetail(video, restoreTo, options = {}) {
   // 「在 B 站打开视频」同规矩：普通链接跳转，不需要任何额外权限。
   const detailHref = video.isInvalid
     ? `https://www.bing.com/search?q=${encodeURIComponent(video.title || "")}`
-    : (video.url || "");
+    : safeVideoHref(video.url);
   const detailHrefLabel = escapeHtml(video.isInvalid ? BcaI18n.t("全网搜索该视频") : BcaI18n.t("在 B 站打开视频"));
   const coverHtml = detailHref
     ? `<a class="detail-cover detail-cover-link" href="${escapeHtml(detailHref)}" target="_blank" rel="noopener noreferrer" title="${detailHrefLabel}">${safeCover(video.cover)}</a>`
@@ -3584,7 +3598,12 @@ function openDetail(video, restoreTo, options = {}) {
   }
 
   const link = detailContent.querySelector(".open-video");
-  if (link) link.href = video.url;
+  if (link) {
+    // 审查 S-4：同样的白名单。放行的才给 href，不放行的连按钮一起藏掉（不给空链接）。
+    const safeUrl = safeVideoHref(video.url);
+    if (safeUrl) link.href = safeUrl;
+    else link.hidden = true;
+  }
   // 4.8：失效视频在 B 站已经没有可看的页面，给一个站外搜索的出口
   const searchInvalidLink = detailContent.querySelector(".search-invalid");
   if (searchInvalidLink) {
@@ -3793,7 +3812,7 @@ function askToDeleteVideo(video) {
   openConfirmBackdrop();
 }
 
-/* 1.8.21（P1-2）：删除收藏夹 = 一次递归 removeEntry，不进回收站。旧确认框只报
+/* 1.8.21（P1-2）：删除收藏夹要走可恢复的路径（1.8.23 起先移进 005回收站，见 confirmPendingDelete）。旧确认框只报
    collection.videos.length（本插件认得的记录数），可目录里还可能有上次导入的半截目录、
    你自己放进去的文件 —— 它们同样会被删掉，却被说成「无法识别的文件」一笔带过。
    这里删之前真的数一遍：几个是记录目录、几个不是；只要有不认识的，就必须先勾确认。 */
@@ -6056,7 +6075,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   // 1.8.22（old-p3 security P3-3）：只接受本扩展自己发来的消息。
   // 其他扩展 / 网页页面摸不到 chrome.runtime.onMessage，但多一道 sender 判据，
   // 将来这条消息通道被复用时不会变成「谁都能催页面干活」。
-  if (sender && sender.id && sender.id !== chrome.runtime.id) return;
+  if (!sender || sender.id !== chrome.runtime.id) return;
   if (message?.type !== "bca-status-progress") return;
   if (!statusRefreshInProgress) return;
   // 有进度就说明后台还活着：把看门狗往后推，正常的长任务不会被误判成卡死

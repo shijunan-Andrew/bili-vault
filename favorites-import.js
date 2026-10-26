@@ -13,7 +13,7 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 1.8.22（old-p3 security P3-3）：只接受本扩展自己发来的消息。
-    if (sender && sender.id && sender.id !== chrome.runtime.id) return;
+    if (!sender || sender.id !== chrome.runtime.id) return;
     if (message?.type === "bca-page-api-get") {
       let url;
       try { url = new URL(message.url); }

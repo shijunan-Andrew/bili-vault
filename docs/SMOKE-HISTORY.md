@@ -6,6 +6,12 @@
 
 ---
 
+## V1.15.4 新增的几条
+- [ ] `node test/pages.test.cjs` 110 项全绿；`node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/stats-core.test.cjs` 69 项也全绿。
+- [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。
+- [ ] 真机：回收站里留两条 → 点「清空回收站」→ 先点「取消」，两条必须还在 → 再点一次、点「确定」→ 状态行写「已清空回收站，彻底删掉 2 项。」且列表回到空态。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
 ## V1.15.3 新增的几条
 - [ ] `node test/archive-core.test.cjs` 101 项、`node test/background.test.cjs` 46 项、`node test/pages.test.cjs` 107 项，三套都全绿。
 - [ ] `node test/stability.test.cjs` 424 项全绿，最后一条棘轮里写着上限 309。

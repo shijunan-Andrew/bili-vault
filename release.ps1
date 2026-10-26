@@ -8,7 +8,7 @@
   它按顺序做这些事：
     1. 检查工作区是否干净
     2. 检查代理（Clash 没开就提醒你去开，然后退出，不动任何东西）
-    3. 改 3 处版本号（manifest.json / 测试断言 / library.html）
+    3. 只改 manifest.json 这一处版本号（测试只验格式，界面从 manifest 现读）
     4. 跑全部检查（scripts/check-all.cjs，与 GitHub Actions 是同一套）
     5. 任何一步不过，自动回滚版本号改动并退出
     6. 提交 → 打 tag（V<版本>）→ 推送

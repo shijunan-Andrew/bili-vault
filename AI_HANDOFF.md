@@ -74,9 +74,9 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 项 | 值 |
 |---|---|
 | 词典 | 1130 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
-| 测试基线 | stability 424 · archive-core 101 · stats-core 69 · background 46 · pages 110（后四套是真执行） |
+| 测试基线 | stability 424 · archive-core 101 · stats-core 69 · background 46 · pages 111（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-26 20:27，当时 HEAD `94b6da1`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-26 20:49，当时 HEAD `3480ada`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -636,7 +636,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 3. **不得新增写操作**：全项目只有 GET。任何 POST/PUT/DELETE 都可能改变用户线上账号状态，属于必须避免的类别。
 4. **不得新增第三方域名**：出网只能到 `api.bilibili.com` 与 `*.hdslb.com`（图片 CDN）。**1.3.0 已把 `*.bilivideo.com` / `*.bilivideo.cn` / `*.akamaized.net` 这三条视频流域名权限从 manifest 里删掉，公开版本不得加回来** —— 那是「插件有没有取流能力」在代码层面唯一的硬证据。不要引入任何统计、遥测、CDN 或"更新检查"。
 5. **不得引入远程代码或 npm 依赖**：无 `eval`、无 `new Function`、无动态插标签；MV3 默认严格 CSP。
-6. **扩展页不得对网页开放**：不要重新添加 `web_accessible_resources`；需要从内容脚本打开扩展页时，走 `bca-open-library` 让后台 `chrome.tabs.create`。`library.js` 顶部的 `window.top !== window.self` 防嵌套检查必须保留，且早于任何目录读取。
+6. **扩展页不得对网页开放**：不要重新添加 `web_accessible_resources`；需要从内容脚本打开扩展页时，走 `bca-open-library` 让后台 `chrome.tabs.create`。`library.js` 顶部的 `window.top !== window.self` 防嵌套检查必须保留，且早于任何目录读取。四个 `chrome.runtime.onMessage` 入口一律用严格判据（`!sender || sender.id !== chrome.runtime.id` 就 return），不许再写成「`sender.id` 为空就放行」；归档里的链接进 `href` 之前必须过 `library.js` 的 `safeVideoHref()`（只放行 http/https）。
 7. **错误报告必须带提示行**：`ERROR_REPORT_NOTICE` 常量与 `persistErrorReport()` 的兜底拼接不要删，报告里含本地路径与视频链接。
 8. **不得绕过出网限速**：所有 B 站接口调用必须走 `biliImportApiGet()`，那里有全局最小间隔（`BILI_MIN_REQUEST_INTERVAL_MS`）。**不要在别处写裸 `fetch` 打 B 站接口，也不要把间隔调小。** README「使用须知」第一条就是“请勿滥用：插件会代替你请求 B 站接口，请求过密可能触发风控，导致 IP 或账号被临时限制”—— 这不只是给用户看的提示，是**开发时必须遵守的约束**。
 
@@ -660,7 +660,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 
 | 操作 | 实现在哪 | 风险与规矩 |
 |---|---|---|
-| 删除本地归档（单条 / 批量 / 整个收藏夹） | `library.js` 的 `askToDeleteVideo` / `askToDeleteBatch` / `askToDeleteCollection` | `removeEntry(..., { recursive: true })`，**不进回收站**；目录里无法识别的文件、用户自己放进去的东西也会一起删。删前必须二次确认并把目录名念出来 |
+| 删除本地归档（单条 / 批量 / 整个收藏夹） | `library.js` 的 `askToDeleteVideo` / `askToDeleteBatch` / `askToDeleteCollection` | `recycleCollection()` 先把整个收藏夹移进 `005回收站/<时间戳>/`（1.8.23 起，可恢复），只有 `000视频下载` 那部分仍走 `removeEntry(..., { recursive: true })`；目录里无法识别的文件、用户自己放进去的东西也会一起移走/删掉。删前必须二次确认并把目录名念出来 |
 | 清理 `000视频下载` 里的下载目录 | `library.js` 的下载清理链路 | 只删「能对上 BV / av 号」的那些；状态未知时**不许当成「没有」**，要如实报出来 |
 | 移动 / 搬运本地归档 | `library.js` 的 `confirmCollectionAction` / `copyVideoRecord` | 先复制 → 逐文件比字节 → 才删源。**任何一步失败都不许删源** |
 | 覆盖写 `视频信息.txt` | `background.js` 的 `writeFile` | 目标文件不存在就就地写（1.8.2：换名覆盖在 Chrome 155 上要 7 秒，只有覆盖已有文件才值得）；覆盖已有文件才先写临时文件再改名，改名失败退回就地写；**写失败不许删记录**，有内容就留、空的才删 |

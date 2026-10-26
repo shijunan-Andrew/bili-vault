@@ -121,8 +121,10 @@ Chrome 不允许扩展页面直接启动 Windows 文件资源管理器。若要�
 安装后可以先做一次不依赖 Chrome 的自检（不会打开资源管理器）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -CollectionName "收藏夹名称" -DirectoryName "视频目录名称"
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -CollectionName "收藏夹名称" -DirectoryName "视频目录名称"
 ```
+
+> `pack.ps1` 用系统自带的 PowerShell 5.1 也能跑；`release.ps1` 与上面这条自检要用 PowerShell 7（`pwsh`）—— 5.1 在受限环境里拿不到子进程输出，会让检查步骤看着像失败了。
 
 如果本地目录打开助手不可用，“打开本地视频目录”会在视频详情里保留完整错误原因，并提供“复制视频目录路径”：助手可用时复制完整绝对路径，不可用时复制“收藏夹\视频目录”相对路径，可手动粘贴到资源管理器。
 
@@ -139,10 +141,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.15.4：回收站「清空」这条最狠的删除，终于有测试点着了
+## V1.15.5：链接与消息的判据收紧，文档不再跟代码打架
 
-- **「清空回收站」补了三条真执行用例**（审查 T-3）：点下去必须先弹一次不可逆确认（文案要写清「不会进系统回收站」和还剩几项）；点「取消」什么都不许删；点「确定」才真的调 `purgeRecycler`，清完状态行报「已清空回收站，彻底删掉 N 项。」；删到一半删不动时要同时说清「删了几项、几项没删掉、为什么」。这条路径是整个项目里唯一一次把 `005回收站` 递归删掉的入口，之前只有「有东西时按钮不该禁用」「按钮要待在底部危险区」两条**不点它**的断言。
-- **测试**：`pages` 107 → 110，其余四套不动（`stability` 424，棘轮上限仍是 309）。
+- **详情页链接只放行 `http` / `https`**（审查 S-4）：归档里的 URL 最终会进 `href`，`escapeHtml` 只挡得住属性闭合、挡不住 `javascript:` 前缀。现在统一过 `safeVideoHref()`，白名单之外的地址降级成纯文本，连「在 B 站打开」按钮都不渲染。
+- **三个页面脚本的消息入口统一成严格判据**（审查 S-7）：`favorites-import.js` / `library.js` / `popup.js` 原来写的是「`sender.id` 为空就放行」，现在一律「不是自己人就不接」。
+- **文档与代码对齐**（审查 S-8 / D-5 / D-6 / D-7 / D-8）：原生宿主协议号在 `ARCHITECTURE.md` 里三处从 3 改成 4；`AI_HANDOFF` 的不可逆操作表改成「先移进 005回收站」；`library.js` 那段 1.8.21 注释写清了 1.8.23 的变化；README 不再说「拒绝 iframe 嵌套」（实际是「不在顶层就直接不工作」）、自检命令改用 `pwsh`；冒烟清单不再说「三张图都能点」；`release.ps1` 文件头不再说「改 3 处版本号」。
+- **测试**：`pages` 110 → 111（新增 `safeVideoHref` 的真执行用例），其余四套不动（`stability` 424，棘轮上限仍是 309）。
 
 **遗留** - `stability` 里剩下的 309 条文本断言按批继续往下压。
 
@@ -210,7 +214,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.
 - **从不修改 B 站服务端状态**：全部请求都是 GET，没有 POST/PUT/DELETE，不可能误删你的线上收藏或代替你发言。
 - **只连三类域名、无遥测**：`api.bilibili.com`（收藏夹与视频资料）、`*.hdslb.com`（封面图 CDN）；另有两个**只在点「检查更新」时**才各请求一次的地址 —— `raw.githubusercontent.com` 与 `cdn.jsdelivr.net`，读的是仓库根那个 `version.json`，详见 `docs/PRIVACY.md`。**1.3.0 起 `*.bilivideo.com`、`*.bilivideo.cn`、`*.akamaized.net` 这三条视频流域名权限已从 `manifest.json` 中删除** —— 这是「插件已经没有取流能力」在代码层面最直接的证据。
 - **无远程代码**：没有 `eval`、没有动态加载脚本、MV3 默认严格 CSP，也没有任何 npm 依赖。
-- **扩展页不对任何网页开放**：`library.html` 不作为 web_accessible resource 暴露，并额外拒绝被 iframe 嵌套。
+- **扩展页不对任何网页开放**：`library.html` 不作为 web_accessible resource 暴露；`library.js` 顶部用 `window.top !== window.self` 保证自己不在顶层时直接不工作（不是拦截请求，是干脆不干活）。
 - **错误报告含本地路径**，文件里已加提示，请勿公开分享。
 
 ## 说明

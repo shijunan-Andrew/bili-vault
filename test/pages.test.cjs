@@ -2835,13 +2835,25 @@ async function suiteLibraryHelpers() {
     names.map((name) => harness.carveFunction(source, name)),
     { BcaI18n: i18n, BcaArchiveCore: core }
   );
-  const lib = pick(["escapeHtml", "safeCover", "highlightMatches", "formatCount", "statDisplay", "addField"]);
+  const lib = pick(["escapeHtml", "safeCover", "safeVideoHref", "highlightMatches", "formatCount", "statDisplay", "addField"]);
   const clock = pick(["compactDate", "startOfDay", "relativeDayLabel", "relativeTime"]);
 
   await test("library.js 的 escapeHtml 转义五个特殊字符（1.15.2 · T-1）", () => {
     assert.equal(lib.escapeHtml("<img src=\"x\" onerror='y'>&"), "&lt;img src=&quot;x&quot; onerror=&#39;y&#39;&gt;&amp;");
     assert.equal(lib.escapeHtml(1234), "1234", "非字符串要先 String() 一遍");
     assert.equal(lib.escapeHtml("中文 🎉 原样"), "中文 🎉 原样", "不需要转义的字符一个都不许动");
+  });
+
+  await test("safeVideoHref 只放行 http/https，别的一律当没有链接（1.15.5 · S-4）", () => {
+    assert.equal(lib.safeVideoHref("https://www.bilibili.com/video/BV1xx411c7mD"), "https://www.bilibili.com/video/BV1xx411c7mD");
+    assert.equal(lib.safeVideoHref("http://www.bilibili.com/video/BV1xx411c7mD"), "http://www.bilibili.com/video/BV1xx411c7mD", "http 也放行（老归档里有）");
+    assert.equal(lib.safeVideoHref("  https://www.bilibili.com/video/BV1  "), "https://www.bilibili.com/video/BV1", "前后空白要去掉");
+    for (const bad of ["javascript:alert(1)", " JavaScript:alert(1)", "data:text/html,<b>x</b>", "blob:x", "//evil.example/a", "vbscript:msgbox", "file:///C:/x"]) {
+      assert.equal(lib.safeVideoHref(bad), "", bad + " 不许当链接");
+    }
+    assert.equal(lib.safeVideoHref(""), "", "空串");
+    assert.equal(lib.safeVideoHref(null), "", "null");
+    assert.equal(lib.safeVideoHref(undefined), "", "undefined");
   });
 
   await test("safeCover 只放行 blob: 与 data:image/（1.15.2 · T-1）", () => {

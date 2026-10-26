@@ -1612,7 +1612,7 @@ test("detail cover and title link out, and fall back to a Bing search for invali
   // 出口只有两个：失效视频 → Bing 搜标题；其余 → 归档里记的 B 站链接
   assert.match(library, /const detailHref = video\.isInvalid/);
   assert.match(library, /https:\/\/www\.bing\.com\/search\?q=\$\{encodeURIComponent\(video\.title \|\| ""\)\}/);
-  assert.match(library, /: \(video\.url \|\| ""\);/);
+  assert.match(library, /: safeVideoHref\(video\.url\);/, "1.15.5（S-4）：链接要过 http/https 白名单");
 
   // 有链接才包 a；没有链接必须退回原来的 div —— href="" 会把扩展页自己导航走
   assert.match(library, /<a class="detail-cover detail-cover-link" href="\$\{escapeHtml\(detailHref\)\}"/);
@@ -8736,7 +8736,7 @@ test("1.12.4：收藏夹页桥有真执行用例盯着（审查 P2-6）", () => 
   const bridge = readProjectFile("favorites-import.js");
   assert.match(pages, /async function suiteFavoritesImport\(\) \{/);
   assert.match(pages, /await suiteFavoritesImport\(\);/, "写了用例还要真的跑");
-  assert.match(bridge, /if \(sender && sender\.id && sender\.id !== chrome\.runtime\.id\) return;/, "外来消息必须挡掉");
+  assert.match(bridge, /if \(!sender \|\| sender\.id !== chrome\.runtime\.id\) return;/, "外来消息必须挡掉（1.15.5 起 sender.id 为空也不信）");
   for (const type of ["bca-page-api-get", "bca-list-import-folders", "bca-import-selected-folders"]) {
     assert.ok(bridge.includes(`message?.type === "${type}"`), `三条消息分支都要在：${type}`);
   }
@@ -9039,6 +9039,14 @@ test("后台的消息入口先验 sender（1.14.1 · 审查 S-2）", () => {
     /chrome\.runtime\.onMessage\.addListener\(\(message, sender, sendResponse\) => \{\r?\n(?:\s*\/\/[^\r\n]*\r?\n){2}\s*if \(!BcaArchiveCore\.isTrustedMessageSender\(sender, chrome\.runtime\.id\)\) return;/,
     "能力最大的这条监听线必须先验 sender");
   assert.ok(background.includes("function isTrustedMessageSender") === false, "判据只有 archive-core 一份");
+  // 1.15.5（审查 S-7）：三个页面脚本的 onMessage 也曾经是「sender.id 为空就放行」。
+  for (const file of ["favorites-import.js", "library.js", "popup.js"]) {
+    const source = readProjectFile(file);
+    assert.ok(source.includes("if (!sender || sender.id !== chrome.runtime.id) return;"),
+      file + " 的消息入口也要严格判 sender（sender.id 为空一律不信）");
+    assert.equal(source.includes("sender && sender.id &&"), false,
+      file + " 不许再用「sender.id 为空就放行」的写法");
+  }
 });
 
 // ---- V1.13.5（审查 P1-6）：对比残影要有复位入口 ----
