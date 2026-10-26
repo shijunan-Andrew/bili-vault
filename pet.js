@@ -910,6 +910,7 @@
     }
     phase = "sleep";
     setState("sleep");
+    playSound("purring", { loop: true });
     // row4 由 pet.css 的 [data-bca-state="sleep"] 那条规则负责，坐姿类必须摘掉。
     setHolding(false);
     after(randInt(SLEEP_MIN, SLEEP_MAX), () => standUp(false));
@@ -920,6 +921,8 @@
   // eager 会一路传进待机窗口：被叫醒时要把那一下眨眼尽快补上。
   function standUp(eager) {
     if (!stateReady()) return;
+    // 醒来（或被叫醒）就把呼噜停掉 —— 睡着时才循环播放。
+    stopSound("purring");
     phase = "standUp";
     setState("sit");
     setPose(false);
@@ -1062,9 +1065,27 @@
     } catch (_) {}
   }
 
+  // 1.16.0：宠物音效。音量/开关在 sound.js，「睡醒要停呼噜」也由这里负责。
+  function playSound(name, options) {
+    try {
+      globalThis.BcaSound?.play(name, options);
+    } catch (error) {
+      console.warn("音效没播出来（不影响宠物）", error);
+    }
+  }
+
+  function stopSound(name) {
+    try {
+      globalThis.BcaSound?.stop(name);
+    } catch (error) {
+      console.warn("音效没停下来（不影响宠物）", error);
+    }
+  }
+
   function onPetClick(event) {
     event.stopPropagation(); // 否则会被下面那条「点空白处收起」当场关掉
     pop();
+    playSound("meow");
 
     // 用户第 3 条：点在正在睡觉的猫身上 = 唤醒它。站起来（播一次 .is-sit-up 的
     // 「弹一下」，360ms）之后马上眨一下眼，再回到正常循环。不应期在 onPointerDown 里就已经设好了

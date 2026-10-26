@@ -1886,4 +1886,148 @@ async function boot() {
   });
 }
 
+/* 1.16.0：音量控制。这里只做「读出来 → 画控件 → 改了就写回去」，
+   「总音量 × 单项音量」的算法只有 sound.js 的 effectiveSoundVolume() 一份。 */
+(function initSoundSettings() {
+  const sound = globalThis.BcaSound;
+  if (!sound || typeof document === "undefined") return;
+
+  const EFFECTS = ["bubblepop", "notification", "meow", "purring", "error"];
+  const SUFFIX = { bubblepop: "Bubblepop", notification: "Notification", meow: "Meow", purring: "Purring", error: "Error" };
+  const PREVIEW = { bubblepop: "bubblepop", notification: "notification", meow: "meow", purring: "purring", error: "error" };
+
+  function $(id) { return document.getElementById(id); }
+
+  function showSoundStatus(text, isError) {
+    const node = $("soundStatus");
+    if (!node) return;
+    node.textContent = text;
+    node.classList.toggle("error", Boolean(isError));
+    node.hidden = !text;
+  }
+
+  function renderSoundSettings(settings) {
+    const toggle = $("soundToggle");
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", String(settings.enabled));
+      toggle.classList.toggle("off", !settings.enabled);
+    }
+    const master = $("soundVolume");
+    const masterValue = $("soundVolumeValue");
+    const percent = Math.round(settings.volume * 100);
+    if (master) {
+      master.value = String(percent);
+      master.disabled = !settings.enabled;
+    }
+    if (masterValue) masterValue.textContent = percent + "%";
+    for (const key of EFFECTS) {
+      const item = settings.effects[key];
+      const suffix = SUFFIX[key];
+      const button = $("sound" + suffix + "Toggle");
+      if (button) {
+        button.setAttribute("aria-pressed", String(item.enabled));
+        button.classList.toggle("off", !item.enabled || !settings.enabled);
+        button.disabled = !settings.enabled;
+      }
+      const input = $("sound" + suffix + "Volume");
+      const output = $("sound" + suffix + "Value");
+      const value = Math.round(item.volume * 100);
+      if (input) {
+        input.value = String(value);
+        input.disabled = !settings.enabled || !item.enabled;
+      }
+      if (output) output.textContent = value + "%";
+    }
+  }
+
+  let currentSound = sound.defaultSettings();
+
+  function readFromControls() {
+    const next = JSON.parse(JSON.stringify(currentSound));
+    const toggle = $("soundToggle");
+    if (toggle) next.enabled = toggle.getAttribute("aria-pressed") === "true";
+    const master = $("soundVolume");
+    if (master && master.value !== "") next.volume = Number(master.value) / 100;
+    for (const key of EFFECTS) {
+      const suffix = SUFFIX[key];
+      const button = $("sound" + suffix + "Toggle");
+      if (button) next.effects[key].enabled = button.getAttribute("aria-pressed") === "true";
+      const input = $("sound" + suffix + "Volume");
+      if (input && input.value !== "") next.effects[key].volume = Number(input.value) / 100;
+    }
+    return currentSound = sound.normalizeSoundSettings(next);
+  }
+
+  let writeTimer = 0;
+  function persist(previewName) {
+    const patch = { [sound.STORAGE_KEY]: readFromControls() };
+    renderSoundSettings(currentSound);
+    clearTimeout(writeTimer);
+    writeTimer = setTimeout(() => {
+      writeStoredSettings(patch)
+        .then(() => {
+          showSoundStatus("");
+          return sound.reload();
+        })
+        .then(() => {
+          if (previewName) sound.play(previewName);
+        })
+        .catch((error) => {
+          console.warn("音效设置没写进去（这一次的改动不会生效）", error);
+          showSoundStatus(BcaI18n.t("音效设置没能保存，请再试一次。"), true);
+        });
+    }, 120);
+  }
+
+  function bindToggle(id, previewName) {
+    const button = $(id);
+    if (!button) return;
+    button.addEventListener("click", () => {
+      const next = button.getAttribute("aria-pressed") !== "true";
+      button.setAttribute("aria-pressed", String(next));
+      persist(next ? previewName : "");
+    });
+  }
+
+  function bindVolume(inputId, outputId, previewName) {
+    const input = $(inputId);
+    const output = $(outputId);
+    if (!input) return;
+    input.addEventListener("input", () => {
+      if (output) output.textContent = Math.round(Number(input.value || 0)) + "%";
+    });
+    input.addEventListener("change", () => {
+      const value = Math.round(Number(input.value || 0)) / 100;
+      persist(value > 0 ? previewName : "");
+    });
+  }
+
+  function bind() {
+    bindToggle("soundToggle", "");
+    bindVolume("soundVolume", "soundVolumeValue", "bubblepop");
+    for (const key of EFFECTS) {
+      const suffix = SUFFIX[key];
+      bindToggle("sound" + suffix + "Toggle", PREVIEW[key]);
+      bindVolume("sound" + suffix + "Volume", "sound" + suffix + "Value", PREVIEW[key]);
+    }
+  }
+
+  Promise.resolve(readStoredSettings([sound.STORAGE_KEY]))
+    .then((stored) => {
+      currentSound = sound.normalizeSoundSettings(stored[sound.STORAGE_KEY]);
+      renderSoundSettings(currentSound);
+      bind();
+    })
+    .catch(() => {
+      renderSoundSettings(currentSound);
+      bind();
+    });
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[sound.STORAGE_KEY]) return;
+    currentSound = sound.normalizeSoundSettings(changes[sound.STORAGE_KEY].newValue);
+    renderSoundSettings(currentSound);
+  });
+})();
+
 boot().catch(() => {});

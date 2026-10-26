@@ -137,7 +137,7 @@ async function suiteLibrary() {
 
   await test("library.html 整页真加载：七个脚本都跑了，侧栏版本号来自 manifest", async () => {
     const page = await openLibrary();
-    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "archive-core.js", "archive-tools.js", "stats-core.js", "library.js", "pet.js"]);
+    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "sound.js", "archive-core.js", "archive-tools.js", "stats-core.js", "library.js", "pet.js"]);
     assert.equal(page.document.getElementById("sideVersion").textContent, "V1.7.23");
     assert.equal(page.warnings.length, 0, `加载期不该有 warning：${page.warnings.join(" | ")}`);
   });
@@ -923,7 +923,7 @@ async function suitePopup() {
     const chrome = makeChrome({ version: "1.7.23", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
     await settle();
-    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "archive-core.js", "popup.js"]);
+    assert.deepEqual(page.ran, ["theme.js", "i18n.js", "client-errors.js", "icons.js", "sound.js", "archive-core.js", "popup.js"]);
     assert.equal(page.warnings.length, 0, `加载期不该有 warning：${page.warnings.join(" | ")}`);
     assert.ok(page.document.getElementById("lastError"));
     assert.equal(page.document.getElementById("lastError").getAttribute("role"), "alert");
@@ -1320,7 +1320,7 @@ async function suiteSettings() {
     const page = await openSettings();
     const doc = page.document;
     const cards = [...doc.querySelectorAll(".settings-main .settings-card[data-group]")];
-    assert.equal(cards.length, 10, "十张卡");
+    assert.equal(cards.length, 10, "十张卡（1.16.0 的音量控制不挂 data-group，不算导航分组）");
     for (const card of cards) {
       const title = card.querySelector("h2");
       assert.ok(title, `${card.id} 要有标题`);
@@ -3129,11 +3129,95 @@ async function suiteStatsFingerprint() {
   });
 }
 
+/* ---------------- 1.16.0：音效设置 ---------------- */
+async function suiteSoundSettings() {
+  await test("设置页按存下来的音量画出滑块与开关，总开关关掉时单项置灰（1.16.0）", async () => {
+    const page = await openSettings({
+      localData: {
+        soundSettings: {
+          enabled: false,
+          volume: 0.8,
+          effects: {
+            bubblepop: { enabled: false, volume: 0.25 },
+            notification: { enabled: true, volume: 0.5 },
+            meow: { enabled: true, volume: 0.5 },
+            purring: { enabled: true, volume: 0.5 },
+            error: { enabled: true, volume: 0.5 }
+          }
+        }
+      }
+    });
+    const doc = page.document;
+    const toggle = doc.getElementById("soundToggle");
+    const master = doc.getElementById("soundVolume");
+    const masterValue = doc.getElementById("soundVolumeValue");
+    assert.ok(toggle && master && masterValue, "音量控制的三个总控件都应该在");
+    assert.equal(toggle.getAttribute("aria-pressed"), "false");
+    assert.ok(toggle.classList.contains("off"), "总开关关掉时按钮要有 off 态");
+    assert.equal(master.value, "80");
+    assert.equal(masterValue.textContent, "80%");
+    assert.ok(master.disabled, "总开关关掉时总音量滑块要置灰");
+    assert.equal(doc.getElementById("soundBubblepopToggle").getAttribute("aria-pressed"), "false");
+    assert.equal(doc.getElementById("soundBubblepopVolume").value, "25");
+    assert.equal(doc.getElementById("soundBubblepopValue").textContent, "25%");
+    assert.ok(doc.getElementById("soundBubblepopVolume").disabled, "总开关关掉时单项滑块也置灰");
+    assert.equal(doc.getElementById("soundMeowToggle").getAttribute("aria-pressed"), "true", "没关掉的项保持开着");
+  });
+
+  await test("点开关、拖滑块会把整份设置写回 storage（1.16.0）", async () => {
+    const page = await openSettings({ localData: {} });
+    const doc = page.document;
+    const toggle = doc.getElementById("soundToggle");
+    assert.equal(toggle.getAttribute("aria-pressed"), "true", "默认是开着的");
+    dom.fireUserEvent(toggle, "click");
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    let stored = (await page.__chrome.storage.local.get("soundSettings")).soundSettings;
+    assert.equal(stored.enabled, false, "点一下总开关要写进 storage");
+
+    const slider = doc.getElementById("soundMeowVolume");
+    slider.value = "30";
+    dom.fireUserEvent(slider, "input");
+    assert.equal(doc.getElementById("soundMeowValue").textContent, "30%", "拖动时先就地更新数字");
+    dom.fireUserEvent(slider, "change");
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    stored = (await page.__chrome.storage.local.get("soundSettings")).soundSettings;
+    assert.equal(stored.effects.meow.volume, 0.3, "松手之后才写回 storage");
+    assert.equal(stored.volume, 0.5, "总音量没动就保持 50%");
+  });
+
+  await test("音量算法只有一处：总音量 × 单项音量，任何一项关掉就是 0（1.16.0）", async () => {
+    const page = await openSettings({ localData: {} });
+    const sound = page.window.BcaSound;
+    assert.ok(sound, "sound.js 应该挂在 window 上");
+    const settings = { enabled: true, volume: 0.5, effects: { bubblepop: { enabled: true, volume: 0.4 } } };
+    assert.equal(sound.effectiveSoundVolume(settings, "bubblepop"), 0.2);
+    assert.equal(sound.effectiveSoundVolume({ ...settings, enabled: false }, "bubblepop"), 0);
+    assert.equal(
+      sound.effectiveSoundVolume({ ...settings, effects: { bubblepop: { enabled: false, volume: 0.4 } } }, "bubblepop"),
+      0
+    );
+    assert.equal(sound.effectiveSoundVolume(settings, "不存在的音效"), 0);
+
+    const normalized = sound.normalizeSoundSettings({ volume: 3, effects: { meow: { volume: -1 } } });
+    assert.equal(normalized.volume, 1, "超过 1 的音量要夹回去");
+    assert.equal(normalized.effects.meow.volume, 0, "负数要夹到 0");
+    assert.equal(normalized.enabled, true);
+    assert.equal(normalized.effects.bubblepop.volume, 0.5, "没写的项补默认 50%");
+    assert.equal(normalized.effects.error.enabled, true);
+
+    assert.equal(sound.importFailed({ summary: "导入已取消。" }), true, "取消算失败");
+    assert.equal(sound.importFailed({ failed: true }), true);
+    assert.equal(sound.importFailed({ summary: "导入完成，共 12 条。" }), false);
+    assert.equal(sound.importFailed(null), false);
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
   await suiteContent();
   await suiteSettings();
+  await suiteSoundSettings();
   await suiteFavoritesImport();
   await suiteRecycle();
   await suiteStats();

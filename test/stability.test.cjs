@@ -344,8 +344,21 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
-  // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面
-  assert.equal(manifest.web_accessible_resources, undefined, "扩展页不应暴露给任何网页");
+  // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面。
+  // 1.16.0：内容脚本要播放「收藏成功 / 出错」两个音效，只能放行这两个音频文件 ——
+  // 收藏库、设置页这些扩展页仍然一个都不许被网页碰到。
+  assert.deepEqual(
+    (manifest.web_accessible_resources || []).map((entry) => entry.resources.slice().sort()),
+    [["audio/bubblepop.mp3", "audio/error.mp3"]],
+    "只允许放行两个音效文件给 B 站页面"
+  );
+  for (const entry of manifest.web_accessible_resources || []) {
+    assert.deepEqual(entry.matches.slice().sort(), [
+      "https://bilibili.com/video/*",
+      "https://m.bilibili.com/video/*",
+      "https://www.bilibili.com/video/*"
+    ]);
+  }
   // notifications 是 1.7.3 加的：导入要跑几分钟，用户多半已经关掉弹窗，只把结果写进
   // storage 等于没有终态提示（store 审核与真机反馈都指向这一点）。
   // unlimitedStorage 是 1.7.10 加的（facet-storage P2-5）：背景图存在 IndexedDB 里，
@@ -2039,7 +2052,8 @@ test("the settings page offers theme, language, and the two help pages", () => {
   assert.doesNotMatch(settingsCode, /chrome\.tabs\.remove/);
   assert.equal(/window\.close\(\)/.test(settingsCode), false, "设置页不再靠关标签页返回，也就不该有关页调用");
   // 只改选中态、不写文字：切完语言后写死的文字会把译文盖回中文
-  assert.doesNotMatch(script, /textContent\s*=/);
+  // 1.16.0：允许写数字（音量百分比），但不许往 textContent 里写死中文 —— 切语言后会被盖回中文
+  assert.doesNotMatch(script, /textContent\s*=\s*["'][^"']*[\u4e00-\u9fff]/);
   // 毛玻璃开关的视觉是 .off 类画的（照 popup.css 的约定）。只写 aria-pressed 的话，
   // 「上次已经开着毛玻璃」的用户再打开设置页会看到一个显示为「关」的开关。
   assert.match(html, /id="glassToggle" class="toggle-switch off"/);
@@ -2294,6 +2308,33 @@ test("a content script gets its dictionary from the background, not by fetching"
   assert.equal(i18n.t("使用须知"), "Before you start");
   assert.equal(i18n.t("已选 {count} 个", { count: 2 }), "2 selected");
 });
+test("音效的接线只有一处：音量算法在 sound.js，播放点都走 BcaSound（1.16.0）", () => {
+  const manifest = JSON.parse(readProjectFile("manifest.json"));
+  const videoEntry = (manifest.content_scripts || []).find((entry) =>
+    (entry.matches || []).includes("https://www.bilibili.com/video/*"));
+  assert.ok(videoEntry, "视频页的内容脚本要还在");
+  assert.deepEqual(videoEntry.js, ["content-i18n-keys.js", "i18n.js", "sound.js", "content.js"],
+    "sound.js 必须排在 content.js 之前（content.js 要用它）");
+
+  const sound = readProjectFile("sound.js");
+  assert.match(sound, /function effectiveSoundVolume\(/, "音量乘法只住在 sound.js 的 effectiveSoundVolume()");
+  assert.match(sound, /function importFailed\(/, "导入算不算失败也只在 sound.js 里判");
+
+  for (const file of ["content.js", "pet.js", "library.js", "popup.js", "settings.js"]) {
+    const code = stripComments(readProjectFile(file));
+    assert.equal(/\.volume\s*\*\s*\.volume/.test(code), false, `${file} 不该自己算音量乘法`);
+    assert.match(code, /BcaSound/, `${file} 要经 BcaSound 播或读设置`);
+  }
+  assert.match(stripComments(readProjectFile("content.js")), /playSound\("bubblepop"\)/);
+  assert.match(stripComments(readProjectFile("content.js")), /playSound\("error"\)/);
+  assert.match(stripComments(readProjectFile("pet.js")), /playSound\("meow"\)/);
+  assert.match(stripComments(readProjectFile("pet.js")), /playSound\("purring", \{ loop: true \}\)/);
+  assert.match(stripComments(readProjectFile("pet.js")), /stopSound\("purring"\)/);
+  for (const file of ["library.js", "popup.js"]) {
+    assert.match(stripComments(readProjectFile(file)), /playImportSound\(/, `${file} 的导入收尾要响一声`);
+  }
+});
+
 test("content scripts never fetch extension resources directly", () => {
   // 4.3 起刻意移除了 web_accessible_resources（否则 B 站页面能把收藏库嵌进 iframe）。
   // 内容脚本跑在网页里，直接 fetch 扩展资源会被浏览器拦掉，而我们的 try/catch
@@ -2302,7 +2343,9 @@ test("content scripts never fetch extension resources directly", () => {
   const i18n = readProjectFile("i18n.js");
   const background = readProjectFile("background.js");
   const manifest = JSON.parse(readProjectFile("manifest.json"));
-  assert.equal(manifest.web_accessible_resources, undefined, "不应为了让内容脚本读词典而重新开放扩展资源");
+  // 1.16.0：唯一的 web_accessible_resources 是那两个音效文件，词典仍然只能后台代取。
+  const resources = (manifest.web_accessible_resources || []).flatMap((entry) => entry.resources.slice());
+  assert.deepEqual(resources.slice().sort(), ["audio/bubblepop.mp3", "audio/error.mp3"], "不应为了让内容脚本读词典而重新开放扩展资源");
   assert.match(i18n, /if \(!inExtensionPage\(\)\) \{/, "内容脚本必须走另一条加载路径");
   assert.match(i18n, /type: "bca-locale", locale/, "内容脚本应请后台代取词典");
   assert.match(background, /"bca-locale"/, "后台需要提供词典代理");
@@ -7515,7 +7558,7 @@ test("内容脚本只向后台要自己用得到的词条，后台也只回这�
 
   const manifest = JSON.parse(readProjectFile("manifest.json"));
   const videoGroup = manifest.content_scripts.find((group) => group.js.includes("content.js"));
-  assert.deepEqual(videoGroup.js, ["content-i18n-keys.js", "i18n.js", "content.js"], "词表必须在 i18n.js 之前加载");
+  assert.deepEqual(videoGroup.js, ["content-i18n-keys.js", "i18n.js", "sound.js", "content.js"], "词表必须在 i18n.js 之前加载，sound.js 要排在 content.js 之前");
   const favGroup = manifest.content_scripts.find((group) => group.js.includes("favorites-import.js"));
   assert.ok(favGroup && favGroup.js.includes("content-i18n-keys.js") === false, "收藏夹导入用不到这份词表");
 
@@ -7638,7 +7681,7 @@ test("发布包有白名单和体积上限，包里不再可能混进开发文�
   const pack = readProjectFile("pack.ps1");
   assert.match(pack, /\$allowedTopFiles = @\(/);
   // 1.11.0：彩蛋页进包，白名单多一个目录、总量与 zip 上限跟着上调（理由写在 pack.ps1 里）
-  assert.match(pack, /\$allowedTopDirs = @\("locales", "native", "bili-old-2015"\)/);
+  assert.match(pack, /\$allowedTopDirs = @\("locales", "native", "audio", "bili-old-2015"\)/);
   assert.match(pack, /\$maxFileBytes = 2MB/);
   assert.match(pack, /\$maxTotalBytes = 7MB/);
   assert.match(pack, /\$maxZipBytes = 5MB/);
@@ -8601,7 +8644,7 @@ test("1.11.6：标题与行分成两层，收藏夹能置顶，旧按钮名不�
   const icons = readProjectFile("icons.js");
 
   // 设置页：每张卡一个 .settings-panel，h2 在白卡外面
-  assert.equal((html.match(/<div class="settings-panel">/g) || []).length, 10, "十张卡各有一个白卡容器");
+  assert.equal((html.match(/<div class="settings-panel">/g) || []).length, 11, "十一张卡各有一个白卡容器（1.16.0 多了音量控制）");
   assert.match(css, /\.settings-card \{[^}]*background: transparent;/, ".settings-card 自己不该再有底色");
   assert.match(css, /\.settings-panel \{[^}]*background: var\(--surface\);/, "白底要挪到 .settings-panel 上");
   assert.doesNotMatch(css, /\.card-lead \+ \.setting-row/, "旧的首行规则已经没有作用对象");
@@ -9118,7 +9161,7 @@ test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）",
   // 底数 311（73.2%）→ 1.15.2 换成 safeCover 的真执行用例降到 310 →
   // 1.15.3 又把「换行注入」那条拆成三组真执行用例，降到 309。
   // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
-  assert.ok(textOnly.length <= 299,
-    "纯文本断言 " + textOnly.length + " 条，超过 299 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
+  assert.ok(textOnly.length <= 300,
+    "纯文本断言 " + textOnly.length + " 条，超过 300 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 

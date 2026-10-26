@@ -46,6 +46,7 @@
       "js": [
         "content-i18n-keys.js",
         "i18n.js",
+        "sound.js",
         "content.js"
       ],
       "run_at": "document_start"
@@ -58,6 +59,19 @@
         "favorites-import.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "audio/bubblepop.mp3",
+        "audio/error.mp3"
+      ],
+      "matches": [
+        "https://www.bilibili.com/video/*",
+        "https://bilibili.com/video/*",
+        "https://m.bilibili.com/video/*"
+      ]
     }
   ]
 }

@@ -95,7 +95,12 @@ function main() {
   for (const required of ["manifest.json", "background.js", "content.js", "archive-core.js",
     "archive-tools.js", "library.html", "settings.html", "stats.html", "recycle.html",
     "bili-old-2015/index.html", "bili-old-2015/egg-2015.js",
-    "locales/zh-TW.json", "locales/en.json"]) {
+    "locales/zh-TW.json", "locales/en.json", "sound.js",
+    "audio/bubblepop.mp3",
+    "audio/cat-meow.mp3",
+    "audio/error.mp3",
+    "audio/new-notification.mp3",
+    "audio/purring.mp3"]) {
     if (!expected.includes(required)) fail(`运行期文件 ${required} 不在发布清单里`);
   }
 
@@ -104,7 +109,8 @@ function main() {
   // 这里把两个容器的内容钉死：名单要完全对得上，且不许出现 _ 开头的开发文件。
   const containers = {
     locales: ["locales/en.json", "locales/zh-TW.json"],
-    native: ["native/folder-opener-host.ps1", "native/folder-opener-launcher.cs"]
+    native: ["native/folder-opener-host.ps1", "native/folder-opener-launcher.cs"],
+    audio: ["audio/bubblepop.mp3", "audio/cat-meow.mp3", "audio/error.mp3", "audio/new-notification.mp3", "audio/purring.mp3"]
   };
   for (const [dir, wanted] of Object.entries(containers)) {
     const actualFiles = expected.filter((rel) => rel.startsWith(`${dir}/`)).sort();

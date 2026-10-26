@@ -415,6 +415,15 @@
     if (seen.size > 100) seen.clear();
   }
 
+  // 1.16.0：手动归档的音效。音量与开关都在 sound.js 里算，这里只决定该不该响。
+  function playSound(name) {
+    try {
+      globalThis.BcaSound?.play(name);
+    } catch (error) {
+      console.warn("音效没播出来（不影响归档）", error);
+    }
+  }
+
   function sendFavorite(data, signature) {
     // 1.8.1：等弹窗关闭最多 10 秒，这期间扩展可能被重新加载（用户点「重新加载」、或后台自动更新）。
     // 真断了就说明白，别让下面的 sendMessage 抛未捕获错误。
@@ -432,27 +441,33 @@
     chrome.runtime.sendMessage({ type: "bca-import-probe" }, (status) => {
       void chrome.runtime.lastError;
       if (status?.active) {
+        playSound("error");
         showNotice(BcaI18n.t("导入进行中"), BcaI18n.t("目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。"), "", true);
         return;
       }
       chrome.runtime.sendMessage({ type: "save-favorite", data }, (result) => {
         const runtimeError = chrome.runtime.lastError;
         if (runtimeError) {
+          playSound("error");
           showNotice(BcaI18n.t("归档失败"), BcaI18n.t("插件后台暂时无法处理这次收藏。"), runtimeError.message, true);
         } else if (result?.busyImport) {
           // 1.7.3：后台发现队列里正在导入时会立刻回 busyImport（兜住「问的时候还没开始、
           // 发出去的时候已经开始了」这种抢跑），这里给一句用户能照做的话。
+          playSound("error");
           showNotice(BcaI18n.t("导入进行中"), BcaI18n.t("目前正在导入收藏夹，归档未完成，请等收藏夹导入结束后再尝试保存。"), "", true);
         } else if (result?.partial) {
           // 1.8.0：部分收藏夹没保存。整次报「归档失败」是骗人的（磁盘上确实写进去了），
           // 只报「归档成功」又会把那几个没成的藏起来 —— 用错误样式把清单摆出来。
+          playSound("error");
           showNotice(BcaI18n.t("部分收藏夹没保存"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.path || "", true, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
         } else if (!result?.ok) {
           // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
+          playSound("error");
           showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);
         } else {
           rememberSeen(signature);
           showNotice(BcaI18n.t("归档成功"), result?.message || BcaI18n.t("已保存视频信息和封面。"), result?.path || "", false, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
+          playSound("bubblepop");
         }
       });
     });

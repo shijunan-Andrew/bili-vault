@@ -1078,6 +1078,15 @@ chrome.runtime.onMessage.addListener((message, sender) => {
    这里记下「等哪一次导入的结果」，收到就补一次完成提示。 */
 let awaitingBackgroundImport = 0;
 
+/* 1.16.0：导入收尾的音效。判据只住在 sound.js 的 importFailed() 里。 */
+function playImportSound(state) {
+  try {
+    globalThis.BcaSound?.playImportResult(globalThis.BcaSound?.importFailed(state) === true);
+  } catch (error) {
+    console.warn("导入结束的提示音没播出来（不影响导入结果）", error);
+  }
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.enabled) renderEnabledState(changes.enabled.newValue !== false);
   // 收藏库里换了备份文件夹：把这一行名字同步过来，别让两边显示得不一样
@@ -1095,6 +1104,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       if (done.failed) importStatus.classList.add("error");
       importStatus.textContent = done.text;
       showDoneDialog(done.text, done.failed);
+      playImportSound({ failed: done.failed === true, summary: done.text });
     }
   }
   if (areaName === "local" && (changes.bcaImportResume || changes.importState)) {
@@ -1116,6 +1126,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       importStatus.classList.remove("error");
       importStatus.textContent = state.summary || BcaI18n.t("导入已结束。");
       if (state.summary?.includes("取消")) importStatus.classList.add("error");
+      playImportSound(state);
     }
   }
   refreshStatus().catch(() => {});

@@ -95,7 +95,13 @@ try {
     "popup.html", "library.html", "settings.html", "recycle.html", "stats.html", "guide.html",
     "locales/zh-TW.json", "locales/en.json",
     "native/folder-opener-host.ps1", "native/folder-opener-launcher.cs",
-    "bili-old-2015/index.html", "bili-old-2015/egg-2015.js"
+    "bili-old-2015/index.html", "bili-old-2015/egg-2015.js",
+    "sound.js",
+    "audio/bubblepop.mp3",
+    "audio/cat-meow.mp3",
+    "audio/error.mp3",
+    "audio/new-notification.mp3",
+    "audio/purring.mp3"
   )) {
     if (-not ($actual -contains $required)) { throw "运行期文件 $required 不在打包结果里" }
   }
@@ -106,6 +112,11 @@ try {
   }
   if ($nativeFiles.Count -ne 2) {
     throw "native/ 里应该恰好两个文件（宿主脚本 + 启动器源码），实际：$($nativeFiles -join ', ')"
+  }
+  # 1.16.0：音效是五个 mp3，多一个少一个都说明打包清单或素材变了。
+  $audioFiles = @($actual | Where-Object { $_ -like "audio/*" })
+  if ($audioFiles.Count -ne 5 -or -not ($audioFiles -contains "audio/bubblepop.mp3")) {
+    throw "audio/ 里应该恰好五个音效，实际：$($audioFiles -join ', ')"
   }
   foreach ($dev in @("test", "scripts", ".github", "README.md", "AI_HANDOFF.md", "SMOKE_TEST.md", "release.ps1", "_ref", "docs")) {
     if ($actual | Where-Object { $_ -eq $dev -or $_ -like "$dev/*" }) { throw "开发文件 $dev 混进打包结果了" }
@@ -126,12 +137,12 @@ try {
     "page.css", "pet-cat.png", "pet.css", "pet.js",
     "popup.css", "popup.html", "popup.js",
     "recycle.css", "recycle.html", "recycle.js",
-    "settings.css", "settings.html", "settings.js",
+    "settings.css", "settings.html", "settings.js", "sound.js",
     "stats-core.js", "stats.css", "stats.html", "stats.js", "theme.css", "theme.js",
     "test-native-folder-opener.ps1", "tutorial.html", "tutorial.js",
     "uninstall-native-folder-opener.ps1"
   )
-  $allowedTopDirs = @("locales", "native", "bili-old-2015")
+  $allowedTopDirs = @("locales", "native", "audio", "bili-old-2015")
   # 1.11.0：彩蛋页进包后，运行期子集约 3.4MB（index.html 0.6MB + 重编码后的 assets 图片 2.4MB），
   # 扩展本体仍约 2.1MB。上限按「本体 + 彩蛋」给足余量，同时继续挡住「把开发物打进来」。
   $maxFileBytes = 2MB
@@ -165,7 +176,7 @@ try {
   # 以前这一步全靠手工算，等于没人算。
   "[OK] SHA-256：$((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower())"
   "[OK] 版本 $version，文件 $($actual.Count) 个，源目录 $([math]::Round($stagedBytes / 1KB, 1)) KB，zip $size KB"
-  "[OK] 发布清单：locales、native 两个目录 + $($allowedTopFiles.Count) 个文件，均在允许范围内"
+  "[OK] 发布清单：locales、native、audio 三个目录 + $($allowedTopFiles.Count) 个文件，均在允许范围内"
   "[OK] 已排除（开发用）：$($excludeNames -join ", ")"
 } finally {
   Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue

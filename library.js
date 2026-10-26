@@ -3120,13 +3120,25 @@ let importWasRunning = false;
    这件事，才能把节奏放慢（见 scheduleArchiveRefresh）。 */
 let importIsRunning = false;
 
+/* 1.16.0：导入收尾的音效。成功 / 失败怎么判只在 sound.js 的 importFailed() 里写。 */
+function playImportSound(state) {
+  try {
+    globalThis.BcaSound?.playImportResult(globalThis.BcaSound?.importFailed(state) === true);
+  } catch (error) {
+    console.warn("导入结束的提示音没播出来（不影响导入结果）", error);
+  }
+}
+
 function applyImportState(state) {
   const wasRunning = importIsRunning;
   importIsRunning = state?.running === true;
   /* 1.7.5：导入**结束**才收口刷一次列表。之前靠 bcaStats 变化触发，而导入期间每写一批
      快照都会写一次 bcaStats —— 真机上 575 个记录就是一遍遍整树重扫（「正在读取 568/575…」），
      文件系统调用量随记录数线性上升，收益却只是列表早点更新几条。 */
-  if (wasRunning && !importIsRunning) scheduleArchiveRefresh();
+  if (wasRunning && !importIsRunning) {
+    scheduleArchiveRefresh();
+    playImportSound(state);
+  }
   if (!importRunningNotice) return;
   lastImportState = state || null;
   const running = state?.running === true;

@@ -141,12 +141,12 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.15.14：清单文件怎么生成、怎么命名、进度怎么写，原来一次都没跑过
+## V1.16.0：收藏、导入、猫咪和出错，各配了一声
 
-- 「导出 Markdown 清单」的文案生成现在会真的喂数据进去看输出：分组、没有标题时回退目录名、没有链接的记录只写名字、空分组落到「未命名收藏夹」。
-- 清单文件名与导出文件名共用同一份时间戳格式，这条也补了真执行断言（`归档清单-20261025-210507.md`）。
-- 进度计数（`12/345`）原来只被正则提过名字，现在真跑一遍，确认它和界面里的数字格式是同一套。
-- 这三处都属于「读源码看着对、其实从来没被执行过」；`archive-core` 从 102 项涨到 105 项。
+- `audio/` 里五个音效随扩展一起安装：手动收藏成功「啵」一声、收藏夹导入成功提示一声、点猫咪它会叫、猫咪睡着时轻轻打呼噜、导入或归档失败响一声。
+- 新增**设置 → 音量控制**：一个总开关 + 总音量，五个音效各有自己的开关和音量；默认总音量和每一项都是 50%，实际音量是两者相乘。
+- 连点猫咪时后一声会打断前一声，不会叠成一团；猫咪醒来（或被点醒）呼噜立刻停。
+- 音效只在 B 站视频页与扩展自己的页面里播放，不上传、不联网，也不会新增任何请求。
 
 **遗留** - 无。
 
@@ -155,11 +155,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 
 - **稳定性回归**：`node test/stability.test.cjs`（项数以实际输出为准，本文不写死）。
 - **另外四套真执行测试**：`node test/archive-core.test.cjs`、`node test/stats-core.test.cjs`、`node test/background.test.cjs`、`node test/pages.test.cjs`。
-- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1130 条**<!-- i18n-count:1130 -->，少一条、多一条都失败（多余的必须是 0）。
+- **多语言词典**：`node test/i18n-extract.cjs --check`，两本词典各 **当前 1147 条**<!-- i18n-count:1147 -->，少一条、多一条都失败（多余的必须是 0）。
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:417 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:418 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 
