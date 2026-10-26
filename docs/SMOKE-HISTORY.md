@@ -6,6 +6,13 @@
 
 ---
 
+## V1.15.12 新增的几条
+- [ ] `node test/stability.test.cjs` 418 项全绿；末尾那条棘轮守卫说「300 条，未超过 300」。
+- [ ] `node test/archive-core.test.cjs` 102 项全绿（含「分享统计文案不算简介」）。
+- [ ] `node test/pages.test.cjs` 114 项全绿（含「data-i18n-html 只留白名单标签」）。
+- [ ] 真机：打开「使用须知」（guide.html），里面的粗体、行内代码、DownKyi 这类链接都照常显示，链接点开是新标签页。
+- [ ] `node scripts/check-all.cjs` 全绿。
+
 ## V1.15.11 新增的几条
 - [ ] `node test/stability.test.cjs` 420 项全绿；末尾那条棘轮守卫说「302 条，未超过 302」。
 - [ ] `node test/pages.test.cjs` 113 项全绿（含下载路径三档、卡片播放量、失效视频出口三条真执行）。

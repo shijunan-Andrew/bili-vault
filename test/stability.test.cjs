@@ -6836,15 +6836,6 @@ test("后台写完统计库要读回自检，不合格就用上一版顶回去�
 
 // ---- 1.8.11：P2/P3 收尾（指纹按内容、id 与语义对齐、宠物封顶合写、背景三处）----
 
-test("统计页的实质指纹按内容算，不再只比数组长度（V1.8.11）", () => {
-  const stats = readProjectFile("stats.js");
-  assert.match(stats, /function rowSignature\(rows\) \{/, "指纹要按「行数 + 内容滚动和」算");
-  assert.match(stats, /rowSignature\(snapshot\.dailyRows\),/, "逐日明细要参与指纹");
-  assert.match(stats, /rowSignature\(snapshot\.weekly\),/, "周汇总要参与指纹");
-  assert.match(stats, /rowSignature\(snapshot\.monthly\)/, "月汇总要参与指纹");
-  assert.doesNotMatch(stats, /Array\.isArray\(snapshot\.dailyRows\) \? snapshot\.dailyRows\.length : 0,/, "别再退回「只比长度」：同一天删一条、另一天加一条，长度不变，图就停在旧数据上");
-});
-
 test("两张瓷砖的 id 和它现在显示的东西对得上（V1.8.11）", () => {
   const html = readProjectFile("stats.html");
   const stats = readProjectFile("stats.js");
@@ -9127,7 +9118,7 @@ test("stability 自己也不许再堆纯文本断言（1.15.2 · 审查 T-1）",
   // 底数 311（73.2%）→ 1.15.2 换成 safeCover 的真执行用例降到 310 →
   // 1.15.3 又把「换行注入」那条拆成三组真执行用例，降到 309。
   // 这个上限只许往下调：新用例只要真执行了项目代码，自然就落进行为断言那一侧。
-  assert.ok(textOnly.length <= 300,
-    "纯文本断言 " + textOnly.length + " 条，超过 300 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
+  assert.ok(textOnly.length <= 299,
+    "纯文本断言 " + textOnly.length + " 条，超过 299 上限（例：第 " + textOnly.slice(0, 5).join("、") + " 行）。新用例请真执行项目代码，别再堆源码正则");
 });
 

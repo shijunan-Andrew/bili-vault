@@ -2287,7 +2287,13 @@
     let sum = 0;
     for (const row of rows) {
       const key = String(row?.day || row?.week || row?.month || "");
-      sum = (sum * 31 + (Number(row?.count) || 0) + key.length * 7) % 1000000007;
+      /* 1.15.13（审查 T-1）：只把 key 的**长度**算进去有洞 —— 「2026-10-25」换成
+         「2026-10-26」、计数恰好一样时指纹不变，图就停在旧数据上。把字符也滚进和里。 */
+      let keyHash = 0;
+      for (let index = 0; index < key.length; index += 1) {
+        keyHash = (keyHash * 33 + key.charCodeAt(index)) % 1000000007;
+      }
+      sum = (sum * 31 + (Number(row?.count) || 0) + keyHash) % 1000000007;
     }
     return `${rows.length}:${sum}`;
   }

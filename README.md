@@ -141,14 +141,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 > 这里**只放最新一版**的改动说明。更早的版本（V1.9.8 一路到 V1.0.0，以及 V1.0.0 之前那 36 个测试版）按时间倒序完整存放在 [`docs/HISTORY.md`](docs/HISTORY.md)。
 > 同一段历史写两遍一定会漂，所以只留一份：用户可见的「这一版改了什么」在本文，逐版本的根因与教训在 HISTORY。
 
-## V1.15.12：那条 HTML 白名单，以前其实从没被真跑过
+## V1.15.13：统计图的指纹会漏掉「同长度的另一个日子」
 
-- **data-i18n-html 白名单真执行**（审查 T-1）：用真页面 + 真 `i18n.js` 走一遍 —— `<script>` 与 `<img onerror>` 被拆掉、`javascript:` 的 `href` 被清掉、`onclick` 一律剥掉、`https` 链接保留并补 `target="_blank"` + `rel="noopener noreferrer"`。
-- **顺手修掉一个跨 realm 的判定错误**：白名单取属性名时写的是 `node.attributes instanceof Map`，而 vm 沙箱里的 `Map` 是另一个 realm 的构造器 —— 判不出来就会一路 `removeAttribute(undefined)`，属性一个都删不掉。改成按能力判（`typeof node.attributes?.keys === "function"`）。真浏览器里 `instanceof Map` 本来就是 false，所以线上没出过这个问题，但**白名单的语义从来没被测试真跑过**。
-- **分享统计文案不算简介**（审查 T-1，1.9.4 的遗留）：`splitShareText()` / `descriptionFromInfo()` 改成真跑 —— 「正文 + 视频播放量…弹幕量…」只留下前面的正文、整段都是统计时简介为空、普通简介不误判、`-` 这类占位值按没有简介处理。
-- **测试**：`stability` 418（删掉两条文本用例）、`archive-core` 102、`pages` 114 全绿；纯文本断言 302 → **300**。
+- **统计指纹真执行**（审查 T-1）：把 `rowSignature()` 抠出来喂数据，验「行数不变、内容变了也必须换指纹」「总数相同、分布不同也要换」「顺序参与计算」「周/月键变了要换」。
+- **顺手修掉一个真会显示旧数据的洞**：指纹只把键的**长度**滚进和里（`key.length * 7`），所以「2026-10-25」换成「2026-10-26」、计数恰好一样时指纹不动 —— 统计页会停在旧图上。改成把键的字符也滚进同一个和里。
+- **测试**：`stability` 417（删掉一条文本用例）、`pages` 115 全绿；纯文本断言 300 → **299**。
 
-**遗留** - 文本断言还剩 300 条，按批继续压。
+**遗留** - 文本断言还剩 299 条，按批继续压。
 
 ## 测试与文档
 
@@ -158,7 +157,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test-native-folder-opener.ps1 -C
 - **持续集成**：每次推送 / PR 在 GitHub Actions 上跑上面这五套 + 语法 + 词典 + 状态块 + 文档标记（与发版第 4 步同一个脚本 `node scripts/check-all.cjs`）；标题下方的 CI 徽章点进去就是运行记录。
 - **数据层性能基准**：`node test/bench.cjs`（1000 / 3000 / 10000 条记录，默认每组 3 次取中位数；`--quick` 只跑一遍 1000 条）。它不进门禁，是改完 `stats-core.js` / `archive-core.js` 的循环之后回头量一下用的工具。
 - **发版前**照 [`SMOKE_TEST.md`](SMOKE_TEST.md) 在真机上走一遍。
-- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:418 -->
+- **完整版本记录**在 [`docs/HISTORY.md`](docs/HISTORY.md)，**机制与数据流**在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，**接手开发**看 [`AI_HANDOFF.md`](AI_HANDOFF.md)，**隐私说明**（数据存哪、请求哪些域名、每个权限干什么）看 [`docs/PRIVACY.md`](docs/PRIVACY.md)。<!-- test-count:417 -->
 
 ## 使用边界（这些是设计约束，不是缺陷）
 

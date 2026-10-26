@@ -4,7 +4,7 @@
 
 ## 为什么需要它
 
-`node test/stability.test.cjs` 的 **418** 项里<!-- test-count:418 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
+`node test/stability.test.cjs` 的 **417** 项里<!-- test-count:417 -->，绝大多数是**读文件做文本正则断言**（另有四套**真执行**单元测试：`archive-core.js` / `stats-core.js` 的纯函数、把 `background.js` 整份丢进 `vm` 的浏览器环境套件、以及用最小 DOM 把 `library.js` / `settings.js` / `recycle.js` / `stats.js` / `popup.js` / `content.js` 真跑起来的页面套件 —— **当前项数不写死**，见 `node test/status.cjs --check` 或 `AI_HANDOFF.md` 的「当前状态」表）——
 它能证明「约定没被违反」，**证明不了「功能真的能跑」**。
 
 下面这些缺陷**全部是通过了自动检查、却只有真机能暴露的**：
@@ -65,14 +65,14 @@
 - [ ] **剪贴板**：详情页「复制路径」、设置页「复制原生助手清理命令」、诊断信息「复制」—— 三个按钮各自真的写进了剪贴板（粘到记事本里核对）。
 - [ ] **大收藏夹的速率与风控**：用一个 2000+ 条的收藏夹导入前 50 条 → 全程不出现 412 / 风控提示，进度条持续推进，取消后统计库回滚干净。
 
-## V1.15.12 新增的几条
-- [ ] `node test/stability.test.cjs` 418 项全绿；末尾那条棘轮守卫说「300 条，未超过 300」。
-- [ ] `node test/archive-core.test.cjs` 102 项全绿（含「分享统计文案不算简介」）。
-- [ ] `node test/pages.test.cjs` 114 项全绿（含「data-i18n-html 只留白名单标签」）。
-- [ ] 真机：打开「使用须知」（guide.html），里面的粗体、行内代码、DownKyi 这类链接都照常显示，链接点开是新标签页。
+## V1.15.13 新增的几条
+- [ ] `node test/stability.test.cjs` 417 项全绿；末尾那条棘轮守卫说「299 条，未超过 299」。
+- [ ] `node test/pages.test.cjs` 115 项全绿（含「统计指纹按内容算」）。
+- [ ] 真机：打开统计页 → 在收藏库里删掉今天的一条归档、再加一条到另一天（让「每天条数」分布变化但总数不变）→ 回到统计页，图要跟着变。
+- [ ] 真机：统计页切「周」/「月」区间，图与表格一致。
 - [ ] `node scripts/check-all.cjs` 全绿。
 
 ---
 
-> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.11 及以前）。
+> 更早版本的增量清单已经归档到 [`docs/SMOKE-HISTORY.md`](docs/SMOKE-HISTORY.md)（V1.15.12 及以前）。
 > 每次发版时，把上一版的「新增的几条」从这份文件移过去，它只留当前这一版。

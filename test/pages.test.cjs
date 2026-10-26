@@ -3086,6 +3086,49 @@ async function suiteI18nWhitelist() {
   });
 }
 
+/* 1.15.13（审查 T-1）：统计页的「实质指纹」以前只有读源码的断言。
+   rowSignature() 是纯函数，抠出来直接喂数据 —— 关键是证明「行数不变、内容变了」时指纹也变。 */
+async function suiteStatsFingerprint() {
+  await test("统计指纹按内容算：行数不变、内容变了也必须变（1.15.13 · T-1）", async () => {
+    const rowSignature = new Function(
+      `${harness.carveFunction(harness.readSource("stats.js"), "rowSignature")}; return rowSignature;`
+    )();
+
+    assert.equal(rowSignature(null), 0, "没有快照时返回 0");
+    assert.equal(rowSignature([]), 0, "空数组也返回 0");
+
+    const rows = [
+      { day: "2026-10-24", count: 3 },
+      { day: "2026-10-25", count: 5 },
+      { day: "2026-10-26", count: 2 }
+    ];
+    const baseline = rowSignature(rows);
+    assert.match(baseline, /^3:\d+$/, "签名形如「行数:滚动和」");
+
+    const movedOne = [
+      { day: "2026-10-24", count: 1 },
+      { day: "2026-10-25", count: 5 },
+      { day: "2026-10-26", count: 4 }
+    ];
+    assert.equal(rowSignature(movedOne) === baseline, false, "长度不变也要能看出内容变了（同一天删一条、另一天加一条）");
+
+    const sameTotal = [
+      { day: "2026-10-24", count: 6 },
+      { day: "2026-10-25", count: 4 },
+      { day: "2026-10-26", count: 0 }
+    ];
+    assert.equal(rowSignature(sameTotal) === baseline, false, "总数相同、分布不同也要换指纹");
+
+    const reordered = [rows[2], rows[0], rows[1]];
+    assert.equal(rowSignature(reordered) === baseline, false, "顺序也参与计算");
+
+    assert.equal(rowSignature([{ week: "2026-W43", count: 2 }]) !== rowSignature([{ week: "2026-W42", count: 2 }]), true,
+      "周汇总的键变了要换指纹");
+    assert.equal(rowSignature([{ month: "2026-10", count: 2 }]) !== rowSignature([{ month: "2026-09", count: 2 }]), true,
+      "月汇总的键变了要换指纹");
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
@@ -3096,6 +3139,7 @@ async function suite() {
   await suiteStats();
   await suiteA11y();
   await suiteDocs();
+  await suiteStatsFingerprint();
   await suiteI18nWhitelist();
   await suiteLibraryHelpers();
   await suiteRecycleTools();
