@@ -27,12 +27,12 @@ const storageErrorText = document.getElementById("storageErrorText");
 const dismissStorageError = document.getElementById("dismissStorageError");
 const importConfirm = document.getElementById("importConfirm");
 const importConfirmDetail = document.getElementById("importConfirmDetail");
-const updateRecentButton = document.getElementById("updateRecent");
 const importLimitSelect = document.getElementById("importLimit");
-/* 1.16.5：记住上次选的「每次最多导入多少条」，下次打开原样选中（默认仍是「全部」）。 */
+const importScopeHint = document.getElementById("importScopeHint");
+/* 1.17.0：下拉里同时装「最近几天」与「最多导入多少条」两类选择，值形如 "recent:7" / "limit:50"。
+   1.16.5 存下来的纯数字值（如 "50"）读的时候按「最多导入」迁移。 */
 const IMPORT_LIMIT_KEY = "importLimit";
-const updateRecentDialog = document.getElementById("updateRecentDialog");
-const updateRecentDetail = document.getElementById("updateRecentDetail");
+const IMPORT_SCOPE_DEFAULT = "limit:0";
 const speedGroup = document.getElementById("speedGroup");
 const speedHint = document.getElementById("speedHint");
 // 1.14.3（审查 C-3）：写失败时临时借速度提示行说一句，6 秒后回到正常文案。
@@ -249,7 +249,6 @@ function updateImportSelection() {
     + (totalItems ? " · " + BcaI18n.t("共 {total} 条视频", { total: totalItems }) : "");
   startImportButton.disabled = importBusy || selected === 0;
   diffFoldersButton.disabled = importBusy || selected === 0;
-  updateRecentButton.disabled = importBusy || selected === 0;
   diffFoldersButton.textContent = selected ? BcaI18n.t("先看差异（{count} 个）", { count: selected }) : BcaI18n.t("先看差异");
   startImportButton.textContent = selected ? BcaI18n.t("开始导入（{count} 个收藏夹）", { count: selected }) : BcaI18n.t("开始导入");
   renderImportControl();
@@ -368,20 +367,51 @@ function setLastResultText(value) {
 
 /* V1.1.3：点「开始导入」先弹确认框。
    导入是逐条解析 + 写盘的慢操作（1000 条约 10 分钟），误点代价很高，所以先问一句。 */
+/* 1.17.0（用户要求）：把「同步最近收藏」并进这个下拉，两类选择各归一组：
+   「最近几天」按收藏时间过滤（recent:N），「最多导入多少条」只数本地还没有的（limit:N，0 = 全部）。
+   解析写成显式映射 —— 以前 `Number(value) || 0` 那种写法遇到 "recent:3" 会静默变成 0（= 全部），
+   等于「选了最近 3 天却导入了整个收藏夹」。 */
+function selectedImportScope() {
+  const raw = String(importLimitSelect?.value || IMPORT_SCOPE_DEFAULT);
+  const [kind, amountText] = raw.split(":");
+  const amount = Math.max(0, Math.round(Number(amountText) || 0));
+  if (kind === "recent" && amount > 0) return { kind: "recent", days: Math.min(365, amount) };
+  return { kind: "limit", limit: amount };
+}
+
 // 1.8.8：0 表示「全部」；数字表示这次最多导入多少条**新**视频（已有的跳过不占名额）。
+// 选了「最近几天」时不限条数，这里按 0（不限）返回，给「要不要再问一句」这类判断用。
 function selectedImportLimit() {
-  return Math.max(0, Number(importLimitSelect?.value) || 0);
+  const scope = selectedImportScope();
+  return scope.kind === "limit" ? scope.limit : 0;
+}
+
+/* 1.17.0：下拉下面那行说明跟着选择换 —— 「最近几天」只碰窗口内的视频，
+   不会像「最多导入」那样从列表头往后数。 */
+function scopeHintText(scope) {
+  if (scope.kind === "recent") {
+    return BcaI18n.t("只处理这个时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新，窗口之外的记录完全不动。");
+  }
+  return BcaI18n.t("只数本地还没有的视频，已有的不占名额；到上限就收工，再点一次从后面接着补。");
+}
+
+function updateImportScopeHint() {
+  if (!importScopeHint) return;
+  importScopeHint.textContent = scopeHintText(selectedImportScope());
 }
 
 function openImportConfirm() {
   if (importBusy) return;
   const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
   if (!selected) return;
-  const limit = selectedImportLimit();
-  importConfirmDetail.textContent = (limit > 0
-    ? BcaI18n.t("将要导入 {count} 个收藏夹，本次最多写入 {limit} 条还没保存到本地的新视频。", { count: selected, limit })
-    : BcaI18n.t("将要导入 {count} 个收藏夹。", { count: selected }))
-    + " " + requestEstimateText();
+  const scope = selectedImportScope();
+  const scopeText = scope.kind === "recent"
+    ? BcaI18n.t("只同步最近 {days} 天新收藏的视频。", { days: scope.days })
+    : (scope.limit > 0
+      ? BcaI18n.t("本次最多写入 {limit} 条还没保存到本地的新视频。", { limit: scope.limit })
+      : "");
+  importConfirmDetail.textContent = BcaI18n.t("将要导入 {count} 个收藏夹。", { count: selected })
+    + (scopeText ? " " + scopeText : "") + " " + requestEstimateText();
   importConfirm.showModal();
 }
 
@@ -548,15 +578,6 @@ function requestEstimateText() {
   return BcaI18n.t("预计要读取 {requests} 次收藏夹列表（{folders} 个收藏夹，每次 40 条）。", { requests, folders });
 }
 
-function openUpdateRecent() {
-  if (importBusy) return;
-  const selected = importFolderList.querySelectorAll('input[type="checkbox"]:checked').length;
-  if (!selected) return;
-  updateRecentDetail.textContent = BcaI18n.t("将要同步 {count} 个收藏夹。", { count: selected })
-    + " " + requestEstimateText();
-  updateRecentDialog.showModal();
-}
-
 /* 导入过程中用户把 B 站收藏夹页面关掉时，弹窗发给页面的那条消息会随着标签页一起断掉。
    后台其实还在跑（1.4.3 起「关掉页面也继续」是有意做的），但这里的 await 会直接失败，
    于是既不显示完成提示、还会写一句「请先打开并刷新收藏夹页面」的假错误。
@@ -583,7 +604,8 @@ function settleImportView(stillRunning) {
 
 async function startImport(options = {}) {
   if (importBusy) return;
-  activeOperation = options.recentDays ? "update" : "import";
+  const scope = options.scope || selectedImportScope();
+  activeOperation = scope.kind === "recent" ? "update" : "import";
   const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   if (!folderIds.length) {
     importStatus.textContent = BcaI18n.t("请先勾选要导入的收藏夹。");
@@ -610,8 +632,8 @@ async function startImport(options = {}) {
     if (permission !== "granted") throw new Error(BcaI18n.t("未获得本地备份文件夹的写入权限，请重新选择本地备份文件夹后重试。"));
     const tab = await queryCurrentTab();
     const payload = { type: "bca-import-selected-folders", folderIds };
-    if (options.recentDays) payload.recentDays = options.recentDays;
-    if (options.limit) payload.limit = options.limit;
+    if (scope.kind === "recent") payload.recentDays = scope.days;
+    else if (scope.limit > 0) payload.limit = scope.limit;
     const response = await sendTabMessage(tab.id, payload);
     if (response?.cancelled) {
       importStatus.classList.add("error");
@@ -930,19 +952,11 @@ downloadButton.addEventListener("click", () => {
 
 refreshImportFoldersButton.addEventListener("click", loadImportFolders);
 startImportButton.addEventListener("click", openImportConfirm);
-updateRecentButton.addEventListener("click", openUpdateRecent);
-document.getElementById("updateRecentCancel").addEventListener("click", () => updateRecentDialog.close());
-document.getElementById("updateRecentGo").addEventListener("click", () => {
-  const picked = updateRecentDialog.querySelector('input[name="updateRange"]:checked');
-  const days = Number(picked?.value) || 3;
-  updateRecentDialog.close();
-  confirmRiskySpeed().then((ok) => { if (ok) startImport({ recentDays: days }); });
-});
 document.getElementById("importConfirmCancel").addEventListener("click", () => importConfirm.close());
 document.getElementById("importConfirmGo").addEventListener("click", async () => {
   importConfirm.close();
   if (!await confirmRiskySpeed()) return;
-  startImport({ limit: selectedImportLimit() });
+  startImport({ scope: selectedImportScope() });
 });
 document.getElementById("riskyWarnCancel").addEventListener("click", () => {
   riskyWarnDialog.close();
@@ -1159,19 +1173,23 @@ async function clearBadgeIfSeen() {
   clearBadge();
 }
 
-/* 1.16.5：把上次的导入上限读回来，并在改动时记下 —— 只写 storage，不碰导入逻辑本身。 */
+/* 1.16.5：把上次的导入上限读回来，并在改动时记下 —— 只写 storage，不碰导入逻辑本身。
+   1.17.0：存的是下拉的原始值（"recent:7" / "limit:50"）；1.16.5 存下的纯数字按「最多导入」迁移。 */
 function restoreImportLimit() {
   chrome.storage.local.get(IMPORT_LIMIT_KEY).then((saved) => {
     const value = saved?.[IMPORT_LIMIT_KEY];
     if (value === undefined || value === null || !importLimitSelect) return;
-    const text = String(value);
+    const text = /^\d+$/.test(String(value)) ? "limit:" + String(value) : String(value);
     const option = Array.from(importLimitSelect.options).find((item) => item.value === text);
-    if (option) importLimitSelect.value = text;
+    if (option) importLimitSelect.value = option.value;
+    updateImportScopeHint();
   }).catch((error) => console.warn("导入上限没读出来（先按默认档）", error));
   importLimitSelect?.addEventListener("change", () => {
-    chrome.storage.local.set({ [IMPORT_LIMIT_KEY]: selectedImportLimit() })
+    updateImportScopeHint();
+    chrome.storage.local.set({ [IMPORT_LIMIT_KEY]: importLimitSelect.value })
       .catch((error) => console.warn("导入上限没记住（下次打开会回到默认档）", error));
   });
+  updateImportScopeHint();
 }
 
 async function boot() {

@@ -2337,7 +2337,7 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
     "1.16.11（用户第 2 条）：按下去那一刻就要停呼噜 —— 拖走这条路走不到 standUp");
   const popupSource = readProjectFile("popup.js");
   assert.match(popupSource, /IMPORT_LIMIT_KEY/, "导入上限要记住上次的选择");
-  assert.match(readProjectFile("popup.html"), /<option value="10">10<\/option>/, "导入上限要有 10 这一档");
+  assert.match(readProjectFile("popup.html"), /<option value="limit:10">10<\/option>/, "导入上限要有 10 这一档");
 
   for (const file of ["content.js", "pet.js", "library.js", "popup.js", "settings.js"]) {
     const code = stripComments(readProjectFile(file));
@@ -3773,7 +3773,9 @@ test("默认档位是「较低」，且大收藏夹配快档要再提醒一次",
   assert.match(popup, /function riskySpeedWarning\(\)/, "没有档位风险判断函数");
   assert.match(popup, /function confirmRiskySpeed\(\)/, "没有共用的前置检查");
   const entries = (popup.match(/await confirmRiskySpeed\(\)|confirmRiskySpeed\(\)\.then/g) || []).length;
-  assert.ok(entries >= 3, `只有 ${entries} 个入口调用了风险提醒，导入/更新/差异三个都要`);
+  // 1.17.0：「同步最近收藏」并进下拉后入口从三个变两个（开始导入 / 先看差异），
+  // 时间窗那条走同一套 confirmRiskySpeed()，所以门槛跟着降。
+  assert.ok(entries >= 2, `只有 ${entries} 个入口调用了风险提醒，导入和差异两个都要`);
   assert.match(readProjectFile("popup.html"), /id="riskyWarnDialog"/, "风险提醒弹窗不存在");
 });
 
@@ -4052,7 +4054,7 @@ test("进度区按操作类型显示，差异对比不给暂停/取消", () => {
   assert.match(popup, /importControl\.hidden = !importBusy \|\| isDiff/,
     "差异对比时没有隐藏暂停/取消按钮");
   assert.match(popup, /activeOperation = "diff"/, "差异对比没有标记操作类型");
-  assert.match(popup, /activeOperation = options\.recentDays \? "update" : "import"/,
+  assert.match(popup, /activeOperation = scope\.kind === "recent" \? "update" : "import"/,
     "更新与导入没有区分文案");
 
   // 收藏库那边也要过同一道风险检查
@@ -6786,12 +6788,19 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
   assert.ok(backgroundCode.indexOf("const importLimit = Math.max") < backgroundCode.indexOf("for (let folderIndex = 0;"),
     "importLimit 的声明必须在收藏夹循环之前");
   assert.match(popupCode, /function selectedImportLimit\(\) \{/, "界面要有一个读上限的地方");
-  assert.match(popupCode, /if \(options\.limit\) payload\.limit = options\.limit;/, "载荷里要带上 limit");
+  assert.match(popupCode, /else if \(scope\.limit > 0\) payload\.limit = scope\.limit;/, "载荷里要带上 limit");
   assert.match(relay, /if \(message\.limit\) payload\.limit = message\.limit;/, "中转那层别把 limit 丢了");
 
   // 下拉就是那五档，默认「全部」
   const selectBlock = popupHtml.slice(popupHtml.indexOf('id="importLimit"'), popupHtml.indexOf("</select>"));
-  assert.deepEqual([...selectBlock.matchAll(/<option value="(\d+)"/g)].map((m) => m[1]), ["10", "50", "100", "300", "500", "0"]);
+  assert.deepEqual([...selectBlock.matchAll(/<option value="(?:recent|limit):(\d+)"/g)].map((m) => m[1]), ["3", "7", "15", "10", "50", "100", "300", "500", "0"]);
+  // 1.17.0（方案 B）：「同步最近收藏」并进下拉，分「最近几天 / 最多导入」两组；
+  // 分组名只能走 label 属性，所以 i18n 也得有对应的属性通道。
+  assert.match(selectBlock, /<optgroup data-i18n-label="最近几天"/, "时间窗要单独成组");
+  assert.match(selectBlock, /<optgroup data-i18n-label="最多导入"/, "条数要单独成组");
+  assert.match(readProjectFile("i18n.js"), /querySelectorAll\("\[data-i18n-label\]"\).*?setAttribute\("label"/s,
+    "<optgroup> 的分组名要靠 label 属性翻译");
+  assert.match(popupCode, /function selectedImportScope\(\)/, "下拉的值要有一个显式映射，不能靠 Number() 猜");
 
   // 名额只数「本地还没有的」：裁剪必须发生在 pendingItems 上，而不是 scopedItems
   assert.match(backgroundCode, /if \(pendingItems\.length > remaining\) \{/, "要按剩余名额裁剪新视频");
@@ -6818,13 +6827,17 @@ test("「开始更新」改叫「同步最近收藏」：界面上不再出现�
     // 1.9.7：收藏库详情里的「开始更新视频数据」是另一个功能，不算这里的旧名字
     assert.equal(/开始更新(?!视频数据)/.test(text), false, `${file} 里还有旧名字「开始更新」`);
   }
-  assert.match(readProjectFile("popup.html"), /data-i18n="同步最近收藏"/, "按钮要叫「同步最近收藏」");
+  // 1.17.0（方案 B）：「同步最近收藏」按钮并进了导入数量下拉，改成两组 option ——
+  // 名字仍要看得见（最近几天 / 最多导入），不能再有旧的「开始更新」。
+  assert.match(readProjectFile("popup.html"), /data-i18n-label="最近几天"/, "时间窗那组要叫「最近几天」");
+  assert.match(readProjectFile("popup.html"), /data-i18n-label="最多导入"/, "条数那组要叫「最多导入」");
+  assert.equal(/id="updateRecent"/.test(readProjectFile("popup.html")), false, "旧按钮应该已经删掉");
   const zhTW = JSON.parse(readProjectFile("locales/zh-TW.json"));
   const en = JSON.parse(readProjectFile("locales/en.json"));
   for (const dict of [zhTW, en]) {
-    assert.ok(dict["同步最近收藏"], "词典里要有新名字");
+    assert.ok(dict["最近几天"], "词典里要有分组名");
     assert.equal("开始更新" in dict, false, "词典里不许留旧名字");
-    assert.ok(dict["每次最多导入多少条"], "词典里要有条数上限的文案");
+    assert.ok(dict["选择想要导入的数量"], "词典里要有下拉标签的文案");
   }
 });
 

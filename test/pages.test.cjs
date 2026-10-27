@@ -1040,28 +1040,67 @@ async function suitePopup() {
     chrome.storage.local.__failSet = null;
   });
 
-  await test("导入条数上限：下拉的六个档位都能读成数字，默认「全部」是 0（1.8.8 / 1.16.5）", async () => {
+  await test("导入数量下拉：九个选项分两组，默认「全部」读成 limit:0（1.8.8 / 1.16.5 / 1.17.0）", async () => {
     const chrome = makeChrome({ version: "1.8.8", localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
     await settle();
     const doc = page.document;
     const select = doc.getElementById("importLimit");
-    assert.ok(select, "导入面板要有「每次最多导入多少条」");
-    /* 1.16.5：新增 10 这一档（用户要的「每次最多导入 10 条」）。 */
-    assert.deepEqual([...doc.querySelectorAll("#importLimit option")].map((option) => option.value), ["10", "50", "100", "300", "500", "0"]);
+    assert.ok(select, "导入面板要有「选择想要导入的数量」");
+    /* 1.17.0（方案 B）：原来独立的「同步最近收藏」按钮并进这个下拉，分「最近几天」与「最多导入」两组。 */
+    assert.deepEqual([...doc.querySelectorAll("#importLimit option")].map((option) => option.value), ["recent:3", "recent:7", "recent:15", "limit:10", "limit:50", "limit:100", "limit:300", "limit:500", "limit:0"]);
+    assert.deepEqual([...doc.querySelectorAll("#importLimit optgroup")].map((group) => group.getAttribute("label")), ["最近几天", "最多导入"]);
     const selectedByDefault = doc.querySelector("#importLimit option[selected]");
-    assert.equal(selectedByDefault && selectedByDefault.value, "0", "默认必须是「全部」，否则老用户会觉得导入被截断");
+    assert.equal(selectedByDefault && selectedByDefault.value, "limit:0", "默认必须是「全部」，否则老用户会觉得导入被截断");
 
+    const readScope = page.window.selectedImportScope;
     const readLimit = page.window.selectedImportLimit;
+    assert.equal(typeof readScope, "function", "下拉要有一个统一的读法");
     assert.equal(typeof readLimit, "function", "上限要有一个统一的读法");
-    select.value = "50";
+    select.value = "limit:50";
     assert.equal(readLimit(), 50);
-    select.value = "500";
+    assert.deepEqual({ ...readScope() }, { kind: "limit", limit: 50 });
+    select.value = "limit:500";
     assert.equal(readLimit(), 500);
-    select.value = "0";
+    select.value = "limit:0";
     assert.equal(readLimit(), 0, "「全部」读出来必须是 0");
+    select.value = "recent:7";
+    assert.deepEqual({ ...readScope() }, { kind: "recent", days: 7 }, "「最近 7 天」要读成时间窗");
+    assert.equal(readLimit(), 0, "选时间窗时不限条数");
     select.value = "";
     assert.equal(readLimit(), 0, "读不到值时要退成「全部」，不许变成 NaN 把导入卡死");
+    select.value = "bogus";
+    assert.deepEqual({ ...readScope() }, { kind: "limit", limit: 0 }, "不认识的值要退成「全部」，不能静默变成别的档");
+  });
+
+  await test("1.17.0：下拉同时表达「条数」与「最近几天」，说明跟着换，老版本存的数字能迁移", async () => {
+    const chrome = makeChrome({ version: "1.17.0", localData: { importLimit: "50" } });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle();
+    const doc = page.document;
+    const select = doc.getElementById("importLimit");
+    const hint = doc.getElementById("importScopeHint");
+
+    /* 读回上次的选择是异步的（boot() 里 chrome.storage.local.get().then()）——
+       只 await settle() 一次可能还没回填，所以轮询到它落定为止（不去改产品代码迁就测试）。 */
+    for (let i = 0; i < 20 && !select.value; i += 1) {
+      await settle();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    /* 1.16.5 存的是纯数字（"50"），1.17.0 起存 "limit:50" —— 老值要按「最多导入」迁移。 */
+    assert.equal(select.value, "limit:50", "老的纯数字值要迁移成 limit:N");
+    assert.match(hint.textContent, /只数本地还没有的视频/, "选「最多导入」时说明写名额口径");
+
+    select.value = "recent:7";
+    dom.fireUserEvent(select, "change");
+    await settle();
+    assert.match(hint.textContent, /时间窗/, "选「最近几天」时说明改成时间窗口径");
+    assert.equal(chrome.storage.local.dump().importLimit, "recent:7", "记下的是下拉原值，下次打开才能原样选中");
+
+    /* 按钮与对话框都并进下拉了，不该再留在页面上 */
+    assert.equal(doc.getElementById("updateRecent"), null, "「同步最近收藏」按钮应该已经并进下拉");
+    assert.equal(doc.getElementById("updateRecentDialog"), null, "那个时间窗对话框也应该删掉");
   });}
 
 /* ---------------- content.js ---------------- */

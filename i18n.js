@@ -209,6 +209,11 @@
     root.querySelectorAll("[data-i18n-aria]").forEach((element) => {
       element.setAttribute("aria-label", t(element.dataset.i18nAria));
     });
+    // 1.17.0：导入数量下拉分了两组（最近几天 / 最多导入）。<optgroup> 的分组名只能走
+    // label 属性，textContent 改了等于把整组选项擦掉，所以单独开一个属性通道。
+    root.querySelectorAll("[data-i18n-label]").forEach((element) => {
+      element.setAttribute("label", t(element.dataset.i18nLabel));
+    });
   }
 
   // 内容脚本跑在 B 站页面里：绝不能顺手翻译宿主页面，也不能改它的 lang

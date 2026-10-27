@@ -131,8 +131,9 @@ function extractFrom(file) {
   };
 
   if (file.endsWith(".html")) {
-    // data-i18n*="..."：属性值就是 key
-    for (const match of source.matchAll(/data-i18n(?:-html|-title|-placeholder|-aria)?="([^"]*)"/g)) {
+    // data-i18n*="..."：属性值就是 key。1.17.0 起多了 -label ——
+    // <optgroup> 的分组名只能通过 label 属性翻（改 textContent 会把整组选项擦掉）。
+    for (const match of source.matchAll(/data-i18n(?:-html|-title|-placeholder|-aria|-label)?="([^"]*)"/g)) {
       add(match[1], true);
     }
   } else {

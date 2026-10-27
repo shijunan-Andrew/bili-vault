@@ -478,6 +478,15 @@ class DomElement extends DomNode {
     return this;
   }
 
+  /* <select>.options：真 DOM 里是「全部 <option>（含 <optgroup> 里的）」，类型是
+     HTMLOptionsCollection、可当数组用。1.17.0 起 popup 的导入数量下拉要靠它
+     按 value 找回上次选的那一项 —— 少了它，Array.from(select.options) 直接抛错，
+     被 .catch() 吞掉之后下拉会一直停在默认档。 */
+  get options() {
+    if (this.localName !== "select") return undefined;
+    return descendants(this).filter((node) => node.localName === "option");
+  }
+
   click() {
     // 真浏览器里 element.click() 造出来的是**合成事件**（isTrusted = false）。
     // 想让被测代码走「真用户点的」那条路，用 fireUserEvent()。
