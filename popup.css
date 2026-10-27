@@ -34,7 +34,16 @@ main { padding: var(--sp-3) var(--sp-4) var(--sp-2); }
 h1 { margin: 0; color: var(--ink); font-size: var(--fs-md); line-height: 1.35; }
 .subtitle { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); }
 
-.card { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-sm); }
+/* 1.16.13（视觉）：每张卡片左侧一条 3px 色带，卡片边界与层级一眼分得出来。
+   只引用令牌，浅色与深色主题共用一套（--brand-tint 在两套主题里都够亮）。 */
+.card { border: 1px solid var(--line); border-left: 3px solid var(--brand-tint); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-sm); transition: border-left-color var(--dur-fast) var(--ease); }
+.card:hover { border-left-color: var(--brand); }
+/* 1.16.13（视觉）：卡片之间统一留 --sp-3 的呼吸感（原来是 8px，卡片挤在一起时
+   全靠边框区分，看起来像一张长条）。状态卡自带 margin-top，这里一并收掉。 */
+main > .card { margin-bottom: var(--sp-3); }
+.status-card { margin-top: 0; }
+/* 导入卡用「功能色」、使用须知用「警示色」，与各自的标题底色成套 */
+.import-card { border-left-color: var(--feature); }
 .feature-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-4); }
 .feature-title { color: var(--ink); font-size: var(--fs-base); font-weight: 700; }
 .feature-hint { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
@@ -104,6 +113,11 @@ button:disabled { cursor: wait; opacity: .6; }
 .primary:hover:not(:disabled) { background: var(--brand-strong); }
 .secondary { margin-top: var(--sp-2); border: 1px solid var(--line); color: var(--text); background: var(--surface); }
 .secondary:hover:not(:disabled) { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
+/* 1.16.13（视觉）：一屏只有一个「主按钮」——开始导入。加大、加重，和下面两个
+   ghost 按钮（同步最近收藏 / 先看差异）拉开主次；ghost 按钮只在悬停时铺底色。 */
+#startImport { min-height: 44px; margin-top: var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-md); font-weight: 700; }
+.secondary.diff-button { border-color: var(--brand-line); color: var(--brand-deep); background: transparent; font-weight: 650; }
+.secondary.diff-button:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); }
 .hint { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
 /* 文件夹卡片专用：这条说明和上面的按钮同属一组，间距收到 4px
    （原来的 --sp-2 / --sp-3 留白，4.5.1 让位给顶部的主题 / 语言控件） */
@@ -188,9 +202,22 @@ button:disabled { cursor: wait; opacity: .6; }
 .import-folder-row input { accent-color: var(--brand); }
 .import-folder-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .import-folder-count { color: var(--faint); font-size: var(--fs-sm); }
-.import-warning { margin: var(--sp-2) 0 var(--sp-1); color: var(--danger); font-size: var(--fs-sm); line-height: 1.6; }
+/* 1.16.13（视觉）：从一行红字改成带边界的警示块，与「使用须知」共用一套色彩语言 */
+.import-warning {
+  margin: var(--sp-2) 0 var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--warning-line);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--r-sm);
+  color: var(--warning);
+  background: var(--warning-soft);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.6;
+}
 /* 4.3：失效视频恢复默认关闭，需要用户显式勾选 */
-.import-option { display: flex; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); cursor: pointer; }
+.import-option { display: flex; align-items: flex-start; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-left: 3px solid var(--brand-line); border-radius: var(--r-sm); background: var(--surface-soft); cursor: pointer; transition: border-left-color var(--dur-fast) var(--ease); }
+.import-option:hover { border-left-color: var(--brand); }
 .import-option input { margin: 2px 0 0; accent-color: var(--brand); }
 .import-option span { display: grid; gap: 2px; color: var(--text); font-size: var(--fs-base); }
 .import-option small { color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
@@ -227,7 +254,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .report-path { color: var(--faint); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
 /* ---------- 使用须知（4.4.1：置顶、黄色底、字号调大、可折叠但不能关闭） ---------- */
-.safety-notice { margin: 0 0 var(--sp-2); padding: 0; overflow: hidden; border-color: var(--warning-line); background: var(--warning-soft); }
+.safety-notice { margin: 0 0 var(--sp-2); padding: 0; overflow: hidden; border-color: var(--warning-line); border-left-color: var(--warning); background: var(--warning-soft); }
 .safety-notice > summary {
   display: flex;
   align-items: center;
@@ -276,6 +303,13 @@ button:disabled { cursor: wait; opacity: .6; }
   color: var(--muted);
   font-size: var(--fs-sm);
   line-height: 1.6;
+}
+
+/* 1.16.13（视觉）：说明文字分两档 —— 关系到「要等多久 / 会不会丢东西」的那句
+   抬到正文色，其余补充说明继续用弱化色。 */
+.diff-hint.emphasis {
+  color: var(--text);
+  font-size: var(--fs-base);
 }
 
 .diff-result {
