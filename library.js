@@ -3082,8 +3082,7 @@ function relativeDayLabel(date) {
   const days = Math.round((today.getTime() - target.getTime()) / 86400000);
   if (days <= 0) return BcaI18n.t("今天");
   if (days === 1) return BcaI18n.t("昨天");
-  if (days < 30) return BcaI18n.t("{count} 天前", { count: days });
-  return BcaI18n.t("{count} 个月前", { count: Math.max(1, Math.round(days / 30)) });
+  return BcaI18n.t("{count} 天前", { count: days });
 }
 
 // 卡片上的相对时间：今天 / 昨天 / N 天前 / N 个月前 / 超过一年时只到月份（2025.03）
@@ -3095,8 +3094,10 @@ function relativeTime(value) {
   // 不是归档里的中文时间格式（异常值）就退回 2026.10.09，至少不显示空白
   if (!date) return compactDate(text);
   const days = Math.round((startOfDay(new Date()).getTime() - startOfDay(date).getTime()) / 86400000);
-  if (days >= 365) return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}`;
-  return relativeDayLabel(date);
+  /* 1.16.11（用户第 3 条）：7 天内说「今天 / 昨天 / N 天前」，第 8 天起直接给年月日。
+     再往后「37 天前」「3 个月前」都不如一个具体日期好对档案。 */
+  if (days <= 7) return relativeDayLabel(date);
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
 // extra 用来在值后面追加徽标等附加内容（例如 UP 主那一行的粉丝数）

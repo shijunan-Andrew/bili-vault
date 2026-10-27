@@ -1140,6 +1140,46 @@ async function suiteContent() {
     assert.equal(sent.some((message) => message.type === "save-favorite"), false, "导入在跑时不许再发归档请求");
   });
 
+  await test("同一个视频在同一页里再收藏一次：给右下角提示，不再重复归档（1.16.11 · 用户第 1 条）", async () => {
+    /* 1.16.11（用户第 1 条）：以前这里静默 return，用户完全看不到反馈。
+       现在第二次关弹层要弹一张「本地已有该视频存档」的提示卡，而且一条消息都不许再发。 */
+    const page = await openVideo(VIDEO_PAGE, {
+      localData: { enabled: true },
+      onRuntimeMessage: (message) => {
+        if (message.type === "bca-import-probe") return { ok: true, active: false };
+        if (message.type === "save-favorite") return { ok: true, message: "已保存视频信息和封面。" };
+        return undefined;
+      }
+    });
+    const first = page.document.querySelector(".bili-dialog .confirm");
+    const dialogNode = page.document.querySelector(".bili-dialog");
+    assert.ok(dialogNode, "夹具里要有收藏弹窗");
+    dom.fireUserEvent(first, "click");
+    await settle(4);
+    await closeDialog(page);
+    await settle(6);
+    assert.equal(page.chrome.__messages.filter((message) => message.type === "save-favorite").length, 1, "第一次要真的发归档请求");
+    const host = page.document.getElementById("bili-fav-archiver-host");
+    assert.ok(host && host.__shadowRoot, "第一次要有一张提示卡");
+    assert.ok(host.__shadowRoot.textContent.includes("归档成功"), "第一次是成功提示");
+
+    /* 第二次：把同一个收藏弹窗重新挂出来、再点一次确认 → 签名命中，直接给提示，不发消息 */
+    const before = page.chrome.__messages.length;
+    /* content.js 里有一道 700ms 去抖（lastConfirmAt），setTimeout 用的是真时间 —— 老实等 800ms。 */
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    page.document.body.append(dialogNode);
+    await settle(2);
+    const confirmAgain = page.document.querySelector(".bili-dialog .confirm");
+    dom.fireUserEvent(confirmAgain, "click");
+    await settle(4);
+    await closeDialog(page);
+    assert.equal(page.chrome.__messages.length, before, "第二次不许再发任何消息");
+    const again = page.document.getElementById("bili-fav-archiver-host");
+    assert.ok(again && again.__shadowRoot, "第二次也要给一张提示卡");
+    assert.ok(again.__shadowRoot.textContent.includes("本地已有该视频存档"), "要点明本地已经存过");
+    assert.ok(again.__shadowRoot.textContent.includes("不重复存档"), "还要说清不重复存档");
+  });
+
   await test("窗口状态读不到就认账：content.js 里不许再有活的 __INITIAL_STATE__ 读取（1.7.23）", async () => {
     const source = harness.readSource("content.js");
     const withoutComments = source
@@ -1147,6 +1187,30 @@ async function suiteContent() {
       .replace(/^\s*\/\/.*$/gm, "");
     assert.equal(withoutComments.includes("__INITIAL_STATE__"), false, "只剩注释里提它是可以的，代码里不许再读");
     assert.equal(withoutComments.includes("__initialState__"), false);
+  });
+}
+
+/* 1.16.11（用户第 4 条）：返回键统一挪到页面左上角，和标题同一行。 */
+async function suiteBackButtons() {
+  await test("设置页的「返回收藏库」在左上角、和标题同一行（1.16.11 · 用户第 4 条）", async () => {
+    const page = dom.loadPage({ htmlFile: "settings.html", chrome: makeChrome({ version: "1.16.11", localData: {} }) });
+    await settle(6);
+    const button = page.document.getElementById("settingsBack");
+    assert.ok(button, "返回按钮要在");
+    assert.equal(button.closest(".topbar-lead") !== null, true, "返回按钮要在标题那一格里（左上角）");
+    assert.equal(button.closest(".topbar-tools"), null, "不能还留在右上角的工具格里");
+    const lead = page.document.querySelector(".settings-topbar .topbar-lead");
+    assert.equal(lead.firstElementChild, button, "它是标题行里的第一个元素");
+  });
+
+  await test("统计页的「返回设置」在左上角、和标题同一行（1.16.11 · 用户第 4 条）", async () => {
+    const page = dom.loadPage({ htmlFile: "stats.html", chrome: makeChrome({ version: "1.16.11", localData: {} }) });
+    await settle(6);
+    const button = page.document.getElementById("statsBack");
+    assert.ok(button, "返回按钮要在");
+    assert.equal(button.closest(".stats-topbar-lead") !== null, true, "返回按钮要在标题那一格里（左上角）");
+    const lead = page.document.querySelector(".stats-topbar .stats-topbar-lead");
+    assert.equal(lead.firstElementChild, button, "它是标题行里的第一个元素");
   });
 }
 
@@ -2997,19 +3061,30 @@ async function suiteLibraryHelpers() {
     assert.deepEqual(await dl.resolveDownloadPath({}), { path: "", source: "none" }, "没有下载目录时什么都不给");
   });
 
-  await test("relativeTime 今天/昨天/N 天前，一年以上退回 YYYY.MM（1.15.2 · T-1）", () => {
+  await test("relativeTime 7 天内说「今天 / 昨天 / N 天前」，第 8 天起给年月日（1.16.11 · 用户第 3 条）", () => {
     const stamp = (dayOffset) => {
       const date = new Date();
       date.setDate(date.getDate() + dayOffset);
       return date.getFullYear() + "年" + (date.getMonth() + 1) + "月" + date.getDate() + "日12时0分0秒";
     };
+    const dateText = (dayOffset) => {
+      const date = new Date();
+      date.setDate(date.getDate() + dayOffset);
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return date.getFullYear() + "." + month + "." + day;
+    };
     assert.equal(clock.relativeTime(stamp(0)), "今天");
     assert.equal(clock.relativeTime(stamp(-1)), "昨天");
     assert.equal(clock.relativeTime(stamp(-5)), "5 天前");
+    assert.equal(clock.relativeTime(stamp(-7)), "7 天前", "第 7 天还是相对说法");
+    /* 第 8 天起改成具体日期 —— 再往后「37 天前」「3 个月前」都不如年月日好对档案。 */
+    assert.equal(clock.relativeTime(stamp(-8)), dateText(-8), "第 8 天要换成年月日");
+    assert.equal(clock.relativeTime(stamp(-45)), dateText(-45), "一个多月前也是年月日，不再出现「1 个月前」");
     const old = new Date();
     old.setFullYear(old.getFullYear() - 2);
     const oldText = old.getFullYear() + "年" + (old.getMonth() + 1) + "月" + old.getDate() + "日12时0分0秒";
-    assert.equal(clock.relativeTime(oldText), old.getFullYear() + "." + String(old.getMonth() + 1).padStart(2, "0"));
+    assert.equal(clock.relativeTime(oldText), old.getFullYear() + "." + String(old.getMonth() + 1).padStart(2, "0") + "." + String(old.getDate()).padStart(2, "0"), "两年前也是完整年月日");
     assert.equal(clock.relativeTime("不是时间"), "不是时间", "解析不出就退回 compactDate，不显示空白");
   });
   await test("bilibiliLink 只放行 B 站自己的域名（1.15.3 · 审查 T-1）", () => {
@@ -3302,6 +3377,7 @@ async function suite() {
   await suiteContent();
   await suiteSettings();
   await suiteSoundSettings();
+  await suiteBackButtons();
   await suiteFavoritesImport();
   await suiteRecycle();
   await suiteStats();

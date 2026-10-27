@@ -21,13 +21,11 @@
        条上必须有底色 —— 铺了背景图以后，粘性条里的文字不能直接压在照片上滚过去。 -->
   <header class="stats-topbar">
     <div class="stats-topbar-lead">
+      <!-- 1.16.11（用户第 4 条）：返回键挪到页面左上角。 -->
+      <button id="statsBack" class="button button-quiet stats-back" type="button" data-i18n="返回设置">返回设置</button>
       <h1 data-i18n="哔哩藏库 · 数据统计">哔哩藏库 · 数据统计</h1>
       <p class="stats-sub" data-i18n="收了多少、最近在收什么，这一页都从本机的 003database 现算。">收了多少、最近在收什么，这一页都从本机的 003database 现算。</p>
     </div>
-    <!-- 这一页是新开的一个标签：能关就直接关掉回到设置页那个标签，
-         关不掉（用户手输地址进来）才退回导航过去。绝不做成链接 ——
-         链接会把当前这个标签直接换成别的页面。 -->
-    <button id="statsBack" class="button button-quiet" type="button" data-i18n="返回设置">返回设置</button>
   </header>
 
   <main class="stats-shell skip-target" id="statsShell" tabindex="-1" aria-label="收藏数据统计" data-i18n-aria="收藏数据统计">

@@ -1330,6 +1330,25 @@ async function saveFavorite(data) {
     // 1.9.4：先按「收藏夹 + BV」索引判重，命中就直接跳过。
     const bvIndex = await loadBvIndex();
     const pageBvid = bvidOfMetadata(pageMetadata);
+    /* 1.16.11（用户第 1 条）：本地任何一个收藏夹里已经有这条视频就不再存第二份。
+       以前的判重只看「这一次要存的那几个收藏夹」，所以换一个收藏夹再收藏一次
+       会真的多写一份；用户要的是「本地已有 = 不重复存档」。 */
+    if (pageBvid) {
+      const wantedNames = new Set(folders.map((folder) => safeSegment(folder.name)));
+      const alreadyIn = Object.keys(bvIndex).find((name) => bvIndex[name] && bvIndex[name][pageBvid]);
+      /* 只有「别的收藏夹里已有」才在这里拦下；这次勾的收藏夹自己已有，交给下面 1.9.4 那条路，
+         那句「已在本地，跳过（N 个收藏夹都没有改动）」是收藏库顶栏在用的既有口径。 */
+      if (alreadyIn && !wantedNames.has(alreadyIn)) {
+        const message = "本地已有该视频存档，不重复存档。";
+        const existingPath = `${root.name}/${alreadyIn}/${bvIndex[alreadyIn][pageBvid]}`;
+        try {
+          await chrome.storage.local.set({ lastResult: { message, path: maskLocalUserPaths(existingPath), createdAt: Date.now(), kind: "skipped", skipped: 1, failed: 0 }, lastError: null, pendingFavorite: null });
+        } catch (storageError) {
+          console.warn("写入最近结果失败（这次是已经存过）", storageError);
+        }
+        return { ok: true, skipped: true, duplicate: true, message, path: existingPath };
+      }
+    }
     const plans = [];
     const seenNames = new Set();
     const uniqueFolders = [];
@@ -1376,7 +1395,7 @@ async function saveFavorite(data) {
       } catch (storageError) {
         console.warn("写入最近结果失败（这次只是跳过）", storageError);
       }
-      return { ok: true, skipped: true, message, path: skippedPaths.join(String.fromCharCode(10)) };
+      return { ok: true, skipped: true, duplicate: true, message, path: skippedPaths.join(String.fromCharCode(10)) };
     }
 
     metadata = await enrichFavoriteMetadata(pageMetadata);

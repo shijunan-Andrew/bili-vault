@@ -126,7 +126,7 @@ table.terms th:first-child, table.terms td:first-child { width: 34%; }
 
 /* 1.10.20：文档页的「回去的路」。顶栏两个出口靠右，末尾一个「回到顶部」。
    用文字链接而不是按钮：这两个动作是「离开这一页」，不该和正文里的主按钮抢注意力。 */
-.doc-bar { display: flex; justify-content: flex-end; gap: var(--sp-1); margin: 0 0 var(--sp-4); }
+.doc-bar { display: flex; justify-content: space-between; gap: var(--sp-1); margin: 0 0 var(--sp-4); }
 .doc-bar-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: var(--r-xs);
                 color: var(--muted); font-size: var(--fs-sm); text-decoration: none; }
 .doc-bar-link:hover { color: var(--brand); background: var(--brand-soft); }

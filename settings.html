@@ -26,6 +26,8 @@
        下拉的绝对定位就会跟着歪（这条是踩过的坑，别再把两者挪到一起）。 -->
   <header class="settings-topbar">
     <div class="topbar-lead">
+      <!-- 1.16.11（用户第 4 条）：返回键挪到页面左上角，与其它页面保持一致。 -->
+      <button id="settingsBack" class="button button-quiet topbar-back" type="button" data-i18n="返回收藏库">返回收藏库</button>
       <h1 data-i18n="哔哩藏库 · 设置">哔哩藏库 · 设置</h1>
       <nav class="crumbs" aria-label="当前位置" data-i18n-aria="当前位置">
         <span data-icon="settings"></span>
@@ -41,10 +43,6 @@
     </div>
 
     <div class="topbar-tools">
-      <!-- 返回收藏库：本页是新开的一个标签，能关就直接关掉回到原来那个收藏库标签，
-           关不掉（用户手输地址进来）才退回导航过去。位置从原来的标题行挪到了顶栏右侧。 -->
-      <button id="settingsBack" class="button button-quiet" type="button" data-i18n="返回收藏库">返回收藏库</button>
-
       <div class="settings-search">
         <span class="search-icon" data-icon="search" aria-hidden="true"></span>
         <input id="settingsSearch" type="search" autocomplete="off" data-i18n-placeholder="搜索设置" placeholder="搜索设置"

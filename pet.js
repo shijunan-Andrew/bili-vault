@@ -1228,6 +1228,10 @@
     if (phase === "sleep") {
       sleepReadyAt = nowMs() + randInt(WAKE_REFRACTORY_MIN, WAKE_REFRACTORY_MAX);
       wakeOnClick = true;
+      /* 1.16.11（用户第 2 条）：碰一下就算被吵醒，呼噜声必须当场停掉。
+         以前只在 standUp() 里停，而「按下去就拖走」这条路走不到 standUp ——
+         猫已经被拖醒了，呼噜却一直循环下去。 */
+      stopSound("purring");
     }
     // 先把状态机停掉：定时器还挂着的话，下一拍就会把猫从冻住的位置上再挪走。
     clearTimer();

@@ -1824,9 +1824,14 @@ test("the library is keyboard navigable and traps focus in overlays", () => {
 
 test("cards show relative dates and keep the exact time in the tooltip", () => {
   const library = readProjectFile("library.js");
-  for (const key of ["今天", "昨天", "{count} 天前", "{count} 个月前"]) {
+  /* 1.16.11（用户第 3 条）：7 天内相对说法，第 8 天起直接给年月日 ——「N 个月前」取消。 */
+  for (const key of ["今天", "昨天", "{count} 天前"]) {
     assert.ok(library.includes(`BcaI18n.t("${key}"`), `缺少相对时间文案 ${key}`);
   }
+  assert.equal(library.includes('BcaI18n.t("{count} 个月前"'), false, "「N 个月前」这种说法已经取消");
+  assert.ok(library.includes("if (days <= 7) return relativeDayLabel(date);"), "7 天内还是相对说法");
+  assert.match(library, /padStart\(2, "0"\)\}\.\$\{String\(date\.getDate\(\)\)\.padStart\(2, "0"\)\}/,
+    "第 8 天起要给完整年月日");
   assert.match(library, /\.title = /, "完整时间要放进 title");
 });
 
@@ -2325,9 +2330,11 @@ test("音效的接线只有一处：音量算法在 sound.js，播放点都走 B
   assert.ok(sound.includes("失败\\s*(\\d+)\\s*个"), "「失败 N 个」要按数字判，N=0 不算失败");
   const petSource = readProjectFile("pet.js");
   assert.ok(
-    (petSource.match(/stopSound\("purring"\)/g) || []).length >= 2,
-    "呼噜声停两处：醒来（standUp）与被藏起来（applyVisibility）"
+    (petSource.match(/stopSound\("purring"\)/g) || []).length >= 3,
+    "呼噜声停三处：被按住/拖走（1.16.11）、醒来（standUp）、被藏起来（applyVisibility）"
   );
+  assert.match(petSource, /if \(phase === "sleep"\) \{[\s\S]{0,600}?stopSound\("purring"\);/,
+    "1.16.11（用户第 2 条）：按下去那一刻就要停呼噜 —— 拖走这条路走不到 standUp");
   const popupSource = readProjectFile("popup.js");
   assert.match(popupSource, /IMPORT_LIMIT_KEY/, "导入上限要记住上次的选择");
   assert.match(readProjectFile("popup.html"), /<option value="10">10<\/option>/, "导入上限要有 10 这一档");
@@ -5416,10 +5423,16 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
     "定义 1 处 + 保存收藏 / 手动添加 / 补存三个入口各 1 处");
   assert.match(contentCode, /function rememberSeen\(signature\) \{[\s\S]{0,160}seen\.add\(signature\);/);
   assert.equal((contentCode.match(/seen\.add\(/g) || []).length, 1, "去重表只该在 rememberSeen 里写一次");
-  assert.match(contentCode, /if \(seen\.has\(signature\)\) return;\r?\n\s*sendFavorite\(data, signature\);/,
-    "观察器里只查重，不再先记掉");
+  /* 1.16.11（用户第 1 条）：命中查重时不再静默 return —— 给一句「本地已有该视频存档」。 */
+  assert.match(contentCode, /if \(seen\.has\(signature\)\) \{[\s\S]{0,320}?showNotice\(BcaI18n\.t\("本地已有该视频存档"\)[\s\S]{0,120}?return;[\s\S]{0,40}?\}\r?\n\s*sendFavorite\(data, signature\);/,
+    "观察器里只查重：命中时给提示，不先记进去重表");
   assert.match(contentCode, /rememberSeen\(signature\);\r?\n\s*showNotice\(BcaI18n\.t\("归档成功"\)/,
     "只有真的归档成功才记进去重表");
+  assert.ok(contentCode.includes("result?.duplicate"), "后台说重复时内容脚本要单独给一句提示");
+  assert.match(backgroundCode, /const alreadyIn = Object\.keys\(bvIndex\)\.find\(/,
+    "1.16.11：判重要跨所有收藏夹查 BV 索引，不能只看这次要存的那几个");
+  assert.ok(backgroundCode.includes("本地已有该视频存档，不重复存档。"), "后台自己也要给出这句结论");
+  assert.match(backgroundCode, /duplicate: true/, "返回值要带 duplicate 标记，界面据此换文案");
 
   // P1-4：纯本地读的两个循环也要保活
   assert.equal((backgroundCode.match(/await keepServiceWorkerAlive\("scan"\);/g) || []).length, 2);
@@ -7928,7 +7941,9 @@ test("收藏前先按「收藏夹 + BV」判重，已存在就整条跳过（1.9
   assert.match(background, /const pendingFolders = plans\.filter\(\(plan\) => !plan\.error && !plan\.existing\);/);
   assert.match(background, /if \(!pendingFolders\.length\) \{/);
   assert.match(background, /已在本地，跳过（/);
-  assert.match(background, /return \{ ok: true, skipped: true, message, path:/);
+  /* 1.16.11：这条返回值多带一个 duplicate 标记，内容脚本据此弹「本地已有该视频存档」。 */
+  assert.match(background, /return \{ ok: true, skipped: true, duplicate: true, message, path:/,
+    "已在本地时也要告诉界面这是重复收藏");
   assert.match(background, /await saveBvIndex\(bvIndex\);/);
 
   // 顺序：判重放在补资料之前，已在本地就不该再请求接口
@@ -8312,12 +8327,28 @@ test("1.10.19：使用说明与安装教程的字号只用令牌，示意图按�
 
 test("1.10.20：两个文档页都要有「回去的路」，出口指向真实页面", () => {
   const css = readProjectFile("page.css");
-  assert.match(css, /\.doc-bar\s*\{[^}]*justify-content:\s*flex-end/, "顶栏的出口靠右放");
+  /* 1.16.11（用户第 4 条）：返回键统一挪到页面左上角。 */
+  assert.match(css, /\.doc-bar\s*\{[^}]*justify-content:\s*space-between/, "文档页顶栏要把返回键放左边、另一个出口放右边");
   assert.match(css, /\.doc-bar-link\s*\{[^}]*text-decoration:\s*none/, "出口是文字链接，不是按钮");
+
+  /* 1.16.11（用户第 4 条）：设置页与统计页的返回键也搬到左上角、和标题同一行。 */
+  const settingsHtml = readProjectFile("settings.html");
+  assert.match(settingsHtml, /<div class="topbar-lead">[\s\S]{0,400}?<button id="settingsBack"/,
+    "设置页的「返回收藏库」要在标题行第一格（左上角）");
+  assert.equal(/topbar-tools[\s\S]{0,600}?id="settingsBack"/.test(settingsHtml), false,
+    "设置页的返回键不能还留在右上角工具格里");
+  const statsHtml = readProjectFile("stats.html");
+  assert.match(statsHtml, /<div class="stats-topbar-lead">[\s\S]{0,400}?<button id="statsBack"/,
+    "统计页的「返回设置」要在标题行第一格（左上角）");
+  assert.equal(/<header class="stats-topbar">\s*<\/div>/.test(statsHtml), false, "统计页顶栏结构别写坏");
 
   for (const file of ["guide.html", "tutorial.html"]) {
     const html = readProjectFile(file);
     assert.ok(html.includes('<body id="top">'), `${file} 要有 #top 锚点`);
+    assert.ok(
+      html.indexOf('class="doc-bar-link" href="settings.html"') < html.indexOf('class="doc-bar-link" href="library.html"'),
+      `${file} 里「返回设置」要排在「打开本地收藏库」前面（左边那个才是返回键）`
+    );
     assert.ok(html.includes('href="settings.html" data-i18n="返回设置"'), `${file} 要能回设置页`);
     assert.ok(html.includes('href="library.html" data-i18n="打开本地收藏库"'), `${file} 要能去收藏库`);
     assert.ok(html.includes('href="#top" data-i18n="回到顶部"'), `${file} 末尾要有回到顶部`);

@@ -48,6 +48,8 @@
 .topbar-tools { display: flex; align-items: center; gap: var(--sp-3); flex: 0 0 auto; }
 /* 32px 是图标按钮的常见尺寸，比 .button 的 40px 矮一档，顶栏里不抢视线 */
 .topbar-tools .button { min-height: 32px; padding: 0 var(--sp-3); }
+/* 1.16.11：返回键在左上角、和标题同一行；标题行是 baseline 对齐，按钮得自己居中 */
+.topbar-back { align-self: center; min-height: 32px; margin-right: var(--sp-1); padding: 0 var(--sp-3); }
 
 /* 搜索框 + 结果下拉。外面这层**没有** backdrop-filter：
    玻璃会新建包含块，下拉的绝对定位就跟着歪了。 */

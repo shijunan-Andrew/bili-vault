@@ -464,6 +464,10 @@
           // result.message 来自 background，原样显示；details 是路径/原始错误，不翻译
           playSound("error");
           showNotice(BcaI18n.t("归档失败"), result?.message || BcaI18n.t("未能保存视频信息。"), result?.details || "", true);
+        } else if (result?.duplicate) {
+          // 1.16.11（用户第 1 条）：本地别的收藏夹里已经有这条视频 —— 不重复存，说清楚。
+          rememberSeen(signature);
+          showNotice(BcaI18n.t("本地已有该视频存档"), BcaI18n.t("不重复存档。"), result?.path || "", false);
         } else {
           rememberSeen(signature);
           showNotice(BcaI18n.t("归档成功"), result?.message || BcaI18n.t("已保存视频信息和封面。"), result?.path || "", false, { label: BcaI18n.t("打开本地收藏库"), run: openLocalLibrary });
@@ -493,7 +497,12 @@
       if (!archiveEnabled) return;
       data.favoriteAt = Date.now();
       const signature = `${data.metadata.bvid}|${data.folders.map((folder) => folder.name).sort().join(",")}`;
-      if (seen.has(signature)) return;
+      /* 1.16.11（用户第 1 条）：同一个视频在同一页里再收藏一次，以前这里是静默丢弃 ——
+         用户看不到任何反馈，只能猜「到底存没存」。现在给一张右下角提示卡。 */
+      if (seen.has(signature)) {
+        showNotice(BcaI18n.t("本地已有该视频存档"), BcaI18n.t("不重复存档。"), "", false);
+        return;
+      }
       sendFavorite(data, signature);
     });
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "aria-hidden"] });
