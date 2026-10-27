@@ -714,7 +714,7 @@
   "设置分组": "Settings groups",
   "失效": "Unavailable",
   "失效视频能找回来吗？": "Can unavailable videos be recovered?",
-  "失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 APP 接口、稍后再看、观看历史里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。": "An unavailable video is just a blank placeholder on Bilibili — its title, cover and description are gone. When enabled, the extension searches the app API, Watch Later and watch history to piece the cover and title back together. If nothing is found it records 「unknown」 as usual, and records you already have are never affected.",
+  "失效视频在 B 站只剩一张空白占位图（标题、封面、简介都没了）。开启后插件会去 B 站 APP 的收藏夹数据里翻找，尽量把封面和标题拼回来。找不回就照常记「未知」，不会影响已经保存好的记录。": "An unavailable video is just a blank placeholder on Bilibili — its title, cover and description are gone. When enabled, the extension searches the app's favorites data to piece the cover and title back together. If nothing is found it records 「unknown」 as usual, and records you already have are never affected.",
   "失效视频在本地长什么样": "What it looks like locally",
   "失效原因": "Unavailability reason",
   "十、常见问题与使用边界": "10. FAQ and limits",

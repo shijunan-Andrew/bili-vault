@@ -2040,25 +2040,21 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
   }
 
   const maxPasses = IMPORT_RECOVERY_MAX_PASSES;
-  let recoveryRequests = 0;
-  let budgetExhausted = false;
-  // 1.4.2（P1-8）：撞风控时用它一次性跳出「页循环 + 轮次循环」，不再往下加压
+  // 1.17.6：轮数恢复成最初的 4 轮（100 页 / 每页 3 次尝试照旧）——
+  // 次数和 1.1.9 之前一样，但每一次请求都照样过限速器（biliImportApiGet 里领票），
+  // 页间 650ms、轮间 1200ms 也没动，所以是「同样的请求量、更稳的节奏」，
+  // 不是当年那个能把账号送进风控的放大器。撞风控仍然立刻停：
+  // 那说明 B 站已经在拒绝了，硬补齐剩下几轮只会更糟。
   let rateLimitedAbort = false;
   for (let pass = 1; pass <= maxPasses; pass += 1) {
     let page = 1;
     let passFailed = false;
     for (; page <= 100; page += 1) {
-      if (recoveryRequests >= IMPORT_RECOVERY_MAX_REQUESTS) {
-        budgetExhausted = true;
-        recoveryErrors.push(`APP收藏夹接口：已达到本次恢复的请求上限 ${IMPORT_RECOVERY_MAX_REQUESTS} 次，停止扫描；未找到的失效视频保持原样。`);
-        break;
-      }
       // 4.2：失效视频的跨页扫描也可能很久，这里也要能响应暂停/取消
       await importWaitIfPaused();
       let payload = null;
       let lastError = null;
       for (let attempt = 1; attempt <= 3; attempt += 1) {
-        recoveryRequests += 1;
         try {
           payload = await biliImportApiGet("/x/v3/fav/folder/resources", {
             media_id: folder.id, pn: page, platform: "ios", mobi_app: "iphone", build: 89501100
@@ -2096,38 +2092,13 @@ async function fetchMobileRecovery(folder, targets, recoveryErrors = [], tabId =
     }
 
     const missing = missingTargets();
-    if (!missing.length || budgetExhausted || rateLimitedAbort) break;
+    if (!missing.length || rateLimitedAbort) break;
     if (passFailed) recoveryErrors.push(`APP收藏夹接口：第 ${pass} 轮扫描在第 ${page} 页中断，剩余 ${missing.length} 个失效视频将继续重试。`);
     if (pass < maxPasses) await importDelay(1200);
   }
   return [...recordsByKey.values()];
 }
 
-async function fetchImportHistory(wantedBvids, recoveryErrors = [], tabId = null) {
-  const wanted = new Set(wantedBvids.filter(Boolean));
-  const found = new Map();
-  let cursor = { max: 0, view_at: 0, business: "" };
-  for (let page = 0; page < IMPORT_HISTORY_MAX_REQUESTS && wanted.size; page += 1) {
-    let data;
-    try {
-      data = await biliImportApiGet("/x/web-interface/history/cursor", {
-        ps: 30, type: "archive", max: cursor.max || 0, view_at: cursor.view_at || 0, business: cursor.business || ""
-      }, 15000, tabId);
-    } catch (error) { recoveryErrors.push(`观看历史接口：${error.message}`); break; }
-    const list = Array.isArray(data.list) ? data.list : [];
-    for (const record of list) {
-      const bvid = importClean(record?.history?.bvid || record?.bvid || "");
-      if (!bvid || !wanted.has(bvid)) continue;
-      found.set(bvid, record);
-      wanted.delete(bvid);
-    }
-    const next = data.cursor || {};
-    if (!list.length || (next.max === cursor.max && next.view_at === cursor.view_at && next.business === cursor.business)) break;
-    cursor = next;
-    if (list.length < 30) break;
-  }
-  return found;
-}
 
 async function enrichImportedInvalidVideos(items, folder, tabId = null) {
   const invalid = items.filter((item) => item.isInvalid);
@@ -2142,33 +2113,15 @@ async function enrichImportedInvalidVideos(items, folder, tabId = null) {
     }
   } catch (error) { recoveryErrors.push(`APP收藏夹接口：${error.message}`); }
 
-  let toView = new Map();
-  try {
-    const data = await biliImportApiGet("/x/v2/history/toview/web", {}, 15000, tabId);
-    for (const record of Array.isArray(data.list) ? data.list : []) {
-      if (record?.bvid) toView.set(record.bvid, record);
-    }
-  } catch (error) { recoveryErrors.push(`稍后再看接口：${error.message}`); }
-
-  const history = await fetchImportHistory(invalid.map((item) => item.bvid), recoveryErrors, tabId);
-  for (const item of invalid) {
-    const toViewRecord = toView.get(item.bvid);
-    if (toViewRecord) mergeRecoveredValue(item, {
-      title: toViewRecord.title, cover: toViewRecord.pic, author: toViewRecord.owner?.name,
-      authorMid: toViewRecord.owner?.mid, duration: toViewRecord.duration, pubdate: toViewRecord.pubdate
-    }, "稍后再看");
-    const historyRecord = history.get(item.bvid);
-    if (historyRecord) mergeRecoveredValue(item, {
-      title: historyRecord.title, cover: historyRecord.cover, author: historyRecord.author_name,
-      authorMid: historyRecord.author_mid, duration: historyRecord.duration,
-      tags: historyRecord.tag_name ? [historyRecord.tag_name] : []
-    }, "观看历史");
-  }
+  // 1.17.6：不再翻「稍后再看」和「观看历史」。
+  // 失效视频多数是几年前收藏的，观看历史游标最多只够回溯 1200 条，早就出窗口了；
+  // 而 B 站 APP 的收藏夹数据（2025 年底起）能带回一部分失效视频的标题和封面 ——
+  // 那是唯一还留得住东西的地方，所以恢复只打这一路。
 
   // 1.5.1（P1-13）：这里原来写死并发 3，绕过了 IMPORT_DETAIL_CONCURRENCY = 1（见 :1434）——
   // 等于「详情/恢复接口串行」这条安全线在这一段完全没生效：3 个 worker 各自连续打
   // 「视频资料 + 标签」两个接口，请求密度是主流程的 3 倍，而这段恰恰是失效视频恢复，
-  // 本来就被风控盯得最紧（IMPORT_RECOVERY_MAX_REQUESTS 就是为它加的预算）。
+  // 本来就被风控盯得最紧（1.17.6 起恢复只靠限速兜住，见 fetchMobileRecovery）。
   // 现在改成用常量：改并发只需要动 :1434 一处，不会再出现第二个真相。
   await importRunLimited(invalid, IMPORT_DETAIL_CONCURRENCY, async (item) => {
     await importWaitIfPaused();
@@ -4849,7 +4802,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
   // 4.4.1：失效视频恢复默认开启（它需要伪造成官方 APP 客户端请求 APP 接口，
   // 是合规上最勉强的一环，因此保留开关让用户能关掉；只有明确存成 false 才关闭）
   const settings = await chrome.storage.local.get("recoverInvalidVideos").catch(() => ({}));
-  // 默认开启：这个开关会去 APP 接口 / 稍后再看 / 观看历史里**拼凑失效视频的信息**
+  // 默认开启：这个开关会去 APP 收藏夹数据里**拼凑失效视频的信息**
   // （封面、标题等），真机上确实找得回来。
   // 注意别和"把失效视频恢复成正常状态"混为一谈 —— 那是另一回事，一般也做不到。
   // 必须与 popup.js 的默认值保持一致，否则界面显示与实际行为会不一致。
@@ -5121,7 +5074,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       }
       publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
 
-      // 失效视频先走原有的恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）。
+      // 失效视频先走恢复流程（只打 APP 收藏夹这一路，见 fetchMobileRecovery）。
       // 4.4.1：这条路径会伪造成官方 iOS 客户端请求 APP 接口，默认开启，
       // 用户可以在插件弹窗里取消勾选（recoverInvalidVideos=false）来关闭。
       if (recoverInvalidVideos) {
@@ -5576,16 +5529,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
 const IMPORT_PAGE_PROXY_FAILURE_LIMIT = 3;
 let importPageProxyFailures = 0;
 
-/* 失效视频恢复（手机端收藏夹扫描）与观看历史的请求预算。
+/* 失效视频恢复（手机端收藏夹扫描）的轮数。
 
-   这两个是项目里最大的请求放大器，而且**默认开启**：
-     · 恢复：原来是 4 轮 × 100 页 × 每页 3 次重试 = 最多 1200 次请求
-     · 历史：最多 80 页
-   配合"页面代取失败会再发一次"，最坏能到 2400 次 —— 一个收藏夹就能把账号送进风控。
-   现在各自有一个硬预算，用完就停，并在报告里写清楚还剩多少没恢复。 */
-const IMPORT_RECOVERY_MAX_REQUESTS = 120;
-const IMPORT_RECOVERY_MAX_PASSES = 2;
-const IMPORT_HISTORY_MAX_REQUESTS = 40;
+   1.17.6 起恢复只打 APP 收藏夹这一路（不再翻稍后再看 / 观看历史），
+   轮数恢复成最初的 4 轮 × 100 页 × 每页 3 次尝试：请求量回到 1.1.9 之前的水平，
+   但每一次都过限速器、页间 650ms、轮间 1200ms，不会再像当年那样把账号送进风控。
+   真要出事时还有一道闸：撞上风控立刻停（见 fetchMobileRecovery 的 rateLimitedAbort）。 */
+const IMPORT_RECOVERY_MAX_PASSES = 4;
 let biliRequestSlotAt = 0;
 let biliRequestCount = 0;
 

@@ -4128,21 +4128,30 @@ test("收藏夹列表要有短时缓存（差异对比与导入读的是同一�
   assert.equal(/importListCacheClear/.test(src), false, "导入不该再清列表缓存，见 importListCacheStore 上方的说明");
 });
 
-test("请求放大器都有硬预算，不能无限翻页", () => {
+test("失效恢复只打 APP 收藏夹这一路，次数回到最初的 4 轮 × 100 页 × 3 次", () => {
   const src = readProjectFile("background.js");
   const num = (name) => Number(src.match(new RegExp(name + " = (\\d+)"))?.[1] || 0);
 
-  // 失效恢复：原来 4 轮 × 100 页 × 3 次重试 = 最多 1200 次，是项目里最大的放大器
-  const recovery = num("IMPORT_RECOVERY_MAX_REQUESTS");
-  const passes = num("IMPORT_RECOVERY_MAX_PASSES");
-  assert.ok(recovery > 0 && recovery <= 300, `失效恢复的请求预算是 ${recovery}，太大`);
-  assert.ok(passes > 0 && passes <= 3, `失效恢复轮数是 ${passes}，太大`);
-  assert.match(src, /recoveryRequests >= IMPORT_RECOVERY_MAX_REQUESTS/, "恢复循环没有真的检查预算");
+  // 1.17.6（用户要求）：B 站 APP 收藏夹从 2025 年底起能带回一部分失效视频的标题和封面，
+  // 所以恢复只打这一路，轮数 / 页数 / 重试次数都回到 V1.1.9 之前的水平。
+  // 次数虽然回到 1200 次上限，但每一次都过限速器（biliImportApiGet 里领票），
+  // 页间 650ms、轮间 1200ms —— 靠节奏兜住，而不是靠砍次数。
+  assert.equal(num("IMPORT_RECOVERY_MAX_PASSES"), 4, "恢复轮数应回到最初的 4 轮");
+  assert.match(src, /for \(; page <= 100; page \+= 1\)/, "每轮最多扫 100 页");
+  assert.match(src, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/, "每页最多尝试 3 次");
+  assert.equal(/IMPORT_RECOVERY_MAX_REQUESTS/.test(src), false, "恢复不该再有请求硬预算");
+  assert.equal(/recoveryRequests/.test(src), false, "恢复不该再数请求次数");
 
-  // 观看历史
-  const history = num("IMPORT_HISTORY_MAX_REQUESTS");
-  assert.ok(history > 0 && history <= 80, `观看历史的请求预算是 ${history}，太大`);
-  assert.match(src, /page < IMPORT_HISTORY_MAX_REQUESTS/, "观看历史没有用预算常量");
+  // 只留 APP 收藏夹：稍后再看 / 观看历史都不翻了（失效视频多数是几年前的，早出窗口了）
+  assert.equal(/history\/toview/.test(src), false, "不该再请求稍后再看");
+  assert.equal(/web-interface\/history\/cursor/.test(src), false, "不该再请求观看历史");
+  assert.equal(/fetchImportHistory/.test(src), false, "观看历史那条函数应该删干净");
+  assert.equal(/IMPORT_HISTORY_MAX_REQUESTS/.test(src), false, "观看历史的预算常量应该删掉");
+
+  // 限速节奏必须还在：这才是「次数一样多、但不再加压」的关键
+  assert.match(src, /await importDelay\(650\);/, "恢复翻页之间要有 650ms 间隔");
+  assert.match(src, /if \(pass < maxPasses\) await importDelay\(1200\);/, "恢复轮次之间要有 1200ms 间隔");
+  assert.match(src, /await biliImportApiGet\("\/x\/v3\/fav\/folder\/resources"/, "恢复要走限速过的 biliImportApiGet");
 
   // 页面代取：失败几次之后本轮就别再试了，否则每次请求都发两遍
   const proxyLimit = num("IMPORT_PAGE_PROXY_FAILURE_LIMIT");
@@ -5482,7 +5491,8 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   // P1-8：风控码补全；恢复扫描撞风控要整轮停，不能继续加压
   assert.match(backgroundCode, /const IMPORT_RATE_LIMIT_CODES = new Set\(\[-412, -352, -509, -799\]\);/);
   assert.match(backgroundCode, /let rateLimitedAbort = false;/);
-  assert.match(backgroundCode, /budgetExhausted \|\| rateLimitedAbort/);
+  assert.match(backgroundCode, /if \(!missing\.length \|\| rateLimitedAbort\) break;/, "撞风控要一次跳出页循环与轮次循环");
+  assert.match(backgroundCode, /IMPORT_RECOVERY_MAX_PASSES = 4;/, "恢复轮数回到最初的 4 轮");
 
   // P2-21：打包白名单脚本在，且排除清单里确实有开发文件
   for (const name of [".node-path", "test", "scripts", ".github", "AI_HANDOFF.md", "README.md", "SMOKE_TEST.md", "release.ps1", "docs"]) {

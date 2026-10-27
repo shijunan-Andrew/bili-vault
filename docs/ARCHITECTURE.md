@@ -115,7 +115,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 `favorites-import.js` 注入个人空间收藏夹页，为后台请求提供页面上下文 API 代理，并接收列表收藏夹、导入所选收藏夹的消息。`popup.js` 展示可选列表和导入进度。后台分页获取收藏视频、对本地 BV/av 去重，并写入与自动归档相同的目录格式。
 
-失效视频恢复逻辑主要在 `background.js`：尝试从 APP 收藏夹数据、稍后再看、观看历史和视频资料等来源恢复标题、封面、UP 主及其他字段。未找回的字段应保留为“未知”；封面无法恢复时使用占位图，避免本地库漏掉该记录。B 站接口和页面结构会变化，导入失败时应保留部分已成功结果并记录错误。
+失效视频恢复逻辑主要在 `background.js`：只从 B 站 APP 收藏夹数据（`fetchMobileRecovery`，4 轮 × 100 页 × 每页 3 次尝试，每次请求都过限速器）和视频资料接口恢复标题、封面、UP 主及其他字段；不再翻稍后再看与观看历史（失效视频多数是几年前的，那两个来源早就出窗口了）。未找回的字段应保留为“未知”；封面无法恢复时使用占位图，避免本地库漏掉该记录。B 站接口和页面结构会变化，导入失败时应保留部分已成功结果并记录错误。
 
 ### 导入/更新流程（4.2 重写）
 
@@ -124,7 +124,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 1. 列远程收藏夹 → 逐个读分页（`/x/v3/fav/resource/list`）。
 2. 本地同名收藏夹**不存在**就新建（记进回滚日志），**存在**就读取已有记录（`readExistingImportRecords()` 同时返回去重标识符和每条记录的原文）。
 3. 按 BV/av 把远程条目分成「缺失的」和「已存在但 `recordNeedsRefresh()` 为真」的两类。
-4. 失效视频先走原有恢复流程（APP 收藏夹 / 稍后再看 / 观看历史）。
+4. 失效视频先走恢复流程（只打 APP 收藏夹这一路，见 `fetchMobileRecovery`）。
 5. **对上面两类条目都抓一次完整资料**：`fetchImportDetails()` → `fetchVideoDetail()` 调 `/x/web-interface/view`（简介、发布时间、时长、UP 主、`stat`）与 `/x/tag/archive/tags`（标签），再调 `/x/relation/stat` 取 UP 主粉丝数（`upFansCache` 按 mid 缓存，同一个 UP 只请求一次）。并发 1、间隔 800ms（4.3 起下调，见 [`AI_HANDOFF.md`](../AI_HANDOFF.md) 的「合规与安全红线」）。
 6. 已存在的记录用 `refreshImportedRecord()` 按新格式重写，**保留原来的收藏时间与目录名**，原文进回滚日志。写盘前先过 `BcaArchiveCore.mergeInfoText(original, rebuiltText)`（1.8.3）：新值是占位而原值有真内容 → 保留原值，`【标签】` / `【视频简介】` 整块变成占位时整块换回，`【互动数据】` 逐键合并 —— **刷新链路不许把已知降级成「未知」**；`patchVolatileFields` 更新互动数据也只动 `stats` 里真出现的键（`patchStatsLines()`）。
 7. 缺失的条目批量下载封面后写入（`saveImportedItem(..., journal)`，目录句柄先登记再写）。
