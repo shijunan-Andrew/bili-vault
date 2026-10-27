@@ -1063,6 +1063,10 @@ test("the collection list scrolls instead of pushing the footer out", () => {
   assert.match(block, /align-content: start/);
   // 底部信息靠 margin-top:auto 定位，前提是列表能收缩
   assert.match(css, /\.sidebar-bottom \{ margin-top: auto;/);
+  // 1.17.3（审查 P2）：置顶/删除出现时计数要让位 —— 鼠标悬停与键盘聚焦两条路都要让，
+  // 否则 Tab 到这一行时两个按钮正好压在数字上。拖拽把手不跟着藏（它由后面的 .85 规则管）。
+  assert.match(css, /\.collection-row:hover \.collection-count,\s*\.collection-row:focus-within \.collection-count \{ opacity: 0; \}/,
+    "键盘聚焦时计数也要让位");
 });
 
 test("every shipped script actually parses", () => {
@@ -2024,7 +2028,13 @@ test("theme, language, and the guide all live in the settings page behind one ge
       assert.match(html, /id="scrollTopFab"[\s\S]{0,200}?data-icon="arrow-up"/, `${file} 的回到顶部要用 arrow-up 图标`);
       assert.match(html, /id="backToLibraryFab"[^>]*href="library\.html"/, `${file} 的 logo 钮要回收藏库`);
       assert.match(html, /id="backToLibraryFab"[^>]*data-i18n-title="回到收藏库"/, `${file} 的回到收藏库 title 要能翻译`);
+      // 1.17.3（审查 P2）：aria-label 会盖掉 title，只写 "B" 的话读屏只会念「B 链接」。
+      assert.match(html, /id="backToLibraryFab"[^>]*aria-label="回到收藏库"/, `${file} 的 logo 钮要能被读屏念对`);
+      assert.match(html, /id="backToLibraryFab"[^>]*data-i18n-aria="回到收藏库"/, `${file} 的无障碍名也要能翻译`);
       assert.ok(html.indexOf('id="scrollTopFab"') < html.indexOf('id="backToLibraryFab"'), `${file} 里回到顶部要排在回到收藏库上方`);
+      // 1.17.3（审查 P2）：浮标是 fixed 的，页面底部必须给它留出空间，否则会压住最下面的按钮。
+      const styles = ["settings.css", "stats.css", "recycle.css"].map((name) => readProjectFile(name)).join("\n");
+      assert.match(styles, /calc\(var\(--sp-[56]\) \+ 120px\)/, "三页底部要给浮标留出 120px，不然会盖住最下面一行");
     }
     // 三个页面都要加载 page.css，否则浮标没有样式（stats 之前只加载 theme.css + stats.css）
     for (const file of ["settings.html", "stats.html", "recycle.html"]) {
@@ -4094,6 +4104,10 @@ test("差异对比的状态要落盘（切走弹窗再回来不能看起来断�
   const popup = readProjectFile("popup.js");
   assert.match(popup, /chrome\.storage\.local\.get\("diffState"\)/, "弹窗打开时没有恢复差异状态");
   assert.match(popup, /state\.running/, "没有区分「还在跑」和「跑完了」");
+  // 1.17.3（审查 P1-A）：光在打开时读一次不够 —— 后台跑完（或上次对比被回收留下残影）
+  // 时没人再通知弹窗，它会一直停在「正在对比差异」并把导入/对比入口全禁掉。
+  assert.match(popup, /changes\.diffState/, "弹窗要监听 diffState 的变化，不能只在打开时读一次");
+  assert.match(popup, /diffStateNext\.running/, "监听回调里要区分「还在跑」与「跑完了」");
 });
 
 test("收藏夹列表要有短时缓存（差异对比与导入读的是同一份）", () => {
@@ -7643,6 +7657,15 @@ test("1.16.10：这一轮其实跑完了就不报中断（收尾判据）", () =
   assert.match(background, /if \(importRunLooksComplete\(leftover\)\) \{/, "reconcile 里要先判「其实跑完了」");
   assert.match(background, /const folderTotal = Number\(snapshot\?\.cursor\?\.folderTotal\) \|\| 0;/, "要靠收藏夹进度判断");
   assert.match(background, /if \(handled < total\) return false;/, "条目没数完就不算跑完");
+  // 1.17.3（审查 P1-B）：handled 只数 imported + skipped —— refreshed 是 skipped 的子集，
+  // failed 里混着接口口径差额，两者任何一个加进来都会提前追平 total。
+  assert.match(background, /const handled = \(Number\(counts\.imported\) \|\| 0\) \+ \(Number\(counts\.skipped\) \|\| 0\);/,
+    "handled 只数「导入成功 + 本地已有跳过」，别再叠加 refreshed / failed");
+  assert.doesNotMatch(background, /Number\(counts\.refreshed\) \|\| 0\) \+ \(Number\(counts\.skipped\)/,
+    "refreshed 与 skipped 不能同时计入 handled（同一条既有记录会算两遍）");
+  // 游标里「这个收藏夹有几条」另起字段，不许再覆写「一共有几个收藏夹」。
+  assert.match(background, /folderItems: pendingItems\.length/, "条目数要写在 folderItems 里");
+  assert.doesNotMatch(background, /folderTotal: pendingItems\.length/, "folderTotal 不能再被条目数覆写");
   assert.match(background, /return folderTotal > 0 && folderIndex >= folderTotal;/, "收藏夹没走完就不算跑完");
   assert.match(background, /finishing: false,/, "快照初始化要带上这个字段");
 });

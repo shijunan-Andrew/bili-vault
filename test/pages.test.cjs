@@ -948,6 +948,37 @@ async function suitePopup() {
     assert.equal(doc.getElementById("doneDialogText").classList.contains("error"), false);
   });
 
+  await test("对比残影会让弹窗锁死 —— 后台一复位，弹窗要自己解锁（1.17.3 · 审查 P1-A）", async () => {
+    const chrome = makeChrome({
+      localData: { diffState: { running: true, text: "正在读取 B 站收藏夹列表…" } },
+      onRuntimeMessage: async (message) => {
+        // get-status 会把对比残影复位成 running:false（background 的 diffReconcileState 那一步），
+        // 这里只回最小状态，重点验「弹窗有没有跟着 storage 的变化走」。
+        if (message?.type === "get-status") return { importState: {} };
+        return undefined;
+      }
+    });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle(20);
+    const doc = page.document;
+    const progressView = doc.getElementById("importProgressView");
+    const selectionView = doc.getElementById("importSelectionView");
+    assert.equal(progressView.hidden, false, "打开时按残影显示「正在对比差异」");
+    assert.equal(selectionView.hidden, true, "这时候不该显示选收藏夹那一段");
+
+    // 后台那一轮对比结束（或复位）后写 diffState：弹窗必须跟着解锁
+    await chrome.storage.local.set({
+      diffState: {
+        running: false,
+        summary: { folders: [{ folderTitle: "测试夹", added: 2, removed: 0, newlyInvalid: 1, recovered: 0 }], reportPath: "" }
+      }
+    });
+    await settle(30);
+    assert.equal(progressView.hidden, true, "后台说对比结束了，弹窗要回到选择视图");
+    assert.equal(selectionView.hidden, false, "选择视图要回来，否则用户什么都点不了");
+    assert.match(textOf(doc.getElementById("importStatus")), /对比完成/, "要把结果结论写出来");
+  });
+
   await test("导入中消息断了、但后台还在跑：视图留在进度页，不许跳回选收藏夹（1.16.8）", async () => {
     const chrome = makeChrome({
       localData: {},

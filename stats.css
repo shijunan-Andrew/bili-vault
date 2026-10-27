@@ -82,7 +82,8 @@ body {
   gap: var(--sp-4);
   max-width: 1120px;
   margin: 0 auto;
-  padding: var(--sp-5) var(--sp-5) var(--sp-6);
+  /* 1.17.3（审查 P2）：同设置页 —— 右下角浮标是 fixed 的，底部多留出它的高度。 */
+  padding: var(--sp-5) var(--sp-5) calc(var(--sp-6) + 120px);
 }
 
 .stats-card {

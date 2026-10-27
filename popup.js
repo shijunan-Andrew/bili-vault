@@ -1125,6 +1125,32 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       playImportSound(state);
     }
   }
+  /* 1.17.3（审查 P1-A）：对比（diff）也要有实时通道。
+     以前这里只监听 importState，而 boot 读到 diffState.running === true 就把 importBusy
+     置真并 return —— 后台那一轮对比跑完之后没人再通知弹窗，于是它永远停在「正在对比
+     差异」，导入/对比入口全禁，只能关掉重开。现在后台一写 diffState 就跟着复位。 */
+  if (areaName === "local" && changes.diffState) {
+    const diffStateNext = changes.diffState.newValue || {};
+    if (diffStateNext.running) {
+      if (!importBusy) {
+        importBusy = true;
+        activeOperation = "diff";
+        if (diffStateNext.text) importProgressText.textContent = diffStateNext.text;
+        updateImportSelection();
+      }
+    } else if (activeOperation === "diff") {
+      importBusy = false;
+      updateImportSelection();
+      const summary = diffStateNext.summary;
+      if (summary && Array.isArray(summary.folders)) {
+        renderDiffResult({ diffs: summary.folders, reportPath: summary.reportPath });
+        const totalOf = (key) => summary.folders.reduce((n, folder) => n + (Number(folder[key]) || 0), 0);
+        importStatus.classList.remove("error");
+        importStatus.textContent = BcaI18n.t("对比完成：新增 {added}、线上已移除 {removed}、新失效 {invalid}、恢复 {recovered}。",
+          { added: totalOf("added"), removed: totalOf("removed"), invalid: totalOf("newlyInvalid"), recovered: totalOf("recovered") });
+      }
+    }
+  }
   refreshStatus().catch(() => {});
 });
 

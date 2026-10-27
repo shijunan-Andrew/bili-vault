@@ -248,8 +248,11 @@ html.banner-visible { --banner-h: 42px; }
 .collection-delete:focus-visible { color: var(--danger); background: var(--danger-soft); opacity: 1; pointer-events: auto; }
 .collection-row:hover .collection-pin,
 .collection-pin:focus-visible { color: var(--success-solid); background: var(--success-soft); opacity: 1; pointer-events: auto; }
+/* 1.17.2 悬停让位；1.17.3（审查 P2）补上键盘那一路 —— Tab 到这一行时置顶/删除会显形，
+   如果计数还亮着，两个按钮正好压在数字上。拖拽把手不在此列：它紧贴左缘、与右侧按钮
+   不重叠，而且它是「这一行能拖」的唯一视觉提示，悬停时应当留着。 */
 .collection-row:hover .collection-count,
-.collection-row:hover .collection-drag-handle { opacity: 0; }
+.collection-row:focus-within .collection-count { opacity: 0; }
 
 .collection-row-draggable { cursor: grab; }
 .collection-row-draggable:active { cursor: grabbing; }

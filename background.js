@@ -207,7 +207,10 @@ function rememberDownloadRootFromStorage() {
 chrome.runtime.onStartup.addListener(() => {
   initializeActionIcon().catch((error) => console.warn("更新扩展图标失败", error));
   // 4.9：浏览器重新启动时 chrome.storage.session 已被清空，只剩 local 里的 running 残影，
-  // 这里立刻复位并写明"上次导入已中断"
+  // 这里立刻复位 running。
+  // 1.17.3（审查 P2）：复位是**静默**的 —— 「上次导入已中断」那句要求读到 session 里的
+  // 运行快照（readImportRunSnapshot 只读 session），重启后它已经没了，写不出来。
+  // 旧注释写成「立刻复位并写明」，与代码不符，这里改成如实描述。
   importReconcileState().catch((error) => console.warn("复位导入状态失败", error));
   // 1.13.5（审查 P1-6）：对比没有断点快照，local 里的 running 同样是残影。
   diffReconcileState().catch((error) => console.warn("复位对比状态失败", error));
@@ -3053,8 +3056,12 @@ function importRunLooksComplete(snapshot) {
   const counts = snapshot?.counts || {};
   const total = Number(counts.total) || 0;
   if (!total) return false;
-  const handled = (Number(counts.imported) || 0) + (Number(counts.refreshed) || 0)
-    + (Number(counts.skipped) || 0) + (Number(counts.failed) || 0);
+  /* 1.17.3（审查 P1-B）：这里只数「每条记录都有结果」这一件事 —— 导入成功（imported）
+     与「本地已有、跳过」（skipped）。refreshed 是 skipped 的子集（同一条既有记录先记
+     skipped，刷新成功再记 refreshed），把它加进来等于同一条算两遍；failed 里还混着接口
+     口径差额（missingCount 根本不在 total 里）。两处一起加，就会在「最后一个收藏夹还有
+     条目没抓」时提前追平 total，把没跑完的一轮判成「导入/更新完成」。 */
+  const handled = (Number(counts.imported) || 0) + (Number(counts.skipped) || 0);
   if (handled < total) return false;
   const folderTotal = Number(snapshot?.cursor?.folderTotal) || 0;
   const folderIndex = Number(snapshot?.cursor?.folderIndex) || 0;
@@ -5200,7 +5207,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
             // 1.5.0：数据库那一行跟着归档走 —— 这条已经落盘了才记
             statsPendingRecords.push(statsRecordForItem(item, folder.title, result.favoriteAtText));
             if (!statsPendingSince) statsPendingSince = Date.now();
-            publishImportRun({ journal, cursor: { folder: folder.title, saved: offset + index + 1, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
+            publishImportRun({ journal, cursor: { folder: folder.title, saved: offset + index + 1, folderItems: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
           } catch (error) {
             importRethrowIfAbort(error);
             failed += 1;
@@ -5222,7 +5229,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
         hasIssues = true;
         folderLog.length = 0;   // 已渲染，别让中止路径再渲一遍
       }
-      publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderTotal: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderItems: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
       // 1.5.0：一个收藏夹跑完就把数据库落一次盘（中途被取消也只丢最后这一小段）
       // 1.7.10（P2-4）：改走 flushStatsPendingRecords —— 写失败会把整批放回队列重试
       // 1.8.6（P0-3）：但每次落盘都是「读全库 → 改 → 整份写回」，十几条的小收藏夹也照做

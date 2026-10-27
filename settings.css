@@ -124,7 +124,9 @@
   gap: var(--sp-5);
   max-width: 1120px;
   margin: 0 auto;
-  padding: var(--sp-5) var(--sp-5) var(--sp-6);
+  /* 1.17.3（审查 P2）：右下角浮标是 fixed 的，两层 48px 圆钮 + 间距会盖住页面最底部
+     那一行（窄窗口下「检查更新」这类右对齐按钮会被压住且点不到），所以底部多留一屏浮标的高度。 */
+  padding: var(--sp-5) var(--sp-5) calc(var(--sp-6) + 120px);
   /* 顶栏是 sticky 的，锚点跳转要给它让出高度，否则目标行会被顶栏压住 */
   scroll-padding-top: calc(var(--sp-5) + var(--sp-4));
 }
