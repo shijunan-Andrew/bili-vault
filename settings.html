@@ -248,17 +248,17 @@
 
       <section class="settings-card" id="group-guide" data-group="guide">
         <h2 data-i18n="使用说明">使用说明</h2>
-        <p class="card-lead" data-i18n="第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。">第一次用先看安装教程；想知道每个按钮做什么，就看使用说明。</p>
+        <p class="card-lead" data-i18n="想让「打开本地目录」直达资源管理器，先装本地目录打开助手；想知道每个按钮做什么，就看使用说明。">想让「打开本地目录」直达资源管理器，先装本地目录打开助手；想知道每个按钮做什么，就看使用说明。</p>
 
         <div class="settings-panel">
 
         <div class="setting-row">
           <div class="setting-row-text">
-            <p class="setting-row-title" data-i18n="打开安装教程">打开安装教程</p>
-            <p class="setting-row-desc" data-i18n="从解压扩展目录到在浏览器里加载，一步一步的新手流程。">从解压扩展目录到在浏览器里加载，一步一步的新手流程。</p>
+            <p class="setting-row-title" data-i18n="打开本地目录打开助手安装教程">打开本地目录打开助手安装教程</p>
+            <p class="setting-row-desc" data-i18n="双击插件目录里的安装脚本，五步装完；装好之后「打开本地目录」能直接跳到资源管理器。">双击插件目录里的安装脚本，五步装完；装好之后「打开本地目录」能直接跳到资源管理器。</p>
           </div>
           <div class="setting-row-control">
-            <a class="button button-quiet" href="tutorial.html" target="_blank" rel="noopener" data-i18n="打开安装教程">打开安装教程</a>
+            <a class="button button-quiet" href="tutorial.html" target="_blank" rel="noopener" data-i18n="打开本地目录打开助手安装教程">打开本地目录打开助手安装教程</a>
           </div>
         </div>
 
@@ -696,6 +696,20 @@
     </main>
   </div>
 
+
+  <!-- 1.17.2（用户要求）：右下角浮标。上面的「回到顶部」滚过一段才出现（停在顶部时按它没反应，
+       露着反而像坏了）；下面那颗是插件 logo，点了回收藏库。显隐逻辑在 dock.js 里。 -->
+  <div class="floating-dock">
+    <div class="dock-slot">
+      <button type="button" id="scrollTopFab" class="dock-ball is-hidden" data-i18n-title="回到顶部" title="回到顶部">
+        <span data-icon="arrow-up"></span>
+      </button>
+    </div>
+    <div class="dock-slot">
+      <a id="backToLibraryFab" class="dock-ball dock-ball-logo" href="library.html" data-i18n-title="回到收藏库" title="回到收藏库" aria-label="B">B</a>
+    </div>
+  </div>
+  <script src="dock.js"></script>
   <script src="sound.js"></script>
   <script src="archive-core.js"></script>
   <script src="stats-core.js"></script>

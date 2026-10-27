@@ -8,6 +8,8 @@
   <!-- 和设置页同一套：先令牌（theme.css），再本页排版（只吃令牌，自己不写颜色） -->
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="stats.css">
+  <!-- 1.17.2：右下角浮标（回到顶部 / 回到收藏库）的样式在 page.css，四个静态页共用 -->
+  <link rel="stylesheet" href="page.css">
   <script src="theme.js"></script>
   <script src="i18n.js"></script>
   <script src="client-errors.js"></script>
@@ -211,6 +213,19 @@
     </footer>
   </main>
 
+
+  <!-- 1.17.2（用户要求）：右下角浮标，见 dock.js -->
+  <div class="floating-dock">
+    <div class="dock-slot">
+      <button type="button" id="scrollTopFab" class="dock-ball is-hidden" data-i18n-title="回到顶部" title="回到顶部">
+        <span data-icon="arrow-up"></span>
+      </button>
+    </div>
+    <div class="dock-slot">
+      <a id="backToLibraryFab" class="dock-ball dock-ball-logo" href="library.html" data-i18n-title="回到收藏库" title="回到收藏库" aria-label="B">B</a>
+    </div>
+  </div>
+  <script src="dock.js"></script>
   <script src="archive-core.js"></script>
   <script src="stats-core.js"></script>
   <script src="stats.js"></script>

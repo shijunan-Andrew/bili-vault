@@ -2013,6 +2013,24 @@ test("theme, language, and the guide all live in the settings page behind one ge
   assert.match(css, /\.dock-ball\.is-hidden \{ opacity: 0; pointer-events: none; \}/, "收起时不该还能点");
   assert.equal(css.includes(".dock-menu"), false, "菜单样式应随菜单一起删掉");
   assert.equal(css.includes(".guide-fab"), false, "问号球样式应随问号球一起删掉");
+  // 1.17.2（用户要求）：同一个浮标也铺到设置页、统计页、回收站页 —— 这两颗球
+  // 与收藏库那两颗是同一套观感，样式在 page.css（收藏库那份在 library.css，两处刻意一致）。
+    assert.match(css, /\.dock-ball\.is-hidden \{ opacity: 0; pointer-events: none; \}/, "收起时不该还能点");
+    for (const file of ["settings.html", "stats.html", "recycle.html"]) {
+      const html = readProjectFile(file);
+      assert.match(html, /<script src="dock\.js"><\/script>/, `${file} 没有引 dock.js`);
+      assert.match(html, /id="scrollTopFab" class="dock-ball is-hidden"/, `${file} 缺少回到顶部`);
+      assert.match(html, /id="scrollTopFab"[^>]*data-i18n-title="回到顶部"/, `${file} 的回到顶部 title 要能翻译`);
+      assert.match(html, /id="scrollTopFab"[\s\S]{0,200}?data-icon="arrow-up"/, `${file} 的回到顶部要用 arrow-up 图标`);
+      assert.match(html, /id="backToLibraryFab"[^>]*href="library\.html"/, `${file} 的 logo 钮要回收藏库`);
+      assert.match(html, /id="backToLibraryFab"[^>]*data-i18n-title="回到收藏库"/, `${file} 的回到收藏库 title 要能翻译`);
+      assert.ok(html.indexOf('id="scrollTopFab"') < html.indexOf('id="backToLibraryFab"'), `${file} 里回到顶部要排在回到收藏库上方`);
+    }
+    // 三个页面都要加载 page.css，否则浮标没有样式（stats 之前只加载 theme.css + stats.css）
+    for (const file of ["settings.html", "stats.html", "recycle.html"]) {
+      assert.match(readProjectFile(file), /<link rel="stylesheet" href="page\.css">/, `${file} 没有加载 page.css`);
+    }
+
 });
 
 test("the settings page offers theme, language, and the two help pages", () => {
@@ -2039,7 +2057,7 @@ test("the settings page offers theme, language, and the two help pages", () => {
   }
   // 使用说明与安装教程的入口
   assert.match(html, /href="guide\.html"[^>]*data-i18n="打开使用说明"/);
-  assert.match(html, /href="tutorial\.html"[^>]*data-i18n="打开安装教程"/);
+  assert.match(html, /href="tutorial\.html"[^>]*data-i18n="打开本地目录打开助手安装教程"/);
   // i18n 四件套：引 i18n.js、标界面文字、标题在 JS 里设（data-i18n-title 改不了 <title>）
   assert.match(html, /<script src="i18n\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="settings\.css">/);
@@ -2105,19 +2123,20 @@ function noticeItems(html) {
     .trim());
 }
 
-test("both surfaces show the same six safety items, abuse warning first", () => {
+test("both surfaces show the same five safety items, abuse warning first", () => {
   const surfaces = ["library.html", "popup.html"];
   const lists = Object.fromEntries(surfaces.map((file) => [file, noticeItems(readProjectFile(file))]));
   for (const file of surfaces) {
-    assert.equal(lists[file].length, 6, `${file} 的使用须知应正好六条`);
+    assert.equal(lists[file].length, 5, `${file} 的使用须知应正好五条`);
     // 4.5：请勿滥用提到最前面
     assert.ok(lists[file][0].startsWith("请勿滥用："), `${file} 的第一条必须是「请勿滥用」`);
     assert.equal(lists[file].filter((item) => item.startsWith("请勿滥用：")).length, 1, `${file} 的「请勿滥用」只应出现一次`);
     const html = readProjectFile(file);
     // 1.3.0：原来这一条是「自带下载器不稳定，建议改用 DownKyi」并带一个第三方下载器链接，
     // 随下载功能一起删掉了 —— 插件不再提供下载，也就不该再替用户指路去找下载器。
-    // 换成了必须说清的那件事：本版本不再提供下载功能。
-    assert.ok(html.includes("不再提供下载功能"), `${file} 的须知没有说明 1.3.0 起不再提供下载功能`);
+    // 1.17.2（用户要求）：把「不再提供下载功能」和「仅用于个人离线观看」两条合并成一条，
+    // 条数从六变五；契约也换成必须说清的那件事：本插件既不含下载器也不含播放器。
+    assert.ok(html.includes("不含下载器、播放器功能"), `${file} 的须知没有说明本插件不含下载器与播放器`);
     // 页面上剩下的外链仍然必须带新窗口保护（node 端没法验证 rel 的语义，至少不许漏写）
     for (const anchor of html.match(/<a\b[^>]*target="_blank"[^>]*>/g) || []) {
       assert.match(anchor, /rel="noopener/, `${file} 的外链缺少 noopener：${anchor.slice(0, 90)}`);

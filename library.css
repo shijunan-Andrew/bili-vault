@@ -220,37 +220,36 @@ html.banner-visible { --banner-h: 42px; }
 .collection-button:hover .collection-count { color: var(--text); }
 .collection-button.active .collection-count { color: var(--brand-deep); background: var(--surface); }
 
-.collection-delete {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  border: 0;
-  border-radius: var(--r-xs);
-  color: var(--faint);
-  background: transparent;
-  font-size: var(--fs-md);
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
-}
-.collection-row:hover .collection-delete, .collection-delete:focus-visible { color: var(--danger); background: var(--danger-soft); opacity: 1; }
-/* 1.11.6：置顶按钮。和删除同一套显隐节奏（悬停才出现），只是绿色 —— 侧栏不该常驻一排图标。 */
+/* 1.17.2（用户要求）：置顶 / 删除不再占行宽。
+   它们原来都是 flex: 0 0 28px 的常驻格子，虽然看不见却一直吃着 56px，
+   收藏夹名字被挤到只剩半行。改成绝对定位贴在行尾，悬停或键盘聚焦才出现，
+   同时让计数与拖拽把手暂时让位，避免三层叠在一起。 */
+.collection-delete,
 .collection-pin {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 26px;
+  height: 26px;
   border: 0;
   border-radius: var(--r-xs);
-  color: var(--faint);
   background: transparent;
   font-size: var(--fs-md);
   opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
-.collection-row:hover .collection-pin, .collection-pin:focus-visible { color: var(--success-solid); background: var(--success-soft); opacity: 1; }
+.collection-delete { right: 4px; color: var(--faint); }
+.collection-pin { right: 32px; color: var(--faint); }
+.collection-row:hover .collection-delete,
+.collection-delete:focus-visible { color: var(--danger); background: var(--danger-soft); opacity: 1; pointer-events: auto; }
+.collection-row:hover .collection-pin,
+.collection-pin:focus-visible { color: var(--success-solid); background: var(--success-soft); opacity: 1; pointer-events: auto; }
+.collection-row:hover .collection-count,
+.collection-row:hover .collection-drag-handle { opacity: 0; }
 
 .collection-row-draggable { cursor: grab; }
 .collection-row-draggable:active { cursor: grabbing; }

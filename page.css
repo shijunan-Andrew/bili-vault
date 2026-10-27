@@ -155,3 +155,38 @@ table.terms th:first-child, table.terms td:first-child { width: 34%; }
 /* 白字压在 --brand 上属于「彩色底上的文字」，不随主题变（和 library.css:345 一致） */
 .button-primary { color: #fff; background: var(--brand); box-shadow: var(--shadow-brand); }
 .button-primary:hover:not(:disabled) { background: var(--brand-strong); }
+
+/* ===== 右下角浮标（1.17.2） =====
+   设置页 / 数据统计页 / 回收站页共用：上面「回到顶部」，下面「回到收藏库」。
+   收藏库那一页不加载本文件，它右下角是「设置齿轮 + 回到顶部」，样式在 library.css；
+   两处刻意保持一致的外观（48px 圆、同色边框、同阴影），改一边记得改另一边。 */
+.floating-dock {
+  position: fixed;
+  right: var(--sp-5);
+  bottom: calc(var(--sp-6) + var(--sp-5));
+  z-index: 6;
+  display: grid;
+  gap: var(--sp-3);
+  justify-items: center;
+}
+.dock-slot { display: grid; place-items: center; }
+.dock-ball {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--brand-line);
+  border-radius: 50%;
+  color: var(--brand-deep);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-md);
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+.dock-ball:hover { transform: translateY(-2px); border-color: var(--brand); }
+.dock-ball.is-hidden { opacity: 0; pointer-events: none; }
+/* 插件 logo 那一个：内容和 B 站图标一致，所以底色直接用品牌色 */
+.dock-ball-logo { color: #fff; background: var(--brand); border-color: var(--brand); font-weight: 800; letter-spacing: .5px; }
+.dock-ball-logo:hover { background: var(--brand-strong); border-color: var(--brand-strong); }

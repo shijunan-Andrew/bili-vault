@@ -16,6 +16,7 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡
 ├── content-i18n-keys.js          # 4.5：内容脚本要用的词条白名单（必须在 i18n.js 之前加载，只列 content.js 真用到的那些）
 ├── client-errors.js              # 1.7.31：扩展页的 error / unhandledrejection 收集器（认 <html data-bca-page>）
+├── dock.js                      # 1.17.2：副页面的右下角浮标（回到顶部 + 回到收藏库）
 ├── favorites-import.js           # B 站收藏夹页：提供页面 API 代理和导入入口
 ├── archive-core.js               # 可复用的纯逻辑：安全名称、下载目录匹配、下载路径、视频信息解析、页码序列
 ├── archive-tools.js              # 1.9.0：归档读盘与回收站原语（scanArchive / readRecord / recordToVideo / recycle* / listRecycled / restoreRecycled / deleteRecycled / pruneRecycler）。library.js 与 settings.js 共用这一份

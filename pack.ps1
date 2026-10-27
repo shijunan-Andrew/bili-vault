@@ -128,7 +128,7 @@ try {
   # 新增运行期文件时，必须同时把它加进 $allowedTopFiles（或 $allowedTopDirs）。
   $allowedTopFiles = @(
     "archive-core.js", "archive-tools.js", "background.js", "client-errors.js", "content-i18n-keys.js",
-    "content.js", "favorites-import.js", "guide.html", "i18n.js", "icons.js",
+    "content.js", "dock.js", "favorites-import.js", "guide.html", "i18n.js", "icons.js",
     "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png",
     "install-native-folder-opener.bat", "install-native-folder-opener.ps1",
     "LICENSE",
