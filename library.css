@@ -97,10 +97,14 @@ html.banner-visible { --banner-h: 42px; }
 .brand strong { display: block; color: var(--ink); font-size: var(--fs-md); letter-spacing: -.2px; }
 .brand small { display: block; margin-top: 2px; color: var(--faint); font-size: var(--fs-micro); font-weight: 600; letter-spacing: 1.1px; }
 
-.collection-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: 0 0 var(--sp-3); padding: 0 var(--sp-2); }
-.side-label { display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: var(--fs-sm); font-weight: 650; }
-.side-label span { color: var(--ghost); font-weight: 500; }
-.collection-sort-hint { color: var(--ghost) !important; font-size: var(--fs-micro); font-weight: 400 !important; white-space: nowrap; }
+.collection-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-1); margin: 0 0 var(--sp-2); padding: 0 var(--sp-2); }
+/* 1.17.1：分组标题从 11px 的 --faint 提到正文档 —— 它是一列行的「抬头」，
+   比行本身还淡会让人觉得这列没有标题。计数仍留在次级档，只把字重和颜色抬一点。
+   标题本身不许折行（「我的收藏」被拆成两行会顶掉两列行），空间不够时让右边的
+   拖拽提示先收窄。 */
+.side-label { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; color: var(--muted); font-size: var(--fs-base); font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
+.side-label span { color: var(--faint); font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0; }
+.collection-sort-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--faint) !important; font-size: var(--fs-micro); font-weight: 400 !important; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 
 /* 收藏夹多了以后侧栏要滚很久，加一条纯本地的过滤框（不发任何请求） */
 .collection-filter {
@@ -126,7 +130,7 @@ html.banner-visible { --banner-h: 42px; }
   background: transparent;
   font-size: var(--fs-base);
 }
-.collection-filter input::placeholder { color: var(--ghost); }
+.collection-filter input::placeholder { color: var(--faint); }
 .collection-filter:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
 .collection-filter-empty { margin: 0 var(--sp-2) var(--sp-2); color: var(--faint); font-size: var(--fs-sm); line-height: 1.6; }
 
@@ -159,8 +163,14 @@ html.banner-visible { --banner-h: 42px; }
    侧栏是固定高度的 flex 列，所以让列表自己滚：flex:1 吃掉剩余空间，
    min-height:0 才允许它收缩到内容高度以下（flex 项的默认 min-height 是 auto）。
    新建收藏夹按钮与底部信息是它的兄弟节点，所以始终留在可视区。 */
-.collection-list { display: grid; gap: 3px; align-content: start; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.collection-list { display: grid; gap: 2px; align-content: start; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .collection-row { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
+/* 1.17.1（用户反馈「左侧收藏夹辨识度不高」）：
+   原来只有 13px 的灰字 + 一个淡图标，一列扫下来分不清哪行是哪行。现在：
+   ① 图标做成 26px 的圆角色块（浅色底、品牌色图标），行首有了视觉锚点；
+   ② 名字用正文色 + 500 字重，读起来不再发灰；
+   ③ 数量变成右侧的小胶囊，且用等宽数字 —— 一列数字能对齐；
+   ④ 选中/悬停在左侧 3px 处画一条色条，比整行铺底色更好定位。 */
 .collection-button {
   display: flex;
   flex: 1;
@@ -168,21 +178,47 @@ html.banner-visible { --banner-h: 42px; }
   gap: var(--sp-2);
   width: 100%;
   min-width: 0;
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 var(--sp-3);
   border: 0;
   border-radius: var(--r-sm);
-  color: var(--muted);
+  color: var(--text);
   background: transparent;
+  font-weight: 500;
   text-align: left;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  box-shadow: inset 3px 0 0 transparent;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.collection-button:hover { color: var(--ink); background: var(--surface-soft); }
-.collection-button.active { color: var(--brand-deep); background: var(--brand-soft); font-weight: 650; }
-.collection-glyph { display: grid; place-items: center; width: 18px; color: var(--faint); font-size: var(--fs-md); }
-.collection-button.active .collection-glyph { color: var(--brand); }
+.collection-button:hover { color: var(--ink); background: var(--surface-soft); box-shadow: inset 3px 0 0 var(--brand-line); }
+.collection-button.active { color: var(--brand-deep); background: var(--brand-soft); font-weight: 700; box-shadow: inset 3px 0 0 var(--brand); }
+.collection-glyph {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  color: var(--brand-strong);
+  background: var(--surface-sunken);
+  font-size: var(--fs-sm);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.collection-button:hover .collection-glyph { color: var(--brand-deep); border-color: var(--brand-line); }
+.collection-button.active .collection-glyph { border-color: transparent; color: #ffffff; background: var(--brand); }
 .collection-name { flex: 1; overflow: hidden; font-size: var(--fs-base); text-overflow: ellipsis; white-space: nowrap; }
-.collection-count { color: var(--faint); font-size: var(--fs-sm); }
+.collection-count {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  background: var(--surface-sunken);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.collection-button:hover .collection-count { color: var(--text); }
+.collection-button.active .collection-count { color: var(--brand-deep); background: var(--surface); }
 
 .collection-delete {
   display: grid;

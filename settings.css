@@ -151,17 +151,34 @@
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid transparent;
   border-radius: var(--r-sm);
-  color: var(--muted);
+  /* 1.17.1（用户反馈「设置页文字和图标辨识度不高」）：导航原来整列都是 --muted 灰字、
+     图标再压一层 .8 透明度，扫下来几乎没有视觉锚点。现在文字用正文色、图标各带一块
+     浅底色块，选中态左侧再画一条 3px 色条（比单靠浅底色更容易定位）。 */
+  color: var(--text);
   background: transparent;
   font-size: var(--fs-base);
   font-weight: 600;
   text-align: left;
+  box-shadow: inset 3px 0 0 transparent;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.nav-item:hover { color: var(--ink); background: var(--surface-soft); }
-.nav-icon { display: inline-flex; font-size: var(--fs-md); opacity: .8; }
+.nav-item:hover { color: var(--ink); background: var(--surface-soft); box-shadow: inset 3px 0 0 var(--brand-line); }
+.nav-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  background: var(--surface-sunken);
+  font-size: var(--fs-sm);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.nav-item:hover .nav-icon { color: var(--brand-deep); background: var(--brand-soft); }
 /* 当前分组：软底 + 品牌色，跟分段控件的选中态是同一套语言 */
-.nav-item[aria-current="true"] { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); }
-.nav-item[aria-current="true"] .nav-icon { color: var(--brand); opacity: 1; }
+.nav-item[aria-current="true"] { border-color: var(--brand-line); color: var(--brand-deep); background: var(--brand-soft); font-weight: 700; box-shadow: inset 3px 0 0 var(--brand); }
+.nav-item[aria-current="true"] .nav-icon { color: #ffffff; background: var(--brand); }
 .nav-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 分组卡：卡片本身就是一条分界，标题不用 page.css 那条上边框 */
@@ -187,8 +204,18 @@
 }
 .settings-panel > .setting-row:first-child { border-top: 0; }
 .settings-card:first-child { margin-top: 0; }
-.settings-card h2 { margin: 0 0 4px; padding-top: 0; border-top: 0; font-size: var(--fs-lg); }
-.card-lead { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--fs-base); }
+/* 1.17.1：分组标题前加一条 4px 的品牌色小竖条 —— 长页面往下滚时，
+   「这是哪一组」比字号差更容易被眼睛接住。 */
+.settings-card h2 { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 4px; padding-top: 0; border-top: 0; font-size: var(--fs-lg); }
+.settings-card h2::before {
+  content: "";
+  flex: 0 0 4px;
+  width: 4px;
+  height: 18px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(var(--brand-tint), var(--brand));
+}
+.card-lead { margin: 0 0 var(--sp-2); color: var(--text); font-size: var(--fs-base); line-height: 1.7; }
 
 /* 一行一项：左标题 + 副说明，右控件。行与行之间用 1px --line 分隔 */
 .setting-row {
@@ -206,8 +233,10 @@
   scroll-margin-top: calc(56px + var(--sp-4));
 }
 .setting-row-text { min-width: 0; }
-.setting-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; color: var(--ink); font-size: var(--fs-md); font-weight: 600; }
-.setting-row-desc { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
+.setting-row-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0; color: var(--ink); font-size: var(--fs-md); font-weight: 650; }
+/* 1.17.1：说明文字从 12px 提到正文档、颜色从 --muted 提到 --text —— 设置页绝大多数
+   信息都在这行说明里，太小太淡等于没写。 */
+.setting-row-desc { margin: 3px 0 0; color: var(--text); font-size: var(--fs-base); line-height: 1.7; }
 /* 右侧控件：右对齐、不换行；分段控件与滑块在这里各有固定宽度 */
 /* 1.10.5：说明太长时控件会换到下一行。自动外边距把它顶到右边，和没换行时的位置一样 ——
    否则 flex-wrap 下它独占一行，justify-content: space-between 只剩一个子项，会贴到左边去。 */
