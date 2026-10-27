@@ -5518,7 +5518,7 @@ const IMPORT_PAGE_DELAY_MS = 220;   // 额外的一层；实际节奏由 BILI_MI
 
    修改这个常量前先想清楚：它同时决定了"最快能多快"和"多久会被限流"。 */
 /* 两次请求之间的最小间隔 = 用户当前选的那一档（见下面的 REQUEST_SPEEDS）。
-   默认「较低」是 1200ms，还会每读 8 次停 6 秒。
+   默认「较低」是 1200ms，还会每读 10 次停 3 秒。
 
    这里以前写死过一个数：最早是 320ms（凭手感定的，比详情抓取快 2.5 倍，
    真机上吃过一次风控），后来对齐到详情抓取的 800ms。现在改成跟着档位走 ——
@@ -5530,12 +5530,12 @@ const IMPORT_PAGE_DELAY_MS = 220;   // 额外的一层；实际节奏由 BILI_MI
    用 session 而不是 local：**关掉浏览器就回到默认的「较低」** ——
    用户要求不要沿用上一次的选择。快档是一次性的决定，不该在不经意间被继承下来。
 
-   「较低」是唯一真正像人的一档：不只慢，还会**分批** —— 读 8 次停 6 秒，
+   「较低」是唯一真正像人的一档：不只慢，还会**分批** —— 读 10 次停 3 秒，
    模拟人翻几页、看到感兴趣的内容会停下来。其余三档只是把间隔拉长/缩短。
 
    数值直接决定被风控的概率。改之前先读 AI_HANDOFF 合规红线第 8 条。 */
 const REQUEST_SPEEDS = {
-  lower:    { intervalMs: 1200, batchSize: 8, pauseMs: 6000 },
+  lower:    { intervalMs: 1200, batchSize: 10, pauseMs: 3000 },
   standard: { intervalMs: 800,  batchSize: 0, pauseMs: 0 },
   higher:   { intervalMs: 400,  batchSize: 0, pauseMs: 0 },
   high:     { intervalMs: 200,  batchSize: 0, pauseMs: 0 }

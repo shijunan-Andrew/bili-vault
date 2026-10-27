@@ -3769,7 +3769,7 @@ test("默认档位是「较低」，且大收藏夹配快档要再提醒一次",
   assert.match(popup, /currentSpeed = "lower"/, "弹窗的默认档位没跟着改成「较低」");
 
   // 档位偏快 + 总量偏大 → 动手前再拦一次
-  assert.match(popup, /const RISKY_TOTAL_ITEMS = 500/, "没有「总量阈值」这个判断");
+  assert.match(popup, /const RISKY_TOTAL_ITEMS = 200/, "没有「总量阈值」这个判断");
   assert.match(popup, /function riskySpeedWarning\(\)/, "没有档位风险判断函数");
   assert.match(popup, /function confirmRiskySpeed\(\)/, "没有共用的前置检查");
   const entries = (popup.match(/await confirmRiskySpeed\(\)|confirmRiskySpeed\(\)\.then/g) || []).length;
@@ -4150,7 +4150,7 @@ test("B 站出网必须过限速器，裸 fetch 要登记在案", () => {
   assert.match(popup, /REQUEST_SPEED_RISKY = new Set\(\["higher", "high"\]\)/, "快速档位没有标记为有风险");
   assert.match(popup, /speedWarnDialog\.showModal\(\)/, "切到快速档位时没有弹提醒");
   assert.match(readProjectFile("popup.html"), /id="speedWarnDialog"/, "提醒弹窗不存在");
-  assert.match(readProjectFile("popup.html"), /500 条以下/, "提醒文案里没有「控制总量」的提示");
+  assert.match(readProjectFile("popup.html"), /200 条以下/, "提醒文案里没有「控制总量」的提示");
 
   // 唯一的出网口必须在发请求之前排队
   const apiGetAt = src.indexOf("async function biliImportApiGet");

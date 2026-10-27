@@ -464,6 +464,13 @@ button:disabled { cursor: wait; opacity: .6; }
 }
 
 /* 「较高」「高」的说明是一条风控警告，用红色而不是土黄 —— 与弹窗里的提醒一致 */
+.speed-hint-note {
+  margin: var(--sp-1) 0 0;
+  color: var(--warning);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
 .speed-hint.danger {
   color: var(--danger);
   font-weight: 600;

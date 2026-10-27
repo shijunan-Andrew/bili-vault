@@ -290,7 +290,7 @@ const REQUEST_SPEED_RISKY = new Set(["higher", "high"]);
 // 必须用字面量调用 BcaI18n.t("…")：项目约定键必须是字面量，
 // 否则 i18n-extract 扫不到、翻译会静默缺失（这里第一版就踩了一次）。
 function speedHintFor(value) {
-  if (value === "lower") return BcaI18n.t("分批读取：每读 8 次停 6 秒，最接近人翻页的节奏。大收藏夹建议用这个。");
+  if (value === "lower") return BcaI18n.t("每次请求间隔 1.2 秒；每请求 10 次停 3 秒，最接近人翻页的节奏。大收藏夹建议用这个。");
   if (value === "standard") return BcaI18n.t("默认。每次请求间隔 0.8 秒，与详情抓取同一节奏。");
   if (value === "higher") return BcaI18n.t("每次请求间隔 0.4 秒。请控制单次勾选的总量。");
   if (value === "high") return BcaI18n.t("每次请求间隔 0.2 秒。风控风险明显，只建议对小收藏夹做小批量操作。");
@@ -481,7 +481,7 @@ function estimateListRequests() {
 /* 动手前的第二次把关：档位偏快 + 勾选总量偏大时再劝一次。
    单看某一项都不算危险（快档跑小收藏夹、低档跑大收藏夹都还行），
    但"快档 × 大收藏夹"正好是最容易触发风控的组合。 */
-const RISKY_TOTAL_ITEMS = 500;
+const RISKY_TOTAL_ITEMS = 200;
 const SPEED_LABELS = { lower: "较低", standard: "标准", higher: "较高", high: "高" };
 let riskyConfirmResolve = null;
 

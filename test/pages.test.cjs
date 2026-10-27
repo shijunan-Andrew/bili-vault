@@ -989,6 +989,19 @@ async function suitePopup() {
     assert.match(summarize({}), /没有成功完成/);
   });
 
+  await test("请求速度：介绍栏讲清「也影响手动收藏」，较低档写的是 10 次 / 3 秒（1.16.12）", async () => {
+    const chrome = makeChrome({ localData: {} });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle();
+    const doc = page.document;
+    const note = doc.getElementById("speedHintNote");
+    assert.ok(note, "介绍栏里要有一句「请求速度也影响手动收藏」的常驻说明");
+    assert.equal(note.className, "speed-hint-note", "这句要用专门的类名上黄色（颜色令牌在 theme.css）");
+    assert.equal(textOf(note), BcaT(page, "请求速度同时影响导入时的速度和手动收藏时的速度"));
+    assert.equal(textOf(doc.getElementById("speedHint")),
+      BcaT(page, "每次请求间隔 1.2 秒；每请求 10 次停 3 秒，最接近人翻页的节奏。大收藏夹建议用这个。"),
+      "默认档的说明要写实际节奏，不能还写旧的 8 次 / 6 秒");
+  });
   await test("限速档没写进去时，弹窗当场说出来并把档位退回去（1.14.3 · 审查 C-3）", async () => {
     const chrome = makeChrome({ localData: {} });
     const page = dom.loadPage({ htmlFile: "popup.html", chrome });
