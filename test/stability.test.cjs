@@ -1281,8 +1281,8 @@ test("a short page is not mistaken for a pagination gap", () => {
   // B 站的 media_count 把"已失效视频"也算进总数，而列表接口不返回它们的内容。
   // 于是"读完了却比总数少"是接口口径差异 —— 4.9 曾把它计入 failed，
   // 用户会在报告里看到一个没有解释的「失败：25」（真实案例：749 报 724）。
-  assert.match(background, /let sawLastPage = false;/);
-  assert.match(background, /if \(result\.hasMore === false \|\| result\.items\.length < IMPORT_FAVORITE_PAGE_SIZE\) sawLastPage = true;/);
+  assert.match(background, /let sawLastPage = BcaArchiveCore\.favoritePageReachedEnd\(first\.items, IMPORT_FAVORITE_PAGE_SIZE, first\.hasMore\);/);
+  assert.match(background, /if \(BcaArchiveCore\.favoritePageReachedEnd\(result\.items, IMPORT_FAVORITE_PAGE_SIZE, result\.hasMore\)\) sawLastPage = true;/);
   // 只有"没读到自然末尾"才可能是真缺口
   assert.match(background, /if \(missingCount > 0 && !sawLastPage\) \{/);
 });

@@ -4922,7 +4922,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       let pageLoopStoppedEarly = false;
       // 4.9.1：是否读到了自然末尾（本页不满一页，或接口明说没有下一页）。
       // 只有"没读到末尾"才可能是真缺口——见下面 missingCount 处的说明。
-      let sawLastPage = false;
+      let sawLastPage = BcaArchiveCore.favoritePageReachedEnd(first.items, IMPORT_FAVORITE_PAGE_SIZE, first.hasMore);
       // V1.1.6：「最近 N 天」提前收工。
       // 列表是按 order=mtime（收藏时间）倒序返回的（见 fetchImportFavoritePage），
       // 所以一旦某页里【最新】的条目都早于窗口起点，后面的只会更早，没必要再翻。
@@ -4942,7 +4942,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
           const result = await fetchImportFavoritePage(folder, page, tabId);
           allItems.push(...result.items);
           consecutivePageFailures = 0;
-          if (result.hasMore === false || result.items.length < IMPORT_FAVORITE_PAGE_SIZE) sawLastPage = true;
+          if (BcaArchiveCore.favoritePageReachedEnd(result.items, IMPORT_FAVORITE_PAGE_SIZE, result.hasMore)) sawLastPage = true;
           publishImportRun({ journal, cursor: { folder: folder.title, page } });
           if (windowCutoff && importPageEntirelyBefore(result.items, windowCutoff)) {
             olderPagesSeen += 1;
@@ -5670,7 +5670,7 @@ async function fetchFavoriteListOnly(folder, tabId, onProgress) {
     ? Math.ceil(expectedTotal / IMPORT_FAVORITE_PAGE_SIZE)
     : (first.hasMore || first.items.length === IMPORT_FAVORITE_PAGE_SIZE ? IMPORT_MAX_PAGES : 1);
   const maxPages = Math.min(Math.max(pageLimit, 1), IMPORT_MAX_PAGES);
-  let sawLastPage = first.items.length < IMPORT_FAVORITE_PAGE_SIZE;
+  let sawLastPage = BcaArchiveCore.favoritePageReachedEnd(first.items, IMPORT_FAVORITE_PAGE_SIZE, first.hasMore);
   let failedPages = 0;
   let consecutiveFailures = 0;
   onProgress?.({ folder: folder.title, page: 1, maxPages, count: items.length });
@@ -5681,7 +5681,7 @@ async function fetchFavoriteListOnly(folder, tabId, onProgress) {
       const result = await fetchImportFavoritePage(folder, page, tabId);
       items.push(...result.items);
       consecutiveFailures = 0;
-      if (result.hasMore === false || result.items.length < IMPORT_FAVORITE_PAGE_SIZE) sawLastPage = true;
+      if (BcaArchiveCore.favoritePageReachedEnd(result.items, IMPORT_FAVORITE_PAGE_SIZE, result.hasMore)) sawLastPage = true;
       onProgress?.({ folder: folder.title, page, maxPages, count: items.length });
       if (!result.items.length) break;
     } catch (error) {

@@ -550,6 +550,19 @@
     return sequence;
   }
 
+  /* ---------- 分页是否读到自然末尾（1.16.9） ----------
+     这一条判断只在这里实现：导入与「与 B 站对比」都调用它。
+     V1.0.0 起导入那条路只看第 2 页起的结果，单页收藏夹（不足一页）
+     永远算作「没读完」—— 8 条里 1 个空槽就会凭空报「失败：1」。
+     本页不满一页、或接口明说没有下一页，都算读到了末尾。 */
+
+  function favoritePageReachedEnd(items, pageSize, hasMore) {
+    if (hasMore === false) return true;
+    const size = Number(pageSize);
+    if (!Number.isFinite(size) || size <= 0) return true;
+    return (Array.isArray(items) ? items.length : 0) < size;
+  }
+
   /* ---------- B 站分享文案拆分（4.2） ----------
      B 站收藏夹接口的 intro 字段常常带一整套分享文案：
        <真正的简介>, 视频播放量 71953、弹幕量 82、点赞数 642、投硬币枚数 172、
@@ -1466,6 +1479,7 @@
     descriptionFromInfo,
     tagsFromInfo,
     pageSequence,
+    favoritePageReachedEnd,
     splitShareText,
     parseShareStats,
     patchVolatileFields,

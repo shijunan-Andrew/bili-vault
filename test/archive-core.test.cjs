@@ -1263,6 +1263,18 @@ test("进度计数走同一套数字格式，别在界面里各写一遍（1.15.
   assert.equal(core.formatProgressCounter(12345, 67890), core.formatCountText(12345) + "/" + core.formatCountText(67890));
 });
 
+test("a short first page counts as the end of the list (1.16.9)", () => {
+  // 单页收藏夹：8 条、页大小 40，第 2 页根本不会请求。
+  // 1.16.9 之前 sawLastPage 只看第 2 页起的结果，于是「8 条里 1 个空槽」
+  // 被算成「缺失 1 条（已计入失败）」，报告里出现凭空多出来的失败。
+  assert.equal(core.favoritePageReachedEnd(new Array(8).fill(0), 40), true);
+  assert.equal(core.favoritePageReachedEnd([], 40), true);
+  assert.equal(core.favoritePageReachedEnd(new Array(39).fill(0), 40, true), true);
+  assert.equal(core.favoritePageReachedEnd(new Array(40).fill(0), 40, true), false);
+  assert.equal(core.favoritePageReachedEnd(new Array(40).fill(0), 40, false), true);
+  assert.equal(core.favoritePageReachedEnd(null, 0), true);
+});
+
 if (isMain) {
   process.stdout.write("\n\n");
   for (const { name, error } of failures) {
