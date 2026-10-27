@@ -63,11 +63,6 @@ const recentResultNotice = document.getElementById("recentResultNotice");
 const recentResultText = document.getElementById("recentResultText");
 const openRecentResultButton = document.getElementById("openRecentResult");
 const dismissRecentResultButton = document.getElementById("dismissRecentResult");
-// 1.12.5（审查 P2-7）：断点续跑的常驻入口（与弹窗里那颗按钮同一套消息）
-const resumeImportNotice = document.getElementById("resumeImportNotice");
-const resumeImportText = document.getElementById("resumeImportText");
-const startResumeImportButton = document.getElementById("startResumeImport");
-const dismissResumeImportButton = document.getElementById("dismissResumeImport");
 // 1.8.21（P2-6）：扫描提示条上的「清理这些没写完的目录」。只在真有半截目录时出现。
 const cleanupUnfinishedButton = document.getElementById("cleanupUnfinished");
 const importHint = document.getElementById("importHint");
@@ -1398,105 +1393,6 @@ function applyRecentResultNotice(result) {
   const shown = fresh && at !== dismissedRecentResultAt;
   recentResultText.textContent = shown ? recentResultNoticeMessage(result) : "";
   recentResultNotice.hidden = !shown;
-}
-
-/* 1.12.5（审查 P2-7）：把「上次导入停在第几页」搬到收藏库顶栏。
-
-   `bcaImportResume` 以前只有弹窗读（popup.js 的 refreshImportResume），从不点扩展图标的人
-   永远看不到它。这里只做两件事：把那条记录读出来显示、点按钮时按同一套消息把续跑参数发下去；
-   真正的续跑逻辑、限速、断点推进全在后台，一行都没搬。 */
-
-const RESUME_DISMISSED_KEY = "bcaResumeNoticeDismissedAt";
-let resumeDismissedAt = 0;
-let resumeImport = null;
-
-function resumeImportUsable() {
-  if (!resumeImport || !resumeImport.folder) return false;
-  /* 关过一次就别再冒出来 —— 但只针对「这一条」断点：用户关掉之后又中断了一轮，
-     新记录的 at 会更大，提示该重新出现。 */
-  const recordAt = Number(resumeImport.at) || 0;
-  if (resumeDismissedAt && resumeDismissedAt >= recordAt) return false;
-  return true;
-}
-
-function resumeImportMessage() {
-  if (!resumeImport) return "";
-  return BcaI18n.t("上次导入停在「{folder}」第 {page} 页（已写入 {saved} 条），可以接着往下跑。", {
-    folder: String(resumeImport.folder || ""),
-    page: Math.max(1, Number(resumeImport.page) || 1),
-    saved: Math.max(0, Number(resumeImport.saved) || 0)
-  });
-}
-
-function renderResumeImportNotice() {
-  if (!resumeImportNotice) return;
-  const usable = resumeImportUsable();
-  resumeImportNotice.hidden = !usable;
-  if (!usable) return;
-  if (resumeImportText) resumeImportText.textContent = resumeImportMessage();
-}
-
-/** @returns {Promise<boolean>} 这一轮有没有读到可续跑的记录 */
-async function restoreResumeImportNotice() {
-  try {
-    const stored = await chrome.storage.local.get(["bcaImportResume", "bcaResumeNoticeDismissedAt"]);
-    resumeDismissedAt = Math.max(0, Number(stored?.bcaResumeNoticeDismissedAt) || 0);
-    resumeImport = stored?.bcaImportResume || null;
-    renderResumeImportNotice();
-    return resumeImportUsable();
-  } catch (error) {
-    console.warn("上次导入的断点记录没读出来（顶栏那条「继续上次导入」本次不显示）", error);
-    return false;
-  }
-}
-
-async function startResumeImport() {
-  if (!resumeImport || !resumeImport.folder) return;
-  /* uid 不在断点记录里（那是「导入参数」，不是断点），用记过的 UID 补；
-     没有就明确说一句，别发一条注定失败的导入。 */
-  let uid = "";
-  try {
-    const stored = await chrome.storage.local.get("lastImportUid");
-    uid = String(stored?.lastImportUid || "").trim();
-  } catch (_) {
-    uid = "";
-  }
-  if (!uid) {
-    showToast(BcaI18n.t("还不知道你的 B 站 UID，先去弹窗里导入一次再续跑。"));
-    return;
-  }
-  const folderIds = Array.isArray(resumeImport.folderIds) ? resumeImport.folderIds.map(String).filter(Boolean) : [];
-  resumeImportNotice.hidden = true;
-  try {
-    const response = await sendMessageWatched(
-      {
-        type: "import-bili-favorites",
-        uid,
-        folderIds,
-        resume: { folder: String(resumeImport.folder), page: Math.max(1, Number(resumeImport.page) || 1) }
-      },
-      IMPORT_START_TIMEOUT_MS
-    );
-    if (!response?.ok) {
-      showToast(response?.message || BcaI18n.t("继续导入失败。"));
-      await restoreResumeImportNotice();
-      return;
-    }
-    showToast(BcaI18n.t("已接着上次的位置往下跑，进度看左上角那条提示。"));
-  } catch (error) {
-    showToast(BcaI18n.t("继续导入失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
-    await restoreResumeImportNotice();
-  }
-}
-
-async function dismissResumeImport() {
-  resumeDismissedAt = Date.now();
-  resumeImportNotice.hidden = true;
-  try {
-    await chrome.storage.local.set({ [RESUME_DISMISSED_KEY]: resumeDismissedAt });
-  } catch (error) {
-    console.warn("「继续上次导入」的关闭状态没记住（下次打开还会出现）", error);
-  }
 }
 
 async function restoreRecentResultNotice() {
@@ -5977,8 +5873,6 @@ dismissScanNoticeButton?.addEventListener("click", () => {
 });
 // 1.10.0（TODO P0-4）：跳过 / 失败提示条的两个按钮。关掉只记这一条的时间戳，
 // 下一条新的收藏结果照常会出来（和扫描提示同一个「关掉不烦人、新信息不丢」的口径）。
-startResumeImportButton?.addEventListener("click", () => { startResumeImport(); });
-dismissResumeImportButton?.addEventListener("click", () => { dismissResumeImport(); });
 dismissRecentResultButton?.addEventListener("click", () => {
   dismissedRecentResultAt = Number(recentResultRecord?.createdAt) || 0;
   applyRecentResultNotice(recentResultRecord);
@@ -6127,10 +6021,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 // 这里就能立刻挂出提示 —— 用户不用关掉再打开。
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  // 1.12.5（审查 P2-7）：断点记录一变（中断留下 / 续跑清掉）就同步那条提示
-  if (changes.bcaImportResume || changes.bcaResumeNoticeDismissedAt) {
-    restoreResumeImportNotice().catch(() => {});
-  }
   if (!changes.lastResult) return;
   applyRecentResultNotice(changes.lastResult.newValue || null);
 });
@@ -6307,8 +6197,6 @@ BcaI18n.init().catch(() => {}).then(() => Promise.all([
   restoreGithubBanner(),
   // 1.10.0（TODO P0-4）：最近一次收藏里的跳过 / 失败，开机就挂出来（24 小时内的才算）
   restoreRecentResultNotice(),
-  // 1.12.5（审查 P2-7）：断点续跑的入口也搬到顶栏，别只在弹窗里
-  restoreResumeImportNotice().catch(() => {})
 ])).finally(() => {
   applyViewMode();
   restoreLastRoot();

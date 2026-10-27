@@ -878,31 +878,6 @@ async function suiteLibrary() {
       "横幅出现时页面要靠 banner-visible 让出高度");
   });
 
-  await test("顶栏会挂出「继续上次导入」，点关闭就不再出现（1.12.5）", async () => {
-    const page = await openLibrary({
-      localData: {
-        bcaImportResume: { folder: "蜻蜓小新", page: 3, saved: 42, folderIds: ["11", "22"], at: Date.now() }
-      }
-    });
-    await settle(12);
-    const notice = page.document.getElementById("resumeImportNotice");
-    const text = page.document.getElementById("resumeImportText");
-    assert.ok(notice, "library.html 里要有 #resumeImportNotice");
-    assert.equal(notice.hidden, false, "有断点记录就该挂出来");
-    assert.match(textOf(text), /蜻蜓小新/);
-    assert.match(textOf(text), /第 3 页/);
-    dom.fireUserEvent(page.document.getElementById("dismissResumeImport"), "click");
-    await settle(4);
-    assert.equal(notice.hidden, true);
-    const stored = await page.__chrome.storage.local.get("bcaResumeNoticeDismissedAt");
-    assert.ok(Number(stored.bcaResumeNoticeDismissedAt) > 0, "关闭状态要记住");
-  });
-
-  await test("没有断点记录时，那条提示不出现（1.12.5）", async () => {
-    const page = await openLibrary({ localData: {} });
-    await settle(12);
-    assert.equal(page.document.getElementById("resumeImportNotice").hidden, true);
-  });
 }
 
 
@@ -2108,14 +2083,13 @@ async function suiteFavoritesImport() {
     await ask(listener, { type: "bca-import-selected-folders", folderIds: [11, 22] });
     assert.deepEqual(sent.at(-1), { type: "import-bili-favorites", uid: "1024", folderIds: [11, 22] }, "不传可选项就不该多带字段");
 
-    await ask(listener, { type: "bca-import-selected-folders", folderIds: [11], recentDays: 7, limit: 300, resume: { folder: "默认收藏夹", page: 3 } });
+    await ask(listener, { type: "bca-import-selected-folders", folderIds: [11], recentDays: 7, limit: 300 });
     assert.deepEqual(sent.at(-1), {
       type: "import-bili-favorites",
       uid: "1024",
       folderIds: [11],
       recentDays: 7,
-      limit: 300,
-      resume: { folder: "默认收藏夹", page: 3 }
+      limit: 300
     });
   });
 
@@ -3302,6 +3276,26 @@ async function suiteSoundSettings() {
   });
 }
 
+/* 1.16.10（用户要求）：SW 在「最后一次写盘之后、发布结束状态之前」被杀时，
+   快照里其实已经跑完了 —— 这时不该报中断，也不该再写断点。 */
+async function suiteImportCompletion() {
+  const background = harness.readSource("background.js");
+  const make = () =>
+    new Function(
+      harness.carveFunction(background, "importRunLooksComplete") + "\n" + "return importRunLooksComplete;"
+    )();
+
+  await test("1.16.10：跑完的那一轮不会被当成中断（收尾判据真跑）", async () => {
+    const looksComplete = make();
+    const counts = (n) => ({ imported: n, refreshed: 0, skipped: 0, failed: 0, total: n });
+    assert.equal(looksComplete({ finishing: true }), true, "有收尾标记就算跑完");
+    assert.equal(looksComplete({ counts: counts(5), cursor: { folderIndex: 2, folderTotal: 2 } }), true, "计数齐 + 收藏夹走完");
+    assert.equal(looksComplete({ counts: counts(5), cursor: { folderIndex: 1, folderTotal: 2 } }), false, "收藏夹没走完不算");
+    assert.equal(looksComplete({ counts: { imported: 3, total: 5 }, cursor: { folderIndex: 2, folderTotal: 2 } }), false, "条目没数完不算");
+    assert.equal(looksComplete(null), false, "没有快照就不算跑完");
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
@@ -3318,6 +3312,7 @@ async function suite() {
   await suiteLibraryHelpers();
   await suiteRecycleTools();
   await suitePruneRecycler();
+  await suiteImportCompletion();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

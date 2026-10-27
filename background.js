@@ -2564,10 +2564,9 @@ let importStatePublishAt = 0;
    ========================================================================== */
 
 const IMPORT_RUN_SESSION_KEY = "bcaImportRun";
-/* P1-7（2026-10 审阅）：中断后要能「接着上次跑」，所以把断点里那句「停在哪」
-   缩小成一条极小的记录放进 local —— 它只含收藏夹名、页号、三个计数与收藏夹 id，
-   不含回滚日志、不含视频正文，重启浏览器后照样能读到（session 里的会被清掉）。 */
-const IMPORT_RESUME_KEY = "bcaImportResume";                  // 正在进行的导入（只有断点，不含回滚日志）
+/* 1.16.10（用户要求）：取消「继续上次导入」这个功能。这个键现在只用来清理
+   旧版本留在 local 里的那条断点记录（不清也不影响导入，只是存储里会多一条）。 */
+const IMPORT_RESUME_KEY = "bcaImportResume";
 /* 1.12.2（审查 P1-3）：回滚日志原来是只写 chrome.storage.session 的，浏览器一重启就没了，
    被打断的那一轮永远说不清「它建了哪些目录」。这里在 local 里留一份【只有名字】的副本，
    断电 / 关浏览器之后也能照着它把本轮新建的空目录清掉（正文改过的文件不在此列，见下方说明）。 */
@@ -2727,6 +2726,7 @@ function resetImportRunSnapshot(journal, folderIds = []) {
     folderIds: (Array.isArray(folderIds) ? folderIds : []).map(String),
     startedAt: importState.startedAt || Date.now(), updatedAt: Date.now(),
     rateLimitStreak: 0, text: importState.text || "",
+    finishing: false,
     cursor: { folder: "", page: 0, saved: 0, folderTotal: 0 },
     counts: { imported: 0, refreshed: 0, skipped: 0, failed: 0, total: 0 },
     journal: importJournalSnapshot(journal)
@@ -2906,34 +2906,12 @@ async function cleanupLeftoverImport() {
   return result;
 }
 
-// P1-7：把「上次停在哪」写成一条可跨重启的小记录（只有收藏夹名 / 页号 / 计数 / 收藏夹 id）
-async function writeImportResume(snapshot) {
-  const cursor = snapshot?.cursor || {};
-  const counts = snapshot?.counts || {};
-  const folder = String(cursor.folder || "");
-  if (!folder) return;
-  const folderIds = Array.isArray(snapshot?.folderIds) ? snapshot.folderIds : [];
-  const record = {
-    folder,
-    page: Math.max(1, Number(cursor.page) || 1),
-    saved: Math.max(0, Number(cursor.saved) || 0),
-    imported: Math.max(0, Number(counts.imported) || 0),
-    total: Math.max(0, Number(counts.total) || 0),
-    folderIds,
-    at: Date.now()
-  };
-  try {
-    await chrome.storage.local.set({ [IMPORT_RESUME_KEY]: record });
-  } catch (error) {
-    console.warn("断点记录没写进去（这次中断后不会出现「继续上次导入」）", error);
-  }
-}
-
+/* 1.16.10（用户要求）：不再写「继续上次导入」的断点，这里只负责清掉旧版本留下的那条。 */
 async function clearImportResume() {
   try {
     await chrome.storage.local.remove(IMPORT_RESUME_KEY);
   } catch (error) {
-    console.warn("断点记录没清掉（下次可能提示一个已经过期的「继续上次导入」）", error);
+    console.warn("旧的导入断点没清掉（不影响导入，只是存储里会多一条记录）", error);
   }
 }
 
@@ -2952,12 +2930,8 @@ async function finishImportRunSnapshot() {
   // 1.7.10（P2-5）：这一轮结束了，把跨上下文闸门放掉。放在最前面，保证任何一条返回路径
   // 都会经过它（下面第一行就可能提前 return）。
   await clearArchiveWriteLock("import");
-  /* 1.16.3：不管是成功、取消、被风控还是出错，这一轮都已经结束了 ——
-     断点记录只对「中断之后继续」有意义，跑完就该收起来。
-     以前只在「真是继续」那条分支里清，于是跑完之后弹窗还挂着「继续上次导入」。 */
-  await clearImportResume().catch((error) => {
-    console.warn("断点记录没能清理（弹窗里可能还挂着「继续上次导入」）", error);
-  });
+  /* 1.16.10：继续导入已取消，这里只剩「把旧版本留下的断点清掉」这一件事。 */
+  await clearImportResume();
   if (!importRunSnapshot) return clearImportRunSnapshot();
   importRunSnapshot = {
     ...importRunSnapshot, active: false, paused: false, finished: true, finishedAt: Date.now()
@@ -2987,24 +2961,43 @@ function importInterruptedSummary(snapshot) {
   return parts.join("；");
 }
 
-// 统一的"中断说明"：复位状态 + 文案落盘（local.importState 与 lastResult 都写）
+// 统一的"中断说明"：复位状态 + 文案落盘（local.importState / lastResult / lastError 都写）
+// 1.16.10（用户要求）：中断就是失败 —— 不再提供「继续上次导入」，只提示回收藏夹页重新导入。
 async function importAnnounceInterruption(snapshot) {
   const detail = importInterruptedSummary(snapshot);
-  const notice = BcaI18n.t("上次导入已中断（浏览器被关闭、扩展被重载或后台被回收，导入没有继续）。已写入本地的记录保持原样，重新导入会跳过它们。");
+  const counts = snapshot?.counts || {};
+  const written = Math.max(0, Number(counts.imported) || 0) + Math.max(0, Number(counts.refreshed) || 0);
+  const savedCount = written || (snapshot?.journal?.createdRecords?.length || 0);
+  const notice = BcaI18n.t("上次导入可能因为杀后台、网络波动等原因没有完整导入，上次导入了 {count} 条，如果需要继续导入请到收藏夹页使用插件再导入一次。", { count: savedCount });
   const text = detail ? `${notice}（${detail}）` : notice;
   // 最后一次导入活动时间：比它更新的结果（例如中断之后又自动归档了一条视频）不能被盖掉
   const activityAt = Number(snapshot?.updatedAt) || Number(snapshot?.startedAt) || 0;
   importState = { ...importState, running: false, paused: false, finishedAt: Date.now(), updatedAt: Date.now(), text, summary: text, interrupted: true };
   await chrome.storage.local.set({ importState }).catch(() => {});
-  // P1-7：写一份跨重启的断点，让弹窗能给出「继续上次导入」
-  await writeImportResume(snapshot);
+  await clearImportResume();
+  // 1.16.10：中断也留一份错误报告 —— 过几天再问「上次到底导了多少」时还查得到。
+  const reportLines = [
+    "B站收藏夹导入中断报告",
+    `插件版本：${(() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "未知"; } })()}`,
+    ERROR_REPORT_NOTICE,
+    text,
+    "",
+    `中断时间：${formatChineseDateTime(new Date(), true)}`
+  ];
+  const reportPath = await persistErrorReport(reportLines.join("\n"));
   // 1.12.2（P1-3）：把跨重启的回滚日志标成「已中断」
   await markImportLeftoverInterrupted(snapshot, text);
   const stored = await chrome.storage.local.get("lastResult").catch(() => ({}));
   if ((Number(stored?.lastResult?.createdAt) || 0) <= activityAt) {
     /* 1.16.3：中断也是「没跑完」—— 标成 failed，弹窗才会按错误展开，
      否则用户看到的是一条「上次导入已中断」的正常状态，还伴着一声「导入成功」的音效。 */
-  await chrome.storage.local.set({ lastResult: { message: text, createdAt: Date.now(), failed: true } }).catch(() => {});
+    await chrome.storage.local.set({ lastResult: { message: text, createdAt: Date.now(), failed: true } }).catch(() => {});
+  }
+  try {
+    const report = maskLocalUserPaths(reportLines.join("\n").slice(0, 16000));
+    await chrome.storage.local.set({ lastError: { report, reportPath: storageReportLabel(reportPath), createdAt: Date.now(), needsReauth: false } }).catch(() => {});
+  } catch (error) {
+    console.warn("中断说明没挂到「最近一次错误」上（报告本身已经落盘）", error);
   }
   return { text, detail, activityAt };
 }
@@ -3029,6 +3022,24 @@ async function importRunLooksAlive() {
   }
   const snapshot = await readImportRunSnapshot();
   return snapshot?.active === true;
+}
+
+/* 1.16.10（用户要求）：这一轮其实已经跑完了吗？
+   证据只有硬信号，不猜时间：
+   ① 收尾时打过 finishing 标记 —— 跨过那条线就只剩 await 了；
+   ② 或者「所有收藏夹都处理过」且「每个读到的条目都有了结果」。
+   命中任何一条就按成功收尾，不再提示中断、也不再留断点。 */
+function importRunLooksComplete(snapshot) {
+  if (snapshot?.finishing === true) return true;
+  const counts = snapshot?.counts || {};
+  const total = Number(counts.total) || 0;
+  if (!total) return false;
+  const handled = (Number(counts.imported) || 0) + (Number(counts.refreshed) || 0)
+    + (Number(counts.skipped) || 0) + (Number(counts.failed) || 0);
+  if (handled < total) return false;
+  const folderTotal = Number(snapshot?.cursor?.folderTotal) || 0;
+  const folderIndex = Number(snapshot?.cursor?.folderIndex) || 0;
+  return folderTotal > 0 && folderIndex >= folderTotal;
 }
 
 async function importReconcileState() {
@@ -3066,6 +3077,20 @@ async function importReconcileState() {
        只剩 session 快照没来得及删。这时状态本身是权威证据：它不是中断，别写断点、别改文案，
        把快照清掉就完事。真正的半路死亡（状态还停在 running:true）下面照旧宣告。 */
     await clearImportRunSnapshot();
+    return { active: false, reset: false };
+  }
+  /* 1.16.10（用户要求）：快照显示这一轮其实已经跑完时，不报中断。
+     service worker 恰好在「最后一条写完之后、收尾 await 之前」被杀，是最常见的
+     「其实导完了却说没导完」—— 判据见 importRunLooksComplete()。 */
+  if (importRunLooksComplete(leftover)) {
+    await clearImportRunSnapshot();
+    /* 收尾文案也要补上：快照里留着的是「正在读取「X」的视频资料：12/50」这种进度句，
+       直接复位会让人以为它停在半路。这里按快照的计数拼一句和正常收尾一样的完成说明。 */
+    const doneCounts = leftover?.counts || {};
+    const doneText = `导入/更新完成：新导入 ${Number(doneCounts.imported) || 0} 个，更新 ${Number(doneCounts.refreshed) || 0} 个，`
+      + `已存在跳过 ${Number(doneCounts.skipped) || 0} 个，失败 ${Number(doneCounts.failed) || 0} 个。`;
+    importState = { ...importState, running: false, paused: false, text: doneText, summary: doneText, finishedAt: Date.now(), updatedAt: Date.now() };
+    await chrome.storage.local.set({ importState }).catch(() => {});
     return { active: false, reset: false };
   }
   await importAnnounceInterruption(leftover);
@@ -4837,33 +4862,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
     const allFolders = await listBiliFavoriteFolders(data?.uid, tabId);
     const folders = allFolders.filter((folder) => selectedIds.has(String(folder.id)));
     if (!folders.length) throw new Error("所选收藏夹已不存在或没有读取权限，请刷新列表后重试。");
-
-    /* P1-7：上次被打断时记下的断点。只在「这次是继续」时才用；找不到那个收藏夹
-       （改名 / 取消勾选 / 换了账号）就从第一个收藏夹从头导 —— 宁可多跑一遍，
-       也不能因为对不上就整轮不干活。断点本身不带任何视频正文，只是「停在哪」。 */
-    const resume = data?.resume && typeof data.resume === "object" ? data.resume : null;
-    let startFolderIndex = 0;
-    if (resume) {
-      const wanted = String(resume.folder || "");
-      const foundIndex = wanted ? folders.findIndex((folder) => folder.title === wanted) : -1;
-      const startPage = Math.max(1, Number(resume.page) || 1);
-      if (foundIndex >= 0) {
-        startFolderIndex = foundIndex;
-        const line = `继续上次导入：从「${folders[foundIndex].title}」第 ${startPage} 页往后接着跑，它前面的收藏夹上次已经处理过。`;
-        reportLines.push("", line);
-        folderNotes.push(line);
-        importProgress(line, true);
-      } else {
-        const line = "上次停在的收藏夹这次没找到（可能改名或这次没勾选），这一轮从第一个收藏夹重新开始。";
-        reportLines.push("", line);
-        folderNotes.push(line);
-        importProgress(line, true);
-      }
-    }
-    // 断点只对「这一次继续」有效：真跑起来就把它清掉，免得下次再提示一条过期的
-    await clearImportResume();
-
-    for (let folderIndex = startFolderIndex; folderIndex < folders.length; folderIndex += 1) {
+    /* 1.16.10（用户要求）：不再有「继续上次导入」，每轮都从头跑。
+       已写入的记录会被跳过（不重抓详情），所以重跑一轮的代价主要是读一遍列表。 */
+    for (let folderIndex = 0; folderIndex < folders.length; folderIndex += 1) {
       await importWaitIfPaused();
       const folder = folders[folderIndex];
       const folderLog = [];
@@ -4877,7 +4878,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       }
       // 1.8.8：上一个收藏夹就把这次的额度用完了 —— 这里直接收工，不再读它的列表。
       if (limitReached) break;
-      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderTotal: 0 }, counts: { imported, refreshed, skipped, failed, total } });
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderIndex: folderIndex + 1, folderTotal: folders.length }, counts: { imported, refreshed, skipped, failed, total } });
 
       importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`, true);
       // 第 1 页读不到就整轮跳过这个收藏夹，代价太大：一次偶发的 412 会让用户以为功能坏了
@@ -5301,6 +5302,13 @@ async function importBiliFavoritesInner(data, tabId = null) {
     publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message, rateLimited: true }, true);
     await finishImportRunSnapshot();
     return { ok: false, rateLimited: true, message, imported, refreshed, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "" };
+  }
+
+  /* 1.16.10：跨过这一行就代表所有收藏夹都跑完了，只剩收尾的 await。
+     这里把 finishing 与最终计数先写进快照：收尾期间被回收时，下次按「已完整导入」处理。 */
+  if (importRunSnapshot) {
+    importRunSnapshot = { ...importRunSnapshot, finishing: true, counts: { imported, refreshed, skipped, failed, total }, updatedAt: Date.now() };
+    await writeImportRunSnapshot();
   }
 
   reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`,

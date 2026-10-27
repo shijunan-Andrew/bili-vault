@@ -66,12 +66,6 @@ const importCard = document.getElementById("importCard");
 const importStatus = document.getElementById("importStatus");
 const importWarn = document.getElementById("importWarn");
 const startImportButton = document.getElementById("startImport");
-/* P1-7：上次导入中断时后台会留一条「停在哪」的小记录（local: bcaImportResume），
-   这里把它显示成一行提示 + 一个「继续上次导入」按钮。 */
-const resumeImportRow = document.getElementById("resumeImportRow");
-const resumeImportText = document.getElementById("resumeImportText");
-const resumeImportButton = document.getElementById("resumeImport");
-let importResume = null;
 const diffFoldersButton = document.getElementById("diffFolders");
 const diffResult = document.getElementById("diffResult");
 const refreshImportFoldersButton = document.getElementById("refreshImportFolders");
@@ -254,8 +248,6 @@ function updateImportSelection() {
   importSelectedCount.textContent = BcaI18n.t("已选 {count} 个", { count: selected })
     + (totalItems ? " · " + BcaI18n.t("共 {total} 条视频", { total: totalItems }) : "");
   startImportButton.disabled = importBusy || selected === 0;
-  // P1-7：正在导入时把「继续上次导入」那一行收起（导入中它也没有意义）
-  renderResumeImport();
   diffFoldersButton.disabled = importBusy || selected === 0;
   updateRecentButton.disabled = importBusy || selected === 0;
   diffFoldersButton.textContent = selected ? BcaI18n.t("先看差异（{count} 个）", { count: selected }) : BcaI18n.t("先看差异");
@@ -578,37 +570,6 @@ async function importStillRunning() {
   }
 }
 
-async function readImportResume() {
-  try {
-    const stored = await chrome.storage.local.get("bcaImportResume");
-    return stored?.bcaImportResume || null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function renderResumeImport() {
-  if (!resumeImportRow) return;
-  const resume = importResume;
-  const usable = Boolean(resume && resume.folder && !importBusy);
-  resumeImportRow.hidden = !usable;
-  if (!usable) {
-    if (resumeImportText) resumeImportText.textContent = "";
-    return;
-  }
-  if (resumeImportText) {
-    resumeImportText.textContent = BcaI18n.t("上次导入停在「{folder}」第 {page} 页（已写入 {saved} 条），可以接着往下跑。", {
-      folder: String(resume.folder),
-      page: Math.max(1, Number(resume.page) || 1),
-      saved: Math.max(0, Number(resume.saved) || 0)
-    });
-  }
-}
-
-async function refreshImportResume() {
-  importResume = await readImportResume();
-  renderResumeImport();
-}
 
 /* 1.16.8：这一轮的消息断了（消息通道先回了一句超时 / 页面走神），后台可能还在跑 ——
    那种情况不许把「导入中」的视图复位，否则弹窗会跳回「选收藏夹」，用户以为导入被取消了。
@@ -622,18 +583,10 @@ function settleImportView(stillRunning) {
 
 async function startImport(options = {}) {
   if (importBusy) return;
-  // P1-7：继续上次导入时，用断点里记着的收藏夹 id，不必让用户重新勾选
-  const resume = options.resume && typeof options.resume === "object" ? options.resume : null;
-  const resumeIds = resume && Array.isArray(resume.folderIds) ? resume.folderIds.map(String).filter(Boolean) : [];
   activeOperation = options.recentDays ? "update" : "import";
-  const folderIds = resume
-    ? resumeIds
-    : [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+  const folderIds = [...importFolderList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   if (!folderIds.length) {
-    /* 1.16.3：以前这里直接 return —— 点了「继续上次导入」什么都不会发生（真机反馈「没反应」）。 */
-    importStatus.textContent = resume
-      ? BcaI18n.t("这条断点里没有记下收藏夹，请在下面重新勾选后再导入。")
-      : BcaI18n.t("请先勾选要导入的收藏夹。");
+    importStatus.textContent = BcaI18n.t("请先勾选要导入的收藏夹。");
     importStatus.classList.add("error");
     return;
   }
@@ -659,7 +612,6 @@ async function startImport(options = {}) {
     const payload = { type: "bca-import-selected-folders", folderIds };
     if (options.recentDays) payload.recentDays = options.recentDays;
     if (options.limit) payload.limit = options.limit;
-    if (resume) payload.resume = { folder: String(resume.folder || ""), page: Math.max(1, Number(resume.page) || 1) };
     const response = await sendTabMessage(tab.id, payload);
     if (response?.cancelled) {
       importStatus.classList.add("error");
@@ -668,9 +620,6 @@ async function startImport(options = {}) {
     }
     if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("导入失败。"));
     importStatus.classList.remove("error");
-    // 断点已经在后台开跑时清掉了；这里把弹窗里的那一行也收起来
-    importResume = null;
-    renderResumeImport();
     const doneText = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入/更新完成：新导入 {imported} 个，更新 {refreshed} 个。", { imported: response.imported || 0, refreshed: response.refreshed || 0 });
     importStatus.textContent = doneText;
     showDoneDialog(doneText);
@@ -981,8 +930,6 @@ downloadButton.addEventListener("click", () => {
 
 refreshImportFoldersButton.addEventListener("click", loadImportFolders);
 startImportButton.addEventListener("click", openImportConfirm);
-/* P1-7：断点那一行的按钮直接按上次勾过的收藏夹续跑（不重新勾选、不再问一次速度）。 */
-resumeImportButton?.addEventListener("click", () => { startImport({ resume: importResume }); });
 updateRecentButton.addEventListener("click", openUpdateRecent);
 document.getElementById("updateRecentCancel").addEventListener("click", () => updateRecentDialog.close());
 document.getElementById("updateRecentGo").addEventListener("click", () => {
@@ -1145,9 +1092,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       playImportSound({ failed: done.failed === true, summary: done.text });
     }
   }
-  if (areaName === "local" && (changes.bcaImportResume || changes.importState)) {
-    refreshImportResume().catch(() => {});
-  }
   if (areaName === "local" && changes.importState) {
     const state = changes.importState.newValue || {};
     importPaused = Boolean(state.paused);
@@ -1252,7 +1196,6 @@ async function boot() {
   restoreRecoverInvalid().catch(() => {});
   restoreImportLimit();
   loadImportFolders();
-  refreshImportResume().catch(() => {});
   refreshStatus().catch((error) => {
     setLastResultText(error?.message ? BcaI18n.t(error.message) : BcaI18n.t("无法读取插件状态。"));
   });

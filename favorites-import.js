@@ -56,8 +56,6 @@
       const payload = { type: "import-bili-favorites", uid: pageUid(), folderIds: message.folderIds };
       if (message.recentDays) payload.recentDays = message.recentDays;
       if (message.limit) payload.limit = message.limit;
-      // P1-7：继续上次导入时把断点原样带下去（收藏夹名 + 页号）
-      if (message.resume && typeof message.resume === "object") payload.resume = message.resume;
       /* 1.16.8：这条路不许有 15 秒兜底。导入本来就要跑几分钟，超时会让弹窗以为这一轮
          已经结束了，于是把「导入中」的视图切回选收藏夹（真机反馈「界面突然跳回去了」）。
          真的断线由后台写 importDone / importState 落地，弹窗那边另有 importStillRunning() 接着。 */

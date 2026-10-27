@@ -283,7 +283,8 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **`005回收站` / `006报告` 是保留目录**：与 `000视频下载`…`004导出` 同一套名单（`archive-core.js` 的 `RESERVED_COLLECTION_NAMES`、`background.js` 的同名 Set、`library.js` 的扫描跳过 / 新建收藏夹拦截 / `ARCHIVE_RESERVED_DIRS`，共 9 个名字）。扫描不把它们当收藏夹，用户也不能新建同名收藏夹。
 - **归档体检只读**：`writeHealthReport()` 复用 `scanRoot(rootHandle, true)` 的 `diagnostics`（`missingText` / `missingCover` / `brokenText` / `tempFiles`，由 `readArchiveRecord()` 在一次遍历里顺手收集，不额外读盘），写成 `006报告/体检-<YYYYMMDD-HHMMSS>.md`。报告只描述现状、不修任何东西；每类最多列 `HEALTH_REPORT_LIST_LIMIT = 20` 条，多出来的折成「…还有 N 条」。
 - **storage 写入兜底只覆盖关键路径**：`safeLocalSet(patch, label)` 失败等 `STORAGE_WRITE_RETRY_MS = 200` 毫秒重试一次，仍失败写一条 `console.warn` + `lastStorageError`（`{ label, message, at }`）并返回 `false`——**它不抛错**，调用方必须看返回值；`setBcaStatsSnapshot()` 是统计快照专用包装，内部保留 `chrome.storage.local.set({ bcaStats: stats })` 字面量（`stability:5627` 钉着），最终失败才抛。弹窗读 `lastStorageError` 展示「本地存储没写进去」，点「知道了」把键删掉。
-- **导入断点续跑**：中断时 `writeImportResume(snapshot)` 把「收藏夹名 / 页号 / 已写入数 / 总数 / folderIds」写进 `chrome.storage.local` 的 `bcaImportResume`（不含回滚日志与视频正文，重启浏览器仍然在）。弹窗据此显示「继续上次导入」；后台 `importBiliFavoritesInner` 按 `data.resume.folder` 找收藏夹下标，从那个收藏夹起跑。**匹配用的是收藏夹名**：用户中途改名或删掉收藏夹，就回退成从头开始（会写一行说明），不会崩。
+- **导入断了就是失败，没有「继续」**（1.16.10，用户要求）：删掉「继续上次导入」之后，中断只做三件事 —— 复位状态、把「上次导入可能因为杀后台、网络波动等原因没有完整导入，上次导入了 N 条，如果需要继续导入请到收藏夹页使用插件再导入一次。」写进 `importState`（弹窗与收藏库的「最近状态」都读它）、并落一份 `001错误报告`（同时挂到 `lastError` 上，弹窗能直接「下载错误报告」）。`bcaImportResume` 这个键只保留给清理旧版本留下的记录，不再写新断点。
+- **「其实已经跑完了」不报中断**（1.16.10）：收尾第一步先往 `chrome.storage.session` 的快照里写 `finishing: true` 与最终计数；下次启动若发现快照里的条目全数完、收藏夹也走完（`fixed` 见 `importRunLooksComplete()`），就按成功收尾，不宣告中断、不写错误报告。这是「SW 恰好在最后一次写盘之后、发布结束状态之前被杀」那个窗口的解药。
 - **版本号只有 `manifest.json` 一处**（1.8.23，P1-6）：`library.html` 的 `#sideVersion` 是空标签，`library.js` 启动时用 `displayVersion(chrome.runtime.getManifest().version)` 填；`release.ps1` 只替换 `manifest.json`，界面与测试里不许再出现硬编码版本号（测试盯着）。
 
 ### 内容脚本词典、页面错误留档、卡片复用与 HISTORY 索引（1.8.23）
@@ -349,7 +350,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **回收站页可以逐条恢复/彻底删除，但不覆盖同名目录**（1.9.0）：恢复时目标收藏夹里已有同名目录会存成「名字-2」，想合并只能手动处理；30 天清理仍只认插件自己写的时间戳目录名，用户改过名的目录不会被自动清理，也不会被误删。
 - **`safeLocalSet()` 只接了三条关键路径**（1.8.23）：统计镜像、补存登记、统计快照。其余几十处 `chrome.storage.local.set` 仍是裸写——它们失败最多丢一条界面状态，不值得逐个改；新增关键写入时再往 `safeLocalSet` 里接。
 - **归档体检只描述、不修**（1.8.23）：七类问题里「只有骨架」「缺封面」这类含历史遗留的正常现象，报告不做去重也不做合并；每点一次都重新全量扫一遍（8 路并发读）。
-- **`bcaImportResume` 按收藏夹名匹配**（1.8.23）：中途给收藏夹改名或删掉它，续跑就回退成从头开始（会写一行说明）。续跑只保证「不重复写已经有 `视频信息.txt` 的记录」，不保证页内顺序与上次完全一致。
+- **断点续跑已移除**（1.16.10，用户要求）：`writeImportResume()` 与后台的 `data.resume` 分支已删除，「按收藏夹名匹配」那套判据随之作废；`IMPORT_RESUME_KEY` 只剩清理旧记录一个用途。
 - **页面错误去重只在内存里**（1.8.23）：`clientErrorSeen` 上限 80 条，刷新页面或重启浏览器就清零，同一条错误可能再进一次「001错误报告」。刻意不把去重状态写进 storage——它会随着每次上报增长，且丢了最多多一份报告，不影响正确性。
 - **卡片复用依赖 `video.id` 稳定**（1.8.23）：id 变了（比如目录被改名后重新扫描）就会建新卡、丢焦点，这是可接受的降级；`updateVideoCard()` 每页都会重写标题/角标/时间，不依赖旧闭包。
 - **`content-i18n-keys.js` 是手写白名单**（1.8.23）：`content.js` 新增界面文字时如果忘了加，内容脚本那条会静默回退中文（不报错、不崩），守卫只能发现「白名单与字面量不一致」，发现不了「你本来想给某个词加译文」。
@@ -674,10 +675,9 @@ UP主主页：https://space.bilibili.com/……
   （换根目录 / 点「刷新」都会走到）。**命中判据仍然只有 `archive-tools.js` 的 `cacheEntryFor()` 一处**（比
   `size + lastModified`），缓存本身不参与判断；`record.coverEntry` 落库前被置空（句柄恢复要重新申请权限），
   命中时用这次枚举到的新句柄补上。
-- **断点续跑的两个入口（1.12.5）**：弹窗（`popup.js` 的 `refreshImportResume`）与收藏库顶栏
-  （`#resumeImportNotice`）读的是同一条 `chrome.storage.local.bcaImportResume`，发的也是同一种
-  `import-bili-favorites` + `resume: {folder, page}`。收藏库这边多存一个 `bcaResumeNoticeDismissedAt`，
-  与断点记录的 `at` 比新旧 —— 关掉的只是「这一条」，新的一轮中断仍会重新提示。
+- **断点续跑的两个入口已经一并删掉（1.16.10）**：弹窗那行 `#resumeImportRow` 与收藏库顶栏
+  `#resumeImportNotice` 都移除了，`import-bili-favorites` 也不再接受 `resume` 字段。中断之后想接着导，
+  按提示回收藏夹页重新勾一次即可（已写入的记录会被跳过）。
 
 ## 彩蛋页的视觉基线（1.12.9）
 
@@ -710,7 +710,7 @@ UP主主页：https://space.bilibili.com/……
 | `toast=1` | 直接点亮底部提示条（量毛玻璃下的对比度用） |
 | `open=1` | 设置页「更多导出」默认展开 |
 | `nohandle=1` | `BcaArchiveTools.loadRootHandle()` 返回 null → 回收站「还没选文件夹」空态 |
-| `resume=1` | 造一条 `bcaImportResume`（`folder` / `page` / `saved`）→ 收藏库顶栏「继续上次导入」 |
+| `resume=1` | 造一条旧版本留下的 `bcaImportResume` 记录 → 验证它只被清理、不会再提示「继续上次导入」（1.16.10 起这个功能已移除） |
 | `leftover=1` | 造一条 `bcaImportLeftover` → 设置页「上次导入没有收尾」那一行 |
 
 **造不出来的**（这些只能真机验证）：

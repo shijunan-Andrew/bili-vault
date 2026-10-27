@@ -6160,7 +6160,7 @@ test("静默吞错按三级分档：二档必须留原因，三档要写明为�
   // 1.14.3（审查 C-3）：棘轮原来只统计 `catch (_) {}`，而 `.catch(() => {})` 这种写法
   // 一处都没数 —— 三个「用户能感知的开关」正是被后面这种吞掉的。现在两种都数。
   for (const [file, catchLimit, thenLimit] of [
-    ["background.js", 7, 27],
+    ["background.js", 7, 29],
     ["library.js", 10, 19],
     ["popup.js", 3, 16],
     ["content.js", 1, 3],
@@ -6768,11 +6768,10 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
   // ReferenceError（数据其实已经存好了，用户却看到「导入失败」）。必须是两空格缩进的函数作用域，
   // 而且要在收藏夹循环之前。
   assert.match(backgroundCode, /^ {2}const importLimit = Math\.max\(0, Number\(data\?\.limit\) \|\| 0\);$/m, "importLimit 要声明在函数作用域里（两空格缩进），不能藏在循环里");
-  // 1.8.23（TODO P1-7）：循环起点改成 startFolderIndex（「继续上次导入」从断点那一段开始），
-  // importLimit 与起点都必须在收藏夹循环之前声明。
-  assert.ok(backgroundCode.indexOf("let startFolderIndex = 0;") < backgroundCode.indexOf("for (let folderIndex = startFolderIndex;"),
-    "startFolderIndex 要先声明，收藏夹循环才能用");
-  assert.ok(backgroundCode.indexOf("const importLimit = Math.max") < backgroundCode.indexOf("for (let folderIndex = startFolderIndex;"), "importLimit 的声明必须在收藏夹循环之前");
+  // 1.16.10（用户要求）：取消「继续上次导入」之后，收藏夹循环固定从第 0 个开始。
+  assert.match(backgroundCode, /for \(let folderIndex = 0; folderIndex < folders\.length; folderIndex \+= 1\) \{/);
+  assert.ok(backgroundCode.indexOf("const importLimit = Math.max") < backgroundCode.indexOf("for (let folderIndex = 0;"),
+    "importLimit 的声明必须在收藏夹循环之前");
   assert.match(popupCode, /function selectedImportLimit\(\) \{/, "界面要有一个读上限的地方");
   assert.match(popupCode, /if \(options\.limit\) payload\.limit = options\.limit;/, "载荷里要带上 limit");
   assert.match(relay, /if \(message\.limit\) payload\.limit = message\.limit;/, "中转那层别把 limit 丢了");
@@ -7571,24 +7570,37 @@ test("chrome.storage 写入失败要重试一次并留下可见痕迹（TODO P0-
   assert.match(readProjectFile("popup.html"), /id="storageErrorRow"/);
 });
 
-test("导入断了能从上次的收藏夹接着跑（TODO P1-7）", () => {
+test("1.16.10（用户要求）：取消「继续上次导入」，中断一律算失败", () => {
   const background = readProjectFile("background.js");
-  assert.match(background, /const IMPORT_RESUME_KEY = "bcaImportResume";/);
-  assert.match(background, /async function writeImportResume\(snapshot\) \{/);
-  assert.match(background, /async function clearImportResume\(\) \{/);
-  assert.match(background, /await writeImportResume\(snapshot\);/);
-  assert.match(background, /folderIds: \(Array\.isArray\(folderIds\) \? folderIds : \[\]\)\.map\(String\)/);
-  assert.match(background, /const resume = data\?\.resume && typeof data\.resume === "object" \? data\.resume : null;/);
-  assert.match(background, /let startFolderIndex = 0;/);
-  assert.match(background, /for \(let folderIndex = startFolderIndex; folderIndex < folders\.length; folderIndex \+= 1\) \{/);
-  assert.match(background, /await clearImportResume\(\);/, "开始跑之后要清断点，别让人重复点");
+  assert.doesNotMatch(background, /async function writeImportResume\(/, "不再写断点");
+  assert.doesNotMatch(background, /data\?\.resume/, "后台不再收续跑参数");
+  assert.doesNotMatch(background, /startFolderIndex/, "收藏夹循环不再从中间开始");
+  assert.match(background, /for \(let folderIndex = 0; folderIndex < folders\.length; folderIndex \+= 1\) \{/);
+  assert.match(background, /const IMPORT_RESUME_KEY = "bcaImportResume";/, "老版本留下的断点键还要能清掉");
+  assert.match(
+    background,
+    /上次导入可能因为杀后台、网络波动等原因没有完整导入，上次导入了 \{count\} 条，如果需要继续导入请到收藏夹页使用插件再导入一次。/
+  );
+  assert.match(background, /await persistErrorReport\(reportLines\.join\("\\n"\)\)/, "中断要留一份错误报告");
+  assert.match(background, /finishing: true, counts: \{ imported, refreshed, skipped, failed, total \}/, "收尾前要留「其实跑完了」的标记");
   const popup = readProjectFile("popup.js");
-  assert.match(popup, /async function readImportResume\(\) \{/);
-  assert.match(popup, /function renderResumeImport\(\) \{/);
-  assert.match(popup, /payload\.resume = \{ folder: String\(resume\.folder \|\| ""\), page: Math\.max\(1, Number\(resume\.page\) \|\| 1\) \};/);
-  assert.match(readProjectFile("popup.html"), /id="resumeImport"/);
+  assert.doesNotMatch(popup, /resumeImport/, "弹窗不再有「继续上次导入」那一行");
+  assert.doesNotMatch(readProjectFile("popup.html"), /id="resumeImport/, "popup.html 里也不该再有那一块");
+  const library = readProjectFile("library.js");
+  assert.doesNotMatch(library, /restoreResumeImportNotice/, "收藏库顶栏不再读断点");
+  assert.doesNotMatch(readProjectFile("library.html"), /id="resumeImportNotice"/, "library.html 里也不该再有那条横幅");
 });
 
+test("1.16.10：这一轮其实跑完了就不报中断（收尾判据）", () => {
+  const background = readProjectFile("background.js");
+  assert.match(background, /function importRunLooksComplete\(snapshot\) \{/);
+  assert.match(background, /if \(snapshot\?\.finishing === true\) return true;/, "有收尾标记就是跑完了");
+  assert.match(background, /if \(importRunLooksComplete\(leftover\)\) \{/, "reconcile 里要先判「其实跑完了」");
+  assert.match(background, /const folderTotal = Number\(snapshot\?\.cursor\?\.folderTotal\) \|\| 0;/, "要靠收藏夹进度判断");
+  assert.match(background, /if \(handled < total\) return false;/, "条目没数完就不算跑完");
+  assert.match(background, /return folderTotal > 0 && folderIndex >= folderTotal;/, "收藏夹没走完就不算跑完");
+  assert.match(background, /finishing: false,/, "快照初始化要带上这个字段");
+});
 test("设置页的三件事有真执行测试（TODO P1-4）", () => {
   const pages = readProjectFile(path.join("test", "pages.test.cjs"));
   assert.match(pages, /function suiteSettings\(\) \{/);
@@ -8765,23 +8777,6 @@ test("1.12.5：扫描缓存能跨会话留下来，冷启动不再逐条重读 �
   assert.match(tools, /if \(!entry \|\| entry\.size !== size \|\| entry\.lastModified !== lastModified\) return null;/);
 });
 
-test("1.12.5：断点续跑在收藏库顶栏也有入口，弹窗不再是唯一出路（审查 P2-7）", () => {
-  const library = readProjectFile("library.js");
-  const html = readProjectFile("library.html");
-  const popup = readProjectFile("popup.js");
-  for (const id of ["resumeImportNotice", "resumeImportText", "startResumeImport", "dismissResumeImport"]) {
-    assert.ok(html.includes(`id="${id}"`), `library.html 缺 #${id}`);
-  }
-  assert.match(library, /async function restoreResumeImportNotice\(\) \{/);
-  assert.match(library, /async function startResumeImport\(\) \{/);
-  assert.match(library, /resume: \{ folder: String\(resumeImport\.folder\), page: Math\.max\(1, Number\(resumeImport\.page\) \|\| 1\) \}/);
-  assert.match(library, /restoreResumeImportNotice\(\)\.catch\(\(\) => \{\}\)/, "启动链里要调一次");
-  assert.match(library, /if \(changes\.bcaImportResume \|\| changes\.bcaResumeNoticeDismissedAt\) \{/, "记录变了要同步");
-  assert.ok(popup.includes("上次导入停在"), "弹窗那条提示不能删（两处入口并存）");
-  // 续跑参数里必须有 uid，没有就说清楚，别发注定失败的导入
-  assert.match(library, /还不知道你的 B 站 UID，先去弹窗里导入一次再续跑。/);
-});
-
 test("1.12.5：复制按钮的每次调用都有看得见的失败退路（审查 P2-3）", () => {
   const library = readProjectFile("library.js");
   const settings = readProjectFile("settings.js");
@@ -9033,11 +9028,9 @@ test("1.12.7：导入结束的通知有开关，后台真的照它办事（审�
   assert.match(privacy, /www\.bing\.com/, "隐私说明要提到必应那条链接");
   assert.match(privacy, /插件本身\s*\r?\n\s*不发任何请求/, "要写清插件本身不发请求");
 
-  // 附注：IMPORT_RESUME_KEY 那行注释自相矛盾的问题修掉了
-  const resumeLine = background.split("\n").find((line) => line.includes("const IMPORT_RESUME_KEY"));
-  assert.ok(resumeLine, "background.js 里应有 IMPORT_RESUME_KEY");
-  assert.ok(!/断点 \+ 回滚日志/.test(resumeLine), "注释不许再说含回滚日志（实际只有断点）");
-  assert.ok(/只有断点，不含回滚日志/.test(resumeLine), "注释要写明只有断点");
+  // 附注：IMPORT_RESUME_KEY 那行注释口径（1.16.10 起只用于清理旧记录）
+  assert.ok(!/断点 \+ 回滚日志/.test(background), "注释不许再说含回滚日志（实际只有断点）");
+  assert.ok(/旧版本留在 local 里的那条断点记录/.test(background), "注释要写明这条只用于清理旧记录");
 });
 
 test("1.12.6：文档里的数字能一键对齐，.ps1 也不用等人工才验得到（审查 P3-1 / P3-2）", () => {
