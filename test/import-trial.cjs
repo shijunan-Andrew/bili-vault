@@ -13,7 +13,16 @@ const core = require("../archive-core.js");
 
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const REQUEST_DELAY_MS = 600;
-const SKIP_DIRECTORIES = new Set(["001错误报告", "错误报告", "视频下载", "000视频下载", "002回收站"]);
+const SKIP_DIRECTORIES = new Set([
+  "001错误报告",
+  "错误报告",
+  "视频下载",
+  "000视频下载",
+  "003统计库",
+  "004导出",
+  "005回收站",
+  "006报告"
+]);
 const STAT_LABELS = { view: "播放量", danmaku: "弹幕量", like: "点赞数", coin: "投硬币枚数", favorite: "收藏人数", share: "转发人数" };
 
 const root = process.argv[2];

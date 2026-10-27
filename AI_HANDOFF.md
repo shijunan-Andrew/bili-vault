@@ -76,7 +76,7 @@ node test/i18n-extract.cjs --check  # 动了词典才需要
 | 词典 | 1151 条（`zh-TW` / `en` 各一份；缺 0，多余 0） |
 | 测试基线 | stability 418 · archive-core 106 · stats-core 69 · background 49 · pages 132（后四套是真执行） |
 | 审查欠账 | 旧清单已结清（P0 2/2、P1 24 条、P2 63/63，截至 1.8.9）；2026-10-25 的大审查（`项目审查20261025/`）已全部收口：P0 0 条、P1 4 条、P2 7+2 条、P3 8+1 条，除「拆 `library.js`」按用户要求记为『决定不改』外均已修，明细不进仓库 |
-| 生成 | 2026-10-28 01:20，当时 HEAD `68973b3`；重跑 `node test/status.cjs --write` 刷新 |
+| 生成 | 2026-10-28 01:57，当时 HEAD `17b164d`；重跑 `node test/status.cjs --write` 刷新 |
 <!-- status:end -->
 
 这张表是**脚本生成的**，不是手写的：`node test/status.cjs --write` 会真的跑一遍五套测试和词典检查，再把结果写进上面两块标记之间。看到数字对不上就重跑脚本，**不要去改数字** —— 手写的状态一周就过期，而信了过期状态的判断全是错的。
@@ -416,6 +416,8 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | 改设置页 | `settings.html` / `settings.js`；**禁用 `textContent =` 写文字**，用 `replaceChildren` |
 | 改统计页与图表 | `stats.html` / `stats.js`；纯逻辑在 `stats-core.js`（node 能 require） |
 | 改宠物挂件 | `pet.js` / `pet.css` |
+| 改副页面的右下角浮标（回到顶部 / 回到收藏库） | `dock.js`（`global.BcaDock`，阈值 `SCROLL_TOP_REVEAL_AT = 240`）+ 设置/统计/回收站三页各自的 `.floating-dock` DOM；**收藏库那页的浮标留在 `library.js`**（它跟渲染状态绑在一起） |
+| 改删除确认框 / 直接删除 | `library.js` 的 `askToDeleteVideo` / `askToDeleteBatch` / `askToDeleteCollection` / `confirmPendingDelete` + `library.html` 的 `#deleteSkipRecycle`、`#deleteAssociatedDownloads`；永久删除实现只在 `archive-tools.js` |
 | 改自动归档、导入、后台消息 | `background.js`（service worker，ES module，只 import `./stats-core.js`） |
 | 改 B 站页面上的采集与提示 | `content.js`（隔离世界，读不到页面全局变量） |
 | 改命名、匹配、解析这类纯逻辑 | `archive-core.js`（浏览器挂 `globalThis`，node 能 require） |
@@ -449,6 +451,10 @@ V1.0.0 之后的三件事，**都是用户明确要求的下一步**。做之前
 | 原生宿主注册的浏览器清单 | `install-native-folder-opener.ps1` | 卸载脚本、自检脚本、`settings.js` 的清理命令 | 「原生宿主的浏览器清单三处一致（V1.7.17）」 |
 | `视频信息.txt` / `封面.webp` / `000视频下载` / `003database` 这些字面量 | **没有单一权威** | 多处硬编码 | 无守卫 —— 改名要全仓 grep，别只改一处 |
 | `safeSegment` / `safeCollectionName` | 分别只在 `background.js` / `archive-core.js` 各一份 | —— | 「归档目录名的 200 字节闸（V1.7.10）」 |
+| 导入收尾判据（这一轮到底算不算跑完） | `background.js` 的 `importRunLooksComplete()`：`handled = imported + skipped`（`refreshed` 是 `skipped` 的子集、`failed` 混着占位空槽，都**不许**加进去） | 游标里的 `folderItems`（本夹条目数）与 `folderTotal`（收藏夹总数）分工不同，别用后者覆写前者 | 「收尾判据只数 imported + skipped（1.17.3）」 |
+| 删掉的归档还能不能从回收站捞回来 | `library.js` 的 `confirmPendingDelete()` 读 `#deleteSkipRecycle` | `archive-tools.js` 的 `deleteCollectionPermanently()` / `deleteRecordsPermanently()`（直接 `removeEntry`） | 「直接删除只有一条实现（1.17.4 / 1.17.5）」 |
+| 使用须知的条数与措辞 | `library.html` 与 `popup.html` **两处 DOM**（逐字一致，当前 5 条） | —— | 「两份使用须知逐字一致且正好 5 条（1.17.2）」 |
+| 副页面浮标的显隐阈值 | `dock.js` 的 `SCROLL_TOP_REVEAL_AT = 240` | `library.js` 里收藏库自己那份同值常量（两份要一起改） | —— |
 
 改这类代码的固定动作：
 
@@ -660,7 +666,7 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 
 | 操作 | 实现在哪 | 风险与规矩 |
 |---|---|---|
-| 删除本地归档（单条 / 批量 / 整个收藏夹） | `library.js` 的 `askToDeleteVideo` / `askToDeleteBatch` / `askToDeleteCollection` | `recycleCollection()` 先把整个收藏夹移进 `005回收站/<时间戳>/`（1.8.23 起，可恢复），只有 `000视频下载` 那部分仍走 `removeEntry(..., { recursive: true })`；目录里无法识别的文件、用户自己放进去的东西也会一起移走/删掉。删前必须二次确认并把目录名念出来 |
+| 删除本地归档（单条 / 批量 / 整个收藏夹） | `library.js` 的 `askToDeleteVideo` / `askToDeleteBatch` / `askToDeleteCollection` | 默认 `recycleCollection()` / `recycleRecords()` 把归档移进 `005回收站/<时间戳>/`（1.8.23 起，30 天内可恢复）；**1.17.4 / 1.17.5 起，用户在确认框里勾选「直接删除，不进回收站」时改走 `deleteCollectionPermanently()` / `deleteRecordsPermanently()`，删掉就找不回来 —— 这个勾选框默认不勾，不许改成默认勾**；`000视频下载` 那部分仍按勾选走 `removeEntry(..., { recursive: true })`；目录里无法识别的文件、用户自己放进去的东西也会一起移走/删掉。删前必须二次确认并把目录名念出来 |
 | 清理 `000视频下载` 里的下载目录 | `library.js` 的下载清理链路 | 只删「能对上 BV / av 号」的那些；状态未知时**不许当成「没有」**，要如实报出来 |
 | 移动 / 搬运本地归档 | `library.js` 的 `confirmCollectionAction` / `copyVideoRecord` | 先复制 → 逐文件比字节 → 才删源。**任何一步失败都不许删源** |
 | 覆盖写 `视频信息.txt` | `background.js` 的 `writeFile` | 目标文件不存在就就地写（1.8.2：换名覆盖在 Chrome 155 上要 7 秒，只有覆盖已有文件才值得）；覆盖已有文件才先写临时文件再改名，改名失败退回就地写；**写失败不许删记录**，有内容就留、空的才删 |
@@ -680,6 +686,23 @@ node test/import-trial.cjs "<你的本地备份文件夹>" 3
 - **「尝试找回失效视频的部分信息」是插件的核心用处之一。** 在没有用户明确指示的情况下，**不要改这一块的行为** —— 包括开关本身、它的文案、恢复哪些字段、几路来源的先后顺序、以及 `fetchMobileRecovery()` 的扫描参数。要动先问，别自作主张「优化」。
 - **不许给 `fetchMobileRecovery()` 加请求硬预算。** 1.17.6 刚按用户要求把 1.1.9 起那个 120 次上限删掉，恢复到最初的 4 轮 × 100 页 × 每页 3 次尝试。防风控只能往**节奏**上做（`biliImportApiGet` 领票、页间 650ms、轮间 1200ms、撞风控立刻停），**不能靠砍次数**：砍掉的每一次，都可能是一条再也找不回来的失效视频。
 - 判断依据（用户实测，2026-10-28）：改回四轮之后，之前一直取不到的失效视频取回来了 —— 标题、封面、「UP主自行删除」的原因都对上了。B 站 APP 收藏夹（`platform=ios` 的 `/x/v3/fav/folder/resources`）是现在唯一还留得住这些信息的来源；稍后再看与观看历史在 1.17.6 已按用户要求整段删除，别加回来。
+
+## 这一阶段的一般性教训（2026-10-26 → 10-28，1.17.x）
+
+> 记的是**换个地方也成立**的做法，不是版本流水账（流水账在 `docs/HISTORY.md`）。下面每条都至少踩过一次。
+
+1. **「藏起来的按钮」仍然占位。** 收藏库侧栏名字被挤没，根因不是字号大，是置顶/删除两个按钮 `flex: 0 0 28px` 常驻、`opacity: 0` 只是看不见（1.17.2）。改视觉问题先看布局盒，再看颜色。
+2. **同一个交互别写第二份。** 设置/统计/回收站三页各写一段「滚动到顶部」就是三份副本；抽出一份 `dock.js`（`global.BcaDock`），页面只放 DOM 与 `<script>`（1.17.2）。
+3. **DOM 桩跑不通整条写盘链时，把用例拆两层**：UI 层只验确认框（默认值、文案、勾选切换），真执行放到 tools 层直接调 `archive-tools`。1.17.4/1.17.5 两次都是这么切的，比硬造 `requestPermission` 桩可靠。
+4. **旧用例依赖的「制造错误」手法会随实现失效。** 「复制后比字节不一致」原来靠源文件自己变小；改成只读一次之后造不出来，得换成「声明 size 9、实际只写 3 字节」。改实现前先想：这条用例还造得出它要的错误吗？
+5. **删常量、改判据必须同轮改测试。** 测试里 `num("IMPORT_RECOVERY_MAX_REQUESTS")` 找不到会静默变 0，断言反而「通过」（1.17.6 踩过）。
+6. **整文件字符串替换很危险。** 三条一模一样的 `freshRoot({...})` 会被一起改掉；按用例标题切片（从标题到下一个 `  await test(`）再替换。
+7. **补丁脚本五个固定动作**：探测该文件 EOL → `patchOnce` 断言命中恰好 1 次 → 写回 → 校验「CRLF 文件裸 LF 为 0」→ 改过 `.js` 再 `node --check`。
+8. **替换文本要自带锚点标题。** 用「从 A 到 B 之间整段替换」时，若 B 被吃掉，中间的 `## Vx.y.z` 标题也会消失（1.17.2 的 README 事故）。写完立刻 `git diff` 看标题还在不在。
+9. **`test/pages.test.cjs` 提交走 blob 手法。** 它在 git 里是 `i/crlf`，普通 `git add` 会把整份规范化成 LF：用 `git hash-object -w --no-filters` + `git update-index --add --cacheinfo 100644,<blob>`，提交后用 `git show --numstat` 确认没有被整份重写。
+10. **数字交给脚本，结构交给人。** `check-all --write` / `history-index --write` / `status --write` 能改对的只有数字；四段式骨架、页脚版本、「README 只留最新一版」这些结构约束脚本只能报错不能自己修。
+11. **审查报告要单列「只能真机验」。** 否则「没发现问题」会被读成「已经验过了」—— 缩放比例、窄窗口遮挡、真实 B 站响应这类只能上真机。
+12. **用户明确要过的行为，别自作主张「优化」。** 失效视频找回的次数被砍过一次（1.1.9 的 120 次上限），用户实测发现少找回了十几条才翻出来；现在写成了硬规则（见上面「失效视频找回」那节）。
 
 ## 修改原则
 

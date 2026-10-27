@@ -9,9 +9,11 @@
 bili-vault/                       # 仓库根即扩展目录；改名前先看「项目基线」里那条扩展 ID 说明
 ├── .git/                         # 完整版本历史（tag: beta1.0 … beta4.9、V1.0.0 一路到当前版本；数量随发布增长，别写死）
 ├── .gitignore / .gitattributes   # 忽略本地归档；换行策略（.bat/.ps1/.cs 钉死 CRLF）
+├── .github/workflows/ci.yml      # CI：Node 20/22/24 矩阵，跑 scripts/check-all.cjs
 ├── .node-path                    # 本机 node.exe 的路径（各人机器不同，已被 .gitignore，不进仓库）
 ├── version.json                  # 公开版元数据（released / zipName / sha256）；用户宣布「可以发 release」之后才手工维护
 ├── manifest.json                 # MV3 权限、后台 worker、内容脚本注册
+├── icon-16/32/48/128.png         # 图标（manifest 与工具栏都用这四个）
 ├── background.js                 # 保存、导入、视频 API、错误报告、后台消息路由
 ├── content.js                    # B 站视频页：监听收藏操作、采集视频数据 + 归档提示卡
 ├── content-i18n-keys.js          # 4.5：内容脚本要用的词条白名单（必须在 i18n.js 之前加载，只列 content.js 真用到的那些）
@@ -180,8 +182,8 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 chrome.runtime.sendMessage({ type: "bca-refresh-video-stats", data: { targets, limit: STATUS_BATCH_LIMIT } })
 ```
 
-- **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频数据」（`library.html:136` 的 `#updateSelected`），`library.js:5339` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:957` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
-- **上限**：`library.js:2086` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
+- **批量入口保留着，而且必须保留**：勾选若干条后点批量工具栏的「更新视频数据」（`library.html:136` 的 `#updateSelected`），`library.js:5898` 绑的是 `openStatusConfirm(selectedRecords(), "batch")` —— 取的是**当前选中项**，不是整库、也不是别处的全选快照。`test/stability.test.cjs:981` 守着这两点：必须用 `selectedRecords()`，且不许退回 `selectedVideos()`。详情面板那个按钮（互动数据下方的 `.refresh-status`）走的是同一个 `openStatusConfirm(_, "detail")`。
+- **上限**：`library.js:2576` 的 `const STATUS_BATCH_LIMIT = 80;`（4.4 那个 `statusBatchSize` 常量已经不存在了，别去找它）。超过 80 条时确认框会说「本次只处理前 80 条，完成后可以再点一次继续」，后台返回的 `remaining` 也照实显示。
 - **后台实现**（`refreshVideoStatus` / `refreshOneArchiveStatus`）没有变。风控的顾虑不是靠「不做批量」解决的，而是靠**确认框 + 80 条上限 + 串行间隔**（`IMPORT_DETAIL_CONCURRENCY` / `IMPORT_DETAIL_DELAY_MS`）。**不要再把无确认的单条刷新加回来。**
 - 上面几处行号是 V1.9.7 时的快照，**函数名、常量名、id 才是稳定的锚点**，行号对不上时按名字搜。
 ### CSS 覆盖顺序（4.8.3 的教训）
@@ -280,8 +282,8 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 回收站、归档体检与导入断点（1.8.23）
 
-- **删除一律先挪进 `005回收站`**：`recycleCollection()` / `recycleRecords()` 把收藏夹或记录目录整体移到 `005回收站/<YYYYMMDD-HHMMSS>/<收藏夹>[/<目录>]`，同秒撞名追加 `-2`、`-3`。优先用 `DirectoryHandle.move()`；本机不支持时退化成「复制整棵树 → `directoryFingerprint()` 逐文件比 `名字:字节数` → 一致才删源」，不一致抛「复制到回收站后校验不一致，源目录没有删除。」并把源目录留在原地。`pruneRecycler()` 只删名字是 `recycleStamp()` 时间戳、且年龄 ≥ `RECYCLE_KEEP_DAYS = 30` 天的目录，每次扫描结束后 fire-and-forget 跑一次；`purgeRecycler()` 是工具栏「清空回收站」的实现。**任何删除路径都不要再直接 `removeEntry(..., { recursive: true })` 用户的记录目录**——新增删除动作必须走这两个函数，测试会盯着。
-- **`005回收站` / `006报告` 是保留目录**：与 `000视频下载`…`004导出` 同一套名单（`archive-core.js` 的 `RESERVED_COLLECTION_NAMES`、`background.js` 的同名 Set、`library.js` 的扫描跳过 / 新建收藏夹拦截 / `ARCHIVE_RESERVED_DIRS`，共 9 个名字）。扫描不把它们当收藏夹，用户也不能新建同名收藏夹。
+- **删除默认先挪进 `005回收站`**：`recycleCollection()` / `recycleRecords()` 把收藏夹或记录目录整体移到 `005回收站/<YYYYMMDD-HHMMSS>/<收藏夹>[/<目录>]`，同秒撞名追加 `-2`、`-3`。优先用 `DirectoryHandle.move()`；本机不支持时退化成「复制整棵树 → `directoryFingerprint()` 逐文件比 `名字:字节数` → 一致才删源」，不一致抛「复制到回收站后校验不一致，源目录没有删除。」并把源目录留在原地。`pruneRecycler()` 只删名字是 `recycleStamp()` 时间戳、且年龄 ≥ `RECYCLE_KEEP_DAYS = 30` 天的目录，每次扫描结束后 fire-and-forget 跑一次；`purgeRecycler()` 是工具栏「清空回收站」的实现。**默认不许直接 `removeEntry(..., { recursive: true })` 用户的记录目录**；唯一的例外是用户在确认框里勾选「直接删除，不进回收站」（1.17.4 / 1.17.5 的产品决定，走 `deleteCollectionPermanently()` / `deleteRecordsPermanently()`，默认不勾），那条路径**不许当 bug 修掉、也不许改成默认勾选**。
+- **`005回收站` / `006报告` 是保留目录**：与 `000视频下载`…`004导出` 同一套名单（`archive-core.js` 的 `RESERVED_COLLECTION_NAMES`、`background.js` 的同名 Set、`library.js` 的扫描跳过 / 新建收藏夹拦截（`BcaArchiveTools.RESERVED_DIRS`），共 9 个名字）。扫描不把它们当收藏夹，用户也不能新建同名收藏夹。
 - **归档体检只读**：`writeHealthReport()` 复用 `scanRoot(rootHandle, true)` 的 `diagnostics`（`missingText` / `missingCover` / `brokenText` / `tempFiles`，由 `readArchiveRecord()` 在一次遍历里顺手收集，不额外读盘），写成 `006报告/体检-<YYYYMMDD-HHMMSS>.md`。报告只描述现状、不修任何东西；每类最多列 `HEALTH_REPORT_LIST_LIMIT = 20` 条，多出来的折成「…还有 N 条」。
 - **storage 写入兜底只覆盖关键路径**：`safeLocalSet(patch, label)` 失败等 `STORAGE_WRITE_RETRY_MS = 200` 毫秒重试一次，仍失败写一条 `console.warn` + `lastStorageError`（`{ label, message, at }`）并返回 `false`——**它不抛错**，调用方必须看返回值；`setBcaStatsSnapshot()` 是统计快照专用包装，内部保留 `chrome.storage.local.set({ bcaStats: stats })` 字面量（`stability:5627` 钉着），最终失败才抛。弹窗读 `lastStorageError` 展示「本地存储没写进去」，点「知道了」把键删掉。
 - **导入断了就是失败，没有「继续」**（1.16.10，用户要求）：删掉「继续上次导入」之后，中断只做三件事 —— 复位状态、把「上次导入可能因为杀后台、网络波动等原因没有完整导入，上次导入了 N 条，如果需要继续导入请到收藏夹页使用插件再导入一次。」写进 `importState`（弹窗与收藏库的「最近状态」都读它）、并落一份 `001错误报告`（同时挂到 `lastError` 上，弹窗能直接「下载错误报告」）。`bcaImportResume` 这个键只保留给清理旧版本留下的记录，不再写新断点。
@@ -290,7 +292,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 内容脚本词典、页面错误留档、卡片复用与 HISTORY 索引（1.8.23）
 
-- **内容脚本只拿自己用得到的词条**：`content-i18n-keys.js` 在 `i18n.js` 之前加载，把 `globalThis.__BCA_CONTENT_I18N_KEYS` 的 14 条键挂出来；`i18n.js` 的 `contentScriptKeys()` 只在这个全局存在时返回数组，`loadTable()` 把它塞进 `bca-locale` 消息；`background.js` 收到 `keys` 就只回这些键（限 200 条、`filtered: true`）。**白名单必须与 `content.js` 里 `BcaI18n.t("…")` 的字面量逐条一致**（`stability` 钉着）；新增一条界面文字时三处一起改：字面量、白名单、两本词典。
+- **内容脚本只拿自己用得到的词条**：`content-i18n-keys.js` 在 `i18n.js` 之前加载，把 `globalThis.__BCA_CONTENT_I18N_KEYS` 的 16 条键挂出来；`i18n.js` 的 `contentScriptKeys()` 只在这个全局存在时返回数组，`loadTable()` 把它塞进 `bca-locale` 消息；`background.js` 收到 `keys` 就只回这些键（限 200 条、`filtered: true`）。**白名单必须与 `content.js` 里 `BcaI18n.t("…")` 的字面量逐条一致**（`stability` 钉着）；新增一条界面文字时三处一起改：字面量、白名单、两本词典。
 - **扩展页的异常也进错误报告**：`client-errors.js` 认 `<html data-bca-page>`，装 `error` / `unhandledrejection`，`report()` 10 秒内同签名只发一次（`CLIENT_REPORT_INTERVAL_MS`），消息类型 `bca-client-error`。后台 `logClientError()` 在内存里按「页面 + message + 栈前两行」合并，`CLIENT_ERROR_MERGE_MS = 24h`、缓存上限 80 条；真正落档仍走 `logError()`，报告正文多一行「来源：页面（…）」。**去重表不持久**是刻意的（不往 storage 堆状态）。
 - **视频卡按 `video.id` 复用**：`renderVideos()` 先把当前页记录塞进 `pageVideoById`，再按 id 从 `videoGrid` 现有子节点里找卡片，找不到才 `createVideoCard()`，随后 `updateVideoCard(card, video, query)` 刷内容；顺序不同才逐位 `insertBefore`，多余子节点 `removeChild`。卡片的事件处理器只绑一次，**一律用 `pageVideoById.get(card.dataset.videoId)` 取当前记录**——闭包捕获旧 video 会让筛选后的点击落到上一条记录上。`paintPageCovers()` 仍按页统一读封面。
 - **HISTORY 版本索引**：`scripts/history-index.cjs` 在 `docs/HISTORY.md` 顶部维护「版本 → 行号」表；`--write` 重算、`--check` 验新鲜度，`scripts/check-all.cjs` 第 7 项调它。**行号按 `blockLineCount(rows) = rows + 6` 先占位再回填**，别按插入前的行号直接写。新增/删除版本小节后跑一次 `node scripts/history-index.cjs --write`。
@@ -302,7 +304,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **配置导出/导入搬进设置页**：`settings.html` 的「导入与导出」卡里有 `#settingsExportConfig` / `#settingsImportConfig` / `#settingsExportConfigSlim` / `#settingsExportArchive`；设置页读 `chrome.storage.local` 的 `libraryPageSize` / `libraryViewMode` / `collectionOrder` / `libraryFilters` 拼 payload，导入时写回同样四个键（主题走 `BcaTheme.use`、语言走 `BcaI18n.use`）。**收藏库不再有导出/导入按钮，别再往 `library.js` 里加回去。**
 - **筛选的持久化在收藏库**：`library.js` 的 `saveViewSettings()` 把搜索词、视频筛选、UP/标签筛选、排序写进 `libraryFilters`；`restoreViewSettings()` 启动时套回，`chrome.storage.onChanged` 里 `libraryFilters` 一变就 `applyLibraryFilters()` + `renderVideos()`。设置页导入「只导外观与档位」时没有 `filters` 字段，就不动用户已有的筛选。
 - **回收站页**：`recycle.html` 加载 `theme.css` / `page.css` / `library.css` / `recycle.css` + `archive-core.js` / `archive-tools.js` / `recycle.js`；卡片复用 `.video-grid` / `.video-card`，但 `cursor: default`、hover 不位移，**整卡只切换选择、不打开**。恢复、彻底删除、一键清空各自 `window.confirm`，其中彻底删除与清空写明「不可逆，不会进系统回收站」。`restoreRecycled()` 遇到目标收藏夹里同名目录会追加 `-2`/`-3`，**绝不覆盖**。
-- **转入回收站的动作不变**：收藏库的删除仍然先 `recycleCollection()` / `recycleRecords()`，`pruneRecycler()` 在扫描结束后 fire-and-forget；确认框文案是「先移进 005回收站，30 天后自动清理」，**不要再出现「不可恢复」「不进系统回收站」这类字样**（stability 盯着）。
+- **转入回收站的动作不变**：收藏库的删除仍然先 `recycleCollection()` / `recycleRecords()`，`pruneRecycler()` 在扫描结束后 fire-and-forget；确认框默认文案是「会先进 005回收站，30 天后自动清理」；勾上「直接删除，不进回收站」之后换成「删了找不回来」、按钮也变成「直接删除」（1.17.4 / 1.17.5）。**两套文案都要在，别只留一条**（stability 盯着）。
 - **「把老 PNG 封面转成 WebP」已整体移除（1.9.0）**：`archive-core.js` 的 `COVER_PNG_NAME` / `COVER_WEBP_NAME` / `COVER_WEBP_QUALITY` / `coverConvertAction()` 与 `library.js` 的 `convertLegacyPngCovers()` 都删了。归档里遗留的 `封面.png` 原样保留，读取侧照旧优先 `封面.webp`、退回 `封面.png`。
 
 ### 卡片封面槽跟记录走（1.9.1）
@@ -314,7 +316,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 一次覆盖 约 8800 行 JS 的只读审视确认了下面这些是**已知且暂不修**的限制。**不要把它们当 bug 去"顺手修掉"——每一条都有取舍理由。**
 
-- **`stability.test.cjs` 仍是文本级断言，不执行被测代码**（1.7.22 / 1.7.23 之后已经有四套真执行：`archive-core`、`stats-core`、`background`（vm 里跑 `background.js`，带内存版 `chrome.*` 与 FileSystem）、`pages`（最小 DOM 里跑三个页面脚本），见「常用验证」）。`stability.test.cjs` 的其余断言是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
+- **`stability.test.cjs` 仍是文本级断言，不执行被测代码**（1.7.22 / 1.7.23 之后已经有四套真执行：`archive-core`、`stats-core`、`background`（vm 里跑 `background.js`，带内存版 `chrome.*` 与 FileSystem）、`pages`（最小 DOM 里跑六个页面脚本，132 项），见「常用验证」）。`stability.test.cjs` 的其余断言是"把文件当文本读 + 正则匹配"。它**看不见语法错误**（4.8.2 真的漏过一次：`library.js` 有语法错误但 104 项全绿）。唯一能发现解析错误的是 "every shipped script actually parses" 那条（用 `vm.Script`）。**改完代码必须单独跑 `node --check`。**
 - **配置没有版本迁移**。`CONFIG_VERSION = 1`，导入配置时只校验结构不做迁移。将来升版本必须补。
 - **没有多标签页互斥**。两个标签页同时打开同一归档、同时做写操作（标记已下载 / 删除 / 移动）没有锁。日常使用很难触发，但理论上存在竞态。
 - **没有归档完整性校验与备份机制**。`视频信息.txt` 损坏就是永久丢失，插件没有校验和、没有导出元数据的功能。
@@ -390,7 +392,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **顶部横幅的跑马灯**由 `buildBannerMarquee()` 在显示横幅后构建、窗口 resize 时重建。它按容器宽度补足份数并保证前后两半等宽（位移 50% 才能无缝）。`library.css` 里有一条 `@media (prefers-reduced-motion: reduce)` 显式豁免——**不要删**：`theme.css` 的全局规则会把动画压成「跑一次就弹回原位」，而 `animation-fill-mode` 默认是 `none`，元素会退回无位移状态，跑马灯就完全不动了。
 - **工具栏的下拉框有固定宽度**（`.video-filter select` 132px、`.sort-select select` 124px）。工具栏是 `justify-content: flex-end` 右对齐的，**如果让 select 宽度跟着选中项文字变，整行都会左右窜**。
 - **颜色令牌新增 `--feature` / `--feature-soft` / `--feature-line`**（橘黄，用于突出「导入或更新」这类主入口）。浅色 `#a5560a`、深色 `#efa45a`，对比度 4.76 / 7.39。深色那两处仍然必须完全一致。
-- **使用须知现在是六条**（新增「不要移动插件文件夹位置」）。三个界面必须逐字一致，测试断言条数为 6。**1.6.4 起删掉了「本插件不是 B 站官方工具……账号风险请自行评估」那一条**（用户要求），两份词典里的对应词条同时删除。
+- **使用须知现在是五条**。两个界面（`library.html` / `popup.html`）必须逐字一致，测试断言条数为 5。**1.6.4 删掉「本插件不是 B 站官方工具……账号风险请自行评估」那一条；1.17.2 又把「1.3.0 起不再提供下载」与「放进收藏夹的文件仅限个人离线观看」两条合并成「本插件不含下载器、播放器功能，观看本地收藏视频的唯一途径是点击视频卡片跳转 B 站官网观看」**（用户要求），两份词典里的对应词条同时删除。
 
 ### 收藏库的性能与可访问性（4.6）
 
@@ -408,7 +410,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **`004导出` 只留最近 5 份（1.8.8）**：导出成功后按 `exportPruneList()` 删多余（同秒撞名的 `-2` 排在本体之后），删旧失败只记日志，不影响本次导出；用户自己放进去的文件不匹配命名规则，不会被删。
 
 - **位置重算才允许过渡**（1.8.12）：`syncPosition(animate)` 显式传参 —— 换尺寸档、窗口 resize 传 `true`，拖动与 `settle()` 传 `false`；`settle()` 自己先写 `transition = "none"`。
-- **遮罩下限 10%**（1.8.12）：`settings.html` 的滑杆与 `theme.js` 的 `sanitizeAppearance` 两处同时夹，老库里的 0 读取时抬上来。
+- **遮罩下限 10%**（1.8.12）：`settings.html` 的滑杆与 `theme.js` 的 `normalizeAppearance` 两处同时夹，老库里的 0 读取时抬上来。
 - **外观写盘节流 120ms**（1.8.12）：`settings.js` 的 `scheduleAppearanceWrite()` 合并 patch、`flushAppearanceWrite()` 落地，`change` 事件立刻 flush。
 - **未来时间戳夹到现在**（1.8.12）：`FUTURE_DAY_SLACK_MS` 一天容差，超出夹到 `now` 并计入 `futureDayCount`；`at <= 0` 丢弃。
 - **台词序号单独算**（1.8.13）：`BcaStatsCore.petLineIndex(totalTouch, offset)` 是唯一实现；后台在「封顶后合写」的窗口里记 `petDeferredTouches` 并用 offset 补下标，落地清零 —— 合写省掉的是写盘，不是用户看到的变化。
@@ -464,11 +466,11 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 
 ### 使用须知（4.4 新增）
 
-同一份**六条**安全声明必须同时出现在 `library.html`、`popup.html`，**逐字一致**（测试会逐条比对）。（1.3.0 前下载页也有第三份，随那张页面一起删除。）
+同一份**五条**安全声明必须同时出现在 `library.html`、`popup.html`，**逐字一致**（测试会逐条比对）。（1.3.0 前下载页也有第三份，随那张页面一起删除。）
 
 4.4.1 起：三处统一用 --warning-soft / --warning-line 黄色底、正文 --fs-md(15px)；收藏库默认展开、可折叠，但**不允许永久关闭**（dismissSafety 按钮与 safetyNoticeDismissed 写入都已删除，只保留一次性的旧标记清理）；弹窗里**置顶**（排在 brand-row 之前）且默认折叠，避免把 600px 高的弹窗撑开。**新增任何界面入口时，请一并带上这份声明，或明确说明为什么不需要；也不要把「不再提示」加回来。**
 
-4.5 起：**「请勿滥用……」一条必须排在最前面**（测试会断言第一条以「请勿滥用：」开头，且两个界面的**六条**文字完全一致）。条目上带 data-i18n；**1.3.0 起六条全是纯文本** —— 原来第 2 条带 DownKyi 链接、第 3 条讲下载文件不要外传，两条都换成了「1.3.0 起不再提供下载 / 放进收藏夹的文件仅限个人离线观看」，不再需要 data-i18n-html。
+4.5 起：**「请勿滥用……」一条必须排在最前面**（测试会断言第一条以「请勿滥用：」开头，且两个界面的**五条**文字完全一致）。条目上带 data-i18n；**1.3.0 起须知全是纯文本**（原来第 2 条带 DownKyi 链接、第 3 条讲下载文件不要外传）；**1.17.2 把那两条合并成「本插件不含下载器、播放器功能……」一条**，所以现在不需要 data-i18n-html。
 
 V1.2.3 起：**折叠的须知必须留个「口子」** —— 摘要行里固定带一句 `class="safety-hint"` 的「请勿滥用，请分批、低速使用」，风控提醒不能因为折叠就从界面上消失。V1.3.0 起只有两处：`library.html` 默认展开、`popup.html` 置顶且默认折叠。折叠一律用原生 `<details>`，**不要再引入「不再提示 / 记住已关闭」**。
 
@@ -486,7 +488,7 @@ V1.2.3 起：**折叠的须知必须留个「口子」** —— 摘要行里固�
 
 解析视频信息时依赖“【基本信息】”区块和“视频标题”等字段。不要轻易改变文件名或目录格式，否则旧档案可能不再被识别。列表中的收藏夹和视频信息是本地扫描的结果；线上 B 站收藏不会因移动/删除本地记录而改变。
 
-移动或复制操作先按目标收藏夹判断 BV/av 重复项，再复制归档文件。勾选原收藏夹表示保留原件（复制）；不勾选表示移动。删除收藏夹/视频/批量视频前会确认；**确认后的删除一律先挪进 `005回收站`（保留 30 天），不再直接递归删**（见「共享归档工具、设置页导入导出与回收站页」）；扫描提示条上的「清理这些没写完的目录」同样先送回收站。删进回收站的内容可以在设置页「查看回收站」里逐条恢复或彻底删除。用户可额外勾选同时删除关联下载，默认不删除下载。
+移动或复制操作先按目标收藏夹判断 BV/av 重复项，再复制归档文件。勾选原收藏夹表示保留原件（复制）；不勾选表示移动。删除收藏夹/视频/批量视频前会确认；**确认后的删除默认先挪进 `005回收站`（保留 30 天）**；用户在确认框里勾了「直接删除，不进回收站」的那一次走永久删除（见「共享归档工具、设置页导入导出与回收站页」）；扫描提示条上的「清理这些没写完的目录」同样先送回收站。删进回收站的内容可以在设置页「查看回收站」里逐条恢复或彻底删除。用户可额外勾选同时删除关联下载，默认不删除下载。
 
 **V1.2.1 起，这个对话框还会标出「这支视频在别的收藏夹里也有一份」**：`collectionsHoldingEveryVideo(videos)` 用 BV/av 标识键（`videoIdentifierKeys` / `identifiersOverlap`）在全库的 `collections` 里比对，命中的收藏夹加一枚灰色「已收录」徽标（和品牌色的「原收藏夹」徽标刻意分开）。**徽标只是说明，不参与搬运**：`moveVideoRecordToTargets` 只在 `video.collection` 不在目标里时才移走**那一个**副本，别处的副本它不碰 —— 所以「已收录」的收藏夹**故意不被默认勾选**。勾上不会产生任何效果，却会让用户以为「取消勾选 = 从那里删掉」，点了看着像干了什么其实什么都没干。要清理别处的副本，得先切到那个收藏夹再操作一次。没有 BV/av 号的档案（标识键为空）不参与比对：宁可漏标，不能标错。底部说明文字、`.collection-held-badge` 样式、这条规则都由测试盯着。
 
@@ -520,7 +522,7 @@ V1.2.3 起：**折叠的须知必须留个「口子」** —— 摘要行里固�
 
 ### Native Messaging 原生目录助手
 
-详情页通过 `chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", …)` 请求打开下载目录。`install-native-folder-opener.ps1` 会把工作脚本、编译出的宿主启动器、设置和 Chrome 原生消息清单安装到 `%LOCALAPPDATA%\BcaFolderOpener`，并写入 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.bcatch.folder_opener`。安装时可以交互输入，也支持参数 `-ExtensionId`、`-DownloadBasePath`、`-HostRoot`、`-SkipRegistry`（自检与自动化用它把产物写进沙箱目录）。
+详情页通过 `chrome.runtime.sendNativeMessage("com.bcatch.folder_opener", …)` 请求打开下载目录。`install-native-folder-opener.ps1` 会把工作脚本、编译出的宿主启动器、设置和 Chrome 原生消息清单安装到 `%LOCALAPPDATA%\BcaFolderOpener`，并按 8 个浏览器分别写注册键（Chrome、Edge、Brave、Vivaldi、Opera、Yandex、360、Chromium，见 `install-native-folder-opener.ps1`）。安装时可以交互输入，也支持参数 `-ExtensionId`、`-DownloadBasePath`、`-HostRoot`、`-SkipRegistry`（自检与自动化用它把产物写进沙箱目录）。
 
 **两个必须记住的硬约束（3.7 的失效就是它们造成的）：**
 
@@ -606,11 +608,12 @@ UP主主页：https://space.bilibili.com/……
 | `bca-check-update` | `settings.js` → `background.js` | 读仓库根的 `version.json`（**只有点「检查更新」时才发**） |
 | `bca-badge-clear` | `popup.js` → `background.js` | 清掉工具栏徽标 |
 | `bca-client-error` | 扩展页 `client-errors.js` → `background.js` | 页面侧异常进错误报告（1.7.31） |
+| `bca-pet-touch` | `pet.js` → `background.js` | 宠物触摸计数落盘（发送端用常量 `TOUCH_MESSAGE`，所以下面那条正则守卫匹配不到它） |
 
 `bca-download-parse` / `bca-download-playurl` / `bca-download-subtitles` 三条消息 1.3.0 已随下载功能删除。
 
 后台还保留 `record-favorite-error` 消息处理器，但当前项目内没有找到活跃发送端。若要清理它，先确认外部/旧版页面没有依赖。
-这张表由 `stability` 的守卫核对：源码里出现的每个 `chrome.runtime.sendMessage({ type: "bca-…" })` 都必须能在上面找到一行，加消息时两边一起改。
+这张表由 `stability` 的守卫核对：源码里出现的每个 `chrome.runtime.sendMessage({ type: "bca-…" })` 都必须能在上面找到一行，加消息时两边一起改。**注意守卫只认字面量**：像 `bca-pet-touch` 那样用常量发的消息，正则看不见，得人肉记住表里要有它。
 
 
 异步消息处理器需保持 `sendResponse` 和 `return true` 的配对。修改 API 时不要把 Cookie、CSRF 或用户授权数据写入日志/错误报告。
