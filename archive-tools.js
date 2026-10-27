@@ -402,6 +402,26 @@
     return collectionName;
   }
 
+  /* 1.17.5（用户要求）：单条记录也能「直接删除」—— 和整个收藏夹一样，一次 removeEntry。
+     删不掉的（缺目录 / 权限没了）逐条收集，调用方按失败报出来，不许静默跳过。 */
+  async function deleteRecordsPermanently(root, items) {
+    const removed = [];
+    const failures = [];
+    for (const item of items) {
+      const label = `${item.collection}/${item.directory}`;
+      try {
+        const collectionHandle = await root.getDirectoryHandle(item.collection, { create: false });
+        await collectionHandle.removeEntry(item.directory, { recursive: true });
+        removed.push(label);
+      } catch (error) {
+        // 目录本来就不在了 = 已经删干净了，按成功算
+        if (BcaArchiveCore.isMissingError(error)) removed.push(label);
+        else failures.push(`${label}：${error?.message || "删除失败"}`);
+      }
+    }
+    return { removed, failures };
+  }
+
   async function pruneRecycler(root) {
     let bucket;
     try {
@@ -782,6 +802,7 @@
     recycleCollection,
     recycleRecords,
     deleteCollectionPermanently,
+    deleteRecordsPermanently,
     pruneRecycler,
     purgeRecycler,
     listRecycled,

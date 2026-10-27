@@ -5477,7 +5477,7 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   assert.match(backgroundCode, /if \(error\?\.name !== "NotFoundError" && error\?\.name !== "TypeMismatchError"\) throw error;/);
 
   // P1-7：确认框里固定写一句"删掉不可恢复"
-  assert.match(libraryHtml, /class="confirm-warning" data-i18n="删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。"/);
+  assert.match(libraryHtml, /class="confirm-warning" data-i18n="删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能从设置里的「回收站」恢复。"/);
 
   // P1-8：风控码补全；恢复扫描撞风控要整轮停，不能继续加压
   assert.match(backgroundCode, /const IMPORT_RATE_LIMIT_CODES = new Set\(\[-412, -352, -509, -799\]\);/);
@@ -7563,6 +7563,10 @@ test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", (
     "批量 / 单条 / 清理未完成三条路都要走回收站");
   assert.match(body, /recycleCollection\(rootHandle, action\.collection\.name\)/, "整个收藏夹删除也要先进回收站");
   assert.match(body, /deleteCollectionPermanently\(rootHandle, action\.collection\.name\)/, "勾了「直接删除」就走另一条路");
+  // 1.17.5（用户要求）：单条与批量也能直接删除；口径统一成「删除」，回收站只出现在提示里
+  assert.match(tools, /async function deleteRecordsPermanently\(root, items\) \{/, "直接删单条/批量的实现只能有一份");
+  assert.match(body, /deleteRecordsPermanently\(rootHandle, \[/, "单条与批量都要能走「不进回收站」那条路");
+  assert.match(html, /这段时间里还能从设置里的「回收站」恢复。/, "提示里要告诉用户去哪儿恢复");
   assert.match(body, /已直接删除（没进回收站）/, "直接删掉也要说清楚没进回收站");
   assert.match(body, /recycledSuffix\(recycledPaths\)/, "删除结果要告诉用户去哪捞回来");
   // 界面出口：清空回收站搬到设置/回收站页，删除确认不再说「不可恢复」
@@ -7570,7 +7574,7 @@ test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", (
   assert.match(recycleHtml, /data-i18n="清空回收站"/);
   assert.match(recycleHtml, /data-i18n="恢复所选"/);
   assert.match(recycleHtml, /data-i18n="彻底删除所选"/);
-  assert.match(html, /删除本地归档（先移进回收站）？/);
+  assert.match(html, /删除本地归档？/, "单条删除的标题只叫「删除」，回收站只出现在提示里");
   // 1.17.4（用户要求）：多了一条「直接删除（不进回收站）」。它是选项，不是默认口径，
   // 所以这里盯的是「开关在、且默认没勾」，而不是禁止出现这四个字。
   assert.match(html, /<input id="deleteSkipRecycle" type="checkbox">/, "收藏夹可以直接删除，这个开关不能少");

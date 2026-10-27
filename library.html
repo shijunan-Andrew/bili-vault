@@ -336,16 +336,16 @@
   <div id="confirmBackdrop" class="confirm-backdrop" hidden>
     <section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="confirm-icon" data-icon="alert"></div>
-      <h2 id="confirmTitle">删除本地归档（先移进回收站）？</h2>
+      <h2 id="confirmTitle">删除本地归档？</h2>
       <p id="confirmMessage"></p>
-      <p id="confirmWarning" class="confirm-warning" data-i18n="删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。">删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。</p>
+      <p id="confirmWarning" class="confirm-warning" data-i18n="删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能从设置里的「回收站」恢复。">删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能从设置里的「回收站」恢复。</p>
       <label id="deleteDownloadsOption" class="delete-downloads-option" hidden><input id="deleteAssociatedDownloads" type="checkbox"><span data-i18n="同时删除关联的本地下载文件">同时删除关联的本地下载文件</span></label>
       <label id="deleteUnknownOption" class="delete-downloads-option" hidden><input id="acknowledgeUnknownDelete" type="checkbox"><span data-i18n="我知道目录里另有不是本插件写入的文件，也会一起删掉">我知道目录里另有不是本插件写入的文件，也会一起删掉</span></label>
       <label id="deleteSkipRecycleOption" class="delete-downloads-option" hidden><input id="deleteSkipRecycle" type="checkbox"><span data-i18n="直接删除，不进回收站（删掉就找不回来）">直接删除，不进回收站（删掉就找不回来）</span></label>
       <p id="deleteProgress" class="dialog-progress" role="status" hidden></p>
       <div class="confirm-actions">
         <button id="cancelDelete" class="button button-quiet" type="button" data-i18n="取消">取消</button>
-        <button id="confirmDelete" class="button button-danger" type="button">移到回收站</button>
+        <button id="confirmDelete" class="button button-danger" type="button">删除</button>
       </div>
     </section>
   </div>

@@ -1579,7 +1579,7 @@ function stampText(date = new Date()) {
 function recycledSuffix(paths) {
   if (!paths.length) return "";
   const label = paths.length === 1 ? paths[0] : `${RECYCLE_DIR_NAME}（${paths.length} 项）`;
-  return BcaI18n.t("已移到 {path}（{days} 天后自动清理），这段时间里还能自己捞回来。", { path: label, days: RECYCLE_KEEP_DAYS });
+  return BcaI18n.t("已移到 {path}（{days} 天后自动清理），这段时间里还能从设置里的「回收站」恢复。", { path: label, days: RECYCLE_KEEP_DAYS });
 }
 
 function allVideos() { return collections.flatMap((collection) => collection.videos); }
@@ -2199,6 +2199,11 @@ function renderVideos() {
     filterTotal,
     pageVideos.map((video) => `${video.id}:${video.title}:${video.downloaded ? 1 : 0}:${video.isInvalid ? 1 : 0}`).join("|"),
     collections.map((item) => `${item.name}:${item.videos.length}`).join("|"),
+    /* 1.17.5（用户反馈）：退出批量管理会把 selectedVideoIds 清空，但网格内容没变时
+       上面这段签名一模一样 → renderVideos 直接命中缓存不重画，勾选就留在屏幕上，
+       再进批量管理还带着上一轮的勾。选中状态必须算进签名。 */
+    selectionMode ? 1 : 0,
+    pageVideos.filter((video) => selectedVideoIds.has(video.id)).map((video) => video.id).join(","),
   ].join("\u0000");
   if (
     renderSignature === lastVideoRenderSignature &&
@@ -3714,14 +3719,15 @@ function openConfirmBackdrop() {
 
 function askToDeleteVideo(video) {
   pendingDeleteAction = { type: "video", video };
-  confirmTitle.textContent = BcaI18n.t("删除本地归档（先移进回收站）？");
+  confirmTitle.textContent = BcaI18n.t("删除本地归档？");
   confirmMessage.textContent = BcaI18n.t("将删除视频目录“{path}”（含封面与视频信息）。此操作不会更改 B 站账户中的收藏。", { path: `${video.collection}/${video.directory}` });
-  confirmDeleteButton.textContent = BcaI18n.t("移到回收站");
+  confirmDeleteButton.textContent = BcaI18n.t("删除");
   deleteDownloadsOption.hidden = !video.hasDownloadFiles;
   deleteAssociatedDownloads.checked = false;
   deleteUnknownOption.hidden = true;
   acknowledgeUnknownDelete.checked = false;
-  deleteSkipRecycleOption.hidden = true;
+  /* 1.17.5（用户要求）：单条与批量删除也开放「直接删除」，默认不勾。 */
+  deleteSkipRecycleOption.hidden = false;
   deleteSkipRecycle.checked = false;
   confirmDeleteButton.disabled = false;
   openConfirmBackdrop();
@@ -3781,7 +3787,8 @@ function askToDeleteBatch(videos) {
   deleteAssociatedDownloads.checked = false;
   deleteUnknownOption.hidden = true;
   acknowledgeUnknownDelete.checked = false;
-  deleteSkipRecycleOption.hidden = true;
+  /* 1.17.5（用户要求）：批量删除也开放「直接删除」，默认不勾。 */
+  deleteSkipRecycleOption.hidden = false;
   deleteSkipRecycle.checked = false;
   confirmDeleteButton.disabled = false;
   openConfirmBackdrop();
@@ -3823,11 +3830,11 @@ function closeDeleteConfirmation() {
   acknowledgeUnknownDelete.checked = false;
   deleteSkipRecycleOption.hidden = true;
   deleteSkipRecycle.checked = false;
-  confirmWarning.textContent = BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。");
+  confirmWarning.textContent = BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能从设置里的「回收站」恢复。");
   confirmDeleteButton.disabled = false;
   pendingDeleteAction = null;
-  confirmTitle.textContent = BcaI18n.t("删除本地归档（先移进回收站）？");
-  confirmDeleteButton.textContent = BcaI18n.t("移到回收站");
+  confirmTitle.textContent = BcaI18n.t("删除本地归档？");
+  confirmDeleteButton.textContent = deleteButtonLabel(null);
 }
 
 /* 1.7.10（facet-destructive P2-1）：目标里已经有同名文件时**不许静默覆盖**。
@@ -4546,6 +4553,16 @@ async function confirmCollectionAction() {
   }
 }
 
+/* 1.17.5（用户要求）：删除口径统一 —— 四个入口的按钮都叫「删除××」，
+   「移进回收站」只留在提示语里。按钮名只在这里算一次。 */
+function deleteButtonLabel(action) {
+  if (!action) return BcaI18n.t("删除");
+  if (action.type === "collection") return BcaI18n.t("删除收藏夹");
+  if (action.type === "batch") return BcaI18n.t("删除 {count} 个视频", { count: action.videos.length });
+  if (action.type === "unfinished") return BcaI18n.t("清理 {count} 个目录", { count: action.records.length });
+  return BcaI18n.t("删除");
+}
+
 // “；N 个下载目录未能删除”这半句在几个 toast 里都出现，抽出来保证词条只有一条
 function downloadCleanupSuffix(count) {
   return count ? BcaI18n.t("；{count} 个下载目录未能删除", { count }) : "";
@@ -4564,7 +4581,9 @@ async function confirmPendingDelete() {
      一次说清两件事。 */
   if (deleteProgress) {
     deleteProgress.hidden = false;
-    deleteProgress.textContent = BcaI18n.t("正在准备删除…（这一步不能中途取消，以免删到一半）");
+    deleteProgress.textContent = deleteSkipRecycle.checked
+      ? BcaI18n.t("正在准备直接删除…（不进回收站，删了找不回来）")
+      : BcaI18n.t("正在准备删除…（这一步不能中途取消，以免删到一半）");
   }
   try {
     const permissionRequest = rootHandle.requestPermission({ mode: "readwrite" });
@@ -4615,10 +4634,18 @@ async function confirmPendingDelete() {
       let deleted = 0;
       const failures = [];
       for (const video of action.videos) {
-        if (deleteProgress) deleteProgress.textContent = BcaI18n.t("正在删除 {done}/{total}：{name}（不能中途取消，以免删到一半）", { done: deleted + failures.length + 1, total: action.videos.length, name: video.title });
+        if (deleteProgress) deleteProgress.textContent = deleteSkipRecycle.checked
+          ? BcaI18n.t("正在直接删除 {done}/{total}：{name}（不进回收站，删了找不回来）", { done: deleted + failures.length + 1, total: action.videos.length, name: video.title })
+          : BcaI18n.t("正在删除 {done}/{total}：{name}（不能中途取消，以免删到一半）", { done: deleted + failures.length + 1, total: action.videos.length, name: video.title });
         try {
-          const recycled = await recycleRecords(rootHandle, [{ collection: video.collection, directory: video.directory }]);
-          recycledPaths.push(...recycled.moved.map((item) => item.path));
+          if (deleteSkipRecycle.checked) {
+            const purged = await deleteRecordsPermanently(rootHandle, [{ collection: video.collection, directory: video.directory }]);
+            if (purged.failures.length) throw new Error(purged.failures[0]);
+            permanentlyDeleted = (permanentlyDeleted || 0) + 1;
+          } else {
+            const recycled = await recycleRecords(rootHandle, [{ collection: video.collection, directory: video.directory }]);
+            recycledPaths.push(...recycled.moved.map((item) => item.path));
+          }
           if (deleteDownloads && downloadParent) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
           selectedVideoIds.delete(video.id);
           deleted += 1;
@@ -4651,8 +4678,14 @@ async function confirmPendingDelete() {
       batchResult = { deleted: removed.length, failures, skipped };
     } else {
       const video = action.video;
-      const recycled = await recycleRecords(rootHandle, [{ collection: video.collection, directory: video.directory }]);
-      recycledPaths.push(...recycled.moved.map((item) => item.path));
+      if (deleteSkipRecycle.checked) {
+        const purged = await deleteRecordsPermanently(rootHandle, [{ collection: video.collection, directory: video.directory }]);
+        if (purged.failures.length) throw new Error(purged.failures[0]);
+        permanentlyDeleted = 1;
+      } else {
+        const recycled = await recycleRecords(rootHandle, [{ collection: video.collection, directory: video.directory }]);
+        recycledPaths.push(...recycled.moved.map((item) => item.path));
+      }
       if (deleteDownloads && downloadParent) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
     }
     deleteInProgress = false;
@@ -4663,7 +4696,7 @@ async function confirmPendingDelete() {
        catch 接住，弹出来的却是「删除失败」，用户只会再点一次「删除」再吃一次同样的错。 */
     const refreshError = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
     if (action.type === "collection") {
-      showResultDialog(permanentlyDeleted ? BcaI18n.t("已直接删除（没进回收站）") : BcaI18n.t("已移进回收站：整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      showResultDialog(permanentlyDeleted ? BcaI18n.t("已直接删除（没进回收站）") : BcaI18n.t("已删除整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       // 1.7.0（批次 B / P1）：原来失败清单只把**第一条**塞进 3 秒就消失的 toast，
@@ -4671,10 +4704,10 @@ async function confirmPendingDelete() {
       // 现在只要有任何一条失败就改用结果弹窗逐条列出来；全成功才继续用 toast。
       const lines = [];
       if (batchResult.failures.length) {
-        lines.push(BcaI18n.t("已移进回收站 {deleted} 个，{failed} 个失败并保留选中。", { deleted: batchResult.deleted, failed: batchResult.failures.length }));
+        lines.push(BcaI18n.t("已删除 {deleted} 个，{failed} 个失败并保留选中。", { deleted: batchResult.deleted, failed: batchResult.failures.length }));
         lines.push(...batchResult.failures);
       } else {
-        lines.push(BcaI18n.t("已移进回收站 {count} 个本地视频", { count: batchResult.deleted }));
+        lines.push(BcaI18n.t("已删除 {count} 个本地视频", { count: batchResult.deleted }));
       }
       if (downloadCleanupFailures.length) {
         lines.push(BcaI18n.t("；{count} 个下载目录未能删除", { count: downloadCleanupFailures.length }));
@@ -4690,7 +4723,7 @@ async function confirmPendingDelete() {
       }
     } else if (action.type === "unfinished") {
       // 1.8.21（P2-6）：清理结果里必须把「跳过的」也说清楚，否则用户以为删干净了。
-      const lines = [BcaI18n.t("已把 {count} 个没写完的目录移进回收站", { count: batchResult.deleted })];
+      const lines = [BcaI18n.t("已删除 {count} 个没写完的目录", { count: batchResult.deleted })];
       if (batchResult.skipped.length) {
         lines.push(BcaI18n.t("跳过 {count} 个（现在已经有 视频信息.txt 了，可能刚补完导入）：{list}", {
           count: batchResult.skipped.length,
@@ -4706,7 +4739,11 @@ async function confirmPendingDelete() {
       if (batchResult.failures.length) showResultDialog(BcaI18n.t("清理没写完的目录"), lines.join("；") + suffix, "error");
       else showToast(lines.join("；") + suffix);
     } else {
-      showResultDialog(BcaI18n.t("已移进回收站"), [BcaI18n.t("本地归档已移进回收站。"), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      if (permanentlyDeleted) {
+        showResultDialog(BcaI18n.t("已直接删除（没进回收站）"), [BcaI18n.t("本地归档已直接删除，找不回来了。"), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      } else {
+        showResultDialog(BcaI18n.t("已删除"), [BcaI18n.t("本地归档已删除。"), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      }
     }
   } catch (error) {
     showResultDialog(BcaI18n.t("删除失败"), error?.message || BcaI18n.t("本地文件操作失败。"), "error");
@@ -4719,8 +4756,8 @@ async function confirmPendingDelete() {
       deleteProgress.textContent = "";
     }
     confirmDeleteButton.disabled = false;
-    confirmWarning.textContent = BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。");
-    confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : action.type === "unfinished" ? BcaI18n.t("清理 {count} 个目录", { count: action.records.length }) : BcaI18n.t("移到回收站");
+    confirmWarning.textContent = BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能从设置里的「回收站」恢复。");
+    confirmDeleteButton.textContent = deleteButtonLabel(action);
   }
 }
 
@@ -6062,8 +6099,8 @@ deleteSkipRecycle.addEventListener("change", () => {
   const direct = deleteSkipRecycle.checked;
   confirmWarning.textContent = direct
     ? BcaI18n.t("这次不走回收站：文件会被直接删掉，删了找不回来。")
-    : BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。");
-  confirmDeleteButton.textContent = direct ? BcaI18n.t("直接删除") : BcaI18n.t("删除收藏夹");
+    : BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能从设置里的「回收站」恢复。");
+  confirmDeleteButton.textContent = direct ? BcaI18n.t("直接删除") : deleteButtonLabel(pendingDeleteAction);
 });
 confirmDeleteButton.addEventListener("click", confirmPendingDelete);
 cancelCreateCollectionButton.addEventListener("click", () => collectionDialog.close());

@@ -415,7 +415,7 @@ async function suiteLibrary() {
 
     assert.equal(doc.getElementById("confirmBackdrop").hidden, false, "对话框要打开");
     // 1.8.23（TODO P0-1）：删除改成了「先移进 005回收站」，标题口径跟着换
-    assert.equal(textOf(doc.getElementById("confirmTitle")), "删除本地归档（先移进回收站）？");
+    assert.equal(textOf(doc.getElementById("confirmTitle")), "删除本地归档？");
     assert.match(textOf(doc.getElementById("confirmMessage")), /将删除视频目录“/);
     assert.equal(textOf(doc.getElementById("confirmDelete")).length > 0, true);
 
@@ -2400,7 +2400,7 @@ async function suiteRecycle() {
     assert.equal(doc.getElementById("recyclePurge").disabled, false, "有东西时清空按钮要可用");
   });
 
-  await test("「清空回收站」和日常操作隔着一段放：不许再挨着「彻底删除所选」（1.10.9）", async () => {
+  await test("「清空回收站」挪到顶部操作行，紧跟在「彻底删除所选」右边（1.17.5 用户要求）", async () => {
     const page = await openRecycle();
     const { tools } = makeRecycleTools({ entries: [recycleEntry("2026年05月10日01时19分50秒")] });
     page.window.BcaArchiveTools = tools;
@@ -2410,14 +2410,13 @@ async function suiteRecycle() {
     const doc = page.document;
     const purge = doc.getElementById("recyclePurge");
     const actions = doc.querySelector(".recycle-actions");
-    const zone = doc.querySelector(".recycle-danger-zone");
-    assert.ok(actions && zone, "顶部操作行与底部危险区都要在");
-    assert.equal(actions.contains(purge), false, "清空回收站不许留在顶部操作行里");
-    assert.equal(zone.contains(purge), true, "清空回收站要待在底部危险区");
+    assert.ok(actions, "顶部操作行要在");
+    assert.equal(actions.contains(purge), true, "清空回收站要挪到顶部操作行");
+    assert.equal(doc.querySelector(".recycle-danger-zone"), null, "底部危险区整块撤掉");
+    const order = [...actions.children].map((node) => node.id);
+    assert.equal(order.indexOf("recyclePurge"), order.indexOf("recycleDeleteSelected") + 1,
+      "清空回收站要跟在「彻底删除所选」后面");
     assert.equal(purge.disabled, false, "有内容时清空按钮可用");
-    // 恢复与彻底删除是「选中的这几条」，留在顶部；只有「全清」下沉
-    assert.equal(zone.contains(doc.getElementById("recycleDeleteSelected")), false, "彻底删除所选仍留在顶部");
-    assert.equal(zone.contains(doc.getElementById("recycleRestore")), false, "恢复所选仍留在顶部");
   });
 
   await test("回收站全选按钮在「全选 / 取消全选」之间切，恢复与删除的可用状态跟着选中数走（1.10.0 真执行）", async () => {
@@ -2997,6 +2996,125 @@ async function suiteRecycleTools() {
     assert.deepEqual((await root.getDirectoryHandle("别的收藏")).__dump(), kept, "彻底删除不该动到别的收藏夹");
   });
 
+  await test("删单个视频时，确认框里也有「直接删除」，默认不勾（1.17.5 用户要求）", async () => {
+    const root = await freshRoot({
+      我的收藏: {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("第一条视频"), "封面.png": "PNG-1" },
+        "2026年10月10日02时20分00秒": { "视频信息.txt": INFO("第二条视频"), "封面.png": "PNG-2" }
+      }
+    });
+    const page = await openLibrary();
+    await page.window.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const doc = page.document;
+
+    doc.querySelectorAll("#videoGrid .video-card")[0].click();
+    await settle(6);
+    doc.querySelector(".delete-local").click();
+    await settle(4);
+
+    const option = doc.getElementById("deleteSkipRecycleOption");
+    const checkbox = doc.getElementById("deleteSkipRecycle");
+    assert.equal(option.hidden, false, "删单个视频也要能选「直接删除」");
+    assert.equal(checkbox.checked, false, "默认不许勾上");
+    assert.equal(textOf(doc.getElementById("confirmTitle")), "删除本地归档？",
+      "口径统一成「删除」，回收站只在提示里出现");
+    assert.equal(textOf(doc.getElementById("confirmDelete")), "删除");
+
+    const warning = doc.getElementById("confirmWarning");
+    assert.match(textOf(warning), /还能从设置里的「回收站」恢复/, "提示要指路到设置里的回收站");
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    assert.equal(textOf(doc.getElementById("confirmDelete")), "直接删除", "勾上之后按钮要改名");
+
+    doc.getElementById("cancelDelete").click();
+    await settle(4);
+    assert.equal(doc.getElementById("confirmBackdrop").hidden, true, "取消后要关掉");
+    assert.equal(option.hidden, true, "关掉确认框要把开关收起来");
+  });
+  await test("批量删除时，确认框里同样有「直接删除」，默认不勾（1.17.5 用户要求）", async () => {
+    const root = await freshRoot({
+      我的收藏: {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("第一条视频"), "封面.png": "PNG-1" },
+        "2026年10月10日02时20分00秒": { "视频信息.txt": INFO("第二条视频"), "封面.png": "PNG-2" }
+      }
+    });
+    const page = await openLibrary();
+    await page.window.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const doc = page.document;
+
+    doc.getElementById("batchManage").click();
+    await settle(4);
+    for (const card of doc.querySelectorAll("#videoGrid .video-card")) {
+      card.click();
+      await settle(2);
+    }
+    assert.equal(doc.querySelectorAll("#videoGrid .video-card.selected").length, 2, "两张卡都要选中");
+
+    doc.getElementById("deleteSelected").click();
+    await settle(4);
+    const option = doc.getElementById("deleteSkipRecycleOption");
+    const checkbox = doc.getElementById("deleteSkipRecycle");
+    assert.equal(option.hidden, false, "批量删除也要能选「直接删除」");
+    assert.equal(checkbox.checked, false, "默认不许勾上");
+    assert.equal(textOf(doc.getElementById("confirmDelete")),
+      BcaT(page, "删除 {count} 个视频", { count: 2 }), "按钮名照旧是「删除 N 个视频」");
+
+    doc.getElementById("cancelDelete").click();
+    await settle(4);
+    assert.equal(option.hidden, true, "关掉确认框要把开关收起来");
+  });
+  await test("退出批量管理就把勾选清空，再进来不会带着上一轮的勾（1.17.5 用户要求）", async () => {
+    const root = await freshRoot({
+      我的收藏: {
+        "2026年10月09日01时19分50秒": { "视频信息.txt": INFO("第一条视频"), "封面.png": "PNG-1" },
+        "2026年10月10日02时20分00秒": { "视频信息.txt": INFO("第二条视频"), "封面.png": "PNG-2" }
+      }
+    });
+    const page = await openLibrary();
+    await page.window.displayRoot(root, "*", BcaT(page, "已读取"));
+    await settle();
+    const doc = page.document;
+
+    doc.getElementById("batchManage").click();
+    await settle(4);
+    doc.querySelectorAll("#videoGrid .video-card")[0].click();
+    await settle(3);
+    assert.equal(doc.querySelectorAll("#videoGrid .video-card.selected").length, 1, "先选中一条");
+
+    doc.getElementById("exitBatch").click();
+    await settle(4);
+    assert.equal(doc.querySelectorAll("#videoGrid .video-card.selected").length, 0,
+      "退出批量管理就该把屏幕上的勾清掉");
+
+    doc.getElementById("batchManage").click();
+    await settle(4);
+    assert.equal(doc.querySelectorAll("#videoGrid .video-card.selected").length, 0,
+      "再进批量管理也不许带着上一轮的勾");
+  });
+
+  await test("直接删除若干条记录：选中的没了，没选的还在，也不建回收站（1.17.5 真执行）", async () => {
+    const root = await freshRoot({
+      我的收藏: {
+        [RECORD_NAME]: recordTree("甲"),
+        "2026年10月25日10时15分9秒": recordTree("乙"),
+        "2026年10月25日10时15分20秒": recordTree("丙")
+      }
+    });
+
+    const result = await tools.deleteRecordsPermanently(root, [
+      { collection: "我的收藏", directory: RECORD_NAME },
+      { collection: "我的收藏", directory: "2026年10月25日10时15分9秒" }
+    ]);
+
+    assert.deepEqual(result.removed, [`我的收藏/${RECORD_NAME}`, "我的收藏/2026年10月25日10时15分9秒"],
+      "两条都该删成功，返回的路径要对得上");
+    assert.deepEqual(result.failures, [], "这两条都不该算失败");
+    const left = await root.getDirectoryHandle("我的收藏");
+    assert.deepEqual(Object.keys(left.__dump()), ["2026年10月25日10时15分20秒"], "没选中的那条必须还在");
+    assert.equal(root.__has(tools.RECYCLE_DIR_NAME), false, "走「不进回收站」却建了回收站目录");
+  });
   await test("批量回收记录：每条都挪进同一个时间戳目录，进度按条回调，路径逐条对得上（1.13.4 真执行 · P1-1）", async () => {
     const root = await freshRoot({
       我的收藏: { [RECORD_NAME]: recordTree("甲"), "2026年10月25日10时15分9秒": recordTree("乙") },
