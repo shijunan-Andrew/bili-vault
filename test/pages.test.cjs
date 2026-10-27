@@ -2919,18 +2919,17 @@ async function suiteRecycleTools() {
     assert.equal((await source.getDirectoryHandle(RECORD_NAME)).__has("封面.jpg"), true);
   });
 
-  await test("搬目录时「复制后比字节」不一致必须报错，且绝不删源（1.13.4 真执行 · P1-1）", async () => {
-    let reads = 0;
-    const driftingFile = {
+  await test("搬目录时「复制后比字节」不一致必须报错，且绝不删源（1.13.4 真执行 · P1-1；1.17.4 起只核目标侧）", async () => {
+    // 1.17.4：复制时顺手记下源侧大小，校验只看目标侧。这里让「声明的大小」和
+    // 「真写下去的字节」对不上（真机上等于复制途中文被换掉），校验必须拦住。
+    const lyingFile = {
       kind: "file",
       name: "视频信息.txt",
       async getFile() {
-        reads += 1;
-        const size = reads === 1 ? 3 : 5;
-        return { name: "视频信息.txt", size, __bytes: new Uint8Array(size) };
+        return { name: "视频信息.txt", size: 9, __bytes: new Uint8Array(3) };
       }
     };
-    const sourceHandle = { kind: "directory", name: "我的收藏", async *values() { yield driftingFile; } };
+    const sourceHandle = { kind: "directory", name: "我的收藏", async *values() { yield lyingFile; } };
     const sourceParent = {
       async removeEntry() { throw new Error("校验不一致时竟然还去删源目录了"); }
     };
@@ -2940,6 +2939,62 @@ async function suiteRecycleTools() {
       () => tools.moveDirectoryInto(sourceHandle, sourceParent, "我的收藏", targetParent, "我的收藏"),
       /复制到回收站后校验不一致/
     );
+  });
+
+  await test("复制一棵 24 个文件的树：并发之后内容与字节仍然逐一对得上（1.17.4 真执行）", async () => {
+    const records = {};
+    for (let i = 0; i < 12; i += 1) {
+      records[`2026年10月${String(i + 1).padStart(2, "0")}日10时15分3秒`] = recordTree(`第${i}条`);
+    }
+    const root = await freshRoot({ 我的收藏: records });
+    const source = await root.getDirectoryHandle("我的收藏");
+    const targetRoot = await makeDirectoryTree({ _测试归档: { 目标: {} } }).getDirectoryHandle("_测试归档");
+    const target = await targetRoot.getDirectoryHandle("目标");
+
+    const rows = await tools.copyDirectoryTree(source, target);
+
+    assert.equal(rows.length, 24, "12 条记录 × 两个文件，清单少了");
+    assert.deepEqual(target.__dump(), records, "复制出来的字节跟源对不上");
+    assert.equal(await tools.verifyCopiedFiles(target, rows), true, "自己复制出来的东西却校验不过");
+  });
+
+  await test("确认框里的「直接删除」默认不勾，勾上会改提示与按钮名（1.17.4 用户要求）", async () => {
+    const page = await openLibrary();
+    const doc = page.document;
+    const option = doc.getElementById("deleteSkipRecycleOption");
+    const checkbox = doc.getElementById("deleteSkipRecycle");
+    assert.ok(option && checkbox, "确认框里缺「直接删除」这个开关");
+    assert.equal(option.hidden, true, "没打开确认框之前不该露出来");
+
+    await page.window.askToDeleteCollection({ name: "我的收藏", videos: [] });
+    assert.equal(option.hidden, false, "删除整个收藏夹时应该露出「直接删除」");
+    assert.equal(checkbox.checked, false, "「直接删除」默认不许勾上");
+    const warning = doc.getElementById("confirmWarning");
+    assert.match(warning.textContent, /005回收站/, "默认提示要说清先进回收站");
+
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+    assert.match(warning.textContent, /删了找不回来/, "勾上之后提示要改口");
+    assert.match(doc.getElementById("confirmDelete").textContent, /直接删除/, "按钮也要跟着改名");
+
+    page.window.closeDeleteConfirmation();
+    assert.equal(option.hidden, true, "关掉确认框要收起来");
+    assert.equal(checkbox.checked, false, "关掉确认框要复位");
+  });
+
+  await test("删除整个收藏夹可以不走回收站：一次删干净，回收站里一条都不建（1.17.4 用户要求）", async () => {
+    const root = await freshRoot({
+      我的收藏: { [RECORD_NAME]: recordTree("甲"), "2026年10月25日10时15分9秒": recordTree("乙") },
+      别的收藏: { "2026年10月25日10时16分0秒": recordTree("丙") }
+    });
+    const kept = (await root.getDirectoryHandle("别的收藏")).__dump();
+
+    const removed = await tools.deleteCollectionPermanently(root, "我的收藏");
+
+    assert.equal(removed, "我的收藏");
+    assert.equal(root.__has("我的收藏"), false, "彻底删除之后收藏夹还在");
+    assert.equal(root.__has(tools.RECYCLE_DIR_NAME), false, "走「不进回收站」却在磁盘上建了回收站目录");
+    assert.deepEqual((await root.getDirectoryHandle("别的收藏")).__dump(), kept, "彻底删除不该动到别的收藏夹");
   });
 
   await test("批量回收记录：每条都挪进同一个时间戳目录，进度按条回调，路径逐条对得上（1.13.4 真执行 · P1-1）", async () => {

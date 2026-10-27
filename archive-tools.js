@@ -63,28 +63,100 @@
     return true;
   }
 
-  async function copyFileHandle(source, targetDirectory) {
-    const file = await source.getFile();
-    const writable = await (await targetDirectory.getFileHandle(source.name, { create: true })).createWritable();
+  /* 1.17.4（审查：删一个几十条的收藏夹要十几秒）：Chrome 对用户选定的目录没有重命名 API，
+     「移进回收站」只能「复制 → 比字节 → 删源」。这条链原来逐文件串行，一条记录约 24 次
+     文件系统往返，几十条就是上千次；每次 8–10ms，十几秒全花在这里。
+     并发只包「一次往返」，不包递归 —— 包住递归会把 8 个槽位全占在父目录上，子目录排不上队。 */
+  const COPY_CONCURRENCY = 8;
+
+  function createConcurrencyLimiter(limit) {
+    let active = 0;
+    const queue = [];
+    const pump = () => {
+      while (active < limit && queue.length) {
+        const job = queue.shift();
+        active += 1;
+        job();
+      }
+    };
+    return function runLimited(task) {
+      return new Promise((resolve, reject) => {
+        queue.push(() => {
+          Promise.resolve()
+            .then(task)
+            .then(resolve, reject)
+            .finally(() => { active -= 1; pump(); });
+        });
+        pump();
+      });
+    };
+  }
+
+  async function writeFileLike(targetDirectory, name, file) {
+    const writable = await (await targetDirectory.getFileHandle(name, { create: true })).createWritable();
     await writable.write(file);
     await writable.close();
   }
 
-  async function copyDirectoryTree(source, target) {
-    for await (const entry of source.values()) {
-      if (entry.kind === "directory") await copyDirectoryTree(entry, await subdirectoryHandle(target, entry.name));
-      else await copyFileHandle(entry, target);
+  async function copyFileHandle(source, targetDirectory) {
+    const file = await source.getFile();
+    await writeFileLike(targetDirectory, source.name, file);
+  }
+
+  /* 1.17.4：复制走 8 路并发，并且顺手把「路径:大小」记下来 —— 校验时只看目标侧，
+     不用再回头把源目录整个读一遍（那等于把校验也串行走了第二遍）。 */
+  async function copyDirectoryTree(source, target, limitRun = null) {
+    const rows = [];
+    async function walk(from, to, prefix) {
+      const pending = [];
+      for await (const entry of from.values()) {
+        const label = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.kind === "directory") {
+          pending.push((async () => {
+            await walk(entry, await subdirectoryHandle(to, entry.name), label);
+          })());
+        } else {
+          const copyOne = async () => {
+            const file = await entry.getFile();
+            await writeFileLike(to, entry.name, file);
+            rows.push(`${label}:${file.size}`);
+          };
+          pending.push(limitRun ? limitRun(copyOne) : copyOne());
+        }
+      }
+      await Promise.all(pending);
     }
+    await walk(source, target, "");
+    return rows.sort();
+  }
+
+  async function walkFingerprint(directory, prefix, limitRun) {
+    const rows = [];
+    const pending = [];
+    for await (const entry of directory.values()) {
+      const label = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.kind === "directory") {
+        pending.push(walkFingerprint(entry, label, limitRun).then((child) => { rows.push(...child); }));
+      } else {
+        const readOne = async () => { rows.push(`${label}:${(await entry.getFile()).size}`); };
+        pending.push(limitRun ? limitRun(readOne) : readOne());
+      }
+    }
+    await Promise.all(pending);
+    return rows;
   }
 
   async function directoryFingerprint(directory, prefix = "") {
-    const rows = [];
-    for await (const entry of directory.values()) {
-      const label = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.kind === "directory") rows.push(...await directoryFingerprint(entry, label));
-      else rows.push(`${label}:${(await entry.getFile()).size}`);
-    }
-    return rows.sort();
+    return (await walkFingerprint(directory, prefix, null)).sort();
+  }
+
+  /* 只核目标侧：源侧大小在复制时已经记进 rows 了。任何一项对不上就返回 false，
+     由调用方决定「保留源目录、报错」。 */
+  async function verifyCopiedFiles(target, rows, limitRun = null) {
+    const actual = (await walkFingerprint(target, "", limitRun)).sort();
+    const expected = rows.slice().sort();
+    if (actual.length !== expected.length) return false;
+    return actual.join("|") === expected.join("|");
   }
 
   /* 挪目录：优先 handle.move()（一次换名、零复制）；本机不支持时退回
@@ -99,10 +171,9 @@
       }
     }
     const target = await subdirectoryHandle(targetParent, targetName);
-    await copyDirectoryTree(sourceHandle, target);
-    const before = await directoryFingerprint(sourceHandle);
-    const after = await directoryFingerprint(target);
-    if (before.join("|") !== after.join("|")) throw new Error(global.BcaI18n ? global.BcaI18n.t("复制到回收站后校验不一致，源目录没有删除。") : "复制到回收站后校验不一致，源目录没有删除。");
+    const limitRun = createConcurrencyLimiter(COPY_CONCURRENCY);
+    const rows = await copyDirectoryTree(sourceHandle, target, limitRun);
+    if (!await verifyCopiedFiles(target, rows, limitRun)) throw new Error(global.BcaI18n ? global.BcaI18n.t("复制到回收站后校验不一致，源目录没有删除。") : "复制到回收站后校验不一致，源目录没有删除。");
     await sourceParent.removeEntry(sourceName, { recursive: true });
     return "copied";
   }
@@ -322,6 +393,13 @@
       moved.push({ ...item, name, path: `${RECYCLE_DIR_NAME}/${stamp}/${item.collection}/${name}` });
     }
     return { stamp, moved };
+  }
+
+  /* 1.17.4（用户要求）：整个收藏夹可以「直接删除」—— 一次 removeEntry 就够，
+     不再复制一遍再删源（几十条记录要十几秒）。这条路径不可恢复，调用方负责说清楚。 */
+  async function deleteCollectionPermanently(root, collectionName) {
+    await root.removeEntry(collectionName, { recursive: true });
+    return collectionName;
   }
 
   async function pruneRecycler(root) {
@@ -695,6 +773,7 @@
     copyFileHandle,
     copyDirectoryTree,
     directoryFingerprint,
+    verifyCopiedFiles,
     moveDirectoryInto,
     optionalFileHandle,
     isUnfinishedRecord,
@@ -702,6 +781,7 @@
     scanArchive,
     recycleCollection,
     recycleRecords,
+    deleteCollectionPermanently,
     pruneRecycler,
     purgeRecycler,
     listRecycled,

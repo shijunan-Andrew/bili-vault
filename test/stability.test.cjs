@@ -7546,6 +7546,10 @@ test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", (
   // move() 优先；用不了就复制 + 逐文件比字节 + 才删源；校验不过不许删源
   assert.match(tools, /await sourceHandle\.move\(targetParent, targetName\)/);
   assert.match(tools, /async function directoryFingerprint\(directory, prefix = ""\) \{/);
+  // 1.17.4：复制 8 路并发；校验只核目标侧；「整个收藏夹直接删除」只有一份实现
+  assert.match(tools, /const COPY_CONCURRENCY = 8;/, "复制要并发，别再逐文件串行等");
+  assert.match(tools, /async function verifyCopiedFiles\(target, rows, limitRun = null\) \{/, "校验只剩「核目标侧」这一份实现");
+  assert.match(tools, /async function deleteCollectionPermanently\(root, collectionName\) \{/, "彻底删除只有一份实现");
   assert.match(tools, /复制到回收站后校验不一致，源目录没有删除。/);
   assert.match(tools, /async function pruneRecycler\(root\) \{/);
   // 收藏库这边：每次扫描顺手清过期回收站，四个删除分支都先走回收站
@@ -7558,6 +7562,8 @@ test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", (
   assert.ok((body.match(/recycleRecords\(rootHandle, \[/g) || []).length >= 3,
     "批量 / 单条 / 清理未完成三条路都要走回收站");
   assert.match(body, /recycleCollection\(rootHandle, action\.collection\.name\)/, "整个收藏夹删除也要先进回收站");
+  assert.match(body, /deleteCollectionPermanently\(rootHandle, action\.collection\.name\)/, "勾了「直接删除」就走另一条路");
+  assert.match(body, /已直接删除（没进回收站）/, "直接删掉也要说清楚没进回收站");
   assert.match(body, /recycledSuffix\(recycledPaths\)/, "删除结果要告诉用户去哪捞回来");
   // 界面出口：清空回收站搬到设置/回收站页，删除确认不再说「不可恢复」
   assert.match(recycleHtml, /id="recyclePurge"/);
@@ -7565,7 +7571,10 @@ test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", (
   assert.match(recycleHtml, /data-i18n="恢复所选"/);
   assert.match(recycleHtml, /data-i18n="彻底删除所选"/);
   assert.match(html, /删除本地归档（先移进回收站）？/);
-  assert.equal(html.includes("不进回收站"), false, "确认文案不许再说「不进回收站」");
+  // 1.17.4（用户要求）：多了一条「直接删除（不进回收站）」。它是选项，不是默认口径，
+  // 所以这里盯的是「开关在、且默认没勾」，而不是禁止出现这四个字。
+  assert.match(html, /<input id="deleteSkipRecycle" type="checkbox">/, "收藏夹可以直接删除，这个开关不能少");
+  assert.equal(/<input id="deleteSkipRecycle" type="checkbox" checked/.test(html), false, "「直接删除」默认不许勾上");
   assert.equal(html.includes("清空回收站"), false, "清空回收站已经搬到设置/回收站页");
 });
 

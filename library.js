@@ -106,6 +106,11 @@ const deleteDownloadsOption = document.getElementById("deleteDownloadsOption");
 const deleteAssociatedDownloads = document.getElementById("deleteAssociatedDownloads");
 const deleteUnknownOption = document.getElementById("deleteUnknownOption");
 const acknowledgeUnknownDelete = document.getElementById("acknowledgeUnknownDelete");
+/* 1.17.4（用户要求）：大收藏夹多给一条「直接删除，不进回收站」。默认不勾 ——
+   勾了就一次删干净、删了找不回来，所以只在「整个收藏夹」这一个入口露出来。 */
+const deleteSkipRecycleOption = document.getElementById("deleteSkipRecycleOption");
+const deleteSkipRecycle = document.getElementById("deleteSkipRecycle");
+const confirmWarning = document.getElementById("confirmWarning");
 const cancelDeleteButton = document.getElementById("cancelDelete");
 const deleteProgress = document.getElementById("deleteProgress");
 const confirmDeleteButton = document.getElementById("confirmDelete");
@@ -3716,6 +3721,8 @@ function askToDeleteVideo(video) {
   deleteAssociatedDownloads.checked = false;
   deleteUnknownOption.hidden = true;
   acknowledgeUnknownDelete.checked = false;
+  deleteSkipRecycleOption.hidden = true;
+  deleteSkipRecycle.checked = false;
   confirmDeleteButton.disabled = false;
   openConfirmBackdrop();
 }
@@ -3758,6 +3765,8 @@ async function askToDeleteCollection(collection) {
   const needsAcknowledge = counted && unknown > 0;
   deleteUnknownOption.hidden = !needsAcknowledge;
   acknowledgeUnknownDelete.checked = false;
+  deleteSkipRecycleOption.hidden = false;
+  deleteSkipRecycle.checked = false;
   confirmDeleteButton.disabled = needsAcknowledge;
   openConfirmBackdrop();
 }
@@ -3772,6 +3781,8 @@ function askToDeleteBatch(videos) {
   deleteAssociatedDownloads.checked = false;
   deleteUnknownOption.hidden = true;
   acknowledgeUnknownDelete.checked = false;
+  deleteSkipRecycleOption.hidden = true;
+  deleteSkipRecycle.checked = false;
   confirmDeleteButton.disabled = false;
   openConfirmBackdrop();
 }
@@ -3796,6 +3807,8 @@ function askToCleanupUnfinished() {
   deleteAssociatedDownloads.checked = false;
   deleteUnknownOption.hidden = true;
   acknowledgeUnknownDelete.checked = false;
+  deleteSkipRecycleOption.hidden = true;
+  deleteSkipRecycle.checked = false;
   confirmDeleteButton.disabled = false;
   openConfirmBackdrop();
 }
@@ -3808,6 +3821,9 @@ function closeDeleteConfirmation() {
   deleteAssociatedDownloads.checked = false;
   deleteUnknownOption.hidden = true;
   acknowledgeUnknownDelete.checked = false;
+  deleteSkipRecycleOption.hidden = true;
+  deleteSkipRecycle.checked = false;
+  confirmWarning.textContent = BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。");
   confirmDeleteButton.disabled = false;
   pendingDeleteAction = null;
   confirmTitle.textContent = BcaI18n.t("删除本地归档（先移进回收站）？");
@@ -4574,15 +4590,22 @@ async function confirmPendingDelete() {
     const downloadCleanupNotes = [];
     // 1.8.23（TODO P0-1）：这次删除在回收站里的落点，结果弹窗要告诉用户去哪捞
     const recycledPaths = [];
+    let permanentlyDeleted = null;
     if (deleteDownloads && !downloadParent) {
       downloadCleanupNotes.push(BcaI18n.t("没找到下载文件夹（000视频下载），关联的下载文件这次一个都没动。"));
     }
     let batchResult = null;
     if (action.type === "collection") {
-      if (deleteProgress) deleteProgress.textContent = BcaI18n.t("正在删除收藏夹「{name}」及其中的文件…（这一步不能中途取消，以免删到一半）", { name: action.collection.name });
+      if (deleteProgress) deleteProgress.textContent = deleteSkipRecycle.checked
+        ? BcaI18n.t("正在直接删除收藏夹「{name}」…（不进回收站，删了找不回来）", { name: action.collection.name })
+        : BcaI18n.t("正在删除收藏夹「{name}」及其中的文件…（这一步不能中途取消，以免删到一半）", { name: action.collection.name });
       // 1.8.23（P0-1）：不再直接 removeEntry —— 整个收藏夹先挪进 005回收站/<时间戳>/。
       // （move() 优先、复制+校验+删源兜底，见 moveDirectoryInto。）
-      recycledPaths.push(await recycleCollection(rootHandle, action.collection.name));
+      if (deleteSkipRecycle.checked) {
+        permanentlyDeleted = await deleteCollectionPermanently(rootHandle, action.collection.name);
+      } else {
+        recycledPaths.push(await recycleCollection(rootHandle, action.collection.name));
+      }
       if (selectedCollection === action.collection.name) selectedCollection = "*";
       if (deleteDownloads && downloadParent) {
         downloadCleanupFailures.push(...await removeCollectionDownloadDirectory(downloadParent, action.collection.name));
@@ -4640,7 +4663,7 @@ async function confirmPendingDelete() {
        catch 接住，弹出来的却是「删除失败」，用户只会再点一次「删除」再吃一次同样的错。 */
     const refreshError = await refreshAfterLocalChange(() => displayRoot(rootHandle, selectedCollection));
     if (action.type === "collection") {
-      showResultDialog(BcaI18n.t("已移进回收站：整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
+      showResultDialog(permanentlyDeleted ? BcaI18n.t("已直接删除（没进回收站）") : BcaI18n.t("已移进回收站：整个本地归档"), [BcaI18n.t("“{name}”", { name: action.collection.name }), recycledSuffix(recycledPaths), ...downloadCleanupFailures, downloadCleanupSuffix(downloadCleanupFailures.length), ...downloadCleanupNotes, refreshFailureSuffix(refreshError)].filter(Boolean).join("；"), "ok");
     } else if (action.type === "batch") {
       if (!batchResult.failures.length) setSelectionMode(false);
       // 1.7.0（批次 B / P1）：原来失败清单只把**第一条**塞进 3 秒就消失的 toast，
@@ -4696,6 +4719,7 @@ async function confirmPendingDelete() {
       deleteProgress.textContent = "";
     }
     confirmDeleteButton.disabled = false;
+    confirmWarning.textContent = BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。");
     confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("删除收藏夹") : action.type === "batch" ? BcaI18n.t("删除 {count} 个视频", { count: action.videos.length }) : action.type === "unfinished" ? BcaI18n.t("清理 {count} 个目录", { count: action.records.length }) : BcaI18n.t("移到回收站");
   }
 }
@@ -6031,6 +6055,15 @@ cancelDeleteButton.addEventListener("click", closeDeleteConfirmation);
 // 1.8.21（P1-2）：目录里有不认识的条目时，勾了这句才允许点删除
 acknowledgeUnknownDelete.addEventListener("change", () => {
   confirmDeleteButton.disabled = !acknowledgeUnknownDelete.checked;
+});
+// 1.17.4（用户要求）：勾上「直接删除」时，把「30 天还能捞回来」换成「删了找不回来」，
+// 按钮也跟着改名 —— 免得点下去才发现不是同一个动作。
+deleteSkipRecycle.addEventListener("change", () => {
+  const direct = deleteSkipRecycle.checked;
+  confirmWarning.textContent = direct
+    ? BcaI18n.t("这次不走回收站：文件会被直接删掉，删了找不回来。")
+    : BcaI18n.t("删除会先把这些文件移进本地备份文件夹里的 005回收站，30 天后自动清理；这段时间里还能自己捞回来。");
+  confirmDeleteButton.textContent = direct ? BcaI18n.t("直接删除") : BcaI18n.t("删除收藏夹");
 });
 confirmDeleteButton.addEventListener("click", confirmPendingDelete);
 cancelCreateCollectionButton.addEventListener("click", () => collectionDialog.close());
