@@ -3661,6 +3661,117 @@ async function suiteImportCompletion() {
   });
 }
 
+/* 1.17.9（审查 P2-3 / P2-5）：收藏库这一批的两条界面行为。 */
+async function suiteLibrary1179() {
+  await test("1.17.9：收藏夹列表读不出来时说清是哪一步，并给出下一步（审查 P2-3）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const g = page.window;
+    const broken = await makeDirectoryTree({ "_坏归档": sampleTree() }).getDirectoryHandle("_坏归档");
+    // 模拟「根句柄在扫描途中失效」：枚举本身抛错，而不是返回空列表
+    broken.values = async function* brokenValues() {
+      throw new Error("目录句柄已经失效");
+    };
+    let message = "";
+    try {
+      await g.scanRoot(broken, false);
+      message = "（没有抛错）";
+    } catch (error) {
+      message = error?.message || String(error);
+    }
+    assert.match(message, /读取收藏夹列表失败/, "要说明是「读收藏夹列表」这一步失败");
+    assert.match(message, /目录句柄已经失效/, "底层原因要带出来，别只剩一句「失败」");
+    assert.match(message, /重新点一次「刷新」/, "要告诉用户下一步做什么");
+  });
+
+  await test("1.17.9：换一条视频时详情面板回顶部，重画同一条与关掉时也归零（审查 P2-5）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const doc = page.document;
+    const g = page.window;
+    const panel = doc.getElementById("detailPanel");
+    const cards = doc.querySelectorAll(".video-card");
+    assert.ok(cards.length >= 2, "要有两条视频才谈得上「换一条」");
+    cards[0].dispatchEvent(new g.MouseEvent("click", { bubbles: true }));
+    await settle();
+    assert.equal(panel.classList.contains("open"), true, "点卡片要打开详情");
+    panel.scrollTop = 420;   // 上一条简介很长，滚到中间
+    cards[1].dispatchEvent(new g.MouseEvent("click", { bubbles: true }));
+    await settle();
+    assert.equal(panel.scrollTop, 0, "换一条视频要从顶部开始，不能停在上一条的位置");
+    panel.scrollTop = 300;
+    // 切语言 / 更新数据 / 标记已下载走的都是「重画同一条」这条路
+    g.openDetail(g.detailVideo(), null, { trap: false });
+    await settle();
+    assert.equal(panel.scrollTop, 300, "重画同一条视频时不许把用户滚到的位置顶回去");
+    doc.getElementById("closeDetail").dispatchEvent(new g.MouseEvent("click", { bubbles: true }));
+    await settle();
+    assert.equal(panel.scrollTop, 0, "关掉之后也归零，下次打开不从上一轮的位置开始");
+  });
+}
+
+/* 1.17.9（审查 P2-8）：页面可以一直开着跨过零点。「今天 / 昨天 / 近 7 天」都是按渲染那一刻
+   的日期算的，所以判据得真跑一遍 —— 只断言「源码里有某一行」证明不了它真的会重画。 */
+async function suiteDayRollover() {
+  const DAY = 24 * 60 * 60 * 1000;
+  const todayStart = (() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  })();
+
+  await test("1.17.9：跨过零点才作废渲染签名重画，同一天一次都不画（审查 P2-8 · 收藏库）", () => {
+    const source = harness.readSource("library.js");
+    const build = (seedStamp) => harness.buildModule([
+      `let lastVideoRenderSignature = "旧签名";`,
+      `let renderedDayStamp = ${seedStamp};`,
+      `let renders = 0;`,
+      `function renderVideos() { renders += 1; }`,
+      harness.carveFunction(source, "startOfDay"),
+      harness.carveFunction(source, "refreshRelativeDayLabels"),
+      `function peek() { return { renders: renders, signature: lastVideoRenderSignature, stamp: renderedDayStamp }; }`
+    ], {});
+
+    const sameDay = build(todayStart);
+    assert.equal(sameDay.refreshRelativeDayLabels(), false, "同一天什么都不做");
+    assert.deepEqual(sameDay.peek(), { renders: 0, signature: "旧签名", stamp: todayStart }, "同一天不许白重画一次");
+
+    const nextDay = build(todayStart - DAY);
+    assert.equal(nextDay.refreshRelativeDayLabels(), true, "跨天了要重画");
+    assert.deepEqual(nextDay.peek(), { renders: 1, signature: "", stamp: todayStart },
+      "签名要作废（否则 renderVideos 会直接短路），日期要记成今天");
+    assert.equal(nextDay.refreshRelativeDayLabels(), false, "一天只画一次");
+    assert.equal(nextDay.peek().renders, 1, "第二轮不能再画");
+  });
+
+  await test("1.17.9：统计页回到前台时比一次自然日，变了才重画（审查 P2-8 · 统计页）", () => {
+    const source = harness.readSource("stats.js");
+    const document = { visibilityState: "visible" };
+    const page = harness.buildModule([
+      `let loaded = true;`,
+      `let currentDay = "2026-10-28";`,
+      `let renderedDayKey = "2026-10-28";`,
+      `let renders = 0;`,
+      `function localDayKey() { return currentDay; }`,
+      `function render() { renders += 1; renderedDayKey = currentDay; }`,
+      harness.carveFunction(source, "checkDayRollover"),
+      `function setDay(value) { currentDay = value; }`,
+      `function setLoaded(value) { loaded = value; }`,
+      `function peek() { return { renders: renders, renderedDayKey: renderedDayKey }; }`
+    ], { document });
+
+    assert.equal(page.checkDayRollover(), false, "同一天不重画");
+    page.setDay("2026-10-29");
+    assert.equal(page.checkDayRollover(), true, "跨天了要重画");
+    assert.equal(page.peek().renders, 1);
+    assert.equal(page.peek().renderedDayKey, "2026-10-29", "重画后要把日期记成新的一天");
+    assert.equal(page.checkDayRollover(), false, "当天之后不再重复重画");
+    page.setDay("2026-10-30");
+    document.visibilityState = "hidden";
+    assert.equal(page.checkDayRollover(), false, "页面在后台时不画");
+    document.visibilityState = "visible";
+    page.setLoaded(false);
+    assert.equal(page.checkDayRollover(), false, "快照还没读出来时不画");
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
@@ -3679,6 +3790,8 @@ async function suite() {
   await suiteRecycleTools();
   await suitePruneRecycler();
   await suiteImportCompletion();
+  await suiteLibrary1179();
+  await suiteDayRollover();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

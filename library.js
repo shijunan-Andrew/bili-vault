@@ -244,6 +244,10 @@ let pageVideoById = new Map();
    打开收藏库时「快照先画一遍、整库扫完再画一遍」，即使两次内容一模一样也会整块重建
    DOM —— 真机上看到的就是「页面闪两下」。内容签名相同就只补当前页还缺的封面。 */
 let lastVideoRenderSignature = "";
+/* 1.17.9（审查 P2-8）：卡片上的「今天 / 昨天 / N 天前」是渲染那一刻按自然日算出来的，
+   而 renderVideos 的内容签名里没有时间 —— 页面开着跨过零点时，光再画一次不会有任何变化。
+   这里记下「上一次是按哪一天画的」，回到前台时只比这一天。 */
+let renderedDayStamp = startOfDay(new Date())?.getTime() || 0;
 let lastCollectionRenderSignature = "";
 let pendingCollectionAction = null;
 /* 1.7.21（收尾）：批量搬运要有进度与中止。搬运一个视频 = 复制整目录 + 删源，
@@ -1507,16 +1511,26 @@ async function scanRoot(handle, preserveDownloadStatuses = true) {
   const stats = { hits: 0, reads: 0, processed: 0, total: knownTotal, bytes: Number(downloadIndex?.bytes) || 0 };
   // 目录列表本身每次重新枚举，缓存只省文件读取，所以新增/删除目录一定反映得出来
   const collections = [];
-  for await (const collectionEntry of handle.values()) {
-    if (collectionEntry.kind !== "directory") continue;
-    if (!BcaArchiveTools.RESERVED_DIRS.includes(collectionEntry.name)) {
-      collections.push(collectionEntry);
-      continue;
+  /* 1.17.9（审查 P2-3）：枚举收藏夹原来是裸着的 —— 根句柄在扫描途中失效、固定目录被别处删掉、
+     或者宿主实现直接抛异常时，整个扫描以一个英文异常名收场，用户只看到一句看不懂的 toast。
+     这里换成一句能照做的话。**故意不吞**：吞下去会走到「零个收藏夹」那条路，界面变成一个
+     空库，用户会以为归档全丢了（1.7.14 处理失联目录时踩过同一个坑）。 */
+  try {
+    for await (const collectionEntry of handle.values()) {
+      if (collectionEntry.kind !== "directory") continue;
+      if (!BcaArchiveTools.RESERVED_DIRS.includes(collectionEntry.name)) {
+        collections.push(collectionEntry);
+        continue;
+      }
+      // 1.8.5：体积统计复用扫描。固定目录（报告 / 数据库 / 导出）都是扁平的、文件很少，
+      // 顺手量一下；000视频下载 那棵树的字节由下载索引给出（它本来就要递归枚举那一遍）。
+      if (collectionEntry.name === "000视频下载" || collectionEntry.name === "视频下载") continue;
+      stats.bytes += await directorySize(collectionEntry);
     }
-    // 1.8.5：体积统计复用扫描。固定目录（报告 / 数据库 / 导出）都是扁平的、文件很少，
-    // 顺手量一下；000视频下载 那棵树的字节由下载索引给出（它本来就要递归枚举那一遍）。
-    if (collectionEntry.name === "000视频下载" || collectionEntry.name === "视频下载") continue;
-    stats.bytes += await directorySize(collectionEntry);
+  } catch (error) {
+    throw new Error(BcaI18n.t("读取收藏夹列表失败（{reason}）。归档本身没有被改动，重新点一次「刷新」试试。", {
+      reason: error?.message || BcaI18n.t("目录读取被中断")
+    }));
   }
   // 1.7.24 的路径长度度量顺路在读那一遍里做，不再为它单独枚举（1.8.4）。
   const progress = progressNotifier(scanNoticeText, (value) => scanProgressText(value));
@@ -3097,6 +3111,19 @@ function startOfDay(value) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+/* 1.17.9（审查 P2-8）：跨过零点之后，「今天」该变成「昨天」、「昨天」该变成「前天」。
+   页面可以一直开着，所以回到前台时比一次自然日；变了才作废渲染签名再画一遍 ——
+   不作废的话 renderVideos 会因为内容没变直接短路（签名里没有时间）。
+   这里只管「相对日期」这一类文案，其它数据该不该刷新另有一套判据，别混进来。 */
+function refreshRelativeDayLabels() {
+  const today = startOfDay(new Date())?.getTime() || 0;
+  if (!today || today === renderedDayStamp) return false;
+  renderedDayStamp = today;
+  lastVideoRenderSignature = "";
+  renderVideos();
+  return true;
+}
+
 function relativeDayLabel(date) {
   const today = startOfDay(new Date());
   const target = startOfDay(date);
@@ -3432,6 +3459,11 @@ async function showDownloadSize(video) {
 // restoreTo：关闭后焦点还给它（通常是触发它的那张卡片）；
 // options.trap = false 用于「重画后重新打开同一个详情」，避免叠加第二层焦点陷阱。
 function openDetail(video, restoreTo, options = {}) {
+  /* 1.17.9（审查 P2-5）：详情面板自己是滚动容器，重画内容时不会自动复位 —— 从一条长简介的
+     视频切到下一条，面板会停在上一条的滚动位置，用户看到的是下一条的半截。
+     但重画同一条视频（切语言 / 更新数据 / 标记已下载）时**必须**保住位置，否则刚滚到的按钮
+     会跳回顶部。判据只有一条：面板本来就开着，而且装的就是这条视频。 */
+  const keepScroll = detailPanel.classList.contains("open") && detailContent.dataset.videoId === video.id;
   // 面板里那张封面由引用计数单独保一份，见 retainDetailCover 的注释
   retainDetailCover(video.cover);
   detailPanel.classList.toggle("invalid-video", video.isInvalid);
@@ -3557,6 +3589,8 @@ function openDetail(video, restoreTo, options = {}) {
   if (deleteLocalButton) deleteLocalButton.addEventListener("click", () => askToDeleteVideo(video));
   showDownloadSize(video).catch(() => {});
   detailPanel.classList.add("open");
+  // 1.17.9（审查 P2-5）：换了一条视频就从顶部开始；重画同一条时上面的 keepScroll 保住了位置
+  if (!keepScroll) detailPanel.scrollTop = 0;
   // 1.8.10：宠物外壳与详情抽屉同为 z-index 6，而宠物后插入 DOM（树序在后者胜），
   // 抽屉右下角会被它盖住还能点中 —— 鼠标点得到、键盘却因焦点陷阱 tab 不到。
   // 抽屉开着的时候把宠物整个收起来，两套输入才不会各看到一套真相。
@@ -3721,6 +3755,8 @@ function closeDetail() {
   document.documentElement.classList.remove("bca-pet-suspended");
   detailBackdrop.hidden = true;
   document.body.style.overflow = "";
+  // 1.17.9（审查 P2-5）：关掉就回到顶部，下次打开不会从上一轮的位置开始
+  detailPanel.scrollTop = 0;
 }
 
 // 确认弹层（#confirmBackdrop）也是普通 div 浮层，四个入口共用一套打开/关闭逻辑
@@ -6251,13 +6287,19 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 function reportLocaleSwitchFailure(error) {
   showToast(BcaI18n.t("切换界面语言失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
 }
-window.addEventListener("focus", () => { if (rootHandle) updateStorageUsage(rootHandle); });
+window.addEventListener("focus", () => {
+  if (rootHandle) updateStorageUsage(rootHandle);
+  // 1.17.9（审查 P2-8）：标签页一直可见（第二块屏）时 visibilitychange 不会来，这里补一次
+  refreshRelativeDayLabels();
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   /* 1.7.7（P0-2）：切回标签页/窗口获焦不再整树重扫 000视频下载。那是文件系统调用
      （几千个目录 = 上万次 Mojo IPC），而"下载目录真的变了"本来就有 downloadRevision
      这个专门信号（见上面的 onChanged）；这里只补一次带缓存的体积统计。 */
   refreshDownloadStatuses();
+  /* 1.17.9（审查 P2-8）：跨零点了就重画一次卡片（只比自然日，不新增定时器） */
+  refreshRelativeDayLabels();
   /* 1.7.5：切回标签页不再整树重扫视频资料 —— 用户的要求是「浏览行为不算」，
      只有导入新视频 / 删除视频 / 点刷新这类主动行为才重扫（导入结束那一次由
      applyImportState 收口）。页面不可见期间漏掉的刷新会在下次主动行为时补上。 */

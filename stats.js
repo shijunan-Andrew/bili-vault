@@ -130,6 +130,9 @@
 
   let stats = null;      // 当前快照（读不到就是 null）
   let loaded = false;    // 第一次 storage 读完没有
+  /* 1.17.9（审查 P2-8）：「今天 / 昨天 / 近 7 天」这些口径都是按渲染那一刻的日期算的，
+     页面可以一直开着跨过零点。这里记下上次渲染的自然日，回到前台时比一次。 */
+  let renderedDayKey = "";
   let resizeTimer = 0;
   /* 选中态分成两套：上面「每日新增收藏数」一套、下面「按年份累计」一套。
      1.6.4 之前两张图共用 focusedDay，于是点上面 2025 年那根柱子，下面年份图里 2025
@@ -1597,6 +1600,9 @@
   }
 
   function render() {
+    /* 1.17.9（审查 P2-8）：空快照分支也走这里，所以先记日期再分派 —— 否则空库时
+       每次回到前台都会以为是跨天了。 */
+    renderedDayKey = localDayKey(Date.now());
     document.title = t("哔哩藏库 · 数据统计");
     const snapshot = stats;
     const empty = isEmptySnapshot(snapshot);
@@ -2352,6 +2358,22 @@
     });
   }
 
+  /* 1.17.9（审查 P2-8）：页面开着跨过零点时，把「今天 / 昨天 / 近 7 天」跟着挪过来。
+     只在「人回到这个标签页」时比一次自然日 —— 统计页原来一个定时器都没有，
+     这条也**不许**改成 setInterval。 */
+  function checkDayRollover() {
+    if (!loaded) return false;
+    if (document.visibilityState !== "visible") return false;
+    if (localDayKey(Date.now()) === renderedDayKey) return false;
+    render();
+    return true;
+  }
+
+  function bindDayRollover() {
+    document.addEventListener("visibilitychange", checkDayRollover);
+    window.addEventListener("focus", checkDayRollover);
+  }
+
   /* ── 启动 ───────────────────────────────────────────────────────── */
 
   function readStats() {
@@ -2373,6 +2395,7 @@
     bindPicker();
     bindChart();
     watchStorage();
+    bindDayRollover();
     try {
       if (i18n && typeof i18n.init === "function") await i18n.init();   // 读不到就按默认语言显示，别把整页拖死
     } catch (_) { /* 词典坏了也继续，t() 会原样返回中文原文 */ }

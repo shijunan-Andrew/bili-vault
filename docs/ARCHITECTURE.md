@@ -357,6 +357,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **原生宿主没有调用方认证**（1.8.22 复核，不修）：协议只能读同目录的 `settings.json`、对下载根内路径做 `Test-Path`、用资源管理器打开已存在的目录，**不写、不删、不读文件内容**，所以拿到协议格式的本地进程也做不出比「打开一个文件夹」更坏的事。宿主脚本与启动器还放在用户可写目录（`%LOCALAPPDATA%`），同样只是「用户自己改自己的东西」，不构成提权；`get-config` 回明文下载路径是功能需要。
 - **`视频信息.txt` 的发布时间带中文星期几**（1.8.22 复核，不修）：那是档案正文的一部分，跟 B 站页面上的写法对齐，**不进词典、不随界面语言变**。`background.js` 的 `formatPublishDate` 上方有注释，别把它当漏翻。
 - **卡片用相对时间、详情用绝对时间是刻意分工**（1.8.22 复核，不修）：列表要能一眼扫「刚存的还是很久以前的」，详情要能和磁盘上的目录名逐字对上。**别为了「统一」把两处改成同一种格式。**
+- **「今天 / 昨天」跨过零点要跟着走**（1.17.9 · 审查 P2-8）：卡片日期与统计页的「今天 / 昨天 / 近 7 天」都是按**渲染那一刻**的自然日算的，而页面可以开着跨天。两处都用同一条思路补：`library.js` 记 `renderedDayStamp`（`refreshRelativeDayLabels()`，回到前台时比一次自然日，变了先作废 `lastVideoRenderSignature` 再 `renderVideos()` —— **不作废签名会直接短路，等于白画**）；`stats.js` 记 `renderedDayKey`（`checkDayRollover()`，比的是 `localDayKey(Date.now())`）。两条都挂在**既有**的 `visibilitychange` / `focus` 上，**不新增定时器**（4.9 删掉的那个 60 秒 `setInterval` 不许换张皮回来）。
 - **统计页的小表每次渲染都重算**（1.8.22 复核，不修）：`normalizeDayRows` 逐渲染重建 Map，`dailyRows` 上限 180 行，常数项远小于缓存 + 失效判断的成本。要改先量 `test/bench.cjs`。
 - **递归删除遇到 junction / symlink 的行为只做过说明、没有自动化断言**（1.8.22）：FSA 的 `removeEntry(..., { recursive: true })` 在不同 Windows 版本上对 junction 的处理无法在 CI 里复现，只能真机验证。删除失败走失败分支并保留现场，不会静默成功。
 - **回收站页可以逐条恢复/彻底删除，但不覆盖同名目录**（1.9.0）：恢复时目标收藏夹里已有同名目录会存成「名字-2」，想合并只能手动处理；30 天清理仍只认插件自己写的时间戳目录名，用户改过名的目录不会被自动清理，也不会被误删。
@@ -408,6 +409,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **增量扫描**：`scanRoot()` 现在带缓存。键 = `收藏夹/目录名`，值 = `{size, lastModified, 解析结果}`；按根目录 handle 用 `WeakMap` 发自增 id 隔离。命中时**只调 `getFile()` 取元数据、不读正文**；`size` 或 `lastModified` 变一个字节就只重读那一条。目录列表**每轮重新枚举**，所以新增/删除目录一定反映。
   **三个必须守住的点**：① 缓存键含 `lastModified`，但外部工具若保留原 mtime 改写文件会漏判 —— 所以「刷新」按钮走 `forceFullScan = true` + `clearArchiveCache()`，**这条退路不能删**；② 缓存里的记录对象被 `video.info` **共享引用**，将来任何代码都不许就地修改它，要改就赋新对象；③ 单根目录缓存上限**不是常数**（1.8.4）：容量 = `archiveCacheCapacity(记录数)` = `max(600, 记录数 + 256)`，天花板 20000；超了用 `archiveCacheDropCount()` 一次丢 25%。**写死 600 + 逐条淘汰会让「库只比容量大一点」的库命中率归零**（630 条 / 上限 600 实测 0%）；扫描期间容量跟着已读条数长，别在半路上丢掉下一条要读的条目。
 - **扫描只读一遍**（1.8.4）：`scanRoot()` 不再「先枚举一遍数总数、再枚举一遍读记录」—— 进度分母先用上次扫描的条数（`lastScanRecordCount`），估少了跟着 `stats.processed` 长，真值在读完时收口。`longNames`（1.7.24 的路径长度度量）就在这一遍里算，并带回 `lastScanInfo` 显示。
+- **收藏夹列表读不出来时要说清是哪一步**（1.17.9 · 审查 P2-3）：`scanRoot()` 里枚举根目录那一段原本裸着，句柄失效 / 固定目录被别处删掉 / 宿主实现抛异常时，整轮扫描以一个英文异常名收场。现在只把 `for await (const collectionEntry of handle.values())` 那一圈包进 try，抛错改成「读取收藏夹列表失败（原因）。归档本身没有被改动，重新点一次「刷新」试试。」。**故意不吞**：吞下去会走到「零个收藏夹」，界面变成一个空库，用户会以为归档全丢了（1.7.14 处理失联目录时踩过同一个坑）。`const collections = []` 留在 try 外（`const` 声明不许落进 try 块）。
 - **下载目录索引有缓存**（1.8.4）：`scanDownloadedDirectories()` 的结果按根目录缓存 2 分钟（`DOWNLOAD_INDEX_TTL_MS`）；手动「刷新」与 `downloadRevision` 变化强制重算，本页删除 / 搬运下载目录后调 `invalidateDownloadIndex(rootHandle)` 立刻作废。**`downloadRevision` 自 1.3.0 删掉下载功能之后已经没人写**，别指望它兜底。
 - **扫描结果会存成快照**（1.8.5）：一轮扫描结束后把每条记录的元数据写进 IndexedDB（`bca-archive-snapshot`），下次打开收藏库先按快照把列表画出来（`paintSnapshot()`），再去整库校准。**快照里不许存 `blob:` URL**（那个 URL 的生命周期只到页面关闭），记录对象的封面留空、需要时现读现造。手动「刷新」必须绕过快照 —— 它存在的意义就是不信缓存。
 - **快照只写变了的**（1.8.7）：`snapshotSave()` 按 `size` / `lastModified` / `bytes` 三个字段比对，一样就跳过、变了才 `cursor.update()`、消失了的 `cursor.delete()`。**别退回「整根目录先删再全 put」** —— 1 万条就是 1 万次写，而一轮扫描通常只有几十条会变。
@@ -460,6 +462,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **UP 主粉丝数按 mid 记住 7 天**（1.8.6）：`chrome.storage.local` 的 `bcaUpFans`（`UP_FANS_TTL_MS`、封顶 `UP_FANS_MAX_ENTRIES = 2000`，写盘 2 秒合并）。`fetchUpFans(mid, tabId, options)` 默认查记忆，`{ fresh: true }` 才强制问接口 —— 「更新视频状态」是用户主动要最新数，必须走 fresh；「只缺粉丝数」的刷新用 `item.fansOnly` 快路，判据仍然是 `recordNeedsRefresh()` 一处。
 - **统计库攒批落盘**（1.8.6）：`statsFlushDue()` 只在「攒够 `STATS_FLUSH_EVERY_RECORDS = 200` 条」或「距上次落盘超过 `STATS_FLUSH_EVERY_MS = 30 秒`」时才 `flushStatsPendingRecords()`，导入收尾再强制补一次。**归档文件本身不受影响** —— 这条只减少统计库的整份重写次数。
 - **焦点陷阱**是手写栈（`trapFocus()`），目前注册了 `#confirmBackdrop` 与 `#detailPanel`。**再加第三层浮层时必须把它也注册进去**，否则 Tab 会穿透。
+- **详情面板换一条视频要回顶部**（1.17.9 · 审查 P2-5）：`#detailPanel` 自己是滚动容器（`.detail-panel { overflow-y: auto }`），重画内容时不会自动复位 —— 从长简介的那条切到下一条，面板会停在上一条的滚动位置。`openDetail()` 只在「面板本来就开着、而且装的就是这条视频」时保住位置（切语言 / 更新数据 / 标记已下载都是重画同一条，顶回去会让用户刚滚到的按钮跳走），其余情况 `scrollTop = 0`；`closeDetail()` 也归零，**两处都要**，只补一处会留中间态。
 - **配置导出**绝不能带上目录句柄、B 站数据或错误报告内容（测试会扫导出代码块里有没有这些标识符）。导入只校验结构与枚举值，`CONFIG_VERSION` 升级时需要补迁移。
 - **导入配置时「文件里没有的那一项就别动」**（1.8.4）：`sanitizeConfigPreferences()` 对缺失的 `filters` 返回 `null`，`applyConfigPreferences()` 见 `null` 就整段跳过。理由：「只导外观与档位」的文件本来就没有搜索词与筛选，导入它把用户正在用的筛选清成默认值，等于替用户做了他没要求的事。**新增可导入项时同样要遵守这条** —— 缺项返回 `null`，别补默认值。
 - **主题到内容脚本的链路**：扩展页写 `localStorage`（首屏同步防闪色）+ 镜像到 `chrome.storage.local`；`content.js` 读 `chrome.storage` 并监听 `onChanged`。卡片根节点的属性是 `data-bca-theme`，**故意不叫 `data-theme`**——它挂在 B 站页面上，避免和宿主页面的选择器撞车。

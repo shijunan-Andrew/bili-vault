@@ -546,8 +546,10 @@ class DomElement extends DomNode {
     return Number.isNaN(parsed) ? -1 : parsed;
   }
   set tabIndex(value) { this.setAttribute("tabindex", String(Number(value) | 0)); }
-  get scrollTop() { return 0; }
-  set scrollTop(_value) {}
+  /* 1.17.9（审查 P2-5）：scrollTop 原来恒为 0 且写不进去 —— 于是「详情面板换一条视频要
+     滚回顶部」这类行为在桩里根本观察不到。DOM 里它本来就是可读写属性，这里真存一个值。 */
+  get scrollTop() { return this.__scrollTop || 0; }
+  set scrollTop(value) { this.__scrollTop = Math.max(0, Number(value) || 0); }
   get scrollHeight() { return 0; }
 
   cloneNode(deep = false) {
