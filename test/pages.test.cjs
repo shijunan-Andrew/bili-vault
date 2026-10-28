@@ -1223,6 +1223,40 @@ async function suiteContent() {
     assert.equal(sent.some((message) => message.type === "save-favorite"), false, "导入在跑时不许再发归档请求");
   });
 
+  await test("等满 10 秒还没关弹窗：要说一句「页面没响应」，而且真的不归档（1.17.8 · 审查 P2-1）", async () => {
+    /* 1.17.8：原来 10 秒到点直接走 stop()（那本来是「弹窗正常关掉」的收尾），于是观察器
+       一断、什么也不说、也不归档 —— 用户点了确定，界面上一点反馈都没有。
+       这里把页面里的 setTimeout 换成「只记下来、不自己跑」：既不用真等 10 秒，又确实
+       走的是 content.js 自己那条到点分支（不是把它的判断抄一份到测试里）。 */
+    const timers = [];
+    const fakeSetTimeout = (fn, ms) => { timers.push({ fn, ms, ran: false }); return timers.length; };
+    const fakeClearTimeout = () => {};
+    const chrome = makeChrome({ localData: { enabled: true } });
+    const page = dom.loadFragment({
+      html: VIDEO_PAGE,
+      chrome,
+      scripts: ["i18n.js", "content.js"],
+      globals: { setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout }
+    });
+    await settle(10);
+    const confirm = page.document.querySelector(".bili-dialog .confirm");
+    dom.fireUserEvent(confirm, "click");
+    await settle(4);
+    // 弹窗一直没关：这里不调用 closeDialog，直接把「10 秒到点了」这件事做一遍
+    const pending = timers.find((timer) => timer.ms === 10000 && !timer.ran);
+    assert.ok(pending, `点击之后应该挂着一个 10 秒到点的收尾，实际挂的是 ${JSON.stringify(timers.map((timer) => timer.ms))}`);
+    pending.ran = true;
+    pending.fn();
+    await settle(6);
+    assert.equal(page.chrome.__messages.length, 0,
+      `超时之后一条消息都不许发（这次归档就是要放弃），实际 ${JSON.stringify(page.chrome.__messages)}`);
+    const host = page.document.getElementById("bili-fav-archiver-host");
+    assert.ok(host && host.__shadowRoot, "超时也得给一张提示卡，不能默默什么都不说");
+    assert.ok(host.__shadowRoot.textContent.includes("B站页面没有响应"), "标题要说清是 B 站页面没响应");
+    assert.ok(host.__shadowRoot.textContent.includes("这次归档没有执行"), "正文要如实说这次没归档，并请用户重来一次");
+    assert.deepEqual(dom.takeObserverErrors().map((error) => String(error && error.message)), [], "提示卡不许抛错");
+  });
+
   await test("同一个视频在同一页里再收藏一次：给右下角提示，不再重复归档（1.16.11 · 用户第 1 条）", async () => {
     /* 1.16.11（用户第 1 条）：以前这里静默 return，用户完全看不到反馈。
        现在第二次关弹层要弹一张「本地已有该视频存档」的提示卡，而且一条消息都不许再发。 */

@@ -135,6 +135,15 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 **接口抓不到数据的处理**：`/x/web-interface/view` 的 `desc` 对不少视频就是空的或 `-`（实测 `BV1LKGm6ZErR` 返回 `-`），这时简介会退回收藏夹接口 `intro` 清理后的文本；`stat` 通常都有。
 
+### 归档侧三个写者共用一把闸门（1.17.8 修正）
+
+会往归档目录里写的路径一共三条：后台导入（`importBiliFavorites()`）、收藏库页面的删除 / 搬运 / 新建目录（`confirmCollectionAction` / `confirmPendingDelete` / 新建收藏夹表单 / 手动添加视频）、以及**视频页的手动收藏**（`save-favorite`）。它们各自的队列管不到别人，所以共用 `chrome.storage.session` 上的 `archiveWriteLock`（`{ kind, since }`，`kind` 取值 `import` / `library` / `save`，超过 `ARCHIVE_WRITE_LOCK_MAX_AGE_MS` 30 分钟自动失效）。
+
+- 判据只能有一个：`archiveWriteLockHeldByOthers(kind)` —— 返回占着闸门的**另一种**写者（空串＝没人占）。三份实现（`background.js` / `library.js` / `settings.js` 只读）同源，`test/stability.test.cjs` 核常量逐字一致。
+- **顺序必须是「先查别人、再立自己」**：`setArchiveWriteLock()` 是无条件覆写的，先立再查永远只会看到自己那把 —— 1.7.10 起的四处写路径当时就是这么写的，等于判据一直是死的，1.17.8 才把顺序摆正。
+- 手动收藏走 `saveFavoriteWithWriteLock(data, label)`（`save-favorite` 与 `retry-pending-favorite` 共用），被挡时回 `{ ok: false, busyWriteLock: kind }`；`busy` 与 `busyWriteLock` 都会把这条记成 `pendingFavorite`，别让一次被挡的收藏悄悄丢掉。
+- 顺手记一条既有事实：回收站页（`recycle.js`）还不占这把锁，属于已登记的 P3。
+
 ### 更新视频数据（4.4 引入，4.5 调整见下；1.9.7 起界面文案叫「更新视频数据」）
 
 收藏库的「更新视频数据」按钮经 `bca-refresh-video-stats` 触发 `refreshVideoStatus()`，逐条调用 `refreshOneArchiveStatus()`：

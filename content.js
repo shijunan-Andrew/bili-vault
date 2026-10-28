@@ -477,6 +477,9 @@
     });
   }
 
+  /* 1.17.8（审查 P2-1）：超时和「弹窗真的关了」是两个不同的结局，不能共用一个出口。
+     原来 10 秒到点直接调 stop()：观察器一断、什么也不说、也不归档 —— 用户点了确定，
+     界面上一点反馈都没有，只能以为已经存上了。慢网、「新建收藏夹」的二次交互都会撞上。 */
   function waitForSuccessfulClose(dialog, data) {
     let finished = false;
     let timeout;
@@ -487,6 +490,18 @@
       observer?.disconnect();
       clearTimeout(timeout);
       pendingStops.delete(stop);
+    };
+    // 到点了弹窗还没关：这次归档没做，必须说出来（stop 是正常收尾，别复用它）
+    const giveUp = () => {
+      if (finished) return;
+      stop();
+      playSound("error");
+      showNotice(
+        BcaI18n.t("B站页面没有响应"),
+        BcaI18n.t("收藏弹窗一直没有关闭，这次归档没有执行。请重新收藏一次。"),
+        "",
+        true
+      );
     };
     observer = new MutationObserver(() => {
       if (finished) return;
@@ -507,7 +522,7 @@
     });
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "aria-hidden"] });
     pendingStops.add(stop);
-    timeout = window.setTimeout(stop, 10000);
+    timeout = window.setTimeout(giveUp, 10000);
   }
 
   document.addEventListener("click", (event) => {

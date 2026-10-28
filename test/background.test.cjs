@@ -521,10 +521,36 @@ async function suite() {
 
   await test("归档写锁：超过时限的锁自己失效，不会把写永久挡住", async () => {
     const bg = loadBackground({ chrome: chromeWithMirror(null) });
+    // 1.17.8：这里原来写的是 `at`，而判据读的是 `since` —— 锁等于没过期，断言是靠
+    // 「反正读不到 since」蒙对的。改成 since 之后才真的在验「陈旧失效」。
     await bg.chrome.storage.session.set({
-      archiveWriteLock: { kind: "import", at: Date.now() - 31 * 60 * 1000 }
+      archiveWriteLock: { kind: "import", since: Date.now() - 31 * 60 * 1000 }
     });
     assert.equal(await bg.__test.archiveWriteLockHeldBy("import"), false);
+  });
+
+  await test("1.17.8：手动收藏也要过归档闸门 —— 别人占着就回绝，自己跑完无论成败都放锁（审查 P2-2）", async () => {
+    const bg = loadBackground({ chrome: makeChrome({ localData: { enabled: false } }) });
+    // 收藏库正在删 / 搬：立刻回绝，并且不许把别人的锁覆写成自己的。
+    await bg.chrome.storage.session.set({ archiveWriteLock: { kind: "library", since: Date.now() } });
+    const blocked = await bg.__test.saveFavoriteWithWriteLock({ metadata: {}, folders: [] });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.busyWriteLock, "library");
+    assert.match(blocked.message, /删除或搬运/, "被收藏库挡住时要实话实说是谁在忙");
+    const stillLibrary = (await bg.chrome.storage.session.get("archiveWriteLock")).archiveWriteLock;
+    assert.equal(stillLibrary.kind, "library", "被别人占着时不许动那把锁");
+    // 导入占着：文案换成「等导入结束」。
+    await bg.chrome.storage.session.set({ archiveWriteLock: { kind: "import", since: Date.now() } });
+    const busyImport = await bg.__test.saveFavoriteWithWriteLock({ metadata: {}, folders: [] });
+    assert.equal(busyImport.busyWriteLock, "import");
+    assert.match(busyImport.message, /导入/);
+    // 没人占：这条路径真的跑了一遍（enabled=false 让它立刻返回），锁必须放掉。
+    await bg.chrome.storage.session.remove("archiveWriteLock");
+    const ran = await bg.__test.saveFavoriteWithWriteLock({ metadata: {}, folders: [] });
+    assert.equal(ran.ok, false);
+    assert.match(ran.message, /自动归档已关闭/, "没被挡时应该真的走到保存链路里");
+    const afterRun = (await bg.chrome.storage.session.get("archiveWriteLock")).archiveWriteLock;
+    assert.equal(afterRun, undefined, "跑完必须放锁，不能留给下一轮");
   });
 
 /* ---------------- 原生消息（从 library.js 抠出来真跑） ---------------- */

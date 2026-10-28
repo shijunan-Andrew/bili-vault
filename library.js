@@ -177,7 +177,10 @@ let videoAddInProgress = false;
    删除 / 搬运 / 新建目录。它们各自排队（importRunChain、各区自己的 *InProgress 标志），
    但彼此完全看不见对方，同时写同一批目录时导入会把刚删掉的目录名字写回统计库。
    这里用一个 storage.session 的共享闸门把两边摆到同一张桌上：页面这边三个标志任意一个为真
-   就立「library」锁，全部放开才解锁；后台的导入开始时读它，读到就先不开跑。 */
+   就立「library」锁，全部放开才解锁；后台的导入开始时读它，读到就先不开跑。
+   1.17.8（审查 P2-2）：第三条写者是手动收藏（后台的 save-favorite），它现在也领一把
+   { kind: "save" }。同时把顺序摆正 —— 闸门是**无条件覆写**的，必须先查别人、再立自己；
+   1.7.10 起的四处都是「先立 library 再查 import」，所以那四个判据其实一直是死的。 */
 const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
 // 超过这个岁数的锁当作陈旧遗留（浏览器/页面崩在写入中间），不能把人永久挡在门外
 const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
@@ -208,13 +211,22 @@ function publishLibraryWriteLock() {
   return busy ? setArchiveWriteLock("library") : clearArchiveWriteLock("library");
 }
 
-async function archiveWriteLockedByImport() {
+/* 1.17.8（审查 P2-2）：判据从「锁是不是导入拿的」放宽成「锁是不是被别人拿着」——
+   手动收藏（save）现在也会占锁，只认某一种 kind 会漏掉第三种写者。
+   返回占着闸门的那一种（空字符串 = 没人占）；自己那一把不算。 */
+async function archiveWriteLockHeldByOthers(kind) {
   try {
     const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
     const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
-    if (!lock || lock.kind !== "import") return false;
-    return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS;
-  } catch (_) { return false; }
+    if (!lock || lock.kind === kind) return "";
+    return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS ? String(lock.kind || "") : "";
+  } catch (_) { return ""; }
+}
+
+// 闸门被别人占着时怎么说：是导入还是手动收藏，实话实说（其余情况按导入兜底）
+function archiveWriteLockBusyMessage(holder, importText) {
+  if (holder === "save") return BcaI18n.t("后台正在保存一条收藏，等它做完再继续 —— 两边同时写同一批目录会留下对不上的记录。");
+  return importText;
 }
 let selectionMode = false;
 let videoFilter = "all";
@@ -4456,7 +4468,6 @@ async function confirmCollectionAction() {
   const targetNames = selectedActionTargetNames();
   if (!targetNames.length) { showToast(BcaI18n.t("请选择一个或多个收藏夹。")); return; }
   confirmCollectionActionButton.dataset.busy = "true";
-  setArchiveWriteLock("library");
   confirmCollectionActionButton.disabled = true;
   confirmCollectionActionButton.textContent = BcaI18n.t("正在整理…");
   // 1.7.21：跑批期间这个按钮不再禁用 —— 它变成「中止整理」。
@@ -4472,9 +4483,12 @@ async function confirmCollectionAction() {
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：搬运/复制是归档侧最重的写操作（复制整目录再删源），
     // 后台导入正在跑时先不动 —— 导入会把这一批目录的名字和统计写回 003database。
-    if (await archiveWriteLockedByImport()) {
-      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再搬 —— 两边同时写同一批目录会留下对不上的记录。"));
+    // 1.17.8（审查 P2-2）：先查别人、再立自己（闸门是无条件覆写的，反过来永远查不到别人）
+    const lockHolder = await archiveWriteLockHeldByOthers("library");
+    if (lockHolder) {
+      throw new Error(archiveWriteLockBusyMessage(lockHolder, BcaI18n.t("后台正在导入收藏夹，等它跑完再搬 —— 两边同时写同一批目录会留下对不上的记录。")));
     }
+    setArchiveWriteLock("library");
     const downloadParent = action.videos.some((video) => video.hasDownloadFiles) ? await getWritableDownloadParent() : null;
     const duplicateSets = new Map(targetNames.map((name) => [
       name,
@@ -4572,7 +4586,6 @@ async function confirmPendingDelete() {
   const action = pendingDeleteAction;
   if (!action) return;
   deleteInProgress = true;
-  publishLibraryWriteLock();
   cancelDeleteButton.disabled = true;
   confirmDeleteButton.disabled = true;
   confirmDeleteButton.textContent = action.type === "collection" ? BcaI18n.t("正在删除收藏夹…") : action.type === "batch" ? BcaI18n.t("正在批量删除…") : action.type === "unfinished" ? BcaI18n.t("正在清理…") : BcaI18n.t("正在删除…");
@@ -4590,9 +4603,12 @@ async function confirmPendingDelete() {
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：后台正在导入时先别删 —— 导入那边会把这一批目录的
     // 统计写回 003database，删一半的目录名会被它照着写入，留下指向已删目录的幽灵行。
-    if (await archiveWriteLockedByImport()) {
-      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再删 —— 两边同时写同一批目录会留下对不上的记录。"));
+    // 1.17.8（审查 P2-2）：先查别人、再立自己（闸门是无条件覆写的，反过来永远查不到别人）
+    const lockHolder = await archiveWriteLockHeldByOthers("library");
+    if (lockHolder) {
+      throw new Error(archiveWriteLockBusyMessage(lockHolder, BcaI18n.t("后台正在导入收藏夹，等它跑完再删 —— 两边同时写同一批目录会留下对不上的记录。")));
     }
+    publishLibraryWriteLock();
     const deleteDownloads = deleteAssociatedDownloads.checked;
     const downloadParent = deleteDownloads ? await getWritableDownloadParent() : null;
     /* 1.7.10（facet-destructive P2-3）：不带 create 地调 getWritableDownloadParent 时，
@@ -4850,7 +4866,6 @@ collectionForm.addEventListener("submit", async (event) => {
   try { name = validateCollectionName(collectionNameInput.value); }
   catch (error) { showToast(error.message); collectionNameInput.focus(); return; }
   collectionCreateInProgress = true;
-  publishLibraryWriteLock();
   submitCreateCollectionButton.disabled = true;
   cancelCreateCollectionButton.disabled = true;
   submitCreateCollectionButton.textContent = BcaI18n.t("正在创建…");
@@ -4859,9 +4874,12 @@ collectionForm.addEventListener("submit", async (event) => {
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：后台导入正在跑时不新建目录/搬运 ——
     // 导入那边也在建收藏夹目录、也在数目录，两边同时动会互相覆盖对方的判断。
-    if (await archiveWriteLockedByImport()) {
-      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再改 —— 两边同时写同一批目录会留下对不上的记录。"));
+    // 1.17.8（审查 P2-2）：先查别人、再立自己（闸门是无条件覆写的，反过来永远查不到别人）
+    const lockHolder = await archiveWriteLockHeldByOthers("library");
+    if (lockHolder) {
+      throw new Error(archiveWriteLockBusyMessage(lockHolder, BcaI18n.t("后台正在导入收藏夹，等它跑完再改 —— 两边同时写同一批目录会留下对不上的记录。")));
     }
+    publishLibraryWriteLock();
     try {
       await rootHandle.getDirectoryHandle(name);
       throw new Error(BcaI18n.t("收藏夹“{name}”已存在。", { name }));
@@ -4891,7 +4909,6 @@ videoForm.addEventListener("submit", async (event) => {
   const collectionNames = selectedTargetNames(videoTargetOptions);
   if (!collectionNames.length) { showToast(BcaI18n.t("请选择一个或多个目标收藏夹。")); return; }
   videoAddInProgress = true;
-  publishLibraryWriteLock();
   submitAddVideoButton.disabled = true;
   cancelAddVideoButton.disabled = true;
   submitAddVideoButton.textContent = BcaI18n.t("正在解析并保存…");
@@ -4900,9 +4917,12 @@ videoForm.addEventListener("submit", async (event) => {
     if (await permissionRequest !== "granted") throw new Error(BcaI18n.t("没有获得本地备份文件夹的写入权限。"));
     // 1.7.10（facet-destructive P2-5）：后台导入正在跑时不再往归档里加新目录 ——
     // 这条链路会经后台建目录写文件，与导入是两条独立队列，同时动会互相覆盖判断。
-    if (await archiveWriteLockedByImport()) {
-      throw new Error(BcaI18n.t("后台正在导入收藏夹，等它跑完再加 —— 两边同时写同一批目录会留下对不上的记录。"));
+    // 1.17.8（审查 P2-2）：先查别人、再立自己（闸门是无条件覆写的，反过来永远查不到别人）
+    const lockHolder = await archiveWriteLockHeldByOthers("library");
+    if (lockHolder) {
+      throw new Error(archiveWriteLockBusyMessage(lockHolder, BcaI18n.t("后台正在导入收藏夹，等它跑完再加 —— 两边同时写同一批目录会留下对不上的记录。")));
     }
+    publishLibraryWriteLock();
     const result = await chrome.runtime.sendMessage({
       type: "add-manual-video",
       data: { identifier, collections: collectionNames }

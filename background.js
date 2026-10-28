@@ -4767,13 +4767,18 @@ async function importBiliFavoritesInner(data, tabId = null) {
   /* 1.7.10（facet-destructive P2-5）：本地收藏库正在删 / 搬 / 新建目录时不开始这一轮 ——
      两边同时写同一批归档目录，导入会把刚删掉的目录名字写回统计库。
      注意这个 await 必须放在 claimImportRun() **之后**：挪到前面就等于在「置位」之前
-     又开了一个窗口，连点两次又能钻进来（见上面 4.9.x 那段注释）。 */
-  if (await archiveWriteLockHeldBy("library")) {
+     又开了一个窗口，连点两次又能钻进来（见上面 4.9.x 那段注释）。
+     1.17.8（审查 P2-2）：判据换成「有没有别人占着闸门」—— 手动收藏也会占锁，
+     只认 "library" 会漏掉那种情形（收藏期间开导入，两边同样写同一批目录）。 */
+  const importLockHolder = await archiveWriteLockHeldByOthers("import");
+  if (importLockHolder) {
     run.active = false;
     run.cancelled = false;
     publishImportState({ running: false, paused: false, finishedAt: Date.now() }, true);
     await clearImportRunSnapshot();
-    throw new Error("本地收藏库正在改动归档（删除 / 搬运 / 新建目录），等它做完再导入。");
+    throw new Error(importLockHolder === "save"
+      ? "本地正在保存一条收藏，等它做完再导入。"
+      : "本地收藏库正在改动归档（删除 / 搬运 / 新建目录），等它做完再导入。");
   }
   // 占位成功、且收藏库那边没在写：把「导入进行中」摆到跨上下文闸门上。
   // 放在这里而不是 claimImportRun 里 —— 那个函数是纯粹的占位判断，测试会把它单独抠出来跑。
@@ -5358,7 +5363,9 @@ function claimImportRun() {
    正好是「这次会话内的互斥」这个语义。
      · 后台导入期间写 { kind: "import", since }，结束时清掉；
      · 收藏库要动归档之前先读它，导入在跑就先不动，并如实告诉用户；
-     · 反过来收藏库动手期间也写 { kind: "library" }，导入开始时同样要读它。 */
+     · 反过来收藏库动手期间也写 { kind: "library" }，导入开始时同样要读它；
+     · 1.17.8 起手动收藏（save-favorite）也领一把 { kind: "save" }：它是第三条会写归档
+       目录的路径，原来既不占也不查 —— 收藏库正在删 / 搬同一个收藏夹时两边会同时写盘。 */
 const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
 // 超过这个岁数的锁当作陈旧遗留（浏览器/页面崩在写入中间），不能把人永久挡在门外
 const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
@@ -5391,6 +5398,42 @@ async function archiveWriteLockHeldBy(kind) {
     if (!lock || lock.kind !== kind) return false;
     return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS;
   } catch (_) { return false; }
+}
+
+/* 1.17.8（审查 P2-2）：判据从「是不是导入」放宽成「是不是被别人拿着」——
+   手动收藏（save）现在也会占锁，只认某一种 kind 的判据会漏掉第三种写者。
+   返回占着闸门的那一种（空字符串 = 没人占）。自己那一把不算，于是调用方可以
+   「先查别人、再立自己」而不必担心上一次自己没清干净。 */
+async function archiveWriteLockHeldByOthers(kind) {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || lock.kind === kind) return "";
+    return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS ? String(lock.kind || "") : "";
+  } catch (_) { return ""; }
+}
+
+/* 1.17.8（审查 P2-2）：保存一条收藏也要过闸门。先查别人占没占，再立自己那把
+   （setArchiveWriteLock 是无条件覆写，立完再查就查不到别人了），跑完不论成败都放掉。
+   这一层只管「查锁 + 领锁」；判重、补资料、写盘仍在 saveFavoriteInOrder 里，
+   免得同一个判断出现第二份实现。 */
+async function saveFavoriteWithWriteLock(data, label = "保存收藏") {
+  const blockedBy = await archiveWriteLockHeldByOthers("save");
+  if (blockedBy) {
+    return {
+      ok: false,
+      busyWriteLock: blockedBy,
+      message: blockedBy === "import"
+        ? "目前正在导入收藏夹，等导入结束后再收藏。"
+        : "本地收藏库正在删除或搬运归档，等它做完再收藏。"
+    };
+  }
+  await setArchiveWriteLock("save");
+  try {
+    return await withKeepAlive(runInSaveQueueWithDeadline(saveFavoriteInOrder(data), label), label);
+  } finally {
+    await clearArchiveWriteLock("save");
+  }
 }
 
 function importBiliFavoritesInOrder(data, tabId = null) {
@@ -6175,9 +6218,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 1.4.2（P1-3）：导入占着串行队列时这次收藏会一直等下去，所以给它加等待上限；超时就把
     // 这条记成 pendingFavorite 并把原因写进 lastResult —— 弹窗「最近状态」能直接看到，
     // 走「重新授权」那条路时也会顺手补存，用户不必回到 B 站重新收藏一次。
-    withKeepAlive(runInSaveQueueWithDeadline(saveFavoriteInOrder(message.data), "保存收藏"), "保存收藏")
+    // 1.17.8（审查 P2-2）：这条路径原来既不占也不查 archiveWriteLock —— 收藏库正在删 / 搬
+    // 同一个收藏夹时两边会同时写盘。查锁与领锁收在 saveFavoriteWithWriteLock 里（只有一份）。
+    saveFavoriteWithWriteLock(message.data)
       .then((result) => {
-        if (result?.busy) {
+        // 1.17.8（审查 P2-2）：闸门被占也是「这次没存成、但可以补存」，同样把这条记下来，
+        // 别只弹一句话就把收藏丢了 —— 走「重新授权」/「补存」时会再用它一次。
+        if (result?.busy || result?.busyWriteLock) {
           chrome.storage.local.set({
             pendingFavorite: message.data,
             lastResult: { message: result.message, createdAt: Date.now() }
@@ -6202,7 +6249,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "retry-pending-favorite") {
     chrome.storage.local.get("pendingFavorite").then(({ pendingFavorite }) => {
       if (!pendingFavorite) return sendResponse({ ok: false, message: "没有可补存的视频，请回到 B 站重新收藏一次。" });
-      return withKeepAlive(runInSaveQueueWithDeadline(saveFavoriteInOrder(pendingFavorite), "补存视频"), "补存视频").then(sendResponse);
+      // 1.17.8（审查 P2-2）：补存也是一条写路径，同样要过闸门（超时文案沿用「补存视频」）
+      return saveFavoriteWithWriteLock(pendingFavorite, "补存视频").then(sendResponse);
     }).catch((error) => sendResponse({ ok: false, message: error.message || "读取待补存视频失败。" }));
     return true;
   }

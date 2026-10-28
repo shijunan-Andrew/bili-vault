@@ -359,6 +359,8 @@ const BACKGROUND_EXPORTS = [
   "archivePreviousStatsDatabase", "statsBackupTimestamp", "trimStatsBackups",
   "withStatsWriteSlot", "statsWriteChain",
   "setArchiveWriteLock", "clearArchiveWriteLock", "archiveWriteLockHeldBy",
+  // 1.17.8（审查 P2-2）：判据放宽成「别人拿没拿」，以及收藏那条写路径的领锁包装
+  "archiveWriteLockHeldByOthers", "saveFavoriteWithWriteLock",
   "createImportJournal", "rollbackImport", "cleanupLeftoverImport", "saveImportedItem", "importMetadata",
   "statsRecordForItem", "maskLocalUserPaths", "storageReportLabel",
   "discardFailedRecord", "renameFailureNote", "statsPendingRecords",

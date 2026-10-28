@@ -2614,11 +2614,11 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   assert.match(background, /setArchiveWriteLock\("import"\);/);
   assert.match(background, /async function finishImportRunSnapshot\(\) \{\s*\n\s*\/\/[\s\S]{0,200}?await clearArchiveWriteLock\("import"\);/);
   // 后台开始导入之前要看收藏库那侧有没有人在写
-  assert.match(background, /if \(await archiveWriteLockHeldBy\("library"\)\) \{/);
+  assert.match(background, /const importLockHolder = await archiveWriteLockHeldByOthers\("import"\);/);
   // 页面：三个写入标志任意一个为真就立锁，并在这四条写路径上先问后台
   assert.match(library, /function publishLibraryWriteLock\(\) \{/);
   assert.match(library, /const busy = deleteInProgress \|\| collectionCreateInProgress \|\| videoAddInProgress;/);
-  assert.equal([...library.matchAll(/if \(await archiveWriteLockedByImport\(\)\) \{/g)].length, 4,
+  assert.equal([...library.matchAll(/const lockHolder = await archiveWriteLockHeldByOthers\("library"\);/g)].length, 4,
     "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径（导出与封面转换 1.9.0 搬去设置页）都要先查闸门");
   assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
   // 设置页的「导出归档元数据 / 归档体检 / 重建统计库 / 导出清单 / 完整度巡检」在导入期间拒绝扫半成品
@@ -5463,8 +5463,10 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
   assert.match(backgroundCode, /await withQueueDeadline\(handle\.turn, IMPORT_QUEUE_WAIT_TIMEOUT_MS, label\)/, "期限只能套 handle.turn");
   assert.match(backgroundCode, /handle\.abandon\(\);/, "超时要把这一棒作废，才配说「这次没有执行」");
   assert.match(backgroundCode, /const SAVE_TASK_ABANDONED = Symbol\("save-task-abandoned"\);/);
-  assert.equal((backgroundCode.match(/runInSaveQueueWithDeadline\(/g) || []).length, 4,
-    "定义 1 处 + 保存收藏 / 手动添加 / 补存三个入口各 1 处");
+  // 1.17.8（审查 P2-2）：保存收藏 / 补存两条入口合并进 saveFavoriteWithWriteLock（查锁 + 领锁
+  // 只有一份），所以队列期限的调用点从 4 处变成 3 处：定义 1 + 那个包装 1 + 手动添加 1。
+  assert.equal((backgroundCode.match(/runInSaveQueueWithDeadline\(/g) || []).length, 3,
+    "定义 1 处 + 保存收藏（含补存）的领锁包装 1 处 + 手动添加 1 处");
   assert.match(contentCode, /function rememberSeen\(signature\) \{[\s\S]{0,160}seen\.add\(signature\);/);
   assert.equal((contentCode.match(/seen\.add\(/g) || []).length, 1, "去重表只该在 rememberSeen 里写一次");
   /* 1.16.11（用户第 1 条）：命中查重时不再静默 return —— 给一句「本地已有该视频存档」。 */
