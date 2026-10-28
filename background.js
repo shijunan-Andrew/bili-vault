@@ -3021,7 +3021,48 @@ function importRunLooksComplete(snapshot) {
   return folderTotal > 0 && folderIndex >= folderTotal;
 }
 
+/* 1.17.10（审查 P2-6）：浏览器重启后 chrome.storage.session 会被清空，但 local 里那份
+   「这一轮留下了什么」（writeImportRunSnapshot 每次都写）还在。原来这种情形走的是静默复位：
+   用户既看不到「上次导入没导完」，设置页的「清理上次中断」也永远不出现 —— 那一行要求
+   interruptedAt，而它只有 markImportLeftoverInterrupted() 才会写，那条路要求 session 里
+   还有运行快照。重启之后就没有了，于是永远没人写。
+
+   现在按同一口径补一次宣告。三个条件缺一不可：
+     ① 确实留下过东西（新建 / 新增 / 改写，或者本来就有条目要导）——刚开跑就没了没什么可说；
+     ② 还没宣告过（interruptedAt 是数字就说明 markImportLeftoverInterrupted 已经写过）；
+     ③ 它不是「其实已经跑完了」（判据与正常收尾共用 importRunLooksComplete）。 */
+function leftoverRecordHasWork(record) {
+  const journal = record?.journal || {};
+  const created = (journal.createdCollections?.length || 0)
+    + (journal.createdRecords?.length || 0)
+    + (journal.addedFiles?.length || 0);
+  const modified = journal.modifiedFiles?.length || 0;
+  return created > 0 || modified > 0 || (Number(record?.counts?.total) || 0) > 0;
+}
+
+async function announceInterruptedImportFromLeftover() {
+  const stored = await chrome.storage.local.get(IMPORT_LEFTOVER_KEY).catch(() => ({}));
+  const record = stored?.[IMPORT_LEFTOVER_KEY] || null;
+  if (!record?.journal) return false;
+  if (Number(record.interruptedAt) > 0) return false;
+  if (!leftoverRecordHasWork(record)) return false;
+  if (importRunLooksComplete(record)) return false;
+  await importAnnounceInterruption(record);
+  return true;
+}
+
+/* 1.17.10（审查 P2-6）：同一个后台可能被几条链同时叫来复位（模块启动 / onStartup /
+   onInstalled / get-status 自愈 / bca-import-probe）。并发进来会各读一遍 local 里的残影，
+   于是可能重复宣告一次中断。这里让它们共用同一次运行：算完就清空，后面再进来的重新算。 */
+let importReconcilePromise = null;
+
 async function importReconcileState() {
+  if (importReconcilePromise) return importReconcilePromise;
+  importReconcilePromise = reconcileImportRunState().finally(() => { importReconcilePromise = null; });
+  return importReconcilePromise;
+}
+
+async function reconcileImportRunState() {
   if (importRun.active) return { active: true, reset: false };
   const stored = await chrome.storage.local.get("importState").catch(() => ({}));
   const storedState = stored?.importState || null;
@@ -3044,11 +3085,15 @@ async function importReconcileState() {
   // 其实判据可以更紧：内存里的 importRun.active 才是"这一轮真的在跑"（上面刚判过），
   // 而 session 里没有 active 快照就说明上一轮的进程已经没了 —— 立刻复位，不必等 90 秒。
   if (!orphan) {
+    /* 1.17.10（审查 P2-6）：重启后走的就是这一条 —— session 快照没了，只剩 local 里那份。
+       先按它补一次中断宣告（里面会写 interruptedAt，设置页的「清理上次中断」据此出现），
+       再照旧把界面状态复位。 */
+    const announced = await announceInterruptedImportFromLeftover();
     if (storedState?.running === true) {
       importState = { ...importState, running: false, paused: false, updatedAt: Date.now() };
       await chrome.storage.local.set({ importState }).catch(() => {});
     }
-    return { active: false, reset: false };
+    return { active: false, reset: announced };
   }
   if (storedState?.running !== true) {
     /* 1.16.4（真机反馈）：50 条全导完了，回来却显示「导入被中断」。

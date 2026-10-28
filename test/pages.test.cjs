@@ -1099,9 +1099,42 @@ async function suitePopup() {
     assert.deepEqual({ ...readScope() }, { kind: "recent", days: 7 }, "「最近 7 天」要读成时间窗");
     assert.equal(readLimit(), 0, "选时间窗时不限条数");
     select.value = "";
-    assert.equal(readLimit(), 0, "读不到值时要退成「全部」，不许变成 NaN 把导入卡死");
+    assert.equal(readLimit(), 0, "读不到值时不限条数，不许变成 NaN 把导入卡死");
+    assert.deepEqual({ ...readScope() }, { kind: "recent", days: 7 }, "1.17.10（审查 P2-7）：认不出的值退回上一次认得的那个，不再静默退成「全部」");
     select.value = "bogus";
-    assert.deepEqual({ ...readScope() }, { kind: "limit", limit: 0 }, "不认识的值要退成「全部」，不能静默变成别的档");
+    assert.deepEqual({ ...readScope() }, { kind: "recent", days: 7 }, "拼错的值同样退回上一次的选择，不能变成整库导入");
+  });
+
+  await test("1.17.10：存储里的导入数量认不出来时退回「全部」并说一句，改动认不出就不落盘（审查 P2-7）", async () => {
+    const chrome = makeChrome({ version: "1.17.10", localData: { importLimit: "recent-7" } });
+    const page = dom.loadPage({ htmlFile: "popup.html", chrome });
+    await settle();
+    const doc = page.document;
+    const select = doc.getElementById("importLimit");
+    const hint = doc.getElementById("importScopeHint");
+    assert.ok(select && hint, "下拉和提示行都要在");
+    for (let i = 0; i < 40 && chrome.storage.local.dump().importLimit !== "limit:0"; i += 1) await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(select.value, "limit:0", "认不出来的存储值要退回「全部」");
+    assert.equal(chrome.storage.local.dump().importLimit, "limit:0", "坏值顺手改掉，别每次打开都提醒一遍");
+    assert.match(hint.textContent, /认不出来/, "要说明为什么变了");
+    assert.ok(hint.classList.contains("emphasis"), "警告要抬成正文色，不能混在小字里");
+
+    /* 正常换一档：提示恢复、存储跟着走 */
+    select.value = "limit:50";
+    dom.fireUserEvent(select, "change");
+    await settle();
+    assert.equal(chrome.storage.local.dump().importLimit, "limit:50");
+    assert.ok(!hint.classList.contains("emphasis"), "正常选择不该留下警告");
+    assert.doesNotMatch(hint.textContent, /认不出来/, "警告文字要清掉");
+
+    /* 再塞一个认不出的值：退回上一次认得的那个，而且不许写进存储 */
+    select.value = "bogus";
+    dom.fireUserEvent(select, "change");
+    await settle();
+    assert.equal(select.value, "limit:50", "退回上一次认得的那个");
+    assert.equal(chrome.storage.local.dump().importLimit, "limit:50", "认不出的值一个字都不许写进存储");
+    assert.match(hint.textContent, /退回上一次的选择/);
   });
 
   await test("1.17.0：下拉同时表达「条数」与「最近几天」，说明跟着换，老版本存的数字能迁移", async () => {

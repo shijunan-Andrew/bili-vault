@@ -33,6 +33,10 @@ const importScopeHint = document.getElementById("importScopeHint");
    1.16.5 存下来的纯数字值（如 "50"）读的时候按「最多导入」迁移。 */
 const IMPORT_LIMIT_KEY = "importLimit";
 const IMPORT_SCOPE_DEFAULT = "limit:0";
+/* 1.17.10（审查 P2-7）：下拉当前的值「认不出来」时退回哪里 —— 只记本页最后一次认得的值，
+   不落盘、也不另存第二份设置（同一件事只留一处权威：chrome.storage.local 的 importLimit）。 */
+let lastValidImportScopeValue = IMPORT_SCOPE_DEFAULT;
+let importScopeWarning = "";
 const speedGroup = document.getElementById("speedGroup");
 const speedHint = document.getElementById("speedHint");
 // 1.14.3（审查 C-3）：写失败时临时借速度提示行说一句，6 秒后回到正常文案。
@@ -371,12 +375,31 @@ function setLastResultText(value) {
    「最近几天」按收藏时间过滤（recent:N），「最多导入多少条」只数本地还没有的（limit:N，0 = 全部）。
    解析写成显式映射 —— 以前 `Number(value) || 0` 那种写法遇到 "recent:3" 会静默变成 0（= 全部），
    等于「选了最近 3 天却导入了整个收藏夹」。 */
-function selectedImportScope() {
-  const raw = String(importLimitSelect?.value || IMPORT_SCOPE_DEFAULT);
-  const [kind, amountText] = raw.split(":");
-  const amount = Math.max(0, Math.round(Number(amountText) || 0));
+/* 1.17.10（审查 P2-7）：「这个值到底什么意思」只在这里判一次。
+   认不出来（拼错的、老版本留下的怪值、浏览器归一化出来的空串）一律返回 null，由调用方决定
+   退回哪一个 —— 以前是静默当成「全部」，等于把「最近 7 天」悄悄换成整库导入。 */
+function parseImportScope(raw) {
+  const text = String(raw ?? "");
+  if (!text) return null;
+  const known = importLimitSelect
+    ? Array.from(importLimitSelect.options).some((item) => item.value === text)
+    : true;
+  if (!known) return null;
+  const [kind, amountText] = text.split(":");
+  if (!/^\d+$/.test(amountText || "")) return null;
+  const amount = Math.max(0, Math.round(Number(amountText)));
   if (kind === "recent" && amount > 0) return { kind: "recent", days: Math.min(365, amount) };
-  return { kind: "limit", limit: amount };
+  if (kind === "limit") return { kind: "limit", limit: amount };
+  return null;
+}
+
+function selectedImportScope() {
+  const parsed = parseImportScope(importLimitSelect?.value);
+  if (parsed) {
+    lastValidImportScopeValue = importLimitSelect.value;
+    return parsed;
+  }
+  return parseImportScope(lastValidImportScopeValue) || { kind: "limit", limit: 0 };
 }
 
 // 1.8.8：0 表示「全部」；数字表示这次最多导入多少条**新**视频（已有的跳过不占名额）。
@@ -397,7 +420,9 @@ function scopeHintText(scope) {
 
 function updateImportScopeHint() {
   if (!importScopeHint) return;
-  importScopeHint.textContent = scopeHintText(selectedImportScope());
+  const hint = scopeHintText(selectedImportScope());
+  importScopeHint.textContent = importScopeWarning ? `${importScopeWarning} ${hint}` : hint;
+  importScopeHint.classList.toggle("emphasis", Boolean(importScopeWarning));
 }
 
 function openImportConfirm() {
@@ -1206,11 +1231,32 @@ function restoreImportLimit() {
     const value = saved?.[IMPORT_LIMIT_KEY];
     if (value === undefined || value === null || !importLimitSelect) return;
     const text = /^\d+$/.test(String(value)) ? "limit:" + String(value) : String(value);
-    const option = Array.from(importLimitSelect.options).find((item) => item.value === text);
-    if (option) importLimitSelect.value = option.value;
+    /* 1.17.10（审查 P2-7）：存着的值认不出来（老版本怪值、手工改过的存储）不许静默退成「全部」。
+       退回默认档、说一句、并把存储里的坏值改掉 —— 只提醒这一次，下次打开不再唠叨。 */
+    if (!parseImportScope(text)) {
+      importScopeWarning = BcaI18n.t("上次保存的导入数量认不出来，已退回「全部」；重新选一次就会记住。");
+      lastValidImportScopeValue = IMPORT_SCOPE_DEFAULT;
+      importLimitSelect.value = IMPORT_SCOPE_DEFAULT;
+      updateImportScopeHint();
+      chrome.storage.local.set({ [IMPORT_LIMIT_KEY]: IMPORT_SCOPE_DEFAULT })
+        .catch((error) => console.warn("导入上限没改回来（下次打开还会再提醒一次）", error));
+      return;
+    }
+    importLimitSelect.value = text;
+    lastValidImportScopeValue = text;
+    importScopeWarning = "";
     updateImportScopeHint();
   }).catch((error) => console.warn("导入上限没读出来（先按默认档）", error));
   importLimitSelect?.addEventListener("change", () => {
+    /* 1.17.10（审查 P2-7）：先认一下再落盘 —— 认不出来就退回上一次认得的那个，别写进 storage。 */
+    if (!parseImportScope(importLimitSelect.value)) {
+      importScopeWarning = BcaI18n.t("这个导入数量认不出来，已退回上一次的选择。");
+      importLimitSelect.value = lastValidImportScopeValue;
+      updateImportScopeHint();
+      return;
+    }
+    importScopeWarning = "";
+    lastValidImportScopeValue = importLimitSelect.value;
     updateImportScopeHint();
     chrome.storage.local.set({ [IMPORT_LIMIT_KEY]: importLimitSelect.value })
       .catch((error) => console.warn("导入上限没记住（下次打开会回到默认档）", error));

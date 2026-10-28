@@ -297,6 +297,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **storage 写入兜底只覆盖关键路径**：`safeLocalSet(patch, label)` 失败等 `STORAGE_WRITE_RETRY_MS = 200` 毫秒重试一次，仍失败写一条 `console.warn` + `lastStorageError`（`{ label, message, at }`）并返回 `false`——**它不抛错**，调用方必须看返回值；`setBcaStatsSnapshot()` 是统计快照专用包装，内部保留 `chrome.storage.local.set({ bcaStats: stats })` 字面量（`stability:5627` 钉着），最终失败才抛。弹窗读 `lastStorageError` 展示「本地存储没写进去」，点「知道了」把键删掉。
 - **导入断了就是失败，没有「继续」**（1.16.10，用户要求）：删掉「继续上次导入」之后，中断只做三件事 —— 复位状态、把「上次导入可能因为杀后台、网络波动等原因没有完整导入，上次导入了 N 条，如果需要继续导入请到收藏夹页使用插件再导入一次。」写进 `importState`（弹窗与收藏库的「最近状态」都读它）、并落一份 `001错误报告`（同时挂到 `lastError` 上，弹窗能直接「下载错误报告」）。`bcaImportResume` 这个键只保留给清理旧版本留下的记录，不再写新断点。
 - **「其实已经跑完了」不报中断**（1.16.10）：收尾第一步先往 `chrome.storage.session` 的快照里写 `finishing: true` 与最终计数；下次启动若发现快照里的条目全数完、收藏夹也走完（`fixed` 见 `importRunLooksComplete()`），就按成功收尾，不宣告中断、不写错误报告。这是「SW 恰好在最后一次写盘之后、发布结束状态之前被杀」那个窗口的解药。
+- **重启之后也要把「上次没导完」说出来**（1.17.10 · 审查 P2-6）：重启会清空 `chrome.storage.session`，运行快照没了，只剩 `chrome.storage.local` 里的 `bcaImportLeftover`（`writeImportRunSnapshot()` 每次都写一份）。`importReconcileState()` 原来在「session 里没有 active 快照」这条分支上静默复位 —— 于是用户看不到中断说明，设置页的「清理上次中断」也永远不出现（那一行要求 `interruptedAt`，而它只有 `markImportLeftoverInterrupted()` 会写，那条路要求 session 里还有快照）。现在这条分支先调 `announceInterruptedImportFromLeftover()`，三个条件同时成立才宣告：① 这一轮确实留下过东西（`leftoverRecordHasWork()`：journal 里新建 / 新增 / 改写非空，或 `counts.total > 0`）；② 还没宣告过（`interruptedAt` 不是数字）；③ 它没有「其实已经跑完」（与正常收尾共用 `importRunLooksComplete()`）。宣告完**不删** local 副本（`keepLeftover` 语义不变），设置页据此给出清理入口。同时 `importReconcileState()` 外面套了一层 `importReconcilePromise` 串行化：模块启动 / onStartup / onInstalled / get-status 自愈 / `bca-import-probe` 可能并发叫进来，不串行会各宣告一遍。
 - **版本号只有 `manifest.json` 一处**（1.8.23，P1-6）：`library.html` 的 `#sideVersion` 是空标签，`library.js` 启动时用 `displayVersion(chrome.runtime.getManifest().version)` 填；`release.ps1` 只替换 `manifest.json`，界面与测试里不许再出现硬编码版本号（测试盯着）。
 
 ### 内容脚本词典、页面错误留档、卡片复用与 HISTORY 索引（1.8.23）
@@ -417,6 +418,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **导入可以按条数收工（1.8.8）**：`bca-import-selected-folders` 载荷可带 `limit`（0 = 全部）。名额只数 `pendingItems`（本地还没有的新视频），已有记录不算；`remaining = importLimit - imported` 截断队列后置 `limitReached`，收藏夹循环据此提前 `break`，且额度用完时不再刷新旧记录。完成消息与报告都要写明「按上限」「还剩多少」，否则用户会把「只导了一半」当失败。
 - **「同步最近收藏」是「开始更新」的新名字（1.8.8）**：界面、引导页、两本词典一起改名；`docs/HISTORY.md` 里的旧写法是历史记录，不改。
 - **1.17.0 起，「同步最近收藏」并进了导入数量下拉**：界面入口只留「选择想要导入的数量」（`recent:*` / `limit:*` 两组），但后台的两个参数没变 —— `recentDays` 按收藏时间过滤、`limit` 只数本地没有的。改这块时别把两件事混成一个字段。
+- **下拉的值认不出来时退回上一次，不许静默退成「全部」**（1.17.10 · 审查 P2-7）：`parseImportScope(raw)` 是「这个值到底什么意思」的唯一判定 —— 白名单只认 `<select>` 里真有的选项、`kind` 只认 `recent` / `limit`、数量必须是纯数字，其余一律返回 `null`。`selectedImportScope()` 认不出时退回 `lastValidImportScopeValue`（本页最后一次认得的原始值，**不落盘**，同一件事仍然只有 `chrome.storage.local` 的 `importLimit` 一处权威）。`restoreImportLimit()` 读到坏值退回默认档并顺手改掉存储（只提醒一次），`change` 里认不出就退回上一次且**不写 storage**；两种情形都把警告串拼进 `#importScopeHint` 并加 `.emphasis`（正文色），说明为什么会变。
 - **老 PNG 封面转 WebP 工具已移除（1.9.0）**：`coverConvertAction()` 与四个常量全部删除；归档里遗留的 `封面.png` 原样保留、读取侧照常退回它。别再把这个一次性迁移工具加回来。
 - **`004导出` 只留最近 5 份（1.8.8）**：导出成功后按 `exportPruneList()` 删多余（同秒撞名的 `-2` 排在本体之后），删旧失败只记日志，不影响本次导出；用户自己放进去的文件不匹配命名规则，不会被删。
 

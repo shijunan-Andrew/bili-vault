@@ -373,7 +373,9 @@ const BACKGROUND_EXPORTS = [
   "rememberLocalRoot", "maskKnownRoots",
   "writeFile", "fileExists",
   // 1.13.5（审查 P1-6）：对比残影的复位要能被真执行
-  "diffReconcileState", "diffRun"
+  "diffReconcileState", "diffRun",
+  // 1.17.10（审查 P2-6）：重启后宣告中断的那条分支也要能被真执行
+  "importReconcileState", "announceInterruptedImportFromLeftover"
 ];
 
 function loadBackground(options = {}) {

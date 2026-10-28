@@ -879,6 +879,86 @@ async function suite() {
     assert.deepEqual(result, { ok: false, reason: "nothing" });
   });
 
+  await test("重启后 session 快照没了，也要照实宣告上次导入没导完，并让清理入口出现（1.17.10 · 审查 P2-6）", async () => {
+    /* 真机上的顺序：导入跑到一半 → service worker 被杀 / 浏览器重启 → chrome.storage.session
+       被清空，只剩 local 里那份「这一轮留下了什么」。这条路以前是静默复位：
+       用户看不到「上次导入没导完」，设置页的「清理上次中断」也永远不出现。 */
+    const leftover = {
+      startedAt: 1000,
+      updatedAt: 2000,
+      counts: { total: 50, imported: 12, refreshed: 0, skipped: 0, failed: 0 },
+      cursor: { folder: "默认收藏夹", page: 2, saved: 3, folderTotal: 3, folderIndex: 1 },
+      journal: { createdCollections: [], createdRecords: [{ collection: "默认收藏夹", name: "记录一" }], addedFiles: [], modifiedFiles: [] }
+    };
+    const bg = loadBackground({
+      chrome: makeChrome({
+        localData: { importState: { running: true, text: "正在读取…" }, bcaImportLeftover: leftover, lastResult: { createdAt: 1, message: "旧结果" } },
+        sessionData: {}
+      })
+    });
+
+    const result = await bg.__test.importReconcileState();
+    assert.deepEqual({ ...result }, { active: false, reset: true }, "宣告了中断就要把 reset 报给弹窗");
+
+    const local = bg.chrome.storage.local.dump();
+    assert.equal(typeof local.bcaImportLeftover.interruptedAt, "number", "要盖上 interruptedAt，设置页的清理入口才认");
+    assert.ok(local.bcaImportLeftover.journal, "local 副本要留着，清理还要靠它");
+    assert.equal(local.importState.running, false, "界面状态要复位");
+    assert.equal(local.importState.interrupted, true, "要标成「中断」而不是正常结束");
+    assert.match(local.importState.text, /上次导入可能因为杀后台/, "文案要和真机上那条一致");
+    assert.match(local.importState.text, /上次导入了 12 条/, "数字要来自快照里的计数");
+    assert.equal(local.lastResult.failed, true, "中断是失败，别让它伴着「导入成功」的音效");
+
+    const stamped = local.bcaImportLeftover.interruptedAt;
+    const again = await bg.__test.importReconcileState();
+    assert.deepEqual({ ...again }, { active: false, reset: false }, "第二次进来不该再宣告一遍");
+    assert.equal(bg.chrome.storage.local.dump().bcaImportLeftover.interruptedAt, stamped, "时间戳不许被覆盖");
+  });
+
+  await test("local 里那份其实已经跑完了：别报中断、也别留下可清理的残影（1.17.10 · 审查 P2-6）", async () => {
+    const leftover = {
+      startedAt: 1000,
+      updatedAt: 2000,
+      counts: { total: 5, imported: 5, refreshed: 0, skipped: 0, failed: 0 },
+      cursor: { folder: "默认收藏夹", page: 1, folderTotal: 2, folderIndex: 2 },
+      journal: { createdCollections: [], createdRecords: [], addedFiles: [], modifiedFiles: [] }
+    };
+    const bg = loadBackground({
+      chrome: makeChrome({ localData: { importState: { running: true, text: "正在写入 5/5" }, bcaImportLeftover: leftover }, sessionData: {} })
+    });
+
+    const result = await bg.__test.importReconcileState();
+    assert.deepEqual({ ...result }, { active: false, reset: false });
+    const local = bg.chrome.storage.local.dump();
+    assert.equal(local.bcaImportLeftover.interruptedAt, undefined, "跑完了就不是中断，不许盖 interruptedAt");
+    assert.equal(local.importState.interrupted, undefined, "也不许标成中断");
+    assert.equal(local.importState.running, false, "但界面状态照旧要复位");
+  });
+
+  await test("刚开跑就被杀、一点东西都没留下：不打扰用户（1.17.10 · 审查 P2-6）", async () => {
+    const bg = loadBackground({
+      chrome: makeChrome({
+        localData: {
+          importState: { running: true, text: "正在读取收藏夹…" },
+          bcaImportLeftover: {
+            startedAt: 1000,
+            updatedAt: 1100,
+            counts: null,
+            cursor: null,
+            journal: { createdCollections: [], createdRecords: [], addedFiles: [], modifiedFiles: [] }
+          }
+        },
+        sessionData: {}
+      })
+    });
+
+    const result = await bg.__test.importReconcileState();
+    assert.deepEqual({ ...result }, { active: false, reset: false });
+    const local = bg.chrome.storage.local.dump();
+    assert.equal(local.bcaImportLeftover.interruptedAt, undefined, "没留下任何东西就不写中断记录");
+    assert.equal(local.importState.running, false, "状态还是要复位");
+  });
+
   await test("写失败留下的半截目录：空的删掉，有内容的留着并说明（1.15.1 · P2 T-3）", async () => {
     const bg = loadBackground({ chrome: makeChrome({ localData: {} }) });
     const root = makeDirectoryTree({ "空目录": {}, "有内容": { "封面.jpg": "x" } });
