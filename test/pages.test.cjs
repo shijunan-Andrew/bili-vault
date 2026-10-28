@@ -1470,7 +1470,7 @@ async function openStats(options = {}) {
 /** 起一页 recycle.html（1.10.0）。回收站的数据面全在 BcaArchiveTools 里，
     测试把那一整块换成桩，页面自己的渲染 / 选择 / 确认 / 文案走真代码。 */
 async function openRecycle(options = {}) {
-  const chrome = makeChrome({ version: "1.10.0", localData: options.localData || {} });
+  const chrome = makeChrome({ version: "1.10.0", localData: options.localData || {}, sessionData: options.sessionData });
   const page = dom.loadPage({ htmlFile: "recycle.html", chrome, globals: options.globals });
   page.__chrome = chrome;
   await settle();
@@ -2651,6 +2651,37 @@ async function suiteRecycle() {
     assert.equal(doc.getElementById("recycleGrid").children.length, 0, "恢复完列表要空");
     assert.equal(doc.getElementById("recycleStatus").textContent.trim(),
       BcaT(page, "已恢复 {count} 项，放回原来的收藏夹。", { count: "1" }));
+  });
+
+  await test("1.17.14：回收站也要过归档闸门，跑完把锁放掉（审查 P3-5）", async () => {
+    const foreign = { kind: "library", since: Date.now() };
+    const page = await openRecycle({ sessionData: { archiveWriteLock: foreign } });
+    const { tools, state } = makeRecycleTools({ entries: [recycleEntry("2026年05月10日01时19分50秒")] });
+    page.window.BcaArchiveTools = tools;
+    await page.window.BcaRecycle.reload();
+    await settle();
+
+    const doc = page.document;
+    const session = page.__chrome.storage.session;
+    dom.fireUserEvent(doc.getElementById("recycleSelectAll"), "click");
+    await page.window.BcaRecycle.restoreSelected();
+    await settle();
+    assert.equal(state.restored.length, 0, "收藏库正在写的时候不许恢复，否则会挪进一个正在被扫描的收藏夹");
+    assert.match(doc.getElementById("recycleError").textContent, /收藏库正在改动归档/, "被挡住时要说清是谁在忙");
+    assert.deepEqual(session.dump().archiveWriteLock, foreign, "不许把别人那把锁覆写掉");
+
+    await session.set({ archiveWriteLock: { kind: "import", since: Date.now() } });
+    page.window.confirm = () => true;
+    await page.window.BcaRecycle.deleteSelected();
+    await settle();
+    assert.equal(state.deleted.length, 0, "导入进行中不许彻底删除");
+    assert.match(doc.getElementById("recycleError").textContent, /正在导入收藏夹/, "导入期间被挡住要说清是导入");
+
+    await session.remove("archiveWriteLock");
+    await page.window.BcaRecycle.restoreSelected();
+    await settle();
+    assert.equal(state.restored.length, 1, "没人占闸门时就该正常恢复");
+    assert.equal(session.dump().archiveWriteLock, undefined, "跑完必须把 recycle 那把锁放掉");
   });
 
   await test("真的读到了、但一条都没有时，才说「回收站里现在是空的」（1.10.16 真执行）", async () => {

@@ -109,6 +109,8 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 `content.js` 在 B 站收藏弹窗中采集当前视频元数据和用户选中的收藏夹。它等待 B 站弹窗关闭后再提交，以确认线上收藏操作完成；用视频编号和选中收藏夹组成的签名做短期去重。随后发送 `save-favorite` 给 `background.js`。
 
+**失败的收藏会不会被补回来**（1.17.14 · 审查 P3-1）：`ensureWritePermission()` 里「句柄自己失效 / 写入授权不是 granted / 备份文件夹被删、改名、换盘」这三类失败，都用 `permissionRetryError()` 打上 `retryAfterPermission = true` 再抛；`saveFavorite()` 的 catch 按这个标记（而不是按文案里有没有「写入授权已失效」）登记 `pendingFavorite`。以前只有「授权失效」那一条会登记，另外两条用户把文件夹选回来也不会自动补 —— 那条收藏就这么静默丢了。`needsReauthFromError()` 的字符串匹配仍然保留，它只用来决定弹窗要不要显示「重新授权」按钮（「文件夹不在了」这种情况不显示，因为重选文件夹才对）。
+
 扩展被重新加载 / 更新 / 停用之后，已打开页面里那份旧脚本的 `chrome.runtime` 会变回 `undefined`（Chrome 不给已打开的标签页重新注入内容脚本）。`content.js` 用 `extensionAlive()`（`typeof chrome !== "undefined" && Boolean(chrome.runtime?.id)`）认这件事：点击路径与 `sendFavorite()` 都先认一次，失效时弹「扩展刚更新过 / 刷新一下（F5）」的卡、不再往下走，因此也不会再抛 `Cannot read properties of undefined (reading 'sendMessage')`。
 
 后台串行执行保存操作（`saveQueue`），读取 IndexedDB 中的根目录句柄，检查写入权限，**先把封面取一次**，再在选中的收藏夹之间并行落盘（`Promise.allSettled`）；每个收藏夹内部仍然先写 `封面.webp`、后写 `视频信息.txt` —— txt 落盘才是这条记录的完成标记。部分收藏夹失败时其余照常保存，返回 `{ ok: true, partial: true }`，界面据此摆出「部分收藏夹没保存」的清单；只有全部失败才算整次失败，此时尝试写入 `001错误报告`。每次写入前会清掉同目录里超过 10 分钟的点号临时文件（`archive-core.js` 的 `isTempFileName` / `isStaleTempFile`）。最近状态、错误详情放入扩展存储供弹窗展示。写盘分两条路（1.8.2）：目标文件还不存在时直接就地写（归档的常态 —— 每个记录目录都是刚建出来的）；只有覆盖一个已经存在的文件才写「点号临时文件 + `move()` 换名」，原子性只在那里才有意义。
@@ -135,14 +137,14 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 **接口抓不到数据的处理**：`/x/web-interface/view` 的 `desc` 对不少视频就是空的或 `-`（实测 `BV1LKGm6ZErR` 返回 `-`），这时简介会退回收藏夹接口 `intro` 清理后的文本；`stat` 通常都有。
 
-### 归档侧三个写者共用一把闸门（1.17.8 修正）
+### 归档侧四个写者共用一把闸门（1.17.8 修正；1.17.14 加上回收站）
 
-会往归档目录里写的路径一共三条：后台导入（`importBiliFavorites()`）、收藏库页面的删除 / 搬运 / 新建目录（`confirmCollectionAction` / `confirmPendingDelete` / 新建收藏夹表单 / 手动添加视频）、以及**视频页的手动收藏**（`save-favorite`）。它们各自的队列管不到别人，所以共用 `chrome.storage.session` 上的 `archiveWriteLock`（`{ kind, since }`，`kind` 取值 `import` / `library` / `save`，超过 `ARCHIVE_WRITE_LOCK_MAX_AGE_MS` 30 分钟自动失效）。
+会往归档目录里写的路径一共四条：后台导入（`importBiliFavorites()`）、收藏库页面的删除 / 搬运 / 新建目录（`confirmCollectionAction` / `confirmPendingDelete` / 新建收藏夹表单 / 手动添加视频）、**视频页的手动收藏**（`save-favorite`）、以及**回收站页的恢复 / 彻底删除 / 清空**（`recycle.js`）。它们各自的队列管不到别人，所以共用 `chrome.storage.session` 上的 `archiveWriteLock`（`{ kind, since }`，`kind` 取值 `import` / `library` / `save` / `recycle`，超过 `ARCHIVE_WRITE_LOCK_MAX_AGE_MS` 30 分钟自动失效）。
 
-- 判据只能有一个：`archiveWriteLockHeldByOthers(kind)` —— 返回占着闸门的**另一种**写者（空串＝没人占）。三份实现（`background.js` / `library.js` / `settings.js` 只读）同源，`test/stability.test.cjs` 核常量逐字一致。
+- 判据只能有一个：`archiveWriteLockHeldByOthers(kind)` —— 返回占着闸门的**另一种**写者（空串＝没人占）。四份实现（`background.js` / `library.js` / `settings.js` 只读 / `recycle.js`，后两者与 `library.js` 中对应函数逐字相同）同源，`test/stability.test.cjs` 核常量逐字一致，并且把 `recycle.js` 与 `library.js` 的三份函数文本直接比一遍 —— 改一边就必须改另一边。
 - **顺序必须是「先查别人、再立自己」**：`setArchiveWriteLock()` 是无条件覆写的，先立再查永远只会看到自己那把 —— 1.7.10 起的四处写路径当时就是这么写的，等于判据一直是死的，1.17.8 才把顺序摆正。
 - 手动收藏走 `saveFavoriteWithWriteLock(data, label)`（`save-favorite` 与 `retry-pending-favorite` 共用），被挡时回 `{ ok: false, busyWriteLock: kind }`；`busy` 与 `busyWriteLock` 都会把这条记成 `pendingFavorite`，别让一次被挡的收藏悄悄丢掉。
-- 顺手记一条既有事实：回收站页（`recycle.js`）还不占这把锁，属于已登记的 P3。
+- 回收站页 1.17.14（审查 P3-5）起也领锁：`claimRecycleWriteLock()` 先查别人、再立 `{ kind: "recycle" }`，三个写动作（恢复 / 彻底删除 / 清空）各在 `finally` 里 `releaseRecycleWriteLock()` 放掉。被挡时按占锁方回不同的说明（导入 / 收藏库 / 手动收藏），不再让「导入跑到一半点恢复」把记录挪进一个正在被扫描的收藏夹。
 
 ### 更新视频数据（4.4 引入，4.5 调整见下；1.9.7 起界面文案叫「更新视频数据」）
 

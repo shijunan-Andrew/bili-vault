@@ -255,6 +255,40 @@ async function suite() {
     assert.equal(text, infoText, "跳过的记录不该被改写");
   });
 
+  await test("1.17.14：备份文件夹没授权、或者根本不在了，也要登记补存（审查 P3-1）", async () => {
+    /* 这两条以前都没登记：判据只认文案里的「写入授权已失效」，
+       「目录被删 / 改名 / 换盘」与「句柄自己失效」于是被当成普通失败，
+       用户把文件夹选回来，这条收藏也不会自动补 —— 白丢一次。 */
+    const revoked = await makeDirectoryTree({ 测试收藏夹: {} });
+    revoked.queryPermission = async () => "prompt";
+    const chromeStub = makeChrome({ localData: { enabled: true } });
+    const bg = loadBackground({ chrome: chromeStub, indexedDB: makeRootDb(revoked) });
+    const data = {
+      metadata: { bvid: "BV1xx411c7mD", url: "https://www.bilibili.com/video/BV1xx411c7mD/", title: "标题" },
+      folders: [{ name: "测试收藏夹" }],
+      favoriteAt: Date.now()
+    };
+    const denied = await bg.__test.saveFavorite(data);
+    assert.equal(denied.ok, false, JSON.stringify(denied));
+    assert.match(denied.message, /写入授权已失效/, "提示要指向「重新授权」这条路");
+    assert.deepEqual(chromeStub.storage.local.dump().pendingFavorite, data,
+      "授权恢复后要能自动补存，所以必须登记");
+
+    const gone = await makeDirectoryTree({ 测试收藏夹: {} });
+    gone.values = async function* goneValues() {
+      const error = new Error("目录不存在");
+      error.name = "NotFoundError";
+      throw error;
+    };
+    const goneChrome = makeChrome({ localData: { enabled: true } });
+    const goneBg = loadBackground({ chrome: goneChrome, indexedDB: makeRootDb(gone) });
+    const missing = await goneBg.__test.saveFavorite(data);
+    assert.equal(missing.ok, false, JSON.stringify(missing));
+    assert.match(missing.message, /已经不在了/, "目录没了要说清是「不在了」，不是普通读取失败");
+    assert.deepEqual(goneChrome.storage.local.dump().pendingFavorite, data,
+      "目录被删 / 改名 / 换盘这一条同样是「恢复后可以再试」，也要登记");
+  });
+
   await test("统计快照丢了可以按现成的 database.json 补发一次（1.9.6）", async () => {
 
     const day = statsCore.localDayKey(Date.now());

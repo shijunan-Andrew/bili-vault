@@ -419,6 +419,16 @@ function describeFileSystemError(error) {
   return detail ? `${hint}（${name}：${detail}）` : `${hint}（${name}）`;
 }
 
+/* 1.17.14（审查 P3-1）：「现在写不进去，但用户恢复授权 / 重选文件夹之后值得再试」这一类失败
+   以前靠文案里有没有「写入授权已失效」来认。于是「备份文件夹被删、改名、换盘」和「句柄自己
+   失效」两条同属这一类，却没登记补存 —— 用户把文件夹选回来，这条收藏也不会自动补。
+   这里给它们打一个标记，收藏失败的 catch 按标记判，不再猜文案。 */
+function permissionRetryError(message) {
+  const error = new Error(message);
+  error.retryAfterPermission = true;
+  return error;
+}
+
 async function ensureWritePermission(handle) {
   let permission;
   try {
@@ -426,10 +436,10 @@ async function ensureWritePermission(handle) {
   } catch (error) {
     // 1.7.14（facet-compat C4）：句柄自己失效（目录被删/改名/换盘）时
     // queryPermission 就会抛，以前这里直接冒泡英文原文。
-    throw new Error(describeFileSystemError(error) || `打不开所选文件夹（${error?.name || "未知错误"}），请重新选择本地备份文件夹。`);
+    throw permissionRetryError(describeFileSystemError(error) || `打不开所选文件夹（${error?.name || "未知错误"}），请重新选择本地备份文件夹。`);
   }
   if (permission !== "granted") {
-    throw new Error("所选文件夹的写入授权已失效。请点击插件图标中的“重新授权本地备份文件夹”，允许访问后重试。");
+    throw permissionRetryError("所选文件夹的写入授权已失效。请点击插件图标中的“重新授权本地备份文件夹”，允许访问后重试。");
   }
   // 1.7.14（facet-compat C6）：授权还在，但目录本身可能已经被删 / 改名 / 换盘。
   // 句柄存在不代表目标还在 —— 以前要等到很深的某一步才炸出一句英文异常名，
@@ -438,10 +448,10 @@ async function ensureWritePermission(handle) {
     for await (const _entry of handle.values()) break;
   } catch (error) {
     if (BcaArchiveCore.isMissingError(error)) {
-      throw new Error("上次选择的本地备份文件夹已经不在了（被删除、改名或换了盘符）。请重新选择本地备份文件夹。");
+      throw permissionRetryError("上次选择的本地备份文件夹已经不在了（被删除、改名或换了盘符）。请重新选择本地备份文件夹。");
     }
     const friendly = describeFileSystemError(error);
-    if (friendly) throw new Error(friendly);
+    if (friendly) throw permissionRetryError(friendly);
     throw error;
   }
 }
@@ -1483,7 +1493,9 @@ async function saveFavorite(data) {
     // 1.8.21（补-1）：这条登记是「授权恢复后补存」的唯一凭据，写不进去就等于把用户
     // 这次收藏丢了 —— 所以失败要显式说出来。以前这里裸 await，一抛就把整条回应吞掉。
     let pendingRegistered = true;
-    if (error?.message?.includes("写入授权已失效")) {
+    // 1.17.14（审查 P3-1）：按 ensureWritePermission 打的标记判，不再去猜文案里有没有某个词 ——
+    // 「备份文件夹被删 / 改名 / 换盘」和「句柄自己失效」同样是「恢复后可以再试」，都要登记。
+    if (error?.retryAfterPermission) {
       // safeLocalSet 不抛错，只回 true/false：这里按返回值判「补存登记」有没有写成
       const registered = await safeLocalSet({ pendingFavorite: data }, "补存登记");
       if (!registered) {
@@ -4823,7 +4835,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
     await clearImportRunSnapshot();
     throw new Error(importLockHolder === "save"
       ? "本地正在保存一条收藏，等它做完再导入。"
-      : "本地收藏库正在改动归档（删除 / 搬运 / 新建目录），等它做完再导入。");
+      : importLockHolder === "recycle"
+        ? "回收站正在恢复或清空，等它做完再导入。"
+        : "本地收藏库正在改动归档（删除 / 搬运 / 新建目录），等它做完再导入。");
   }
   // 占位成功、且收藏库那边没在写：把「导入进行中」摆到跨上下文闸门上。
   // 放在这里而不是 claimImportRun 里 —— 那个函数是纯粹的占位判断，测试会把它单独抠出来跑。
@@ -5470,7 +5484,9 @@ async function saveFavoriteWithWriteLock(data, label = "保存收藏") {
       busyWriteLock: blockedBy,
       message: blockedBy === "import"
         ? "目前正在导入收藏夹，等导入结束后再收藏。"
-        : "本地收藏库正在删除或搬运归档，等它做完再收藏。"
+        : blockedBy === "recycle"
+          ? "回收站正在恢复或清空，等它做完再收藏。"
+          : "本地收藏库正在删除或搬运归档，等它做完再收藏。"
     };
   }
   await setArchiveWriteLock("save");

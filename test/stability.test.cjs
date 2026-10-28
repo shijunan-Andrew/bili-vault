@@ -2604,8 +2604,10 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   const background = readProjectFile("background.js");
   const library = readProjectFile("library.js");
   const settings = readProjectFile("settings.js");
+  // 1.17.14（审查 P3-5）：回收站页现在也领一把 "recycle"，同样要逐字一致
+  const recycle = readProjectFile("recycle.js");
   // 闸门键名与陈旧阈值必须在三边逐字一致 —— 名字差一个字，就各锁各的，等于没有互斥
-  for (const source of [background, library, settings]) {
+  for (const source of [background, library, settings, recycle]) {
     assert.match(source, /const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";/);
     assert.match(source, /const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 \* 60 \* 1000;/);
     assert.match(source, /chrome\.storage\.session/);
@@ -2621,6 +2623,20 @@ test("归档侧的两个写者共用同一把跨上下文闸门（V1.7.10）", (
   assert.equal([...library.matchAll(/const lockHolder = await archiveWriteLockHeldByOthers\("library"\);/g)].length, 4,
     "删除 / 搬运 / 新建收藏夹 / 手动添加四条写路径（导出与封面转换 1.9.0 搬去设置页）都要先查闸门");
   assert.equal([...library.matchAll(/publishLibraryWriteLock\(\);/g)].length, 6, "三个标志各在置位与复位处同步一次闸门");
+  // 1.17.14（审查 P3-5）：回收站的三个写动作各领一次、各放一次；两份实现逐字相同
+  assert.equal([...recycle.matchAll(/await claimRecycleWriteLock\(\);/g)].length, 3,
+    "恢复 / 彻底删除 / 清空都要先领闸门");
+  assert.equal([...recycle.matchAll(/await releaseRecycleWriteLock\(\);/g)].length, 3,
+    "三个动作无论成败都要把闸门放掉");
+  for (const lockName of ["setArchiveWriteLock", "clearArchiveWriteLock", "archiveWriteLockHeldByOthers"]) {
+    const marker = `async function ${lockName}(kind) {`;
+    const start = library.indexOf(marker);
+    assert.ok(start > 0, `library.js 里找不到 ${lockName}`);
+    const end = library.indexOf("\n}", start);
+    const body = library.slice(start, end + 2);
+    assert.ok(body.length > 60, `${lockName} 的切片太短，锚点切错了`);
+    assert.ok(recycle.includes(body), `recycle.js 里的 ${lockName} 必须与 library.js 逐字相同（两份实现差一个字就等于各锁各的）`);
+  }
   // 设置页的「导出归档元数据 / 归档体检 / 重建统计库 / 导出清单 / 完整度巡检」在导入期间拒绝扫半成品
   assert.match(settings, /async function importIsRunning\(\) \{/);
   assert.equal([...settings.matchAll(/if \(await importIsRunning\(\)\) throw new Error/g)].length, 5,

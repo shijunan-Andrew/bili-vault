@@ -230,6 +230,8 @@ async function archiveWriteLockHeldByOthers(kind) {
 // 闸门被别人占着时怎么说：是导入还是手动收藏，实话实说（其余情况按导入兜底）
 function archiveWriteLockBusyMessage(holder, importText) {
   if (holder === "save") return BcaI18n.t("后台正在保存一条收藏，等它做完再继续 —— 两边同时写同一批目录会留下对不上的记录。");
+  // 1.17.14（审查 P3-5）：回收站也会真动归档目录，它现在也占闸门 —— 被它挡着时要说清是谁。
+  if (holder === "recycle") return BcaI18n.t("回收站正在恢复或清空，等它做完再继续 —— 两边同时动同一批目录会留下对不上的记录。");
   return importText;
 }
 let selectionMode = false;

@@ -220,6 +220,64 @@ function renderEntries() {
   hydrateCovers();
 }
 
+/* 1.17.14（审查 P3-5）：回收站也会真动归档目录 —— 恢复是把记录挪回收藏夹，彻底删除是删目录。
+   可它既不看 archiveWriteLock、也不立锁：导入跑到一半点「恢复」，最坏会恢复进一个正在被扫描的
+   收藏夹。这里让回收站也领一把 { kind: "recycle" }：先查别人、再立自己、跑完放掉。
+   下面三个函数与 library.js 里的同名实现**逐字相同**（回收站页没法 import 收藏库那份），
+   stability 有一条断言把两份文本比着钉住 —— 改一边就必须改另一边。 */
+const ARCHIVE_WRITE_LOCK_KEY = "archiveWriteLock";
+// 超过这个岁数的锁当作陈旧遗留（浏览器/页面崩在写入中间），不能把人永久挡在门外
+const ARCHIVE_WRITE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
+
+async function setArchiveWriteLock(kind) {
+  try {
+    await chrome.storage.session.set({ [ARCHIVE_WRITE_LOCK_KEY]: { kind, since: Date.now() } });
+  } catch (error) {
+    // 锁没立起来：这一次的跨上下文互斥退化成「各写各的」，统计库可能留下对不上的行。
+    console.warn("归档写锁没立起来（这一次的跨上下文互斥失效）", error);
+  }
+}
+
+// 只清自己那一把：别人后写进来的锁不能被顺手抹掉
+async function clearArchiveWriteLock(kind) {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || !kind || lock.kind === kind) await chrome.storage.session.remove(ARCHIVE_WRITE_LOCK_KEY);
+  } catch (error) {
+    // 没清掉：这把锁会挡下一次操作，30 分钟后才算陈旧遗留自动失效。
+    console.warn("归档写锁没清掉（下一轮操作可能被它挡住，30 分钟后才自动失效）", error);
+  }
+}
+
+async function archiveWriteLockHeldByOthers(kind) {
+  try {
+    const saved = await chrome.storage.session.get(ARCHIVE_WRITE_LOCK_KEY);
+    const lock = saved?.[ARCHIVE_WRITE_LOCK_KEY];
+    if (!lock || lock.kind === kind) return "";
+    return Date.now() - Number(lock.since || 0) < ARCHIVE_WRITE_LOCK_MAX_AGE_MS ? String(lock.kind || "") : "";
+  } catch (_) { return ""; }
+}
+
+// 闸门被别人占着时怎么说：说清是谁在忙（其余情况按收藏库兜底）
+function recycleLockBusyMessage(holder) {
+  if (holder === "import") return BcaI18n.t("正在导入收藏夹，等导入结束再动回收站。");
+  if (holder === "save") return BcaI18n.t("后台正在保存一条收藏，等它做完再动回收站。");
+  return BcaI18n.t("收藏库正在改动归档（删除 / 搬运 / 新建目录），等它做完再动回收站。");
+}
+
+// 先查别人、再立自己（setArchiveWriteLock 是无条件覆写，立完再查就查不到别人了）
+async function claimRecycleWriteLock() {
+  const holder = await archiveWriteLockHeldByOthers("recycle");
+  if (holder) throw new Error(recycleLockBusyMessage(holder));
+  await setArchiveWriteLock("recycle");
+}
+
+// 无论成败都放掉；只清自己那一把（clearArchiveWriteLock 内部比 kind）
+async function releaseRecycleWriteLock() {
+  await clearArchiveWriteLock("recycle");
+}
+
 async function loadRoot() {
   const handle = await BcaArchiveTools.loadRootHandle();
   if (!handle) {
@@ -269,6 +327,7 @@ async function restoreSelected() {
   try {
     setBusy(true);
     showStatus(BcaI18n.t("正在恢复 {count} 项…", { count: String(chosen.length) }));
+    await claimRecycleWriteLock();
     const handle = await loadRoot();
     const result = await BcaArchiveTools.restoreRecycled(handle, chosen, (entry) => {
       showStatus(BcaI18n.t("恢复到「{collection}/{directory}」…", { collection: entry.collection, directory: entry.directory }));
@@ -288,6 +347,7 @@ async function restoreSelected() {
     showError(BcaI18n.t("恢复失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
   } finally {
     setBusy(false);
+    await releaseRecycleWriteLock();
   }
 }
 
@@ -301,6 +361,7 @@ async function deleteSelected() {
   try {
     setBusy(true);
     showStatus(BcaI18n.t("正在彻底删除 {count} 项…", { count: String(chosen.length) }));
+    await claimRecycleWriteLock();
     const handle = await loadRoot();
     const result = await BcaArchiveTools.deleteRecycled(handle, chosen, (entry) => {
       showStatus(BcaI18n.t("彻底删除「{collection}/{directory}」…", { collection: entry.collection, directory: entry.directory }));
@@ -320,6 +381,7 @@ async function deleteSelected() {
     showError(BcaI18n.t("彻底删除失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
   } finally {
     setBusy(false);
+    await releaseRecycleWriteLock();
   }
 }
 
@@ -332,6 +394,7 @@ async function purgeAll() {
   try {
     setBusy(true);
     showStatus(BcaI18n.t("正在清空回收站…"));
+    await claimRecycleWriteLock();
     const handle = await loadRoot();
     const result = await BcaArchiveTools.purgeRecycler(handle);
     selectedPaths.clear();
@@ -349,6 +412,7 @@ async function purgeAll() {
     showError(BcaI18n.t("清空回收站失败：{message}", { message: error?.message || BcaI18n.t("未知错误") }));
   } finally {
     setBusy(false);
+    await releaseRecycleWriteLock();
   }
 }
 
