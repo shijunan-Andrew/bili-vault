@@ -460,17 +460,20 @@ function splitInfoDescription(info) {
 const DOWNLOAD_MARKER_FILE = "请将视频放到这里.txt";
 const DOWNLOAD_MARKER_TEXT = "请将别的地方下载的视频复制或移动到此处";
 
-async function inspectDownloadDirectory(directory) {
-  // 1.8.5：顺带累加字节数 —— 这个函数本来就要把每个文件过一遍，volume 统计跟着免费拿到
+async function inspectDownloadDirectory(directory, options = {}) {
+  // 1.8.5：顺带累加字节数 —— 这个函数本来就要把每个文件过一遍，volume 统计跟着免费拿到。
+  // 1.17.11（审查 P2-4）：字节只有整库扫描的顶栏占用用得着；「切回标签页就把已下载标记
+  // 重新算一遍」那条路不要体积，也就不必为每个文件多调一次 getFile()。
+  const measureBytes = options.measureBytes !== false;
   const result = { hasFiles: false, hasMedia: false, marked: false, bytes: 0 };
   for await (const entry of directory.values()) {
     if (entry.kind === "file") {
       result.hasFiles = true;
       result.hasMedia ||= BcaArchiveCore.isMediaFileName(entry.name);
       result.marked ||= entry.name === DOWNLOAD_MARKER_FILE;
-      result.bytes += (await entry.getFile()).size;
+      if (measureBytes) result.bytes += (await entry.getFile()).size;
     } else if (entry.kind === "directory") {
-      const child = await inspectDownloadDirectory(entry);
+      const child = await inspectDownloadDirectory(entry, options);
       result.hasFiles ||= child.hasFiles;
       result.hasMedia ||= child.hasMedia;
       result.marked ||= child.marked;
@@ -707,6 +710,9 @@ async function paintSnapshot(handle) {
 
 async function scanDownloadedDirectories(archiveRoot, options = {}) {
   const force = options.force === true;
+  // 1.17.11（审查 P2-4）：谁要体积？只有整库扫描（scanRoot）要拿去算顶栏「本地归档占用」。
+  // 可见性刷新只判「这条下载目录在不在、有没有媒体文件」，那些判据全看文件名。
+  const measureBytes = options.measureBytes !== false;
   const indexCacheKey = rootCacheKey(archiveRoot);
   const cachedIndex = downloadIndexCache.get(indexCacheKey);
   if (!force && cachedIndex && Date.now() - cachedIndex.at < DOWNLOAD_INDEX_TTL_MS) return cachedIndex.index;
@@ -733,7 +739,10 @@ async function scanDownloadedDirectories(archiveRoot, options = {}) {
       for await (const entry of collection.values()) {
         if (entry.kind !== "directory") continue;
         const identifiers = BcaArchiveCore.identifiersFromDirectoryName(entry.name);
-        const contents = await inspectDownloadDirectory(entry);
+        // 1.17.11（审查 P2-4）：不量体积的那条路上，名字里没有 BV/av 号的目录连进都不用进 ——
+        // 它本来就匹配不上任何记录，原来却会被整棵递归一遍。
+        if (!identifiers.size && !measureBytes) continue;
+        const contents = await inspectDownloadDirectory(entry, { measureBytes });
         totalBytes += contents.bytes;
         if (!identifiers.size || !contents.hasFiles) continue;
         for (const identifier of identifiers) {
@@ -746,7 +755,9 @@ async function scanDownloadedDirectories(archiveRoot, options = {}) {
     }
     // 1.8.5：整棵下载树的字节数挂在索引上（Map 上带个属性，调用方用它算占用）
     index.bytes = totalBytes;
-    downloadIndexCache.set(indexCacheKey, { index, at: Date.now() });
+    // 1.17.11（审查 P2-4）：不量体积的那一轮结果不进缓存。缓存是给「整库扫描」用的，
+    // 若把 bytes: 0 的索引塞进去，下一次扫描拿到它要么少算占用、要么退回整树递归（那更慢）。
+    if (measureBytes) downloadIndexCache.set(indexCacheKey, { index, at: Date.now() });
     return index;
   } catch (_) { return null; }
 }
@@ -5721,7 +5732,8 @@ async function refreshDownloadStatuses(force = false) {
   lastDownloadStatusCheckAt = now;
   downloadStatusCheckRunning = true;
   try {
-    const index = await scanDownloadedDirectories(rootHandle, { force });
+    // 1.17.11（审查 P2-4）：这条路只需要「有没有下载」，不需要体积。
+    const index = await scanDownloadedDirectories(rootHandle, { force, measureBytes: false });
     // A denied custom-folder permission means the status is unknown, not that files vanished.
     if (!index) return;
     let changed = false;

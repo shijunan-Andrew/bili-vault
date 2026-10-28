@@ -6538,7 +6538,7 @@ test("扫描不再为了先知道总数多枚举一遍，下载索引也有缓�
   assert.match(library, /const downloadIndexCache = new Map\(\);/);
   assert.match(library, /function invalidateDownloadIndex\(handle\) \{/);
   assert.match(library, /downloadIndexCache\.set\(indexCacheKey, \{ index, at: Date\.now\(\) \}\);/);
-  assert.match(library, /scanDownloadedDirectories\(rootHandle, \{ force \}\)/, "downloadRevision / 可见性刷新要能绕过缓存");
+  assert.match(library, /scanDownloadedDirectories\(rootHandle, \{ force, measureBytes: false \}\)/, "downloadRevision / 可见性刷新要能绕过缓存，而且不为体积逐文件读盘");
   assert.ok((library.match(/invalidateDownloadIndex\(rootHandle\)/g) || []).length >= 3,
     "本页删 / 搬完下载目录后要显式作废，不能等 TTL");
   // 「目录名太长」这条度量 1.7.24 就算出来了，却一直没带回界面 —— 顺手接上
@@ -6591,7 +6591,9 @@ test("体积统计复用扫描量到的字节，不再为它整树递归（V1.8.
   assert.match(library, /const knownTotal = Number\(options\.total\) > 0 \? Number\(options\.total\) : 0;/, "有现成字节就直接用");
   assert.match(library, /else if \(knownTotal\) \{/, "拿不到才退回递归");
   assert.match(library, /index\.bytes = totalBytes;/, "下载树字节挂在索引上");
-  assert.match(library, /result\.bytes \+= \(await entry\.getFile\(\)\)\.size;/, "枚举下载目录时顺手量字节");
+  assert.match(library, /if \(measureBytes\) result\.bytes \+= \(await entry\.getFile\(\)\)\.size;/, "枚举下载目录时顺手量字节（不量体积的那条路一次 getFile 都不调）");
+  assert.match(library, /if \(!identifiers\.size && !measureBytes\) continue;/, "只判状态的那条路，没 BV 号的目录直接不进");
+  assert.match(library, /if \(measureBytes\) downloadIndexCache\.set\(indexCacheKey, \{ index, at: Date\.now\(\) \}\);/, "不量体积的索引不进缓存，免得下一轮以为字节是 0");
   // 1.8.6：扫描时 cover 是空串，只记封面句柄；字节数照旧带着（体积统计要用）
   assert.match(readProjectFile("archive-tools.js"), /savedAt: field\("信息保存于"\)/, "记录里带着自己的保存时间与字节数");
 });

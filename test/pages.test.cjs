@@ -3738,6 +3738,42 @@ async function suiteLibrary1179() {
     doc.getElementById("closeDetail").dispatchEvent(new g.MouseEvent("click", { bubbles: true }));
     await settle();
     assert.equal(panel.scrollTop, 0, "关掉之后也归零，下次打开不从上一轮的位置开始");
+
+  await test("1.17.11：只判下载状态的那条路不逐文件量体积，没 BV 号的目录也不进去（审查 P2-4）", async () => {
+    const page = await openLibrary();
+    const g = page.window;
+    // 下载目录设置存在 IndexedDB 里；这条用例不需要真句柄，给个空库就走「根目录下的 000视频下载」。
+    // 桩要按规范异步回调 onsuccess —— makeFakeIndexedDb 的 get 不回调，readSavedSetting 会一直挂着。
+    page.window.indexedDB = makeRootHandleDb(null);
+    const root = await makeDirectoryTree({
+      "_测试归档": {
+        "000视频下载": {
+          "小鲸鱼测试": {
+            "第一条视频 - BV1xx411c7mD": { "视频.mp4": "MEDIA-BYTES" },
+            "没有编号的目录": { "说明.txt": "TXT-BYTES" }
+          }
+        }
+      }
+    }).getDirectoryHandle("_测试归档");
+    const collection = await (await root.getDirectoryHandle("000视频下载")).getDirectoryHandle("小鲸鱼测试");
+    const media = await (await collection.getDirectoryHandle("第一条视频 - BV1xx411c7mD")).getFileHandle("视频.mp4");
+    const stray = await (await collection.getDirectoryHandle("没有编号的目录")).getFileHandle("说明.txt");
+    // 这条路一个文件内容都不该读：谁被读了就抛错
+    const noRead = new Error("这条路上不该读文件");
+    media.__failRead = noRead;
+    stray.__failRead = noRead;
+    const light = await g.scanDownloadedDirectories(root, { force: true, measureBytes: false });
+    assert.ok(light, "不量体积时，也不该因为「读不出文件」把整轮下载扫描判失败");
+    assert.equal(light.bytes, 0, "这条路不量体积");
+    const match = light.get(g.BcaArchiveCore.downloadIndexKey("小鲸鱼测试", "bvid:BV1xx411c7mD"));
+    assert.equal(match?.hasFiles, true, "文件在不在只看名字，内容一个字都不用读");
+    assert.equal(g.BcaArchiveCore.downloadMatchIsDownloaded(match), true, "有媒体文件就算已下载");
+    // 整库扫描那条路照旧把整棵树的字节量出来（没有 BV 号的目录也算在内）
+    media.__failRead = null;
+    stray.__failRead = null;
+    const heavy = await g.scanDownloadedDirectories(root, { force: true });
+    assert.equal(heavy.bytes, media.__bytes.byteLength + stray.__bytes.byteLength, "默认这条路上照旧逐文件量字节");
+  });
   });
 }
 
