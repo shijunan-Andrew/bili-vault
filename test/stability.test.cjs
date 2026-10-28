@@ -624,51 +624,8 @@ test("the share text splitter pulls the stats out of a real archive description"
   assert.deepEqual(plain.stats, {});
 });
 
-test("update mode only refreshes records that are actually incomplete", () => {
-  const { recordNeedsRefresh } = loadBackgroundFunctions(
-    ["importClean", "importIsPlaceholder", "importPlaceholderWorthRetry", "recordNeedsRefresh"],
-    ["IMPORT_PLACEHOLDER_VALUES", "IMPORT_SYMBOL_PLACEHOLDER_VALUES", "COVER_PENDING_LINE"]
-  );
-  // 4.1 之前的旧档案：没有粉丝数、没有互动数据
-  assert.equal(recordNeedsRefresh({ text: PLACEHOLDER_INFO }), true);
-  // 标签、简介、发布时间是占位值也要刷新
-  assert.equal(recordNeedsRefresh({ text: "【标签】\n未知\n\n【视频简介】\n- 参考\n\nUP主粉丝数：1\n【互动数据】\n播放量：1\n视频发布时间：2020-01-01 00:00:00 星期三" }), true);
-  // 4.2 写出来的完整档案不该被反复重写
-  const complete = [
-    "【基本信息】",
-    "视频发布时间：2026-08-14 06:00:00 星期五",
-    "",
-    "【UP主】",
-    "UP主粉丝数：123456",
-    "",
-    "【互动数据】",
-    "播放量：73798",
-    "",
-    "【标签】",
-    "拉面、治愈",
-    "",
-    "【视频简介】",
-    "真正的简介",
-    ""
-  ].join("\n");
-  assert.equal(recordNeedsRefresh({ text: complete }), false);
-  assert.equal(recordNeedsRefresh({ text: "" }), false);
-  // V1.2.8：占位要分两种。B 站这条本来就没写简介（接口回的就是一个 `-`）时，再抓一百次
-  // 也还是同一个符号 —— 不该每次都重写一遍。真机上的表现是"6 个视频的收藏夹每次导入都报更新 3"。
-  for (const symbol of ["-", "--", "—", "/"]) {
-    assert.equal(
-      recordNeedsRefresh({ text: complete.replace("真正的简介", symbol) }),
-      false,
-      `简介是纯符号「${symbol}」（B 站本来就没有）不该触发重写`
-    );
-  }
-  // 而「未知」是另一回事：多半是上一次没取到，仍要再试一次（旧档案就是这么补回来的）
-  assert.equal(recordNeedsRefresh({ text: complete.replace("真正的简介", "未知") }), true);
-  assert.equal(recordNeedsRefresh({ text: complete.replace("真正的简介", "暂无") }), true);
-  // 标签/发布时间那两处判据同样走新的分法
-  assert.equal(recordNeedsRefresh({ text: complete.replace("拉面、治愈", "-") }), false);
-  assert.equal(recordNeedsRefresh({ text: complete.replace("拉面、治愈", "未知") }), true);
-});
+// 1.17.16（用户要求）：导入不再刷新本地已有记录，recordNeedsRefresh 这套判据整体删掉了，
+// 这里原本是一条「哪些记录需要刷新」的表驱动用例。
 
 test("the new info layout carries the followers count and a separate stats block", () => {
   const source = readProjectFile("background.js");
@@ -679,6 +636,15 @@ test("the new info layout carries the followers count and a separate stats block
   assert.match(source, /const MISSING_VALUE = "N\/A";/);
   assert.match(source, /lines\.push\("【互动数据】"\);/);
   assert.match(source, /importIsPlaceholder\(value\) \? MISSING_VALUE : String\(value\)/);
+
+  // 1.8.6：UP 主粉丝数按 mid 记住 7 天，只有用户主动「更新视频数据」时才绕过记忆取最新
+  assert.match(source, /const UP_FANS_STORAGE_KEY = "bcaUpFans";/);
+  assert.match(source, /const UP_FANS_TTL_MS = 7 \* 24 \* 60 \* 60 \* 1000;/);
+  assert.match(source, /const UP_FANS_MAX_ENTRIES = 2000;/, "别让存储无限长");
+  assert.match(source, /async function rememberedUpFans\(mid\) \{/);
+  assert.match(source, /function rememberUpFans\(mid, fans\) \{/);
+  assert.match(source, /if \(options\.fresh !== true\) \{/, "记忆可被用户主动刷新绕过");
+  assert.match(source, /const upFans = mid \? await fetchUpFans\(mid, tabId, \{ fresh: true \}\) : "";/, "「更新视频状态」要取最新数字");
 });
 
 test("the 4.2 layout round-trips through the archive parser", () => {
@@ -735,7 +701,7 @@ test("the 4.2 layout round-trips through the archive parser", () => {
 
 test("the import can be paused, resumed and cancelled with a rollback journal", () => {
   const source = readProjectFile("background.js");
-  for (const name of ["importWaitIfPaused", "importReleaseWaiters", "createImportJournal", "rollbackImport", "refreshImportedRecord", "readExistingImportRecords", "fetchVideoDetail", "fetchUpFans", "fetchImportDetails"]) {
+  for (const name of ["importWaitIfPaused", "importReleaseWaiters", "createImportJournal", "rollbackImport", "readExistingImportRecords", "fetchVideoDetail", "fetchUpFans", "fetchImportDetails"]) {
     assert.match(source, new RegExp(`^function ${name}\\(|^async function ${name}\\(`, "m"), `缺少 ${name}`);
   }
   // 取消靠一个专用错误向上冒泡
@@ -755,6 +721,17 @@ test("the import can be paused, resumed and cancelled with a rollback journal", 
   assert.match(source, /"\/x\/web-interface\/view"/);
   assert.match(source, /"\/x\/tag\/archive\/tags"/);
   assert.match(source, /"\/x\/relation\/stat"/);
+
+  // 1.17.16（用户要求）：导入只有「本地没有就导入 / 本地已有就跳过」两种结局，
+  // 已有记录一律不碰。判据就切在「读旧记录」到「按条数裁剪」之间这一段。
+  const loopAt = source.indexOf("const existing = await readExistingImportRecords(collection);");
+  const limitAt = source.indexOf("if (importLimit > 0) {", loopAt);
+  assert.ok(loopAt > 0 && limitAt > loopAt, "找不到导入时的「本地已有」判定段");
+  const decision = source.slice(loopAt, limitAt);
+  for (const banned of ["refreshTargets", "recordNeedsRefresh", "refreshImportedRecord", "importRecordNeedsRefresh", "recordNeedsFansOnly", "importItemIsTrustworthy"]) {
+    assert.equal(decision.includes(banned), false, `导入判定段里不该再出现 ${banned}`);
+  }
+  assert.equal((decision.match(/skipped \+= 1;/g) || []).length, 1, "「本地已有」只有一条出路：跳过");
 });
 
 test("the popup exposes pause and cancel for a running import", () => {
@@ -1227,7 +1204,8 @@ test("covers are small WebP files, and both generations of the name are readable
   assert.match(background, /COVER_MIME_TYPE/, "要输出 WebP");
   // 老档案里的 封面.png 不迁移、不重下 —— 读取与存在性检查都要认两个名字
   assert.match(background, /const COVER_FILE_NAMES = \["封面\.png", COVER_FILE_NAME\];/);
-  assert.match(background, /for \(const name of COVER_FILE_NAMES\)/);
+  // 1.17.16（用户要求）：导入不再重写已有记录，background.js 里已经没有人遍历封面文件名；
+  // 两个名字的挑选只剩 library.js 的 coverEntryFor（下面那条断言钉着）。
   assert.match(library, /optionalFileHandle\(recordEntry, "封面\.webp"\)/);
   // 1.8.6：两个名字的挑选挪进 coverEntryFor，真正读文件交给 hydrateCover（用到才读）
   assert.match(library, /async function coverEntryFor\(recordEntry\) \{/);
@@ -3890,25 +3868,8 @@ test("「更新视频状态」发现失效时，只改状态，不动其它内�
   assert.match(invalidBranch, /视频状态：.*失效/, "没有跳过「已经标记过失效」的记录");
 });
 
-test("importItemIsTrustworthy：占位符不算数据（真跑）", () => {
-  // 依赖要一起加载：importUsefulTitle 内部用 IMPORT_INVALID_TITLES 这个常量
-  const { importItemIsTrustworthy, importClean, importUsefulTitle, importIsInvalidTitle } =
-    loadBackgroundFunctions(["importItemIsTrustworthy", "importClean", "importUsefulTitle", "importIsInvalidTitle"], ["IMPORT_INVALID_TITLES"]);
-  // 前两版守卫依赖的谓词，对照用
-  assert.equal(importUsefulTitle("未知"), true, "前提变了：importUsefulTitle 现在认为「未知」不可用，本测试可放宽");
-  assert.equal(importIsInvalidTitle("未知"), false);
-
-  // 唯一被信任的情形：标题是真实标题
-  assert.equal(importItemIsTrustworthy({ title: "【哆啦A梦】国语版 800集全 4K修复" }), true);
-  // 三种不可信：失效、占位「未知」、空标题
-  assert.equal(importItemIsTrustworthy({ title: "【哆啦A梦】", isInvalid: true }), false, "失效条目不可信");
-  assert.equal(importItemIsTrustworthy({ title: "未知" }), false, "「未知」是占位符，不是数据");
-  assert.equal(importItemIsTrustworthy({ title: "" }), false, "空标题不可信");
-  assert.equal(importItemIsTrustworthy({ title: "   " }), false, "只有空白也不可信");
-  assert.equal(importItemIsTrustworthy({ title: "已失效视频" }), false);
-  assert.equal(importItemIsTrustworthy(null), false);
-  assert.equal(importItemIsTrustworthy({}), false);
-});
+// 1.17.16（用户要求）：importItemIsTrustworthy 跟着「更新模式」一起删掉了，
+// 这里原本是它的真跑用例（可信 / 失效 / 占位 / 空标题四种）。
 
 test("attr 是删除原因枚举：非 0 即失效（真跑 + 真数据）", () => {
   const { importAttrIsInvalid } = loadBackgroundFunctions(["importAttrIsInvalid"]);
@@ -4082,22 +4043,22 @@ test("收藏库把失效原因读回来并显示（静态回归）", () => {
   assert.equal(/未知/.test(detailLine), false, "详情面板也不许把没写原因显示成「未知」");
 });
 
-test("失效视频不许覆盖本地已有的记录", () => {
+test("本地已有的记录一律不碰：失效条目也一样（1.17.16）", () => {
   const src = readProjectFile("background.js");
-  // 在"已存在"的分支里，失效条目必须先被丢弃再谈刷新
   const at = src.indexOf("skipped += 1;");
   assert.ok(at > 0, "找不到已存在条目的处理分支");
-  const branch = src.slice(at, at + 1600);
-  assert.match(branch, /if \(!importItemIsTrustworthy\(item\)\) \{[\s\S]{0,120}continue;/,
-    "降级条目没有被挡在刷新之前");
-  // 前两版分别栽在 item.isInvalid 和 importUsefulTitle 上，不许退回那两种写法
-  assert.equal(/if \(item\.isInvalid\) \{/.test(branch), false, "判据退回了只看 isInvalid");
-  assert.equal(/!importUsefulTitle\(item\.title\)\) \{/.test(branch), false,
-    "判据退回了 importUsefulTitle —— 「未知」能骗过它，那正是真机上漏掉的那一类");
-  assert.match(src, /protectedCount \+= 1/, "没有统计被保留的降级条目");
-  // 本地没有的失效条目仍然要正常写入（pendingItems 那条分支不受影响）
+  const stopAt = src.indexOf("if (importLimit > 0) {", at);
+  assert.ok(stopAt > at, "找不到已存在分支的收尾");
+  const branch = src.slice(at, stopAt);
+  for (const banned of ["refreshImportedRecord", "recordNeedsRefresh", "refreshTargets", "importRecordNeedsRefresh", "recordNeedsFansOnly"]) {
+    assert.equal(branch.includes(banned), false, `「本地已有」的分支里还在动旧记录：${banned}`);
+  }
+  assert.doesNotMatch(branch, /writeFile\(/, "「本地已有」的分支不该再写任何文件");
+  // 本地没有的条目仍然要正常写入（pendingItems 那条分支不受影响）
   assert.match(src, /pendingItems\.push\(item\)/, "本地没有的条目仍然要写入");
+  assert.equal((src.match(/skipped \+= 1;/g) || []).length, 1, "「本地已有」只有一条出路：跳过");
 });
+
 
 test("完成弹窗只弹一次（点掉之后再打开插件不该重放）", () => {
   const src = readProjectFile("background.js");
@@ -5171,41 +5132,9 @@ test("导入流程的 root 句柄要在函数作用域里声明，不能锁进 t
   assert.match(background, /const result = await saveImportedItem\(root, folder, item, journal\);/);
 });
 
-test("重复导入不该给内容没变的记录刷新时间戳、也不该报成更新（V1.2.8）", () => {
-  const background = readProjectFile("background.js");
-  const { importStableInfoText } = loadBackgroundFunctions(["importStableInfoText"]);
+// 1.17.16（用户要求）：导入不再重写已有记录，importStableInfoText（比对时抹掉
+// 「信息保存于：」那一行）跟着删掉了，这里原本是它的真跑用例。
 
-  // 就是用户那份归档里的样子：简介是「未知」（B 站这条没有简介）
-  const file = [
-    "【基本信息】",
-    "视频收藏时间：2026年10月08日 23时07分46秒.000",
-    "信息保存于：2026-10-11 21:11:18",
-    "视频标题：2025年【哆啦A梦新番】 第十九季 全集",
-    "",
-    "【互动数据】",
-    "播放量：37495",
-    "",
-    "【视频简介】",
-    "未知"
-  ].join("\n");
-
-  // 只有「信息保存于」不同 —— 这正是重复导入时发生的事：buildInfo 每次都用新的 savedAt。
-  // 以前这里直接比原文，于是文件永远"变了"：每导入一次就重写一遍、还报一次「更新 N」。
-  const restamped = file.replace("信息保存于：2026-10-11 21:11:18", "信息保存于：2026-10-12 00:30:00");
-  assert.equal(importStableInfoText(restamped), importStableInfoText(file), "只有时间戳不同，不该算内容变了");
-  assert.notEqual(restamped, file, "（前提）原文确实不同，所以旧写法会判成变了");
-
-  // 真的变了还是要认出来，否则"以后再补"的能力就没了
-  assert.notEqual(importStableInfoText(file.replace("未知", "真正的简介")), importStableInfoText(file), "简介补上了要算变化");
-  assert.notEqual(importStableInfoText(file.replace("播放量：37495", "播放量：40000")), importStableInfoText(file), "播放量涨了要算变化");
-
-  // 接线：refreshImportedRecord 必须拿归一化后的文本比，不能直接比带时间戳的原文
-  const refreshAt = background.indexOf("async function refreshImportedRecord(");
-  assert.notEqual(refreshAt, -1, "background.js 里找不到 refreshImportedRecord");
-  const refreshBody = background.slice(refreshAt, background.indexOf("\n}", refreshAt));
-  assert.match(refreshBody, /if \(importStableInfoText\(refreshedText\) !== importStableInfoText\(original\)\) \{/);
-  assert.equal(/if \(refreshedText !== original\)/.test(refreshBody), false, "不要再拿带时间戳的原文直接比");
-});
 
 // V1.3.1：切界面语言会把早就关掉的详情页重新弹回来。
 // 根因：closeDetail() 不会清 detailContent.dataset.videoId，而 detailVideo() 只认那个 id，
@@ -5528,7 +5457,7 @@ test("上线前审查第一批：P0/P1 那几处都钉住了（V1.4.2）", () =>
 
   // P1-4：纯本地读的两个循环也要保活
   assert.equal((backgroundCode.match(/await keepServiceWorkerAlive\("scan"\);/g) || []).length, 2);
-  assert.match(backgroundCode, /await keepServiceWorkerAlive\("refresh"\);/);
+  // 1.17.16：刷新链路删掉了，这里原本还钉着一次 keepServiceWorkerAlive("refresh")。
 
   // P1-6：同名位置上是文件时不能当成致命错误（换个后缀继续试）
   assert.match(backgroundCode, /if \(error\?\.name !== "NotFoundError" && error\?\.name !== "TypeMismatchError"\) throw error;/);
@@ -6167,8 +6096,8 @@ test("收藏时间认不出时保留原文，不再拿「现在」顶上（1.13.
   assert.match(core, /function pinUnparsableFavoriteTime\(/, "archive-core.js 要有「认不出就钉回原文」的实现");
   assert.match(core, /function parseChineseDateTime\(/, "中文日期解析只有 archive-core.js 这一份");
   assert.doesNotMatch(source, /function parseChineseDateTime/, "background.js 不许再留第二份解析");
-  assert.match(source, /BcaArchiveCore\.parseChineseDateTime\(/, "background.js 要调用 archive-core 的解析");
-  assert.match(source, /BcaArchiveCore\.pinUnparsableFavoriteTime\(/, "刷新记录时要钉回认不出的收藏时间");
+  // 1.17.16（用户要求）：导入不再重写已有记录，background.js 既不再解析收藏时间、
+  // 也不再「认不出就钉回」—— 那两个函数仍留在 archive-core.js 里（上面两条钉着）。
   assert.doesNotMatch(
     source,
     /const favoriteTimeUnknown = importIsPlaceholder\(favoriteAtText\);/,
@@ -6500,31 +6429,11 @@ test("writeFile 真的对新文件就地写、对已存在的文件才建临时�
   assert.deepEqual(removed, [], "换名成功时临时文件已经变成正式文件了，不该再删一次");
 });
 
-// ---- 1.8.3：刷新的写盘路径先过「不许降级」合并 ----
+// ---- 1.17.16（用户要求）：导入不再重写已有记录 ----
 
-test("导入的「更新」链路写盘前先过「不许降级」合并（V1.8.3）", () => {
-  const backgroundCode = readProjectFile("background.js");
-  const at = backgroundCode.indexOf("async function refreshImportedRecord(");
-  assert.notEqual(at, -1, "background.js 里找不到 refreshImportedRecord");
-  const body = backgroundCode.slice(at, backgroundCode.indexOf("\r\n}\r\n", at));
-  assert.ok(body.length > 400, "refreshImportedRecord 的函数体没取到");
-  assert.match(body, /const rebuiltText = buildInfo\(/, "重建结果要先落到 rebuiltText 上");
-  assert.match(
-    body,
-    /const refreshedText = BcaArchiveCore\.pinUnparsableFavoriteTime\(original, BcaArchiveCore\.mergeInfoText\(original, rebuiltText\)\);/,
-    "写盘前必须过 mergeInfoText，否则接口一失败就把真实简介/标签换成「未知」" +
-      "（1.13.3 起外面还要再包一层 pinUnparsableFavoriteTime，见 P1-5）"
-  );
-  assert.ok(
-    body.indexOf("mergeInfoText(original, rebuiltText)") < body.indexOf('writeFile(directory, "视频信息.txt", refreshedText)'),
-    "合并必须在写盘之前"
-  );
-  // 别处也不许把 buildInfo 的结果直接写进一个已经存在的记录目录
-  assert.doesNotMatch(backgroundCode, /writeFile\(directory, "视频信息\.txt", buildInfo\(/, "重建结果不许绕过合并直接写盘");
-  const coreSource = readProjectFile("archive-core.js");
-  assert.equal((coreSource.match(/function mergeInfoText\(/g) || []).length, 1, "「不许降级」的判断只能有一份实现");
-  assert.equal(typeof require(path.join(projectRoot, "archive-core.js")).mergeInfoText, "function", "archive-core.js 要把 mergeInfoText 导出给 background.js");
-});
+// 「更新」链路连同 archive-core.js 的 mergeInfoText 一起删掉了（唯一调用点就在那条链路上）。
+// 这里本来还有一条「写盘前先过「不许降级」合并」的用例。
+
 
 test("「更新视频状态」只改接口真给了的互动数据（V1.8.3）", () => {
   const coreSource = readProjectFile("archive-core.js");
@@ -6690,45 +6599,7 @@ test("V1.8.6：封面只在要显示时才读，扫描阶段不再把整库封�
   assert.equal(/addCoverRef\(/.test(tools), false, "扫描时不再持有封面 URL");
 });
 
-test("V1.8.6：UP 主粉丝数按 mid 记住 7 天，只缺粉丝的记录只补那一次请求", () => {
-  const background = readProjectFile("background.js");
-  assert.match(background, /const UP_FANS_STORAGE_KEY = "bcaUpFans";/);
-  assert.match(background, /const UP_FANS_TTL_MS = 7 \* 24 \* 60 \* 60 \* 1000;/);
-  assert.match(background, /const UP_FANS_MAX_ENTRIES = 2000;/, "别让存储无限长");
-  assert.match(background, /async function rememberedUpFans\(mid\) \{/);
-  assert.match(background, /function rememberUpFans\(mid, fans\) \{/);
-  assert.match(background, /if \(options\.fresh !== true\) \{/, "记忆可被用户主动刷新绕过");
-  assert.match(background, /const upFans = mid \? await fetchUpFans\(mid, tabId, \{ fresh: true \}\) : "";/, "「更新视频状态」要取最新数字");
-  // 只缺粉丝数：只打 relation，view / tags 都跳过
-  assert.match(background, /function recordNeedsFansOnly\(record\) \{/);
-  assert.match(background, /return !recordNeedsRefresh\(\{ text: text \+ "\\nUP主粉丝数：0" \}\);/, "判据仍然只有 recordNeedsRefresh 一处");
-  assert.match(background, /if \(item\.fansOnly === true && item\.authorMid\) \{/);
-  assert.match(background, /if \(recordNeedsFansOnly\(record\)\) item\.fansOnly = true;/);
-  // 真跑：只缺粉丝的文本认得出，别的都不算
-  const { recordNeedsFansOnly } = loadBackgroundFunctions(
-    ["importClean", "importIsPlaceholder", "importPlaceholderWorthRetry", "recordNeedsRefresh", "recordNeedsFansOnly"],
-    ["IMPORT_PLACEHOLDER_VALUES", "IMPORT_SYMBOL_PLACEHOLDER_VALUES", "COVER_PENDING_LINE"]
-  );
-  const complete = [
-    "【基本信息】",
-    "视频标题：拉面",
-    "视频状态：正常",
-    "",
-    "【标签】",
-    "拉面、治愈",
-    "",
-    "【视频简介】",
-    "真正的简介",
-    "",
-    "UP主粉丝数：123",
-    "【互动数据】",
-    "播放量：1",
-    "视频发布时间：2020-01-01 00:00:00 星期三"
-  ].join("\n");
-  assert.equal(recordNeedsFansOnly({ text: complete }), false, "完整的记录不用补");
-  assert.equal(recordNeedsFansOnly({ text: complete.replace("UP主粉丝数：123", "") }), true, "只缺粉丝数");
-  assert.equal(recordNeedsFansOnly({ text: complete.replace("UP主粉丝数：123", "").replace("2020-01-01 00:00:00 星期三", "未知") }), false, "还缺发布时间就不是只缺粉丝");
-});
+
 
 test("V1.8.6：统计库攒够 200 条或 30 秒才落盘，收尾补一次", () => {
   const background = readProjectFile("background.js");
@@ -6798,7 +6669,7 @@ test("导入进度只在内容真的变了时才写 session（V1.8.7）", () => 
   assert.match(body, /if \(measured === importRunPublishedMeasured\) return;/);
   assert.match(body, /importRunPublishedMeasured = measured;/);
   // 那两条一模一样的 force 调用只能留一条
-  const duplicated = background.split("publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });").length - 1;
+  const duplicated = background.split("publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, skipped, failed, total } });").length - 1;
   assert.equal(duplicated, 1, "重复的那次 force 要删掉一条");
 });
 
@@ -6903,7 +6774,6 @@ test("导入可以按条数收工：名额只算本地没有的新视频，到�
 
   // 到上限就收工：后面的收藏夹连列表都不读；额度用完后也不再顺手刷新旧记录
   assert.match(backgroundCode, /if \(limitReached\) break;/, "到上限要跳出收藏夹循环");
-  assert.match(backgroundCode, /for \(const entry of limitReached \? \[\] : refreshTargets\)/, "额度用完别再去刷新旧记录");
 
   // 裁剪要在抓详情之前，否则白花请求
   assert.ok(backgroundCode.indexOf("pendingItems.length = remaining;") < backgroundCode.indexOf("if (detailTargets.length) await fetchImportDetails("), "裁剪必须早于抓详情");
@@ -7752,7 +7622,7 @@ test("1.16.10（用户要求）：取消「继续上次导入」，中断一律�
     /上次导入可能因为杀后台、网络波动等原因没有完整导入，上次导入了 \{count\} 条，如果需要继续导入请到收藏夹页使用插件再导入一次。/
   );
   assert.match(background, /await persistErrorReport\(reportLines\.join\("\\n"\)\)/, "中断要留一份错误报告");
-  assert.match(background, /finishing: true, counts: \{ imported, refreshed, skipped, failed, total \}/, "收尾前要留「其实跑完了」的标记");
+  assert.match(background, /finishing: true, counts: \{ imported, skipped, failed, total \}/, "收尾前要留「其实跑完了」的标记");
   const popup = readProjectFile("popup.js");
   assert.doesNotMatch(popup, /resumeImport/, "弹窗不再有「继续上次导入」那一行");
   assert.doesNotMatch(readProjectFile("popup.html"), /id="resumeImport/, "popup.html 里也不该再有那一块");
@@ -8083,14 +7953,13 @@ test("收藏库扫描后把「收藏夹 → BV → 目录名」发布给后台�
 /* --------------------------------------------------------------------------- */
 /* ---- 1.9.4：简介读写、收藏前判重、粉丝数 ---- */
 /* --------------------------------------------------------------------------- */
-test("「所属收藏夹」四处写入都传收藏夹名，不再传时间戳目录名（1.9.4）", () => {
+test("「所属收藏夹」三处写入都传收藏夹名，不再传时间戳目录名（1.9.4 / 1.17.16）", () => {
   const background = stripComments(readProjectFile("background.js"));
   const calls = background.match(/buildInfo\(\{/g) || [];
-  assert.equal(calls.length, 4, "buildInfo 的四个调用点都要在");
+  assert.equal(calls.length, 3, "buildInfo 的三个调用点都要在（刷新那一条 1.17.16 删掉了）");
   for (const [note, anchor] of [
     ["手动添加", "}, target.name, new Date());"],
     ["自动收藏", "}, folderName, savedAt);"],
-    ["刷新导入", "}, collection.name, new Date());"],
     ["导入保存", "}, collectionName, new Date()));"]
   ]) {
     assert.ok(background.includes(anchor), `${note}那个调用点要传收藏夹名：${anchor}`);

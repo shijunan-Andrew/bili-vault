@@ -2715,7 +2715,7 @@ function resetImportRunSnapshot(journal, folderIds = []) {
     rateLimitStreak: 0, text: importState.text || "",
     finishing: false,
     cursor: { folder: "", page: 0, saved: 0, folderTotal: 0 },
-    counts: { imported: 0, refreshed: 0, skipped: 0, failed: 0, total: 0 },
+    counts: { imported: 0, skipped: 0, failed: 0, total: 0 },
     journal: importJournalSnapshot(journal)
   };
   importRunPublishAt = 0;
@@ -2953,7 +2953,7 @@ function importInterruptedSummary(snapshot) {
 async function importAnnounceInterruption(snapshot) {
   const detail = importInterruptedSummary(snapshot);
   const counts = snapshot?.counts || {};
-  const written = Math.max(0, Number(counts.imported) || 0) + Math.max(0, Number(counts.refreshed) || 0);
+  const written = Math.max(0, Number(counts.imported) || 0);
   const savedCount = written || (snapshot?.journal?.createdRecords?.length || 0);
   const notice = BcaI18n.t("上次导入可能因为杀后台、网络波动等原因没有完整导入，上次导入了 {count} 条，如果需要继续导入请到收藏夹页使用插件再导入一次。", { count: savedCount });
   const text = detail ? `${notice}（${detail}）` : notice;
@@ -3022,10 +3022,9 @@ function importRunLooksComplete(snapshot) {
   const total = Number(counts.total) || 0;
   if (!total) return false;
   /* 1.17.3（审查 P1-B）：这里只数「每条记录都有结果」这一件事 —— 导入成功（imported）
-     与「本地已有、跳过」（skipped）。refreshed 是 skipped 的子集（同一条既有记录先记
-     skipped，刷新成功再记 refreshed），把它加进来等于同一条算两遍；failed 里还混着接口
-     口径差额（missingCount 根本不在 total 里）。两处一起加，就会在「最后一个收藏夹还有
-     条目没抓」时提前追平 total，把没跑完的一轮判成「导入/更新完成」。 */
+     与「本地已有、跳过」（skipped）。failed 里还混着接口口径差额（missingCount 根本不在
+     total 里），两处一起加，就会在「最后一个收藏夹还有条目没抓」时提前追平 total，
+     把没跑完的一轮判成「导入完成」。（1.17.16 起不再有「更新记录」这一档。） */
   const handled = (Number(counts.imported) || 0) + (Number(counts.skipped) || 0);
   if (handled < total) return false;
   const folderTotal = Number(snapshot?.cursor?.folderTotal) || 0;
@@ -3123,7 +3122,7 @@ async function reconcileImportRunState() {
     /* 收尾文案也要补上：快照里留着的是「正在读取「X」的视频资料：12/50」这种进度句，
        直接复位会让人以为它停在半路。这里按快照的计数拼一句和正常收尾一样的完成说明。 */
     const doneCounts = leftover?.counts || {};
-    const doneText = `导入/更新完成：新导入 ${Number(doneCounts.imported) || 0} 个，更新 ${Number(doneCounts.refreshed) || 0} 个，`
+    const doneText = `导入完成：新导入 ${Number(doneCounts.imported) || 0} 个，`
       + `已存在跳过 ${Number(doneCounts.skipped) || 0} 个，失败 ${Number(doneCounts.failed) || 0} 个。`;
     importState = { ...importState, running: false, paused: false, text: doneText, summary: doneText, finishedAt: Date.now(), updatedAt: Date.now() };
     await chrome.storage.local.set({ importState }).catch(() => {});
@@ -3343,131 +3342,17 @@ async function readExistingImportRecords(collection) {
   return { identifiers, records };
 }
 
-// 缺新字段（粉丝数、互动数据）或标签/简介/发布时间还是占位值时，更新模式会重写它
-function recordNeedsRefresh(record) {
-  const text = String(record?.text || "");
-  if (!text) return false;
-  const tagsLine = text.match(/【标签】[^\n]*\n([^\n]*)/)?.[1]?.trim() || "";
-  const description = (text.match(/【视频简介】[^\n]*\n([\s\S]*)$/)?.[1] || "").trim();
-  const pubdate = text.match(/^视频发布时间：(.+)$/m)?.[1]?.trim() || "";
-  // V1.2.8：这里用 importPlaceholderWorthRetry 而不是 importIsPlaceholder。
-  // 起因是真机上的反馈 —— 一个 6 条的收藏夹，明明只有 3 条资料不完整，却每次导入都报
-  // 「更新 3」。查下来是那 3 条的 B 站简介本来就是空的、接口回的就是一个 `-`：占位不假，
-  // 但"再抓一次"改变不了任何东西，于是每导入一次就白写一遍文件、计数也永远停在 3。
-  // 现在只有「词类占位」（未知/无/暂无…，多半是上次没取到）才当"不完整、值得重试"。
-  return importPlaceholderWorthRetry(tagsLine)
-    || importPlaceholderWorthRetry(description)
-    || importPlaceholderWorthRetry(pubdate)
-    || !/^UP主粉丝数：/m.test(text)
-    || !/【互动数据】/.test(text)
-    // 4.9.x：写入端在封面候选全失败时会写 COVER_PENDING_LINE 占位标记，
-    // 这里必须认它。否则"目录里有一张占位图"会被当成封面完好，这条记录永远不会再补真封面。
-    || text.includes(COVER_PENDING_LINE)
-    // 4.9：目录里没有封面同样算"不完整"。coverMissing 由 importRecordNeedsRefresh()
-    // 在本函数的文本判据都通过之后才去查一次盘并缓存在 record 上，正常记录不额外付 IO。
-    // 背景：旧版本是"先写 视频信息.txt、后写 封面.png"，中途被杀就会留下只有 txt 的半截目录，
-    // 以前它被判成"已存在、跳过"，这条视频就永远没有封面（收藏库还会把它当不完整记录隐藏）。
-    || record?.coverMissing === true;
-}
-
-// 查一次"这条记录的目录里到底有没有封面"，结果缓存在 record 上（同一次导入只查一次）
-// 1.8.6（P0-2）：只缺粉丝数吗？—— 给文本补一行假的「UP主粉丝数」，如果这样
-// recordNeedsRefresh 就不再要求刷新，说明缺的确实只有它（判断仍然只有 recordNeedsRefresh 一处）。
-function recordNeedsFansOnly(record) {
-  const text = String(record?.text || "");
-  if (!text) return false;
-  if (/^UP主粉丝数：/m.test(text)) return false;
-  return !recordNeedsRefresh({ text: text + "\nUP主粉丝数：0" });
-}
-
-async function recordMissingCover(collection, record) {
-  if (!record) return false;
-  if (typeof record.coverMissing === "boolean") return record.coverMissing;
-  try {
-    const directory = await collection.getDirectoryHandle(record.directory);
-    // 两个名字都认：老档案只有 封面.png，4.9 之后写的是 封面.webp
-    let found = false;
-    for (const name of COVER_FILE_NAMES) {
-      try { await directory.getFileHandle(name); found = true; break; } catch (_) {}
-    }
-    if (!found) throw new Error("缺少封面文件");
-    record.coverMissing = false;
-  } catch (_) {
-    record.coverMissing = true;
-  }
-  return record.coverMissing;
-}
-
-async function importRecordNeedsRefresh(collection, record) {
-  if (!record) return false;
-  if (recordNeedsRefresh(record)) return true;   // 文本判据已经说要刷新，不必再查封面
-  if (record.coverMissing === undefined) await recordMissingCover(collection, record);
-  return recordNeedsRefresh(record);             // 复判：coverMissing 也是判据之一
-}
-
-// 1.13.3（审查 P1-5）：中文日期解析已挪进 archive-core.js 的 parseChineseDateTime，
-// 那是纯函数模块，archive-core.test.cjs 能直接表驱动测它；这里不许再留第二份。
-
-// 「信息保存于：…」是 buildInfo 用 savedAt 现写的时间戳（见 background.js 里那一行模板），
-// 每次运行都不一样。比对"这条记录的内容有没有真的变化"之前必须先把它抹掉，否则文件永远"变了"：
-// 每导入一次就给这些记录重写一遍时间戳，用户看到的就是"明明没变，却每次都报更新 N"。
-function importStableInfoText(text) {
-  return String(text || "").replace(/^信息保存于：.*$/m, "");
-}
-
-// 用最新资料按新格式重写已有记录，保留原来的收藏时间与目录名；原文进回滚日志
-async function refreshImportedRecord(collection, record, item, journal) {
-  const directory = await collection.getDirectoryHandle(record.directory);
-  const infoHandle = await directory.getFileHandle("视频信息.txt");
-  const original = await (await infoHandle.getFile()).text();
-  const favoriteAtText = BcaArchiveCore.favoriteTimeTextOf(original);
-  // 1.13.3（审查 P1-5）：解析不出也算「未知」—— 写盘时保留原文那一行，
-  // 不再退回 new Date() 把真实收藏时间改成「更新时间」。
-  const parsed = importIsPlaceholder(favoriteAtText) ? null : BcaArchiveCore.parseChineseDateTime(favoriteAtText);
-  const favoriteTimeUnknown = !parsed;
-  const favoriteAt = parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date();
-  // coverMissing 还没算过就在这里补算一次——只有"需要刷新"的记录会走这条路径，正常记录不受影响。
-  if (record.coverMissing === undefined) await recordMissingCover(collection, record);
-  let cover = null;
-  if (record.coverMissing) {
-    // 抓不到真封面时会写入"封面暂不可恢复"占位图——和导入链路保持一致：
-    // library.js 把没有封面的记录当成不完整记录直接跳过，宁可先写占位图让记录可见。
-    // 但占位图必须留下标记（见 COVER_PENDING_LINE），否则这条记录会被当成封面完好、永不再补。
-    cover = await loadImportCover([
-      ...(item.coverCandidates || []),
-      ...(item.cover ? [{ url: item.cover, source: "收藏夹接口" }] : [])
-    ], item.isInvalid);
-    noteCoverOutcome(cover);
-  }
-  const metadata = importMetadata(item, cover);
-  metadata.favoriteTimeUnknown = favoriteTimeUnknown;
-  // 标记按"这次实际拿到了什么"决定去留：拿到真封面就清掉旧的待补标记，
-  // 仍然只有占位图（或本来就缺封面但这次也没补上）就继续保留待补标记。
-  metadata.coverMissing = cover ? cover.placeholder === true : record.coverMissing === true;
-  // 1.8.3（存档完好性）：整篇重建的结果先过一道「不许降级」合并。
-  // 资料接口 / 标签接口任一失败时，重建出来的是一堆「未知」——直接写下去就是把真实的
-  // 简介、标签、发布时间、时长、互动数据换成占位符，而且导入跑完之后没有退路。
-  const rebuiltText = buildInfo({ metadata, favoriteAt: favoriteAt.getTime() }, collection.name, new Date());
-  // 1.13.3（审查 P1-5）：认不出的收藏时间原样钉回（判定见 archive-core.pinUnparsableFavoriteTime）
-  const refreshedText = BcaArchiveCore.pinUnparsableFavoriteTime(original, BcaArchiveCore.mergeInfoText(original, rebuiltText));
-  let touched = false;
-  if (cover) {
-    // 先写封面、后写 txt：txt 始终是"这条记录写完了"的完成标记
-    journal?.addedFiles.push({ collectionHandle: collection, directoryHandle: directory, name: COVER_FILE_NAME });
-    await writeFile(directory, COVER_FILE_NAME, cover.blob);
-    record.coverMissing = false;
-    touched = true;
-  }
-  // V1.2.8：只认"真变化"。除「信息保存于」那一行以外完全一样，就不动文件、也不算更新 ——
-  // 时间戳停在上一次资料真正变化的时候，比"每次摸一下都算一次更新"诚实。
-  // 真变化（B 站补了简介、播放量涨了、封面补上了）照旧写。
-  if (importStableInfoText(refreshedText) !== importStableInfoText(original)) {
-    journal.modifiedFiles.push({ collectionHandle: collection, directoryHandle: directory, name: "视频信息.txt", text: original });
-    await writeFile(directory, "视频信息.txt", refreshedText);
-    touched = true;
-  }
-  return touched;
-}
+// 1.17.16（用户要求）：导入不再刷新本地已有记录。
+// 以前这里是一整套「更新模式」：
+//   recordNeedsRefresh()       判旧记录缺不缺字段（粉丝数 / 互动数据 / 标签简介占位 / 缺封面）
+//   recordNeedsFansOnly()      只缺粉丝数时走 /x/relation/stat 的快路
+//   recordMissingCover()       顺手查一次盘，看目录里到底有没有封面文件
+//   importRecordNeedsRefresh() 把上面两条串起来
+//   importStableInfoText()     比对时抹掉「信息保存于：…」那一行
+//   refreshImportedRecord()    重抓详情后整篇重写 视频信息.txt（原文进回滚日志）
+// 现在导入只有两种结果：本地没有 → 导入；本地已有 → 跳过，一个字节都不碰。
+// 想让旧记录补资料，只能把它导进一个空的收藏夹，或者手动点「更新视频状态」更新互动数据。
+// 连带删掉的还有 archive-core.js 的 mergeInfoText()（唯一调用点就在上面这套里）。
 
 /* ---------- 视频详情抓取 ---------- */
 
@@ -3497,14 +3382,6 @@ async function fetchUpFans(mid, tabId = null, options = {}) {
 // 一条视频的完整资料：简介、发布时间、时长、UP 主、互动数据、标签、粉丝数
 async function fetchVideoDetail(item, tabId = null) {
   const detail = { stats: {}, errors: [] };
-  /* 1.8.6（P0-2）：这条记录只缺「UP主粉丝数」时，只补 /x/relation/stat 这一下 ——
-     view 与 tags 都不打（4 次请求里省掉 2 次）。刷新写盘仍然过 mergeInfoText，
-     没抓到的简介/标签不会被写成「未知」（1.8.3 的保证）。 */
-  if (item.fansOnly === true && item.authorMid) {
-    const fans = await fetchUpFans(item.authorMid, tabId);
-    if (fans) detail.upFans = fans;
-    return detail;
-  }
   const query = item.bvid ? { bvid: item.bvid } : (item.aid ? { aid: String(item.aid).replace(/^av/i, "") } : null);
   // 已知失效的条目不再请求视频资料接口（必定返回“稿件不可见”），
   // 标签接口仍试一次：稿件不可见时标签有时还能取到。
@@ -3799,25 +3676,6 @@ function importPageEntirelyBefore(items, cutoffMs) {
     seen += 1;
   }
   return seen > 0;
-}
-
-/* 这条解析结果够不够格覆盖本地已有的记录。
-
-   为什么不能直接用 importUsefulTitle：
-     · 上面的流程里有这么一句
-         if (!item.isInvalid && !importUsefulTitle(item.title)) item.title = "未知";
-       标题不可用时会被**换成「未知」**，而「未知」是"非空、且不在已知失效标题名单里"，
-       于是 importUsefulTitle("未知") 返回 true —— 守卫反而认为"信息可用"，把它放过去。
-     · 真机上的完整链条：
-         标题不可用 → item.title = "未知" → 守卫放行 → refreshImportedRecord
-         → importMetadata → buildInfo 整篇重建 → 本地标题被写成「未知」
-       V1.1.20 只挡 isInvalid、V1.1.21 改用 importUsefulTitle，两次都栽在同一个地方。
-
-   所以这里明确把「未知」判成不可信：**占位符不是数据**。 */
-function importItemIsTrustworthy(item) {
-  if (item?.isInvalid) return false;
-  const title = importClean(item?.title);
-  return !!title && title !== "未知" && importUsefulTitle(title);
 }
 
 function importIdentifierKeys(item) {
@@ -4882,7 +4740,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
   // 写进 chrome.storage.session，SW 被回收后还能知道"上次跑到哪、写了哪些目录"
   resetImportRunSnapshot(journal, data?.folderIds);
 
-  let imported = 0, refreshed = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
+  let imported = 0, skipped = 0, failed = 0, total = 0, hasIssues = false;
   // 1.8.8：「最多导入 N 条」用到的两个状态。limitReached 一旦为真，后面的收藏夹
   // 连列表都不去读（读页也要发请求）；limitedCount 记因为上限而没导入的新视频条数。
   // 1.8.8：本次最多导入多少条**新**视频（0 = 不限，也就是「全部」）。
@@ -4921,7 +4779,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
       }
       // 1.8.8：上一个收藏夹就把这次的额度用完了 —— 这里直接收工，不再读它的列表。
       if (limitReached) break;
-      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderIndex: folderIndex + 1, folderTotal: folders.length }, counts: { imported, refreshed, skipped, failed, total } });
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: 1, saved: 0, folderIndex: folderIndex + 1, folderTotal: folders.length }, counts: { imported, skipped, failed, total } });
 
       importProgress(`正在读取「${folder.title}」（${folderIndex + 1}/${folders.length}）…`, true);
       // 第 1 页读不到就整轮跳过这个收藏夹，代价太大：一次偶发的 412 会让用户以为功能坏了
@@ -5081,42 +4939,21 @@ async function importBiliFavoritesInner(data, tabId = null) {
 
       const existing = await readExistingImportRecords(collection);
       const pendingItems = [];
-      const refreshTargets = [];
-      let protectedCount = 0;   // 本地已有备份、因而被丢弃的降级条目数
       for (const item of scopedItems) {
         const keys = importIdentifierKeys(item);
         const matched = keys.find((key) => existing.identifiers.has(key));
+        // 1.17.16（用户要求）：导入只有两种结果 —— 本地没有就导入，本地已有就跳过。
+        // 以前这里还会判「旧记录资料不全」→ 收进一份刷新队列 → 重抓详情后整篇重写
+        // 视频信息.txt。那套「更新模式」已经整套删掉了：导入不再改动任何已有记录，
+        // 报告里也不会再出现「更新 N 条」这一列。
         if (!matched) {
           keys.forEach((key) => existing.identifiers.add(key));
           pendingItems.push(item);
           continue;
         }
         skipped += 1;
-        // **本地已有这条记录时，只有"解析到的信息确实可用"才允许刷新。**
-        //
-        // 判据不能只看 item.isInvalid。真机上那条失效视频的 media.is_invalid 并不是 true：
-        // 接口返回的标题既不是「已失效视频」这类已知占位（不在 IMPORT_INVALID_TITLES 里），
-        // 也不是可用标题，于是上面那句 `if (!item.isInvalid && !importUsefulTitle(...))`
-        // 把它的 item.title 改成了「未知」—— 然后这条"未知"就把本地完好的标题覆盖了。
-        // V1.1.20 只挡了 item.isInvalid，正好漏掉这一条，用户复现后才发现。
-        //
-        // 所以判据交给 importItemIsTrustworthy：失效、标题空、标题是「未知」，
-        // 三种都算不可信（见那个函数的注释 —— 前两版就是在这里连栽两次的）。
-        // 本地没有的（pendingItems 那条分支）不受影响 —— 该存还是要存。
-        // 想用降级信息覆盖，只有手动点「更新视频状态」那一条路。
-        if (!importItemIsTrustworthy(item)) {
-          protectedCount += 1;
-          continue;
-        }
-        const record = existing.records.get(matched);
-        // 4.9：除了文本判据，还要看"目录里有没有封面"（半截目录）。这个查盘只在
-        // 文本判据说"完整"时才发生，正常路径不多付 IO。
-        if (record && await importRecordNeedsRefresh(collection, record)) {
-          // 1.8.6（P0-2）：只缺粉丝数的旧记录，只补那一次请求
-          if (recordNeedsFansOnly(record)) item.fansOnly = true;
-          refreshTargets.push({ item, record });
-        }
       }
+
       // 1.8.8：本次只写 N 条新视频。裁剪放在「抓详情 / 下封面」之前 ——
       // 额度用完的那些条目不该再花任何一次 B 站请求。
       if (importLimit > 0) {
@@ -5130,13 +4967,10 @@ async function importBiliFavoritesInner(data, tabId = null) {
           limitReached = true;
         }
       }
-      // 无论有没有拦到都记一行：这一行能证明「守卫确实跑过了」。
-      // 上一轮的报告里连备注都没有，我分不清是"守卫没生效"还是"根本没走到这里"。
-      folderLog.push(`信息可信度检查：匹配到本地已有记录 ${skipped} 条，其中 ${protectedCount} 条解析结果不可信（失效/标题取不到），已保留原记录。`);
-      if (protectedCount > 0) {
-        folderNotes.push(`「${folder.title}」有 ${protectedCount} 条解析结果不可用（已失效或标题取不到），本地已有备份，按规则保留了原记录、没有被覆盖。`);
+      if (skipped > 0) {
+        folderLog.push(`本地已有 ${skipped} 条（按 BV/av 号对上号），按规则跳过 —— 1.17.16 起导入不再重写已有记录。`);
       }
-      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, refreshed, skipped, failed, total } });
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, page: maxPages }, counts: { imported, skipped, failed, total } });
 
       // 失效视频先走恢复流程（只打 APP 收藏夹这一路，见 fetchMobileRecovery）。
       // 4.4.1：这条路径会伪造成官方 iOS 客户端请求 APP 接口，默认开启，
@@ -5157,34 +4991,9 @@ async function importBiliFavoritesInner(data, tabId = null) {
       }
 
       // 4.2：每条视频都抓一次完整资料（标签 / 简介 / 发布时间 / 互动数据 / UP 主粉丝数）
-      const detailTargets = [...pendingItems, ...refreshTargets.map((entry) => entry.item)];
+      const detailTargets = pendingItems;
       if (detailTargets.length) await fetchImportDetails(detailTargets, folder, tabId);
 
-      // 更新模式：按新格式重写数据不完整的旧记录（原文进回滚日志）
-      // 1.8.8：额度用完就只收工，不再顺手刷新旧记录（那也是成片的请求）。
-      for (const entry of limitReached ? [] : refreshTargets) {
-        await importWaitIfPaused();
-        // 1.4.2（P1-4）：这条循环只重写本地文件、不联网，几千条时中间能静默很久，
-        // 不保活就会被 MV3 的空闲回收掐断（内部按 20 秒节流）
-        await keepServiceWorkerAlive("refresh");
-        if (entry.item.rateLimited) {
-          // 4.9：详情抓取撞上风控时绝不能重写旧记录——重写会用"未知"覆盖档案里
-          // 已经有的标签、简介和互动数据，属于不可逆的数据损失。
-          importRateLimitStreak += 1;
-          failed += 1;
-          folderLog.push(`${entry.item.title || entry.record.directory}：触发 B 站风控，已跳过刷新（避免用“未知”覆盖原记录）。`);
-          importCheckRateLimitAbort();
-          continue;
-        }
-        importRateLimitStreak = 0;
-        try {
-          if (await refreshImportedRecord(collection, entry.record, entry.item, journal)) refreshed += 1;
-        } catch (error) {
-          importRethrowIfAbort(error);
-          failed += 1;
-          folderLog.push(`${entry.item.title || entry.record.directory}：刷新失败：${error.message}`);
-        }
-      }
 
       for (let offset = 0; offset < pendingItems.length; offset += 12) {
         await importWaitIfPaused();
@@ -5224,7 +5033,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
             // 1.5.0：数据库那一行跟着归档走 —— 这条已经落盘了才记
             statsPendingRecords.push(statsRecordForItem(item, folder.title, result.favoriteAtText));
             if (!statsPendingSince) statsPendingSince = Date.now();
-            publishImportRun({ journal, cursor: { folder: folder.title, saved: offset + index + 1, folderItems: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
+            publishImportRun({ journal, cursor: { folder: folder.title, saved: offset + index + 1, folderItems: pendingItems.length }, counts: { imported, skipped, failed, total } });
           } catch (error) {
             importRethrowIfAbort(error);
             failed += 1;
@@ -5246,7 +5055,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
         hasIssues = true;
         folderLog.length = 0;   // 已渲染，别让中止路径再渲一遍
       }
-      publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderItems: pendingItems.length }, counts: { imported, refreshed, skipped, failed, total } });
+      publishImportRun({ journal, force: true, cursor: { folder: folder.title, saved: pendingItems.length, folderItems: pendingItems.length }, counts: { imported, skipped, failed, total } });
       // 1.5.0：一个收藏夹跑完就把数据库落一次盘（中途被取消也只丢最后这一小段）
       // 1.7.10（P2-4）：改走 flushStatsPendingRecords —— 写失败会把整批放回队列重试
       // 1.8.6（P0-3）：但每次落盘都是「读全库 → 改 → 整份写回」，十几条的小收藏夹也照做
@@ -5313,7 +5122,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
     await chrome.storage.local.set({
       lastResult: { message: summary, createdAt: finishedAt, failed: rollbackFailures.length > 0 }
     });
-    return { ok: false, cancelled: true, message: summary, imported: 0, refreshed: 0, skipped, failed, total, reportPath: "" };
+    return { ok: false, cancelled: true, message: summary, imported: 0, skipped, failed, total, reportPath: "" };
   }
 
   // 4.9.1：中止时补渲当前收藏夹的日志
@@ -5327,13 +5136,13 @@ async function importBiliFavoritesInner(data, tabId = null) {
   if (rateLimited) {
     flushActiveFolderLog();
     // 风控中止：把"停在哪、已经写了多少、等多久再试"讲清楚，并留一份报告
-    const message = `${rateLimited.message}（本次：读取 ${total} 条，新导入 ${imported} 条，更新 ${refreshed} 条，跳过 ${skipped} 条，失败 ${failed} 条）`
+    const message = `${rateLimited.message}（本次：读取 ${total} 条，新导入 ${imported} 条，跳过 ${skipped} 条，失败 ${failed} 条）`
       + (missingNotes.length ? `分页缺口：${missingNotes.join("；")}。` : "");
     reportLines.push("", `中止时间：${formatChineseDateTime(new Date(), true)}`,
       "中止原因：连续命中 B 站风控（HTTP 412 / 接口错误码 -412 / -352）。",
       `重试建议：等待约 ${IMPORT_RATE_LIMIT_COOLDOWN_MINUTES} 分钟后再导入；重新导入会按 BV/av 号跳过已写入的记录。`,
       "本次已写入的目录都包含封面与视频信息.txt，是完整记录，不需要删除。",
-      `读取视频：${total}`, `新导入：${imported}`, `更新记录：${refreshed}`, `已存在跳过：${skipped}`, `失败：${failed}`);
+      `读取视频：${total}`, `新导入：${imported}`, `已存在跳过：${skipped}`, `失败：${failed}`);
     if (folderNotes.length) reportLines.push("", "备注：", ...folderNotes);
     const reportPath = await persistErrorReport(reportLines.join("\n"));
     await chrome.storage.local.set({
@@ -5344,18 +5153,18 @@ async function importBiliFavoritesInner(data, tabId = null) {
     });
     publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message, rateLimited: true }, true);
     await finishImportRunSnapshot();
-    return { ok: false, rateLimited: true, message, imported, refreshed, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "" };
+    return { ok: false, rateLimited: true, message, imported, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "" };
   }
 
   /* 1.16.10：跨过这一行就代表所有收藏夹都跑完了，只剩收尾的 await。
      这里把 finishing 与最终计数先写进快照：收尾期间被回收时，下次按「已完整导入」处理。 */
   if (importRunSnapshot) {
-    importRunSnapshot = { ...importRunSnapshot, finishing: true, counts: { imported, refreshed, skipped, failed, total }, updatedAt: Date.now() };
+    importRunSnapshot = { ...importRunSnapshot, finishing: true, counts: { imported, skipped, failed, total }, updatedAt: Date.now() };
     await writeImportRunSnapshot();
   }
 
   reportLines.push("", `完成时间：${formatChineseDateTime(new Date(), true)}`,
-    `读取视频：${total}`, `新导入：${imported}`, `更新记录：${refreshed}`, `已存在跳过：${skipped}`, `失败：${failed}`);
+    `读取视频：${total}`, `新导入：${imported}`, `已存在跳过：${skipped}`, `失败：${failed}`);
   if (limitReached) {
     reportLines.push("", `本次按上限：最多 ${importLimit} 条，已写入 ${imported} 条`
       + (limitedCount > 0 ? `，另有 ${limitedCount} 条新视频未导入（再点一次「开始导入」接着补）` : ""));
@@ -5382,7 +5191,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
     ? `本次按上限导入：最多 ${importLimit} 条，已写入 ${imported} 条`
       + (limitedCount > 0 ? `，另有 ${limitedCount} 条新视频留到下次（再点一次「开始导入」就接着补）。` : "。")
     : "";
-  const message = `导入/更新完成：新导入 ${imported} 个，更新 ${refreshed} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`
+  const message = `导入完成：新导入 ${imported} 个，已存在跳过 ${skipped} 个，失败 ${failed} 个。`
     + (missingNotes.length ? `分页未取全：${missingNotes.join("；")}。` : "")
     // 4.9.2：差额如实报出来，用户才能对照 B 站页面自行核对
     + (coverageNotes.length ? `（${coverageNotes.join("；")}。差额是 B 站收藏夹里的占位空槽：视频被删除后会留下空位，它计入总数但没有内容、接口也不返回，不是导入遗漏。）` : "")
@@ -5397,7 +5206,7 @@ async function importBiliFavoritesInner(data, tabId = null) {
   /* 1.16.4：同上 —— 「结束」先落盘，再清快照。 */
   publishImportState({ running: false, paused: false, finishedAt, text: message, summary: message }, true);
   await finishImportRunSnapshot();
-  return { ok: true, message, imported, refreshed, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "", limitReached, limitedCount };
+  return { ok: true, message, imported, skipped, failed, total, reportPath: reportPath ? storageReportLabel(reportPath) : "", limitReached, limitedCount };
 }
 
 // 4.9.x：占住"当前这一轮导入"。claimImportRun 必须在任何 await 之前调用 ——
@@ -6254,7 +6063,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // 落盘一份完成提示：导入要跑几分钟，用户多半已经切走页面、弹窗也关了，
       // 只在 sendMessage 回调里弹的话这次提示就永远看不到了。
       if (result?.ok !== false) {
-        const text = result?.message || `导入/更新完成：新导入 ${result?.imported || 0} 个，更新 ${result?.refreshed || 0} 个。`;
+        const text = result?.message || `导入完成：新导入 ${result?.imported || 0} 个，已存在跳过 ${result?.skipped || 0} 个。`;
         chrome.storage.local.set({ importDone: { text, acknowledged: false, at: Date.now() } }).catch(() => {});
         // 1.7.3：弹窗多半已经关了，补一条系统通知（见 notifyImportOutcome）
         notifyImportOutcome("导入完成", text);

@@ -689,84 +689,6 @@
     return lines.join(newline);
   }
 
-  /* 1.8.3（存档完好性）：刷新已有记录时的「不许降级」闸门。
-     导入的「更新」链路为了把老档案补齐成新格式，一直是拿这次抓到的资料整篇重建
-     （buildInfo）。但资料接口 / 标签接口任一失败，重建出来的就是一堆「未知」：
-     简介、标签、发布时间、时长、互动数据会在一次「更新」里被换掉，而导入跑完
-     之后没有退路（回滚日志只在中途取消时才用）。
-     这里逐字段比对：新值是占位、原值不是占位 → 保留原值；区块（标签 / 简介 / 互动
-     数据）整体成了占位而原文有真内容 → 整块保留原文。其余以新值为准（真变了就该更新）。 */
-  const MERGE_LINE_FIELDS = ["视频标题", "视频链接", "BV号", "av号", "视频时长", "视频发布时间", "UP主昵称", "UP主UID", "UP主粉丝数", "UP主主页"];
-  const MERGE_SECTIONS = ["【标签】", "【视频简介】"];
-
-  function mergeInfoText(original, candidate) {
-    const source = String(original ?? "");
-    const next = String(candidate ?? "");
-    if (!source.trim()) return next;
-    if (!next.trim()) return source;
-    const newline = next.includes("\r\n") ? "\r\n" : "\n";
-    const oldLines = source.split(/\r?\n/);
-    const lines = next.split(/\r?\n/);
-    const valueOf = (list, key) => {
-      const index = list.findIndex((line) => line.startsWith(`${key}：`));
-      return index < 0 ? "" : list[index].slice(key.length + 1);
-    };
-    // ① 单行字段：新值是占位、原值不是 → 保留原值
-    for (const key of MERGE_LINE_FIELDS) {
-      const before = valueOf(oldLines, key);
-      const after = valueOf(lines, key);
-      if (!isPlaceholderValue(after) || isPlaceholderValue(before)) continue;
-      const index = lines.findIndex((line) => line.startsWith(`${key}：`));
-      if (index >= 0) lines[index] = `${key}：${before}`;
-    }
-    const sectionBody = (list, heading) => {
-      const start = list.findIndex((line) => line.trim() === heading);
-      if (start < 0) return null;
-      let end = start + 1;
-      while (end < list.length && !SECTION_HEADING_PATTERN.test(list[end].trim())) end += 1;
-      const body = list.slice(start + 1, end);
-      while (body.length && !body[body.length - 1].trim()) body.pop();
-      return { start, end, body };
-    };
-    const hasReal = (body) => body.some((line) => line.trim() && !isPlaceholderValue(line.trim()));
-    // ② 文本区块：新块整个是占位、原文有真内容 → 整块换回原文
-    for (const heading of MERGE_SECTIONS) {
-      const before = sectionBody(oldLines, heading);
-      const after = sectionBody(lines, heading);
-      if (!before || !after) continue;
-      if (!hasReal(before.body) || hasReal(after.body)) continue;
-      lines.splice(after.start + 1, after.end - after.start - 1, ...before.body, "");
-    }
-    // ③ 互动数据：新值是占位、原文有真实数字 → 用原值；新区块整个丢了就补回原文那一块
-    const oldStats = sectionBody(oldLines, "【互动数据】");
-    if (!oldStats) return lines.join(newline);
-    const fromOld = {};
-    for (const key of STAT_KEYS) {
-      const label = `${STAT_LABELS[key]}：`;
-      const line = oldStats.body.find((candidate) => candidate.startsWith(label));
-      const value = line === undefined ? "" : line.slice(label.length);
-      if (!isPlaceholderValue(value)) fromOld[key] = value;
-    }
-    if (!Object.keys(fromOld).length) return lines.join(newline);
-    const afterStats = sectionBody(lines, "【互动数据】");
-    if (!afterStats) {
-      const tagIndex = lines.findIndex((line) => line.trim() === "【标签】");
-      lines.splice(tagIndex >= 0 ? tagIndex : lines.length, 0, "【互动数据】", ...STAT_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(fromOld, key)).map((key) => `${STAT_LABELS[key]}：${fromOld[key]}`), "");
-      return lines.join(newline);
-    }
-    const fill = {};
-    for (const key of STAT_KEYS) {
-      if (!Object.prototype.hasOwnProperty.call(fromOld, key)) continue;
-      const label = `${STAT_LABELS[key]}：`;
-      const line = afterStats.body.find((candidate) => candidate.startsWith(label));
-      const value = line === undefined ? "" : line.slice(label.length);
-      // 只有新值是占位时才回填旧值：新值自己也是真数据（播放量涨了）就该以新值为准
-      if (isPlaceholderValue(value)) fill[key] = fromOld[key];
-    }
-    if (Object.keys(fill).length) patchStatsLines(lines, fill);
-    return lines.join(newline);
-  }
-
   /* 1.7.9（ux P2-6）：全站统一的数字格式。
      原来体积是「1.50 MB」（两位小数）、计数是「1234 个」（没有分隔符）、进度是「1/20」
      （斜杠硬拼），同一个界面里三种风格；上千条时读不出量级。
@@ -1484,7 +1406,6 @@
     parseShareStats,
     patchVolatileFields,
     // 1.8.3：刷新已有记录时的「不许降级」合并（background.js 的更新链路用）
-    mergeInfoText,
     // 1.13.3（审查 P1-5）：「视频收藏时间」这一行的读法、解析与钉回，全仓只有这一份
     FAVORITE_TIME_KEY,
     favoriteTimeTextOf,

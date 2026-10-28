@@ -121,19 +121,21 @@ bili-vault/                       # 仓库根即扩展目录；改名前先看�
 
 失效视频恢复逻辑主要在 `background.js`：只从 B 站 APP 收藏夹数据（`fetchMobileRecovery`，4 轮 × 100 页 × 每页 3 次尝试，每次请求都过限速器）和视频资料接口恢复标题、封面、UP 主及其他字段；不再翻稍后再看与观看历史（失效视频多数是几年前的，那两个来源早就出窗口了）。未找回的字段应保留为“未知”；封面无法恢复时使用占位图，避免本地库漏掉该记录。B 站接口和页面结构会变化，导入失败时应保留部分已成功结果并记录错误。
 
-### 导入/更新流程（4.2 重写）
+### 导入流程（4.2 重写；1.17.16 起只补缺失，不再更新已有记录）
 
 `importBiliFavorites()` 现在按下面的顺序跑，每个循环迭代开始都调 `importWaitIfPaused()`：
 
 1. 列远程收藏夹 → 逐个读分页（`/x/v3/fav/resource/list`）。
 2. 本地同名收藏夹**不存在**就新建（记进回滚日志），**存在**就读取已有记录（`readExistingImportRecords()` 同时返回去重标识符和每条记录的原文）。
-3. 按 BV/av 把远程条目分成「缺失的」和「已存在但 `recordNeedsRefresh()` 为真」的两类。
+3. 按 BV/av 只分两类：**本地没有的**进待抓队列（`pendingItems`），**本地已有的**一律 `skipped += 1` 跳过 —— 1.17.16（用户要求）起导入不再改动任何已有记录。
 4. 失效视频先走恢复流程（只打 APP 收藏夹这一路，见 `fetchMobileRecovery`）。
-5. **对上面两类条目都抓一次完整资料**：`fetchImportDetails()` → `fetchVideoDetail()` 调 `/x/web-interface/view`（简介、发布时间、时长、UP 主、`stat`）与 `/x/tag/archive/tags`（标签），再调 `/x/relation/stat` 取 UP 主粉丝数（`upFansCache` 按 mid 缓存，同一个 UP 只请求一次）。并发 1、间隔 800ms（4.3 起下调，见 [`AI_HANDOFF.md`](../AI_HANDOFF.md) 的「合规与安全红线」）。
-6. 已存在的记录用 `refreshImportedRecord()` 按新格式重写，**保留原来的收藏时间与目录名**，原文进回滚日志。写盘前先过 `BcaArchiveCore.mergeInfoText(original, rebuiltText)`（1.8.3）：新值是占位而原值有真内容 → 保留原值，`【标签】` / `【视频简介】` 整块变成占位时整块换回，`【互动数据】` 逐键合并 —— **刷新链路不许把已知降级成「未知」**；`patchVolatileFields` 更新互动数据也只动 `stats` 里真出现的键（`patchStatsLines()`）。
+5. **只对这批缺失的条目抓一次完整资料**：`fetchImportDetails()` → `fetchVideoDetail()` 调 `/x/web-interface/view`（简介、发布时间、时长、UP 主、`stat`）与 `/x/tag/archive/tags`（标签），再调 `/x/relation/stat` 取 UP 主粉丝数（`upFansCache` 按 mid 缓存，同一个 UP 只请求一次）。并发 1、间隔 800ms（4.3 起下调，见 [`AI_HANDOFF.md`](../AI_HANDOFF.md) 的「合规与安全红线」）。
+6. ~~已存在的记录按新格式重写~~ —— **1.17.16（用户要求）整套删掉**：导入只有两种结局，本地没有就写入、本地已有就跳过。跟着删掉的有 `recordNeedsRefresh()` / `recordNeedsFansOnly()` / `recordMissingCover()` / `importRecordNeedsRefresh()` / `importStableInfoText()` / `refreshImportedRecord()` / `importItemIsTrustworthy()`、`fetchVideoDetail()` 里的 `item.fansOnly` 快路、导入循环里的 `refreshTargets` 与刷新循环，以及 `archive-core.js` 的 `mergeInfoText()`（1.8.3 的「不许降级」闸门，唯一调用点就在这条链上）。`patchVolatileFields()` 仍然只动 `stats` 里真出现的键（`patchStatsLines()`）——「更新视频数据」走的是另一条路，不受影响。
 7. 缺失的条目批量下载封面后写入（`saveImportedItem(..., journal)`，目录句柄先登记再写）。
 
 **暂停 / 取消 / 回滚**：`bca-import-control` 消息设置 `importRun.paused/cancelled`；暂停时 `importWaitIfPaused()` 用 Promise 挂起，继续或取消时 `importReleaseWaiters()` 唤醒。取消会抛 `ImportCancelled`（`error.name`），在最外层捕获后调用 `rollbackImport(journal)`：先删 `createdRecords`、再按 `modifiedFiles` 还原原文、最后清掉本次新建且为空的收藏夹。进度通过 `chrome.storage.local.importState` 持久化，所以弹窗关掉再打开也能恢复按钮状态；`get-status` 会带上 `importState`。
+
+**导入只有两种结局**（1.17.16 · 用户要求）：本地没有 → 导入，本地已有 → 跳过。`test/stability.test.cjs` 里有一条守卫切出「读旧记录 → 按条数裁剪」那一段，出现 `refreshTargets` / `recordNeedsRefresh` / `refreshImportedRecord` / `importRecordNeedsRefresh` / `recordNeedsFansOnly` / `importItemIsTrustworthy` 任何一个就红；`skipped += 1` 也只许出现一次。要再加回「按最新资料刷新」的能力，先和用户确认。
 
 **接口抓不到数据的处理**：`/x/web-interface/view` 的 `desc` 对不少视频就是空的或 `-`（实测 `BV1LKGm6ZErR` 返回 `-`），这时简介会退回收藏夹接口 `intro` 清理后的文本；`stat` 通常都有。
 
@@ -286,7 +288,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **回滚功能已在 1.4.2 整体移除**（`rollbackInterruptedImport`、`bca-import-rollback-recovered`、`markImportRunInterrupted`、`IMPORT_INTERRUPTED_SESSION_KEY` 都没了）。快照（`chrome.storage.session`）现在只剩一个用途：中断时写一份"停在哪、写了多少"的报告，以及收尾时把 `active` 置成 false 再删键（`finishImportRunSnapshot`）。**中断时写进本地的记录本身就是完整记录，重新导入会按 BV/av 跳过，不需要回滚** —— 所以别再给用户任何"可以一键还原"的承诺。
 - **风控识别是导入链路的新防线**：HTTP 412 / `code === -412` / `-352` → `error.rateLimited`。**分页与失效恢复接口一旦 412 会立即中止整轮**（不走"连续 5 条"阈值），只有逐条详情走阈值。判断依据是"被限流还继续翻几百页"更危险。连带修掉一个数据损失风险：`refreshOneArchiveStatus` 以前把**任何**数字 `apiCode` 当"视频已失效"，而限流 `-412` 也带 `apiCode` → 会把整批还能看的视频错标成「已失效视频」。现在限流先 rethrow。
 - **封面是 320×180 WebP，文件名 `封面.webp`**。4.9 前写的 `封面.png`（真 PNG，均值 1.6 MB）**原样保留、不迁移、不重下**；读取侧优先 `封面.webp`、退回 `封面.png`，存在性检查两个名字都认。**注意**：不要为了"打开旧封面"而把 WebP 字节写回 `封面.png` —— 那样 MIME 会按扩展名推断成 `image/png`，只能指望浏览器嗅探内容，是审计点名的唯一跨文件语义风险。
-- **`saveImportedItem` 是先封面、后 `视频信息.txt`**，让 txt 充当"完成标记"。中途被杀只会留下没有 txt 的目录，下次导入会重做，而不是留下"有 txt 没封面"被当成完整记录。`recordNeedsRefresh` 增加了封面存在性判据。
+- **`saveImportedItem` 是先封面、后 `视频信息.txt`**，让 txt 充当"完成标记"。中途被杀只会留下没有 txt 的目录，下次导入会重做，而不是留下"有 txt 没封面"被当成完整记录。1.17.16 起导入不再重写已有记录，那条「按封面存在性判要不要补」的判据也跟着没了；`COVER_PENDING_LINE` 仍然照写，只是不会再有人自动补。
 - **缓存淘汰改成了 LRU，封面 URL 用引用计数后再 revoke**：一个 blob URL 有两类持有者（缓存条目 + 由它派生的 video 对象）。**淘汰即 revoke 会在最需要淘汰的 >4000 条场景造成裂图**（卡片封面是 `loading="lazy"`，没滚到的还没取图）。计数归零才 revoke，`beforeunload` 兜底。**改动时不要为了"更及时"提前 revoke。**
 - **60 秒定时重扫已移除**（那条 `setInterval` 在 10000 条时每分钟打 12000 次文件系统调用）。触发路径只剩 `focus` / `visibilitychange` / `downloadRevision` 变化。**不要加回来。**
 - **`background.js` 已纳入 i18n 提取器的扫描范围**（`test/i18n-extract.cjs` 的 `SOURCE_FILES`）。它用 `BcaI18n.t("字面量")` + 一个存在性兜底；不纳入扫描的话新词条永远进不了词典——4.9 的 6 条就是这样漏掉过一次。
@@ -471,7 +473,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **体积统计复用扫描字节**（1.8.5）：`scanRoot()` 顺手把每条记录（`meta.size + coverBytes`）与下载树的字节累起来，`updateStorageUsage(handle, { total })` 有现成数字就不再递归整树。
 
 - **封面只在要显示时才读**（1.8.6）：扫描时只记下封面句柄与字节数（`coverEntry` / `coverBytes`），**不** `createObjectURL`；卡片渲染或详情打开时才 `hydrateCover()` 现读现造，blob 用 LRU 封顶 `COVER_LAZY_MAX = 300`，超了把最旧的那条 `video.cover` 清空并 `releaseCoverRef()`。缓存命中路径不碰封面文件，稳态每条记录只剩「枚举目录 + 读 txt」两次往返。
-- **UP 主粉丝数按 mid 记住 7 天**（1.8.6）：`chrome.storage.local` 的 `bcaUpFans`（`UP_FANS_TTL_MS`、封顶 `UP_FANS_MAX_ENTRIES = 2000`，写盘 2 秒合并）。`fetchUpFans(mid, tabId, options)` 默认查记忆，`{ fresh: true }` 才强制问接口 —— 「更新视频状态」是用户主动要最新数，必须走 fresh；「只缺粉丝数」的刷新用 `item.fansOnly` 快路，判据仍然是 `recordNeedsRefresh()` 一处。
+- **UP 主粉丝数按 mid 记住 7 天**（1.8.6）：`chrome.storage.local` 的 `bcaUpFans`（`UP_FANS_TTL_MS`、封顶 `UP_FANS_MAX_ENTRIES = 2000`，写盘 2 秒合并）。`fetchUpFans(mid, tabId, options)` 默认查记忆，`{ fresh: true }` 才强制问接口 —— 「更新视频状态」是用户主动要最新数，必须走 fresh；1.17.16 删掉「更新记录」链路后，`item.fansOnly` 快路也一起没了 —— 粉丝数只剩两条路：导入新记录时取一次，用户点「更新视频数据」时带 `{ fresh: true }` 取最新。
 - **统计库攒批落盘**（1.8.6）：`statsFlushDue()` 只在「攒够 `STATS_FLUSH_EVERY_RECORDS = 200` 条」或「距上次落盘超过 `STATS_FLUSH_EVERY_MS = 30 秒`」时才 `flushStatsPendingRecords()`，导入收尾再强制补一次。**归档文件本身不受影响** —— 这条只减少统计库的整份重写次数。
 - **焦点陷阱**是手写栈（`trapFocus()`），目前注册了 `#confirmBackdrop` 与 `#detailPanel`。**再加第三层浮层时必须把它也注册进去**，否则 Tab 会穿透。
 - **详情面板换一条视频要回顶部**（1.17.9 · 审查 P2-5）：`#detailPanel` 自己是滚动容器（`.detail-panel { overflow-y: auto }`），重画内容时不会自动复位 —— 从长简介的那条切到下一条，面板会停在上一条的滚动位置。`openDetail()` 只在「面板本来就开着、而且装的就是这条视频」时保住位置（切语言 / 更新数据 / 标记已下载都是重画同一条，顶回去会让用户刚滚到的按钮跳走），其余情况 `scrollTop = 0`；`closeDetail()` 也归零，**两处都要**，只补一处会留中间态。

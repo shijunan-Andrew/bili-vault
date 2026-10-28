@@ -413,7 +413,7 @@ function selectedImportLimit() {
    不会像「最多导入」那样从列表头往后数。 */
 function scopeHintText(scope) {
   if (scope.kind === "recent") {
-    return BcaI18n.t("只处理这个时间窗内新收藏的视频：本地没有的补进来，已有的按最新资料刷新，窗口之外的记录完全不动。");
+    return BcaI18n.t("只处理这个时间窗内新收藏的视频：本地没有的补进来，本地已有的一律跳过，窗口之外的记录完全不动。");
   }
   return BcaI18n.t("只数本地还没有的视频，已有的不占名额；到上限就收工，再点一次从后面接着补。");
 }
@@ -667,7 +667,7 @@ async function startImport(options = {}) {
     }
     if (!response?.ok) throw new Error(response?.message ? BcaI18n.t(response.message) : BcaI18n.t("导入失败。"));
     importStatus.classList.remove("error");
-    const doneText = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入/更新完成：新导入 {imported} 个，更新 {refreshed} 个。", { imported: response.imported || 0, refreshed: response.refreshed || 0 });
+    const doneText = response.message ? BcaI18n.t(response.message) : BcaI18n.t("导入完成：新导入 {imported} 个，已存在跳过 {skipped} 个。", { imported: response.imported || 0, skipped: response.skipped || 0 });
     importStatus.textContent = doneText;
     showDoneDialog(doneText);
     if (response.reportPath) importStatus.textContent += ` ${BcaI18n.t("错误报告：{path}", { path: response.reportPath })}`;

@@ -200,7 +200,7 @@
     /* 1.16.3：被中断（浏览器被关、扩展被重载、后台被回收）也是「没跑完」。 */
     if (state.interrupted === true) return true;
     const text = String(state.summary || state.text || "");
-    /* 1.16.5（真机反馈）：成功的摘要是「导入/更新完成：新导入 3 个，…，失败 0 个。」，
+    /* 1.16.5（真机反馈）：成功的摘要是「导入完成：新导入 3 个，…，失败 0 个。」，
        旧判据一看到「失败」两个字就响 error.mp3 —— 用户听到的「导入成功却响出错音」就是它。
        只要摘要里有「失败 N 个」，就只信 N；N 全是 0 就是成功。 */
     const failureCounts = text.match(/失败\s*(\d+)\s*个/g);
