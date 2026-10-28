@@ -7617,6 +7617,21 @@ test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", (
     });
     assert.deepEqual(unbound, [], `${pageFile} 里裸用了却没绑定：${unbound.join(", ")}（要么解构出来，要么写成 BcaArchiveTools.名字）`);
   }
+  /* 1.17.13（审查 P3-3）：扫描进行中不许发起删除 —— 否则这一轮扫描读到刚被删掉的收藏夹时
+     会以 NotFound 收尾，把「删除成功」显示成「刷新失败」。判据只认 busyNow。 */
+  assert.match(library, /syncBusyDeleteButtons\(isBusy\);/, "setBusy 要把删除按钮一起关掉");
+  assert.equal((library.match(/refuseDeleteWhileScanning\(\)/g) || []).length, 6,
+    "四个删除入口 + 真正执行前 + 函数本身，六处都要在账上");
+  assert.match(library, /if \(!busyNow\) return false;/, "「扫描在进行」只认 busyNow，别拿 self-lock 的标记");
+  /* 1.17.13（审查 P3-6）：同一秒里对同名收藏夹删两次，落点会撞名。整夹回收、批量回收、
+     回收站恢复必须共用同一处重名探测。 */
+  assert.match(tools, /async function uniqueChildName\(parent, desiredName\) \{/, "重名探测只剩这一份实现");
+  assert.equal(/uniqueRestoreName/.test(tools), false, "旧的重名探测函数要整段删掉，别留两份");
+  assert.match(tools, /const name = await uniqueChildName\(stampDir, collectionName\);/, "整夹回收要先挑不冲突的落点名");
+  assert.match(tools, /const name = await uniqueChildName\(targetCollection, entry\.directory\);/, "回收站恢复也走同一处挑名字");
+  /* 1.17.13（审查 P3-7）：下载清理在「归档已经删完」之后跑，它自己抛错不许冒成「删除失败」。 */
+  assert.equal((library.match(/collectDownloadCleanupFailures\(downloadCleanupFailures/g) || []).length, 3,
+    "收藏夹 / 批量 / 单条三条路的下载清理都要自己兜住异常");
 });
 
 test("归档体检把「扫描时被悄悄跳过的东西」写成 006报告（TODO P0-2）", () => {

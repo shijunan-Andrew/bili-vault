@@ -3273,6 +3273,32 @@ async function suiteRecycleTools() {
     assert.deepEqual(result.failures, []);
     assert.deepEqual(bucket.__list(), []);
   });
+
+  await test("1.17.13：同一秒里删两次同名收藏夹，回收站落点加 -2，绝不覆盖先到的那份（审查 P3-6）", async () => {
+    /* 先把「这一秒」和「下一秒」两个落点都占上：真机上第二次删除多半落在同一秒，
+       留下一秒是让用例容忍跨秒那一下，不要变成偶发红的钉子。 */
+    const stampA = tools.recycleStamp();
+    const stampB = tools.recycleStamp(new Date(Date.now() + 1000));
+    const root = await freshRoot({
+      我的收藏: { [RECORD_NAME]: recordTree("甲") },
+      [tools.RECYCLE_DIR_NAME]: {
+        [stampA]: { 我的收藏: { "占位.txt": "先到的那一份" } },
+        [stampB]: { 我的收藏: { "占位.txt": "先到的那一份" } }
+      }
+    });
+
+    const movedPath = await tools.recycleCollection(root, "我的收藏");
+
+    const namePattern = new RegExp("^" + tools.RECYCLE_DIR_NAME + "/(" + stampA + "|" + stampB + ")/我的收藏-2$");
+    assert.match(movedPath, namePattern, "重名时要换个落点名，不许撞上已有的那份");
+    const bucket = await root.getDirectoryHandle(tools.RECYCLE_DIR_NAME);
+    const stamp = movedPath.split("/")[1];
+    assert.deepEqual(bucket.__child(stamp).__child("我的收藏").__dump(), { "占位.txt": "先到的那一份" },
+      "先到的那份被覆盖了 —— 回收站里绝不许互相盖掉");
+    assert.deepEqual(bucket.__child(stamp).__child("我的收藏-2").__dump(), { [RECORD_NAME]: recordTree("甲") },
+      "新落点的字节跟被删的收藏夹不一样");
+    assert.equal(root.__has("我的收藏"), false, "源收藏夹还留在原地");
+  });
 }
 
 /* 1.15.2（审查 T-1 / T-3）：library.js 里那几个纯函数以前只有「源码里写着某行字」的
@@ -3292,6 +3318,26 @@ async function suiteLibraryHelpers() {
   );
   const lib = pick(["escapeHtml", "safeCover", "safeVideoHref", "highlightMatches", "formatCount", "statDisplay", "addField"]);
   const clock = pick(["compactDate", "startOfDay", "relativeDayLabel", "relativeTime"]);
+  /* 1.17.13（审查 P3-7）：下载清理是「归档已经删完」之后的事，它自己抛错绝不能冒到外层
+     catch —— 那样弹出来的标题会是「删除失败」，可收藏夹其实早就在 005回收站里了。 */
+  await test("1.17.13：下载清理自己出错时只记一条说明，不许冒成「删除失败」（审查 P3-7）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const cleanup = page.window;
+    assert.equal(typeof cleanup.collectDownloadCleanupFailures, "function", "下载清理的兜底函数要在页面上");
+
+    const list = [];
+    await cleanup.collectDownloadCleanupFailures(list, "第一条视频", async () => {
+      throw new Error("下载目录读不了了");
+    });
+    assert.equal(list.length, 1, "抛错也要留下一条说明，不能悄悄丢");
+    assert.match(list[0], /第一条视频/, "要说清是哪一条");
+    assert.match(list[0], /下载目录读不了了/, "原因要带上");
+    assert.match(list[0], /本地归档那边已经处理完了/, "要说清归档那边是删成功的");
+
+    const merged = [];
+    await cleanup.collectDownloadCleanupFailures(merged, "第二条视频", async () => ["甲没删掉", "乙没删掉"]);
+    assert.deepEqual(merged, ["甲没删掉", "乙没删掉"], "正常返回的失败串要原样并进清单");
+  });
 
   await test("library.js 的 escapeHtml 转义五个特殊字符（1.15.2 · T-1）", () => {
     assert.equal(lib.escapeHtml("<img src=\"x\" onerror='y'>&"), "&lt;img src=&quot;x&quot; onerror=&#39;y&#39;&gt;&amp;");
@@ -3915,6 +3961,25 @@ async function suiteDeletePermanent() {
     checkPermanent(doc);
     assert.match(textOf(doc.getElementById("toast")), /已删除 2 个本地视频/, "全成功就走 toast 报条数");
     assert.equal(root.__has("005回收站"), false, "直接删除不该建回收站");
+  });
+
+  await test("1.17.13：正在读存档的时候删除入口是关的，就算点到了也只弹一句提示（审查 P3-3）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const g = page.window;
+    const doc = page.document;
+
+    g.setBusy(true, "reading");
+    const rowButtons = [...doc.querySelectorAll(".collection-delete")];
+    assert.ok(rowButtons.length > 0, "前提：列表里得有收藏夹行");
+    assert.ok(rowButtons.every((button) => button.disabled), "扫描期间收藏夹行的删除按钮必须禁用");
+
+    await g.askToDeleteCollection({ name: "小鲸鱼测试", videos: [] });
+    assert.equal(doc.getElementById("confirmBackdrop").hidden, true, "扫描期间不许开删除确认框");
+    assert.match(textOf(doc.getElementById("toast")), /正在读取本地存档/, "要说清为什么这会儿不能删");
+
+    g.setBusy(false, "reading");
+    assert.ok(rowButtons.every((button) => !button.disabled), "读完了要把按钮还回去");
+    assert.equal(doc.getElementById("deleteSelected").disabled, true, "没选中任何视频时批量删除仍然禁用（别顺手放开了）");
   });
 }
 

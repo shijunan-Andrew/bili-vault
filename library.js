@@ -3781,6 +3781,7 @@ function openConfirmBackdrop() {
 }
 
 function askToDeleteVideo(video) {
+  if (refuseDeleteWhileScanning()) return;
   pendingDeleteAction = { type: "video", video };
   confirmTitle.textContent = BcaI18n.t("删除本地归档？");
   confirmMessage.textContent = BcaI18n.t("将删除视频目录“{path}”（含封面与视频信息）。此操作不会更改 B 站账户中的收藏。", { path: `${video.collection}/${video.directory}` });
@@ -3802,6 +3803,7 @@ function askToDeleteVideo(video) {
    这里删之前真的数一遍：几个是记录目录、几个不是；只要有不认识的，就必须先勾确认。 */
 async function askToDeleteCollection(collection) {
   if (!collection) return;
+  if (refuseDeleteWhileScanning()) return;
   pendingDeleteAction = { type: "collection", collection };
   confirmTitle.textContent = BcaI18n.t("删除整个本地归档？");
   confirmDeleteButton.textContent = BcaI18n.t("删除收藏夹");
@@ -3842,6 +3844,7 @@ async function askToDeleteCollection(collection) {
 
 function askToDeleteBatch(videos) {
   if (!videos.length) return;
+  if (refuseDeleteWhileScanning()) return;
   pendingDeleteAction = { type: "batch", videos };
   confirmTitle.textContent = BcaI18n.t("删除选中的本地归档？");
   confirmMessage.textContent = BcaI18n.t("将删除选中的 {count} 个视频目录及其中的封面和视频信息，先进 {recycle}（{days} 天后自动清理）。此操作只影响本地归档，不会更改 B 站账户中的收藏。", { count: videos.length, recycle: RECYCLE_DIR_NAME, days: RECYCLE_KEEP_DAYS });
@@ -3869,6 +3872,7 @@ function askToCleanupUnfinished() {
     })
     .filter((target) => target.collection && target.directory);
   if (!records.length) return;
+  if (refuseDeleteWhileScanning()) return;
   pendingDeleteAction = { type: "unfinished", records };
   confirmTitle.textContent = BcaI18n.t("清理没写完的目录？");
   confirmMessage.textContent = BcaI18n.t("将清理 {count} 个没写完的记录目录（没有 视频信息.txt，多半是上次导入被打断），先移到 {recycle}（{days} 天后自动清理）。已经写好的记录不会被碰。", { count: records.length, recycle: RECYCLE_DIR_NAME, days: RECYCLE_KEEP_DAYS });
@@ -4633,9 +4637,26 @@ function downloadCleanupSuffix(count) {
   return count ? BcaI18n.t("；{count} 个下载目录未能删除", { count }) : "";
 }
 
+/* 1.17.13（审查 P3-7）：下载清理是「归档那边已经处理完」之后的事。它自己抛错绝不能冒到
+   外层 catch —— 那样弹出来的标题是「删除失败」，可收藏夹其实早就在 005回收站里了。
+   失败只记进下载那份清单，结果弹窗照实说「下载没清干净」，已经删掉的那部分不再被否定。 */
+async function collectDownloadCleanupFailures(list, label, task) {
+  try {
+    list.push(...await task());
+  } catch (error) {
+    list.push(BcaI18n.t("{name}：清理关联下载时出错（{message}）；本地归档那边已经处理完了，下载文件请手动确认。", {
+      name: label,
+      message: error?.message || BcaI18n.t("未知错误")
+    }));
+  }
+}
+
 async function confirmPendingDelete() {
   const action = pendingDeleteAction;
   if (!action) return;
+  /* 1.17.13（审查 P3-3）：确认框开着的时候扫描也可能刚开始 —— 关掉框、说清楚，
+     不要在扫描读到一半的时候动目录。 */
+  if (refuseDeleteWhileScanning()) { closeDeleteConfirmation(); return; }
   deleteInProgress = true;
   cancelDeleteButton.disabled = true;
   confirmDeleteButton.disabled = true;
@@ -4694,8 +4715,11 @@ async function confirmPendingDelete() {
       }
       if (selectedCollection === action.collection.name) selectedCollection = "*";
       if (deleteDownloads && downloadParent) {
-        downloadCleanupFailures.push(...await removeCollectionDownloadDirectory(downloadParent, action.collection.name));
-        for (const video of action.collection.videos) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
+        await collectDownloadCleanupFailures(downloadCleanupFailures, action.collection.name, async () => {
+          const list = await removeCollectionDownloadDirectory(downloadParent, action.collection.name);
+          for (const video of action.collection.videos) list.push(...await removeVideoDownloadDirectories(downloadParent, video));
+          return list;
+        });
       }
     } else if (action.type === "batch") {
       let deleted = 0;
@@ -4713,11 +4737,16 @@ async function confirmPendingDelete() {
             const recycled = await recycleRecords(rootHandle, [{ collection: video.collection, directory: video.directory }]);
             recycledPaths.push(...recycled.moved.map((item) => item.path));
           }
-          if (deleteDownloads && downloadParent) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
-          selectedVideoIds.delete(video.id);
-          deleted += 1;
         } catch (error) {
           failures.push(BcaI18n.t("{name}：{message}", { name: video.title, message: error?.message || BcaI18n.t("删除失败") }));
+          continue;
+        }
+        /* 1.17.13（审查 P3-7）：归档那边已经删掉了，下载清理再怎么出错也只是「下载没清干净」——
+           不能把它算成「这条视频没删掉」，更不能让它留在选中里。 */
+        selectedVideoIds.delete(video.id);
+        deleted += 1;
+        if (deleteDownloads && downloadParent) {
+          await collectDownloadCleanupFailures(downloadCleanupFailures, video.title, () => removeVideoDownloadDirectories(downloadParent, video));
         }
       }
       batchResult = { deleted, failures };
@@ -4753,7 +4782,9 @@ async function confirmPendingDelete() {
         const recycled = await recycleRecords(rootHandle, [{ collection: video.collection, directory: video.directory }]);
         recycledPaths.push(...recycled.moved.map((item) => item.path));
       }
-      if (deleteDownloads && downloadParent) downloadCleanupFailures.push(...await removeVideoDownloadDirectories(downloadParent, video));
+      if (deleteDownloads && downloadParent) {
+        await collectDownloadCleanupFailures(downloadCleanupFailures, video.title, () => removeVideoDownloadDirectories(downloadParent, video));
+      }
     }
     deleteInProgress = false;
     closeDeleteConfirmation();
@@ -5795,6 +5826,37 @@ function setBusy(isBusy, busyKey = "reading") {
   // 大目录扫描时给一条进度提示，而不是只有按钮文字变化
   scanProgress.hidden = !isBusy;
   showChooseRootLabel(isBusy ? busyKey : "idle");
+  syncBusyDeleteButtons(isBusy);
+}
+
+/* 1.17.13（审查 P3-3）：扫描进行中不许发起删除。
+   刷新时删掉一个收藏夹，这一轮扫描读到它时撞上 NotFound，整次扫描以「刷新失败」收尾 ——
+   可删除本身是成功的，用户会以为删坏了，甚至再删一次。
+   收藏夹行里的删除按钮是每次渲染新建的（渲染发生在扫描之后，那时 busy 已经结束），
+   所以这里直接按现有 DOM 关掉；批量删除平时由「选中了几条」控制启用，
+   照「添加视频」的老办法记下原状态、解除时还回去。 */
+function syncBusyDeleteButtons(isBusy) {
+  for (const button of collectionList.querySelectorAll(".collection-delete")) button.disabled = isBusy;
+  for (const button of detailContent.querySelectorAll(".delete-local")) button.disabled = isBusy;
+  if (deleteSelectedButton) {
+    if (isBusy) {
+      if (deleteSelectedButton.dataset.busyWasDisabled === undefined) {
+        deleteSelectedButton.dataset.busyWasDisabled = deleteSelectedButton.disabled ? "1" : "0";
+      }
+      deleteSelectedButton.disabled = true;
+    } else if (deleteSelectedButton.dataset.busyWasDisabled !== undefined) {
+      deleteSelectedButton.disabled = deleteSelectedButton.dataset.busyWasDisabled === "1";
+      delete deleteSelectedButton.dataset.busyWasDisabled;
+    }
+  }
+  if (cleanupUnfinishedButton) cleanupUnfinishedButton.disabled = isBusy;
+}
+
+/* 1.17.13（审查 P3-3）：四个删除入口共用这一处判据（扫描在进行就别开确认框）。 */
+function refuseDeleteWhileScanning() {
+  if (!busyNow) return false;
+  showToast(BcaI18n.t("正在读取本地存档，等它读完再删除。"));
+  return true;
 }
 
 async function refreshCurrentRoot() {

@@ -362,8 +362,10 @@
     const stamp = recycleStamp();
     const bucket = await subdirectoryHandle(root, RECYCLE_DIR_NAME);
     const stampDir = await subdirectoryHandle(bucket, stamp);
-    const path = `${RECYCLE_DIR_NAME}/${stamp}/${collectionName}`;
-    await moveDirectoryInto(source, root, collectionName, stampDir, collectionName);
+    /* 1.17.13（审查 P3-6）：同一秒里删两次同名收藏夹，落点会撞名。挑一个不冲突的名字。 */
+    const name = await uniqueChildName(stampDir, collectionName);
+    const path = `${RECYCLE_DIR_NAME}/${stamp}/${name}`;
+    await moveDirectoryInto(source, root, collectionName, stampDir, name);
     return path;
   }
 
@@ -509,18 +511,23 @@
     return entries;
   }
 
-  async function uniqueRestoreName(collectionDirectory, directoryName) {
-    let name = directoryName;
+  /* 1.17.13（审查 P3-6）：同一秒里对同名收藏夹删两次，落点会撞名（InvalidModificationError
+     被显示成「删除失败」）。整夹回收、批量回收、回收站恢复都走这一处挑名字：
+     重名就追加 -2、-3……，绝不覆盖已有的那一份。 */
+  async function uniqueChildName(parent, desiredName) {
+    let name = desiredName;
     for (let attempt = 2; ; attempt += 1) {
       let exists = false;
       try {
-        await collectionDirectory.getDirectoryHandle(name, { create: false });
+        await parent.getDirectoryHandle(name, { create: false });
         exists = true;
       } catch (error) {
-        if (!BcaArchiveCore.isMissingError(error)) throw error;
+        // 同名位置上是一个文件（TypeMismatchError）同样算被占了：换个后缀，绝不去动它
+        if (error?.name === "TypeMismatchError") exists = true;
+        else if (!BcaArchiveCore.isMissingError(error)) throw error;
       }
       if (!exists) return name;
-      name = `${directoryName}-${attempt}`;
+      name = `${desiredName}-${attempt}`;
     }
   }
 
@@ -543,7 +550,7 @@
         const collectionDir = await subdirectoryHandle(stampDir, entry.collection, false);
         const source = await collectionDir.getDirectoryHandle(entry.directory, { create: false });
         const targetCollection = await subdirectoryHandle(root, entry.collection);
-        const name = await uniqueRestoreName(targetCollection, entry.directory);
+        const name = await uniqueChildName(targetCollection, entry.directory);
         await moveDirectoryInto(source, collectionDir, entry.directory, targetCollection, name);
         restored.push({ ...entry, restoredName: name });
         if (await directoryIsEmpty(collectionDir)) await stampDir.removeEntry(entry.collection, { recursive: true }).catch(() => {});
