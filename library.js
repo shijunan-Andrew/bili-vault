@@ -987,6 +987,21 @@ const SCAN_CACHE_STORE = "records";
 const SCAN_CACHE_DB_VERSION = 1;
 const SCAN_CACHE_MAX_ENTRIES = 4000;
 
+/* 1.17.15（审查 P3-2）：扫描缓存原来是「每轮把整张 Map 全 put 回去」——
+   3000 条记录就是 3000 次写，而绝大多数条目的 size / lastModified 根本没变。
+   现在只写「变了、或者从没存过」的那些；解析结果格式改过（RECORD_VERSION 变了）
+   就在下一轮整库重写一次。 */
+const SCAN_CACHE_RECORD_VERSION = 2;
+const scanCacheStoredRows = new Map(); // key -> 上一次写进 IndexedDB 时的签名
+
+function scanCacheSignature(size, lastModified) {
+  return `${SCAN_CACHE_RECORD_VERSION}|${Number(size)}|${Number(lastModified)}`;
+}
+
+function scanCacheRowNeedsWrite(stored, row) {
+  return stored !== scanCacheSignature(row.size, row.lastModified);
+}
+
 let scanCacheDbPromise = null;
 
 function openScanCacheDb() {
@@ -1035,12 +1050,16 @@ async function loadScanCacheInto(cache) {
     if (typeof row.size !== "number" || typeof row.lastModified !== "number") continue;
     // 内存里的形状就是 { size, lastModified, record }（见 archive-tools 的 storeCacheEntry）
     cache.set(String(row.key), { size: row.size, lastModified: row.lastModified, record: row.record });
+    /* 1.17.15（审查 P3-2）：记下这一行「已经存成什么样」，写回时才知道要不要动它。
+       老版本写进去的行没有 recordVersion，签名一律对不上 —— 会在这一轮整库重写一次。 */
+    scanCacheStoredRows.set(String(row.key),
+      row.recordVersion === SCAN_CACHE_RECORD_VERSION ? scanCacheSignature(row.size, row.lastModified) : "");
     seeded += 1;
   }
   return seeded;
 }
 
-/** 扫描结束后把整张 Map 写回去（覆盖旧的同名条目，顺手淘汰长期没用的）。 */
+/** 扫描结束后把变了的行写回去（覆盖旧的同名条目，顺手淘汰长期没用的）。 */
 async function saveScanCacheFrom(cache) {
   if (!cache || !cache.size) return 0;
   const db = await openScanCacheDb();
@@ -1049,11 +1068,17 @@ async function saveScanCacheFrom(cache) {
   const rows = [];
   for (const [key, entry] of cache) {
     if (!entry || !entry.record) continue;
+    /* 1.17.15（审查 P3-2）：只写变了的行。命中缓存的那几千条 size / lastModified
+       跟库里一模一样，把它们重新 put 一遍是每轮扫描最大的写放大来源。
+       （万一某行被 pruneScanCacheStore 淘汰掉了，这里会以为它还在、跳过不写；
+       代价是下次冷启动重读那几条 txt，纯性能，不会读错东西。） */
+    if (!scanCacheRowNeedsWrite(scanCacheStoredRows.get(key), entry)) continue;
     /* 封面句柄不能存（恢复后要重新申请权限），命中路径会用新句柄补上；
        封面字节数保留，报告里的体积统计不受影响。 */
     const record = Object.assign({}, entry.record, { coverEntry: null });
-    rows.push({ key, usedAt: now, size: entry.size, lastModified: entry.lastModified, record });
+    rows.push({ key, usedAt: now, size: entry.size, lastModified: entry.lastModified, recordVersion: SCAN_CACHE_RECORD_VERSION, record });
   }
+  if (!rows.length) return 0;
   return new Promise((resolve) => {
     let store;
     try {
@@ -1064,6 +1089,7 @@ async function saveScanCacheFrom(cache) {
     }
     for (const row of rows) store.put(row);
     store.transaction.oncomplete = () => {
+      for (const row of rows) scanCacheStoredRows.set(row.key, scanCacheSignature(row.size, row.lastModified));
       void pruneScanCacheStore();
       resolve(rows.length);
     };
@@ -1104,6 +1130,7 @@ async function pruneScanCacheStore() {
 }
 
 async function clearScanCacheStore() {
+  scanCacheStoredRows.clear();
   const db = await openScanCacheDb();
   if (!db) return;
   try {
@@ -3475,6 +3502,12 @@ async function showDownloadSize(video) {
 
 // restoreTo：关闭后焦点还给它（通常是触发它的那张卡片）；
 // options.trap = false 用于「重画后重新打开同一个详情」，避免叠加第二层焦点陷阱。
+/* 1.17.15（审查 P3-4）：详情面板里「本地视频 / 本地收藏管理」那一整段按钮。
+   只在这里拼一次；hidden 跟着视频对象走，文案一律过 escapeHtml。 */
+function detailManagementHtml(video) {
+  return `<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("标记为已下载"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>`;
+}
+
 function openDetail(video, restoreTo, options = {}) {
   /* 1.17.9（审查 P2-5）：详情面板自己是滚动容器，重画内容时不会自动复位 —— 从一条长简介的
      视频切到下一条，面板会停在上一条的滚动位置，用户看到的是下一条的半截。
@@ -3528,8 +3561,22 @@ function openDetail(video, restoreTo, options = {}) {
   const titleHtml = detailHref
     ? `<a class="detail-title-link" href="${escapeHtml(detailHref)}" target="_blank" rel="noopener noreferrer" title="${detailHrefLabel}"></a>`
     : "";
+  /* 1.17.15（审查 P3-4）：这段模板只拼「已经安全过的片段」。
+     用户数据要么在辅助函数里过 escapeHtml，要么交给后面那些 textContent 补写；
+     test/stability.test.cjs 会逐个数 ${...}，只认那几个约定的名字 ——
+     以后往模板里塞 ${video.title} 这种会当场被顶掉。 */
+  const fieldsHtml = rows.join("");
+  const openVideoLink = video.url
+    ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>`
+    : "";
+  const searchInvalidButton = video.isInvalid
+    ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>`
+    : "";
+  const incompleteWarning = detailIncomplete
+    ? `<span class="detail-refresh-warning">${escapeHtml(BcaI18n.t("该视频数据不完整（粉丝数N/A或互动数据N/A），更新视频数据将重新获取这些信息，或能解决"))}</span>`
+    : "";
   detailContent.dataset.videoId = video.id;
-  detailContent.innerHTML = `${coverHtml}<span class="detail-collection"></span><h2 class="detail-title">${titleHtml}</h2><p class="detail-bvid"></p>${video.url ? `<a class="button button-primary open-video" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("external")}${escapeHtml(BcaI18n.t("在 B 站打开视频"))}</a>` : ""}${video.isInvalid ? `<a class="button button-quiet search-invalid" target="_blank" rel="noopener noreferrer" href="">${BcaIcons.svg("search")}${escapeHtml(BcaI18n.t("全网搜索该视频"))}</a>` : ""}<section class="detail-management"><h3>${BcaIcons.svg("play")}${escapeHtml(BcaI18n.t("本地视频"))}</h3><div class="detail-primary-actions"><button class="button button-quiet open-download-directory" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("collection-open")}${escapeHtml(BcaI18n.t("打开目录"))}</button></div><button class="button button-quiet mark-downloaded" type="button"${video.downloaded ? " hidden" : ""}>${BcaIcons.svg("check")}${escapeHtml(BcaI18n.t("标记为已下载"))}</button><div class="detail-secondary-actions"><button class="button button-quiet copy-download-path" type="button"${video.hasDownloadFiles ? "" : " hidden"}>${BcaIcons.svg("copy")}${escapeHtml(BcaI18n.t("复制视频目录路径"))}</button></div><p class="download-path-note" role="status" hidden></p><p class="detail-size" hidden></p><h3>${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("本地收藏管理"))}</h3><button class="button button-primary move-local" type="button">${BcaIcons.svg("move")}${escapeHtml(BcaI18n.t("移动或复制"))}</button><button class="button button-danger delete-local" type="button">${BcaIcons.svg("trash")}${escapeHtml(BcaI18n.t("删除本地归档"))}</button><p class="management-note">${escapeHtml(BcaI18n.t("这些整理操作只影响本地归档，不会更改 B 站账户中的收藏。"))}</p></section>${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频数据"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span>${detailIncomplete ? `<span class="detail-refresh-warning">${escapeHtml(BcaI18n.t("该视频数据不完整（粉丝数N/A或互动数据N/A），更新视频数据将重新获取这些信息，或能解决"))}</span>` : ""}<p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${rows.join("")}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
+  detailContent.innerHTML = `${coverHtml}<span class="detail-collection"></span><h2 class="detail-title">${titleHtml}</h2><p class="detail-bvid"></p>${openVideoLink}${searchInvalidButton}${detailManagementHtml(video)}${detailStatsHtml(video.stats)}<div class="detail-refresh"><button class="button button-quiet refresh-status" type="button">${BcaIcons.svg("refresh")}<span>${escapeHtml(BcaI18n.t("更新视频数据"))}</span></button><span class="detail-refresh-note">${escapeHtml(BcaI18n.t("重新解析播放量、点赞、UP 主粉丝数等会变化的数值，只覆盖这些数值，不改动标题、简介和标签"))}</span>${incompleteWarning}<p class="detail-refresh-status" role="status" hidden></p></div><h3 class="detail-section-title">${BcaIcons.svg("file")}${escapeHtml(BcaI18n.t("视频信息"))}</h3><dl class="detail-fields">${fieldsHtml}</dl><h3 class="detail-section-title">${BcaIcons.svg("tag")}${escapeHtml(BcaI18n.t("标签"))}</h3>${tags}<h3 class="detail-section-title">${BcaIcons.svg("info")}${escapeHtml(BcaI18n.t("视频简介"))}</h3><p class="detail-description"></p><button class="text-button detail-description-toggle" type="button" hidden>${escapeHtml(BcaI18n.t("展开全部简介"))}</button>`;
   detailContent.querySelector(".detail-collection").textContent = video.isInvalid ? `${video.collection} · ${BcaI18n.t("已失效")}` : video.collection;
   detailContent.querySelector(".detail-collection").classList.toggle("invalid", video.isInvalid);
   // 1.8.6：详情封面同样「用到才读」；读完只替换占位图，不重画整个面板

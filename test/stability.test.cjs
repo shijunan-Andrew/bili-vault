@@ -1630,6 +1630,36 @@ test("detail cover and title link out, and fall back to a Bing search for invali
   // 复用已有词典键，不新增词条
   assert.match(library, /video\.isInvalid \? BcaI18n\.t\("全网搜索该视频"\) : BcaI18n\.t\("在 B 站打开视频"\)/);
 
+  // 1.17.15（审查 P3-4）：详情那段 innerHTML 模板只许拼「已经安全过的片段」。
+  // 用户数据要么在辅助函数里过 escapeHtml，要么交给 textContent 补写 ——
+  // 以后往模板里加一个 ${video.title} 会在这里被顶掉。
+  const TICK = String.fromCharCode(96);
+  const templateStart = library.indexOf("detailContent.innerHTML = " + TICK);
+  assert.ok(templateStart > 0, "详情面板的 innerHTML 模板要能找到");
+  const templateEnd = library.indexOf(TICK + ";", templateStart);
+  assert.ok(templateEnd > templateStart, "详情面板的模板要有收尾");
+  const template = library.slice(templateStart, templateEnd);
+  const interpolations = [];
+  for (let index = 0; index < template.length; index += 1) {
+    if (template[index] !== "$" || template[index + 1] !== "{") continue;
+    let depth = 1;
+    let cursor = index + 2;
+    while (cursor < template.length && depth > 0) {
+      if (template[cursor] === "{") depth += 1;
+      else if (template[cursor] === "}") depth -= 1;
+      cursor += 1;
+    }
+    interpolations.push(template.slice(index + 2, cursor - 1).trim());
+    index = cursor - 1;
+  }
+  assert.ok(interpolations.length >= 8, "模板里至少要留下覆盖各段的插值，别把守卫做成空跑");
+  const DETAIL_SAFE_SEGMENTS = /^(coverHtml|titleHtml|openVideoLink|searchInvalidButton|fieldsHtml|tags|incompleteWarning|detailManagementHtml\(video\)|detailStatsHtml\(video\.stats\))$/;
+  for (const piece of interpolations) {
+    if (DETAIL_SAFE_SEGMENTS.test(piece)) continue;
+    if (/^(escapeHtml|safeCover|BcaIcons\.svg)\(/.test(piece)) continue;
+    assert.fail("详情模板里出现了没约定的插值：" + piece + " —— 用户数据要在辅助函数里过 escapeHtml，或者走 textContent 补写（1.17.15 审查 P3-4）");
+  }
+
   // 样式：a 要补成块级，否则 aspect-ratio 与 overflow 撑不起来；两个入口都要有悬停反馈
   assert.match(css, /a\.detail-cover \{ display: block; \}/);
   assert.match(css, /\.detail-cover-link:hover \{/);
@@ -8936,6 +8966,11 @@ test("1.12.5：扫描缓存能跨会话留下来，冷启动不再逐条重读 �
   // library.js 是 CRLF，正则里必须写 \r?\n
   assert.match(library, /if \(!forceFullScan\) \{\r?\n    await loadScanCacheInto\(cache\)/, "扫描前要先灌回上一轮");
   assert.match(library, /void saveScanCacheFrom\(cache\)\.catch\(/, "扫描完要写回去");
+  // 1.17.15（审查 P3-2）：只写变了的行，别再整张 Map 全 put 一遍
+  assert.match(library, /const SCAN_CACHE_RECORD_VERSION = \d+;/);
+  assert.match(library, /function scanCacheRowNeedsWrite\(stored, row\) \{/);
+  assert.match(library, /if \(!scanCacheRowNeedsWrite\(scanCacheStoredRows\.get\(key\), entry\)\) continue;/);
+  assert.match(library, /if \(!rows\.length\) return 0;/);
   assert.match(library, /void clearScanCacheStore\(\);/, "换根目录要作废");
   // 封面句柄不能塞进 IndexedDB（恢复后要重新申请权限），必须显式置空
   assert.match(library, /const record = Object\.assign\(\{\}, entry\.record, \{ coverEntry: null \}\);/);

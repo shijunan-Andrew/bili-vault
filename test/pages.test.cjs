@@ -4014,6 +4014,28 @@ async function suiteDeletePermanent() {
   });
 }
 
+/* 1.17.15：扫描缓存的写回判据 —— 签名一样就跳过，解析版本对不上就重写。
+   只断言「源码里有 scanCacheRowNeedsWrite」证明不了它真按签名比对，所以抠出来真跑。 */
+async function suiteScanCacheWrite() {
+  await test("1.17.15：扫描缓存只写变了的行，解析版本对不上就整条重写（审查 P3-2）", () => {
+    const source = harness.readSource("library.js");
+    const mod = harness.buildModule([
+      "const SCAN_CACHE_RECORD_VERSION = 2;",
+      harness.carveFunction(source, "scanCacheSignature"),
+      harness.carveFunction(source, "scanCacheRowNeedsWrite")
+    ]);
+    const row = { size: 1024, lastModified: 1700000000000 };
+    const signature = mod.scanCacheSignature(row.size, row.lastModified);
+    assert.equal(signature, "2|1024|1700000000000", "签名里要带解析版本，改过格式才能整库重写一次");
+    assert.equal(mod.scanCacheRowNeedsWrite(signature, row), false, "一模一样就别再写一遍");
+    assert.equal(mod.scanCacheRowNeedsWrite(mod.scanCacheSignature(1024, 1700000000001), row), true, "mtime 变了要写");
+    assert.equal(mod.scanCacheRowNeedsWrite(mod.scanCacheSignature(2048, 1700000000000), row), true, "size 变了要写");
+    assert.equal(mod.scanCacheRowNeedsWrite("", row), true, "从没存过（或老版本的行）要写");
+    assert.equal(mod.scanCacheRowNeedsWrite(undefined, row), true, "查不到签名也要写");
+    assert.equal(mod.scanCacheSignature("1024", "1700000000000"), signature, "数字与字符串都要归一，别因为类型不同白写一遍");
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
@@ -4035,6 +4057,7 @@ async function suite() {
   await suiteLibrary1179();
   await suiteDayRollover();
   await suiteDeletePermanent();
+  await suiteScanCacheWrite();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

@@ -475,6 +475,7 @@ B 站对**页面上下文**发出的请求本来就返回 HTTP 412，且响应�
 - **统计库攒批落盘**（1.8.6）：`statsFlushDue()` 只在「攒够 `STATS_FLUSH_EVERY_RECORDS = 200` 条」或「距上次落盘超过 `STATS_FLUSH_EVERY_MS = 30 秒`」时才 `flushStatsPendingRecords()`，导入收尾再强制补一次。**归档文件本身不受影响** —— 这条只减少统计库的整份重写次数。
 - **焦点陷阱**是手写栈（`trapFocus()`），目前注册了 `#confirmBackdrop` 与 `#detailPanel`。**再加第三层浮层时必须把它也注册进去**，否则 Tab 会穿透。
 - **详情面板换一条视频要回顶部**（1.17.9 · 审查 P2-5）：`#detailPanel` 自己是滚动容器（`.detail-panel { overflow-y: auto }`），重画内容时不会自动复位 —— 从长简介的那条切到下一条，面板会停在上一条的滚动位置。`openDetail()` 只在「面板本来就开着、而且装的就是这条视频」时保住位置（切语言 / 更新数据 / 标记已下载都是重画同一条，顶回去会让用户刚滚到的按钮跳走），其余情况 `scrollTop = 0`；`closeDetail()` 也归零，**两处都要**，只补一处会留中间态。
+- **详情模板只拼「已经安全过的片段」**（1.17.15 · 审查 P3-4）：`openDetail()` 里那段大 `innerHTML` 仍然是拼字符串，但现在每段用户数据先变成一个有名字的安全片段 —— `coverHtml` / `titleHtml` / `openVideoLink` / `searchInvalidButton` / `fieldsHtml` / `tags` / `incompleteWarning` / `detailManagementHtml(video)` / `detailStatsHtml(video.stats)` —— 模板里只剩这些名字，外加 `escapeHtml(...)` / `safeCover(...)` / `BcaIcons.svg(...)`。标题、简介、BV 号这些仍然走 `textContent` 补写。`test/stability.test.cjs` 会逐个数模板里的插值，出现没约定的直接红：以后加字段要么在辅助函数里过 `escapeHtml`，要么加进白名单并想清楚它为什么安全。
 - **配置导出**绝不能带上目录句柄、B 站数据或错误报告内容（测试会扫导出代码块里有没有这些标识符）。导入只校验结构与枚举值，`CONFIG_VERSION` 升级时需要补迁移。
 - **导入配置时「文件里没有的那一项就别动」**（1.8.4）：`sanitizeConfigPreferences()` 对缺失的 `filters` 返回 `null`，`applyConfigPreferences()` 见 `null` 就整段跳过。理由：「只导外观与档位」的文件本来就没有搜索词与筛选，导入它把用户正在用的筛选清成默认值，等于替用户做了他没要求的事。**新增可导入项时同样要遵守这条** —— 缺项返回 `null`，别补默认值。
 - **主题到内容脚本的链路**：扩展页写 `localStorage`（首屏同步防闪色）+ 镜像到 `chrome.storage.local`；`content.js` 读 `chrome.storage` 并监听 `onChanged`。卡片根节点的属性是 `data-bca-theme`，**故意不叫 `data-theme`**——它挂在 B 站页面上，避免和宿主页面的选择器撞车。
@@ -704,6 +705,7 @@ UP主主页：https://space.bilibili.com/……
   （换根目录 / 点「刷新」都会走到）。**命中判据仍然只有 `archive-tools.js` 的 `cacheEntryFor()` 一处**（比
   `size + lastModified`），缓存本身不参与判断；`record.coverEntry` 落库前被置空（句柄恢复要重新申请权限），
   命中时用这次枚举到的新句柄补上。
+- **扫描缓存只写变了的行**（1.17.15 · 审查 P3-2）：`saveScanCacheFrom()` 原来每轮把整张 Map 全 `put` 回 `bca-scan-cache` —— 3000 条记录就是 3000 次写，而绝大多数条目的 `size / lastModified` 根本没动。现在用 `scanCacheStoredRows` 记住「上一次写进去时是什么签名」（`scanCacheSignature()` = `解析版本|size|lastModified`），`scanCacheRowNeedsWrite()` 说不用写就跳过；一行都没变时连事务都不开。`SCAN_CACHE_RECORD_VERSION` 变一次（解析结果格式改过）就整库重写一次；老版本写的行没有 `recordVersion`，签名对不上，同样会重写。**`bca-archive-snapshot` 那边 1.8.7 起本来就是增量写**，两个库别混。内存那侧的上限仍由 `archiveCacheCapacity()` 兜着（`max(600, 条数 + 256)`、天花板 20000）—— P3-2 只治写入峰值，不动这条。
 - **断点续跑的两个入口已经一并删掉（1.16.10）**：弹窗那行 `#resumeImportRow` 与收藏库顶栏
   `#resumeImportNotice` 都移除了，`import-bili-favorites` 也不再接受 `resume` 字段。中断之后想接着导，
   按提示回收藏夹页重新勾一次即可（已写入的记录会被跳过）。
