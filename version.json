@@ -1,12 +1,14 @@
 {
-  "version": "1.12.1",
-  "date": "2026-10-25",
-  "released": false,
+  "version": "2.0.0",
+  "date": "2026-10-28",
+  "released": true,
   "releasePageUrl": "https://github.com/shijunan-Andrew/bili-vault/releases",
-  "zipName": "",
-  "sha256": "",
+  "zipName": "bili-vault-2.0.0.zip",
+  "sha256": "d30fb745a6e32b3d08ea1aa829fcff3d6c4236943abacf7b4907b35458e43a5c",
   "notes": [
-    "隐私说明重写：三类网络请求逐条写清，补上 2015 彩蛋页的说明",
-    "版本信息与实际版本对齐：released=false 时界面明确说「还没有正式下载包」，不再声称「已经是最新版」"
+    "1.17.x 整条线收口为正式版：审查欠账的 8 条 P2、7 条 P3 全部清零",
+    "导入只有两种结局：本地没有的视频补进来，本地已有一律跳过，不再重写已有的 视频信息.txt",
+    "修掉「勾了直接删除却一直没删掉」：单条、批量、整个收藏夹三个入口现在都真的删掉了",
+    "版本号从此自带发布类型：末位为 0（2.0.0 / 2.1.0）是正式版，其余是测试版"
   ]
 }
