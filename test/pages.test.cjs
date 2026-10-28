@@ -103,6 +103,8 @@ async function openLibrary(options = {}) {
     // 根目录名故意跟收藏夹名不一样，好确认面包屑第一段读的是句柄名、不是写死的
     const rootName = options.rootName || "_测试归档";
     const root = await makeDirectoryTree({ [rootName]: options.tree }).getDirectoryHandle(rootName);
+    // 1.17.12：用例要断言「文件真的没了」，得够得着同一份句柄
+    page.__root = root;
     await g.displayRoot(root, "*", BcaT(page, "已读取"));
     await settle();
   }
@@ -3738,6 +3740,7 @@ async function suiteLibrary1179() {
     doc.getElementById("closeDetail").dispatchEvent(new g.MouseEvent("click", { bubbles: true }));
     await settle();
     assert.equal(panel.scrollTop, 0, "关掉之后也归零，下次打开不从上一轮的位置开始");
+  });
 
   await test("1.17.11：只判下载状态的那条路不逐文件量体积，没 BV 号的目录也不进去（审查 P2-4）", async () => {
     const page = await openLibrary();
@@ -3773,7 +3776,6 @@ async function suiteLibrary1179() {
     stray.__failRead = null;
     const heavy = await g.scanDownloadedDirectories(root, { force: true });
     assert.equal(heavy.bytes, media.__bytes.byteLength + stray.__bytes.byteLength, "默认这条路上照旧逐文件量字节");
-  });
   });
 }
 
@@ -3841,6 +3843,81 @@ async function suiteDayRollover() {
   });
 }
 
+/* 1.17.12（用户反馈）：三个入口勾了「直接删除」全都弹「删除失败」。
+   根因不是删除逻辑写错 —— library.js 调的 deleteCollectionPermanently /
+   deleteRecordsPermanently 从来没从 BcaArchiveTools 解构出来，每次调用都是
+   ReferenceError，被 confirmPendingDelete 的 catch 改写成「删除失败」。
+   旧的守卫只是 assert.match(body, /deleteCollectionPermanently\(rootHandle, .../)：
+   名字有没有真定义出来，它一个字都管不着。这条用例把删除真的跑一遍。 */
+async function suiteDeletePermanent() {
+  async function waitUntil(check, label, ms = 4000) {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (await check()) return true;
+      await settle(2);
+    }
+    assert.fail(`等超时了：${label}`);
+  }
+  function checkPermanent(doc) {
+    const title = textOf(doc.getElementById("resultDialogTitle"));
+    const text = textOf(doc.getElementById("resultDialogText"));
+    assert.doesNotMatch(`${title}${text}`, /is not defined|is not a function/,
+      "不许再把「名字没定义」当删除结果抛给用户");
+    assert.doesNotMatch(title, /删除失败/, "文件其实删掉了，不许报失败");
+    return { title, text };
+  }
+
+  await test("1.17.12：收藏夹勾了「直接删除」就真的一次删干净，不许报「删除失败」（用户反馈回归）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const g = page.window;
+    const doc = page.document;
+    const root = page.__root;
+    assert.equal(root.__has("小鲸鱼测试"), true, "前提：收藏夹在");
+
+    await g.askToDeleteCollection({ name: "小鲸鱼测试", videos: [] });
+    const checkbox = doc.getElementById("deleteSkipRecycle");
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new g.Event("change", { bubbles: true }));
+    assert.match(textOf(doc.getElementById("confirmDelete")), /直接删除/, "勾上之后按钮要改名");
+    dom.fireUserEvent(doc.getElementById("confirmDelete"), "click");
+
+    await waitUntil(() => !root.__has("小鲸鱼测试"), "整个收藏夹被删掉");
+    const { title } = checkPermanent(doc);
+    assert.match(title, /直接删除/, "结果要说清是直接删的");
+    assert.equal(root.__has("005回收站"), false, "直接删除不该顺手建一个回收站目录");
+  });
+
+  await test("1.17.12：单条与批量勾了「直接删除」也真的删掉（用户反馈回归）", async () => {
+    const page = await openLibrary({ tree: sampleTree() });
+    const g = page.window;
+    const doc = page.document;
+    const root = page.__root;
+
+    await g.askToDeleteVideo({ collection: "小鲸鱼测试", directory: "2026年10月09日01时19分50秒", id: "v1", title: "第一条视频", hasDownloadFiles: false });
+    const single = doc.getElementById("deleteSkipRecycle");
+    single.checked = true;
+    single.dispatchEvent(new g.Event("change", { bubbles: true }));
+    dom.fireUserEvent(doc.getElementById("confirmDelete"), "click");
+    await waitUntil(() => !root.__child("小鲸鱼测试").__has("2026年10月09日01时19分50秒"), "单条被直接删掉");
+    checkPermanent(doc);
+    doc.getElementById("resultDialog").close();
+
+    await g.askToDeleteBatch([
+      { collection: "小鲸鱼测试", directory: "2026年10月10日02时20分00秒", id: "v2", title: "第二条视频", hasDownloadFiles: false },
+      { collection: "另一个夹", directory: "2026年10月11日03时30分00秒", id: "v3", title: "第三条视频", hasDownloadFiles: false }
+    ]);
+    const batch = doc.getElementById("deleteSkipRecycle");
+    batch.checked = true;
+    batch.dispatchEvent(new g.Event("change", { bubbles: true }));
+    dom.fireUserEvent(doc.getElementById("confirmDelete"), "click");
+    await waitUntil(() => !root.__child("小鲸鱼测试").__has("2026年10月10日02时20分00秒")
+      && !root.__child("另一个夹").__has("2026年10月11日03时30分00秒"), "两条都直接删掉");
+    checkPermanent(doc);
+    assert.match(textOf(doc.getElementById("toast")), /已删除 2 个本地视频/, "全成功就走 toast 报条数");
+    assert.equal(root.__has("005回收站"), false, "直接删除不该建回收站");
+  });
+}
+
 async function suite() {
   await suiteLibrary();
   await suitePopup();
@@ -3861,6 +3938,7 @@ async function suite() {
   await suiteImportCompletion();
   await suiteLibrary1179();
   await suiteDayRollover();
+  await suiteDeletePermanent();
 }
 
 module.exports = { get results() { return { passed, failed, failures }; }, suite };

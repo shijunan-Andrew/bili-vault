@@ -7594,6 +7594,29 @@ test("删除都是先挪进 005回收站，30 天后才真删（TODO P0-1）", (
   assert.match(html, /<input id="deleteSkipRecycle" type="checkbox">/, "收藏夹可以直接删除，这个开关不能少");
   assert.equal(/<input id="deleteSkipRecycle" type="checkbox" checked/.test(html), false, "「直接删除」默认不许勾上");
   assert.equal(html.includes("清空回收站"), false, "清空回收站已经搬到设置/回收站页");
+  /* 1.17.12（用户反馈）：「直接删除」三个入口全都弹「删除失败」—— library.js 裸调
+     deleteCollectionPermanently / deleteRecordsPermanently，却从没把这两个名字从
+     BcaArchiveTools 里解构出来（1.17.4 起就是这样）。上面这几条 assert.match 盯的只是
+     「调用那一行在不在」，名字有没有真定义，它们一个字都管不着。
+     所以这里不再看某一行文本，而是把「裸用过的工具名字」与「本文件真绑定过的名字」对一遍：
+     裸用必须来自解构，或者本文件自己定义了同名函数。 */
+  const toolsSource = readProjectFile("archive-tools.js");
+  const apiStart = toolsSource.indexOf("  const api = {");
+  const apiEnd = toolsSource.indexOf("  };", apiStart);
+  assert.ok(apiStart > 0 && apiEnd > apiStart, "archive-tools.js 的 api 导出清单读不出来");
+  const apiNames = [...toolsSource.slice(apiStart, apiEnd).matchAll(/^\s{4}([A-Za-z_$][\w$]*),?$/gm)].map((item) => item[1]);
+  assert.ok(apiNames.length > 30, "导出的名字少于 30 个，八成是清单解析坏了");
+  for (const pageFile of ["library.js", "settings.js", "recycle.js", "popup.js", "stats.js"]) {
+    const pageSource = stripComments(readProjectFile(pageFile));
+    const block = pageSource.match(/const\s*\{([\s\S]*?)\}\s*=\s*BcaArchiveTools;/);
+    const bound = new Set(block ? block[1].split(",").map((item) => item.trim()).filter(Boolean) : []);
+    const unbound = apiNames.filter((name) => {
+      if (bound.has(name)) return false;
+      if (new RegExp(`(?:function|const|let|var)\\s+${name}\\b`).test(pageSource)) return false;
+      return new RegExp(`(?<![.\\w$])${name}\\b`).test(pageSource);
+    });
+    assert.deepEqual(unbound, [], `${pageFile} 里裸用了却没绑定：${unbound.join(", ")}（要么解构出来，要么写成 BcaArchiveTools.名字）`);
+  }
 });
 
 test("归档体检把「扫描时被悄悄跳过的东西」写成 006报告（TODO P0-2）", () => {

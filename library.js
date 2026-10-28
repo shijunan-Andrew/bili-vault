@@ -23,6 +23,10 @@ const {
   RECYCLE_KEEP_DAYS,
   recycleCollection,
   recycleRecords,
+  // 1.17.12（用户反馈）：这两个名字 1.17.4 / 1.17.5 起就在下面调用，却一直没解构 ——
+  // 三个「直接删除」入口每次都抛 ReferenceError，被 catch 改写成「删除失败」。
+  deleteCollectionPermanently,
+  deleteRecordsPermanently,
   pruneRecycler
 } = BcaArchiveTools;
 
