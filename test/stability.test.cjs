@@ -2,7 +2,21 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const core = require("../archive-core.js");
+
+// 扩展 ID 由 manifest.key 算出来：SHA-256 前 16 字节，每个 nibble 映射成 a~p。
+// 2.0.1 之前 manifest 没有 key，未打包扩展的 ID 由目录的绝对路径派生 ——
+// 把同一个包解压到新文件夹，Chrome 就当成了另一个扩展（IndexedDB、chrome.storage、
+// 目录授权全对不上，每次升级都要重新授权并重扫）。key 固定下来之后这条依赖没了。
+function extensionIdFromKey(key) {
+  const digest = crypto.createHash("sha256").update(Buffer.from(key, "base64")).digest();
+  let id = "";
+  for (const byte of digest.subarray(0, 16)) {
+    id += String.fromCharCode(97 + (byte >> 4)) + String.fromCharCode(97 + (byte & 15));
+  }
+  return id;
+}
 
 const projectRoot = path.join(__dirname, "..");
 const readProjectFile = (relativePath) => fs.readFileSync(path.join(projectRoot, relativePath), "utf8");
@@ -344,6 +358,15 @@ test("the injected Bilibili notice follows the system colour scheme", () => {
 test("the extension never exposes its pages to web origins", () => {
   const manifest = JSON.parse(readProjectFile("manifest.json"));
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+  // 2.0.1：manifest 必须带固定的 key —— 扩展 ID 由它算出来。删掉 key 之后，
+  // 未打包扩展的 ID 会退回「按解压路径派生」，用户换个文件夹安装就是另一个扩展，
+  // IndexedDB（归档索引）与目录授权全部对不上，表现为「每次开浏览器都要重新授权」。
+  assert.match(manifest.key || "", /^[A-Za-z0-9+/]{300,}={0,2}$/, "manifest 必须带固定 key（解压到哪个目录都得是同一个扩展）");
+  assert.equal(
+    extensionIdFromKey(manifest.key),
+    "lcdhfkgbnmffgmnpongobngdfedhjlmk",
+    "扩展 ID 变了就等于换了扩展：用户的归档索引与目录授权都会丢，改 key 之前先想清楚"
+  );
   // 4.3：library.html 不再作为 web_accessible_resource 暴露给 B 站页面。
   // 1.16.0：内容脚本要播放「收藏成功 / 出错」两个音效，只能放行这两个音频文件 ——
   // 收藏库、设置页这些扩展页仍然一个都不许被网页碰到。
