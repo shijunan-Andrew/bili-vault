@@ -1065,8 +1065,10 @@ test("the collection list scrolls instead of pushing the footer out", () => {
   assert.match(css, /\.sidebar-bottom \{ margin-top: auto;/);
   // 1.17.3（审查 P2）：置顶/删除出现时计数要让位 —— 鼠标悬停与键盘聚焦两条路都要让，
   // 否则 Tab 到这一行时两个按钮正好压在数字上。拖拽把手不跟着藏（它由后面的 .85 规则管）。
-  assert.match(css, /\.collection-row:hover \.collection-count,\s*\.collection-row:focus-within \.collection-count \{ opacity: 0; \}/,
-    "键盘聚焦时计数也要让位");
+  // 2.0.2（用户反馈）：判据从 :focus-within 换成「置顶/删除自己 :focus-visible」——
+  // 用 :focus-within 的话，点一下收藏夹就把计数藏掉了，选中的那一行看不到视频个数。
+  assert.match(css, /\.collection-row:hover \.collection-count,\s*\.collection-row:has\(\.collection-pin:focus-visible\) \.collection-count,\s*\.collection-row:has\(\.collection-delete:focus-visible\) \.collection-count \{ opacity: 0; \}/,
+    "只有悬停、或键盘聚焦到置顶/删除时，计数才让位（2.0.2：点选收藏夹不再藏掉条数）");
 });
 
 test("every shipped script actually parses", () => {
