@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "哔哩藏库",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA82fd3JLvaAnRSsJoGXaGWxk32OW7dv/Epbm4B99KHGejpknUoCsY42Swq7nHnB2xC+7lbF+LV9apokT+wdVgpLeASuKs11/cccDFtYDXvDAaklvlolkQqTWpsCP/wu7Gnb1kSuFYempmjWqF9+txzoKUDta0UtavoGKcMrtmkJ8JBZBlzYyyYMTFwazyxwISENZvwo3IUszzYJdtBgiFFZzJJGAkWme0xRxQ/fN6K2Pxrvv0USn5ZA7XLU2t9yDwzWeETb2r/RNCdvM4I6fKkH0QFuZh5l87311KzTsTBUKnxKeCuzGp5aGny1t/tjVqAtFJRZcVGlvOOb9swDes4wIDAQAB",
   "description": "把 B 站收藏夹备份本地，启用后，收藏成功自动保存视频资料到本地，支持已有收藏夹视频的本地归档与失效视频恢复，支持本地归档浏览、搜索与筛选。",
   "homepage_url": "https://github.com/shijunan-Andrew/bili-vault",
